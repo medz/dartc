@@ -916,7 +916,11 @@ final class FunctionRepresentation(
               ObjectRuntimeType() || ObjectHashCode() => const <Value>[],
               Equals(:final right) => [right],
               _ when instruction.implicitMember != null =>
-                instruction.inputs.skip(1),
+                target.signature.bind<Value>(
+                  instruction.inputs.skip(1).toList(),
+                  const {},
+                  (i) => members.program.implementationOf(target)!.defaults[i]!,
+                ),
               _ => throw StateError('Expected a member call.'),
             };
             final arguments = <Value>[
@@ -1018,6 +1022,11 @@ final class FunctionRepresentation(
                 collection,
                 key,
                 value,
+              ),
+              ListSublist(:final list, :final start, :final end) => ListSublist(
+                list,
+                start,
+                end,
               ),
               _ => throw StateError('Expected a member call.'),
             };

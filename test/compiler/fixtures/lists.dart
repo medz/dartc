@@ -8,6 +8,116 @@ const _constantLists = <List<int>>[
 ];
 List<List<int>>? _savedConstants;
 
+@Export<Int64 Function(Int64, Int64, Int64)>()
+int listSlice(int kind, int start, int end) {
+  final List<int> source = switch (kind) {
+    0 => <int>[1, 2, 3, 4],
+    1 => 'A\u{1f600}Z'.codeUnits,
+    4 => const <int>[1, 2, 3, 4],
+    5 => List<int>.filled(4, 7),
+    _ => _Custom(),
+  };
+  try {
+    final List<int> result;
+    if (kind == 3) {
+      final slice = source.sublist;
+      result = end == -1 ? slice(start) : slice(start, end == -2 ? null : end);
+    } else {
+      result = end == -1
+          ? source.sublist(start)
+          : source.sublist(start, end == -2 ? null : end);
+    }
+    var value = result.length;
+    for (final item in result) {
+      value = value * 10 + item;
+    }
+    return value;
+  } on RangeError {
+    return -1;
+  }
+}
+
+@Export<Int64 Function(Int64, Int64)>()
+int listCopy(int kind, int growable) {
+  final List<Object?> source = switch (kind) {
+    0 => <int>[3, 5],
+    1 => <num>[3, 5],
+    2 => <Object?>[3, 5],
+    3 => <Object?>[3, 'bad'],
+    4 => <int>[],
+    _ => List<int>.filled(2, 4),
+  };
+  try {
+    final dynamic input = source;
+    final copy = kind <= 1
+        ? List<int>.of(input, growable: growable != 0)
+        : List<int>.from(source, growable: growable != 0);
+    final length = copy.length;
+    var value = length * 100;
+    if (length != 0) {
+      copy[0] = 9;
+      value += copy[0] * 10 + (source[0] as int);
+    }
+    try {
+      copy.add(7);
+      return value + 1000;
+    } on UnsupportedError {
+      return value + 2000;
+    }
+  } on TypeError {
+    return -1;
+  }
+}
+
+@Export<Int64 Function(Int64, Int64)>()
+int listCopyProtocol(int kind, int failure) {
+  _iterationTrace = 0;
+  try {
+    final copy = kind == 0 ? List<int>.of : List<int>.from;
+    copy(_Sequence(failure), growable: false);
+    _iterationTrace = _iterationTrace * 10 + 4;
+  } on StateError {
+    _iterationTrace = _iterationTrace * 10 + 6;
+  } finally {
+    _iterationTrace = _iterationTrace * 10 + 5;
+  }
+  return _iterationTrace;
+}
+
+@Export<Int64 Function(Int64)>()
+int listSliceMutability(int kind) {
+  final List<num> source = switch (kind) {
+    0 => const <int>[1, 2],
+    1 => List<int>.filled(2, 4),
+    2 => <int>[],
+    _ => <int>[1, 2],
+  };
+  final result = source.sublist(0);
+  if (result is! List<int> || identical(result, source)) return -1;
+  result.add(3);
+  final List<num> widened = result;
+  try {
+    widened.add(1.5);
+  } on TypeError {
+    return result.length * 10 + source.length;
+  }
+  return -2;
+}
+
+@Export<Int64 Function(Int64)>()
+int listSlicePattern(int kind) {
+  final source = switch (kind) {
+    0 => <int>[1, 2, 3, 4],
+    1 => <int>[1, 4],
+    _ => <int>[1],
+  };
+  if (source case [final first, ...final middle, final last]) {
+    middle.add(5);
+    return first * 100 + last * 10 + middle.length;
+  }
+  return 0;
+}
+
 @Export<Int64 Function()>()
 int listConstantOnly() => const <int>[3, 5][1];
 
@@ -93,6 +203,23 @@ List<T> _filled<T>(int count, T value) =>
 final class _Box(var int value);
 List<_Box>? _saved;
 
+List<T> _slice<T>(List<T> values) => values.sublist(0);
+
+@Export<Int64 Function(Int64)>()
+int listSliceReferences(int count) {
+  final shared = _Box(17);
+  final source = <_Box>[shared, _Box(2)];
+  final copy = _slice(source);
+  source[0] = _Box(3);
+  shared.value = 29;
+  copy.add(_Box(7));
+  _saved = copy;
+  for (var i = 0; i < count; i++) {
+    _Box(i);
+  }
+  return copy.length * 100 + source[0].value * 10 + copy[0].value;
+}
+
 @Export<Int64 Function(Int64)>()
 int listReferences(int count) {
   final shared = _Box(17);
@@ -175,6 +302,11 @@ final class _Custom() implements List<int> {
   Iterator<int> get iterator => <int>[value, value + 1].iterator;
   @override
   int elementAt(int index) => this[index];
+  @override
+  List<int> sublist(int start, [int? end = 1]) => [
+    value + start,
+    end ?? length,
+  ];
   @override
   set length(int value) {
     this.value = value;

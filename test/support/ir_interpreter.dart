@@ -207,7 +207,7 @@ final class IrInterpreter(
     if (target.kind.hasReceiver) {
       environment = {
         ...environment,
-        ...(arguments.first as _Instance).type
+        ...(_runtimeValueType(arguments.first) as ClassType)
             .asInstanceOf(target.owner!)!
             .typeEnvironment,
       };
@@ -514,7 +514,9 @@ final class IrInterpreter(
     var environment = {
       ...fn.environment,
       if (fn.receiver != null)
-        ...fn.receiver!.type.asInstanceOf(target.owner!)!.typeEnvironment,
+        ...(_runtimeValueType(fn.receiver) as ClassType)
+            .asInstanceOf(target.owner!)!
+            .typeEnvironment,
     };
     final argumentsForTypes = fn.typeArguments ?? typeArguments;
     final binders = fn.genericSignature.typeParameters;
@@ -1891,6 +1893,18 @@ final class IrInterpreter(
               growable: read(growable) as bool,
             ),
           );
+        case ListFrom(:final type, :final elements, :final growable):
+          final result = _CollectionValue(
+            resolve(type) as ClassType,
+            <Object?>[],
+          );
+          _spread(result, read(elements), false, false, false);
+          values[op] = read(growable) as bool
+              ? result
+              : _CollectionValue(
+                  result.type,
+                  List<Object?>.of(result.storage as List, growable: false),
+                );
         case CollectionAdd(:final collection, :final value):
           values[op] = _add(read(collection), read(value));
         case CollectionSpread(
@@ -2172,10 +2186,15 @@ final class IrInterpreter(
             );
             break;
           }
-          final instance = value as _Instance;
-          final target = _resolveMember(instance, member);
+          final target = value is _Instance
+              ? _resolveMember(value, member)
+              : program.dispatch(
+                      _runtimeValueType(value) as ClassType,
+                      member,
+                    ) ??
+                    member;
           values[op] = _invoke(
-            _FunctionValue(target, instance),
+            _FunctionValue(target, value),
             positional.map(read).toList(),
             {for (final e in named.entries) e.key: read(e.value)},
             typeArguments.map(resolve).toList(),
@@ -2610,6 +2629,9 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
     ValueType.noSuchMethodError => scalar<NoSuchMethodError>(),
     ValueType.assertionError => scalar<AssertionError>(),
     ValueType.argumentError => scalar<ArgumentError>(),
+    ClassType(:final library, name: 'RangeError')
+        when library == Uri.parse('dart:core') =>
+      scalar<RangeError>(),
     ValueType.stateError => scalar<StateError>(),
     ValueType.unsupportedError => scalar<UnsupportedError>(),
     ValueType.stackTrace => scalar<StackTrace>(),
@@ -2666,7 +2688,7 @@ final class _TypeValue(final ValueType representedType) {
 
 final class _FunctionValue(
   final FunctionTarget target, [
-  final _Instance? receiver,
+  final Object? receiver,
   final List<Object?> captures = const [],
   final Map<TypeParameterType, ValueType> environment = const {},
   final List<ValueType>? typeArguments,
@@ -2705,7 +2727,9 @@ final class _FunctionValue(
     final signature = genericSignature.substitute({
       ...environment,
       if (receiver != null)
-        ...receiver!.type.asInstanceOf(target.owner!)!.typeEnvironment,
+        ...(_runtimeValueType(receiver) as ClassType)
+            .asInstanceOf(target.owner!)!
+            .typeEnvironment,
     }) as FunctionType;
     return typeArguments == null
         ? signature

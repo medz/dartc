@@ -139,21 +139,19 @@ base class ScalarCodeGenerator<R extends Object>(
         ),
       );
       final lists = ListStorage(
+        listBase: program.classes
+            .where(
+              (c) =>
+                  c.type.library == Uri.parse('dart:collection') &&
+                  c.type.name == 'ListBase',
+            )
+            .firstOrNull
+            ?.type,
         hasConstants: constantLists,
         allocate: heap.allocatePayload,
         indexError: strings.indexError,
         rangeError: strings.rangeError,
         unsupportedError: constructor(.unsupportedError),
-        iteratorConstructor: constructor(
-          program.classes
-              .where(
-                (c) =>
-                    c.type.library == Uri.parse('dart:_internal') &&
-                    c.type.name == 'ListIterator',
-              )
-              .firstOrNull
-              ?.type,
-        ),
         concurrentModificationError: constructor(
           program.classes
               .where(

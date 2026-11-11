@@ -6,6 +6,31 @@ import '../../support/native_assets.dart';
 
 final class Lists() {
   final _library = NativeAssets(Target.host()).open('compiler/lists');
+  late final slice = _library
+      .lookupFunction<
+        Int64 Function(Int64, Int64, Int64),
+        int Function(int, int, int)
+      >('listSlice');
+  late final copy = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'listCopy',
+      );
+  late final copyProtocol = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'listCopyProtocol',
+      );
+  late final sliceMutability = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listSliceMutability',
+      );
+  late final sliceReferences = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listSliceReferences',
+      );
+  late final slicePattern = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listSlicePattern',
+      );
   late final constantOnly = _library
       .lookupFunction<Int64 Function(), int Function()>('listConstantOnly');
   late final append = _library

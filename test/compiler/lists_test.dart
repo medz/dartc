@@ -17,6 +17,67 @@ void main() {
     addTearDown(native.close);
   });
 
+  test('sublist preserves ranges, overrides and selected defaults', () {
+    for (final kind in [0, 1, 2, 3, 4, 5]) {
+      for (final (start, end) in [
+        (0, -1),
+        (1, -1),
+        (1, -2),
+        (1, 3),
+        (4, 4),
+        (-1, 2),
+        (2, 1),
+        (0, 5),
+        (0, -3),
+      ]) {
+        expect(native.slice(kind, start, end), sdk.listSlice(kind, start, end));
+      }
+    }
+    expect(native.slice(0, 1, 3), 223);
+    expect(native.slice(2, 1, -1), 1111);
+    expect(native.slice(2, 1, -2), 1112);
+  });
+
+  test('copy constructors retain element checks and requested growability', () {
+    for (final growable in [0, 1]) {
+      for (final kind in [0, 1, 2, 3, 4, 5]) {
+        final expected = switch (kind) {
+          1 || 3 => -1,
+          4 => growable == 0 ? 2000 : 1000,
+          _ => (growable == 0 ? 2000 : 1000) + (kind == 5 ? 294 : 293),
+        };
+        expect(sdk.listCopy(kind, growable), expected);
+        expect(native.copy(kind, growable), expected);
+      }
+    }
+    for (final kind in [0, 1]) {
+      for (final (failure, expected) in [
+        (0, 12323245),
+        (1, 123265),
+        (2, 1232365),
+      ]) {
+        expect(sdk.listCopyProtocol(kind, failure), expected);
+        expect(native.copyProtocol(kind, failure), expected);
+      }
+    }
+  });
+
+  test('sublist copies retain actual element types and shared objects', () {
+    for (final (kind, expected) in [(0, 143), (1, 141), (2, 0)]) {
+      expect(sdk.listSlicePattern(kind), expected);
+      expect(native.slicePattern(kind), expected);
+    }
+    for (final kind in [0, 1, 2, 3]) {
+      final expected = kind == 2 ? 10 : 32;
+      expect(sdk.listSliceMutability(kind), expected);
+      expect(native.sliceMutability(kind), expected);
+    }
+    expect(sdk.listSliceReferences(40000), 359);
+    expect(native.sliceReferences(40000), 359);
+    expect(native.saved(0), 29);
+    expect(native.saved(2), 7);
+  });
+
   test(
     'addAll dispatch checks argument types and mutability before iteration',
     () {

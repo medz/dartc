@@ -435,6 +435,10 @@ sealed class Instruction(super.type) extends Value {
           receiver: collection.type,
           selector: (kind: .method, name: '[]=', privateLibrary: null),
         ),
+        ListSublist(:final list) => (
+          receiver: list.type,
+          selector: (kind: .method, name: 'sublist', privateLibrary: null),
+        ),
         CollectionAdd(:final collection) => (
           receiver: collection.type,
           selector: (kind: .method, name: 'add', privateLibrary: null),
@@ -494,6 +498,7 @@ sealed class Instruction(super.type) extends Value {
     MapPut() ||
     GetIterator() ||
     StringFromCharCodes() ||
+    ListFrom() ||
     IteratorMoveNext() ||
     IteratorCurrent() ||
     DirectCall() ||
@@ -1903,6 +1908,23 @@ final class ListFilled(
   }
   @override
   Iterable<Value> get inputs => [length, fill, growable];
+}
+
+/// Copies [elements] into a fresh List, checking each element against its type.
+final class ListFrom(
+  ClassType super.type,
+  final Value elements,
+  final Value growable,
+) extends Instruction {
+  this {
+    if ((type as ClassType).declaration != CoreTypes.list ||
+        !CoreTypes.iterableOf(.object.nullable).accepts(elements.type) ||
+        growable.type != .boolean) {
+      throw ArgumentError('Invalid List copy operands.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [elements, growable];
 }
 
 /// Appends/inserts using the actual receiver's reified element type checks.

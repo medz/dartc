@@ -8,32 +8,29 @@ void main() {
   late FixtureComparison fixture;
   setUpAll(() async => fixture = await FixtureComparison.load('sdk_calls'));
 
-  test(
-    'SDK members without intrinsics retain ordinary declaration references',
-    () {
-      final calls = fixture.program.functions.expand(
-        (function) => function.callees.followedBy(function.virtualMembers),
-      );
-      expect(
-        calls
-            .where((target) => target.library == Uri.parse('dart:core'))
-            .map((target) => target.name),
-        containsAll([
-          'join',
-          'take',
-          'toList',
-          'compareByIndex',
-          'compareByName',
-          '<extension:EnumByName:method:byName>',
-          '<extension:EnumByName:method:asNameMap>',
-        ]),
-      );
-      final join = calls.firstWhere(
-        (target) => target.name == 'join' && target.owner == CoreTypes.iterable,
-      );
-      expect(fixture.program.implementationOf(join), isNull);
-    },
-  );
+  test('SDK calls retain declaration identity and available source bodies', () {
+    final calls = fixture.program.functions.expand(
+      (function) => function.callees.followedBy(function.virtualMembers),
+    );
+    expect(
+      calls
+          .where((target) => target.library == Uri.parse('dart:core'))
+          .map((target) => target.name),
+      containsAll([
+        'join',
+        'take',
+        'toList',
+        'compareByIndex',
+        'compareByName',
+        '<extension:EnumByName:method:byName>',
+        '<extension:EnumByName:method:asNameMap>',
+      ]),
+    );
+    final join = calls.firstWhere(
+      (target) => target.name == 'join' && target.owner == CoreTypes.iterable,
+    );
+    expect(fixture.program.implementationOf(join), isA<IrFunction>());
+  });
 
   test('SDK constants retain their declared field storage', () {
     final duration = fixture.program.functions

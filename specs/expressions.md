@@ -9,7 +9,7 @@
 | Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有源码字面量及其常量依赖仍明确拒绝，避免消费 analyzer 丢失库身份后的错误折叠结果。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/frontend/lowering/fixtures/symbols.dart)。 |
 | Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
 | Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/frontend/lowering/fixtures/records.dart)。 |
-| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled 和 length setter。支持 const List 的内容和规范身份；其他集合构造器和完整 SDK API 待实现。原生范围见下文。 |
+| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled/of/from 和 length setter。支持 const List 的内容和规范身份；其他集合构造器和完整 SDK API 待实现。原生范围见下文。 |
 | Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey/entries，以及 MapEntry 的普通与 const 构造、key/value。支持 const Set/Map；完整 SDK API 待实现。 |
 | List if/for/for-in、spread | 支持 List、Set、Map 的 if/else、三段式 for、同步 for-in 和 spread，按源码顺序执行。sequence spread 使用源 Iterable 的 iterator；Map spread 需要逐项类型检查时使用 entries，否则使用 forEach。dynamic 源先核对 Iterable/Map 协议，再逐项转换。addAll 调用还在遍历前检查实际接收者要求的源类型。 |
 | 空感知集合元素 | 支持空感知元素、spread 以及 Map 的空感知 key/value。空 key 跳过对应 value 的求值。 |
@@ -79,7 +79,11 @@ const List 保留实际元素类型、嵌套内容和规范身份，支持读取
 
 List.addAll 支持普通调用、方法提取及用户重写，先检查实际元素类型要求的 Iterable 参数，再检查目标可增长性；固定长度和 const List 即使追加空源也拒绝修改。字面量 spread 按迭代顺序逐项转换元素，支持 dynamic 源和 null-aware spread；类型错误或迭代异常停止后续求值并保留 finally。追加及展开后的元素保持别名，经过回收和跨入口保存后仍可读取。依据为 [List.addAll](https://api.dart.dev/stable/3.13.7/dart-core/List/addAll.html)和[语言规范的集合元素求值](https://github.com/dart-lang/language/blob/main/specification/dartLangSpec.tex#L9518)，验证见[原生 List 用例](../test/compiler/lists_test.dart)。
 
-sublist、其他构造器、Set/Map 存储及 typed_data 的原生实现仍是缺口；上表的 IR 范围不等于这些行为已经原生执行。
+`List.of` 与 `List.from` 支持直接及构造器函数值调用、默认可增长和显式固定长度结果。of 的 Iterable 参数按目标元素类型整体检查，from 逐项检查；保留迭代顺序、用户迭代器异常和 finally。新列表拥有独立的元素槽，元素对象仍共享引用；固定长度副本允许索引写入。依据为 [List.of](https://api.dart.dev/stable/3.13.7/dart-core/List/List.of.html)与 [List.from](https://api.dart.dev/stable/3.13.7/dart-core/List/List.from.html)。
+
+`sublist` 支持省略或显式 null 的 end、空范围和边界错误。内置 List、const/固定长度列表与 String.codeUnits 的切片返回独立的可增长 List，保留实际元素类型和共享对象；用户重写和方法值使用选中实现的默认参数。列表模式中的命名 rest 同样复制相应元素。依据为 [List.sublist](https://api.dart.dev/stable/3.13.7/dart-core/List/sublist.html)，验证见[源码对照](../test/frontend/lowering/list_copies_test.dart)与[原生 List 用例](../test/compiler/lists_test.dart)。
+
+其他 List 构造器和完整集合 API、Set/Map 存储及 typed_data 的原生实现仍有缺口；上表的 IR 范围不等于这些行为已经原生执行。
 
 ## 数值比较与 SDK 差异
 

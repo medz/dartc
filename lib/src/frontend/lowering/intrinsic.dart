@@ -20,7 +20,10 @@ void requireListSupport(
   for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
     requireClass(core.getClass(name)!);
   }
-  requireClass(_internal(core).getClass('ListIterator')!);
+  final collection = core.fragments
+      .expand((fragment) => fragment.importedLibraries)
+      .firstWhere((library) => library.uri == Uri.parse('dart:collection'));
+  requireClass(collection.getClass('ListBase')!);
 }
 
 /// Supplies bodies and SDK dependencies for compiler-owned declarations.
@@ -44,6 +47,17 @@ Value Function(FunctionTarget, Block)? intrinsicFor(
   }
   if (element.library.isDartCore) {
     final list = element.library.getClass('List')!;
+    if (element == list.getNamedConstructor('of') ||
+        element == list.getNamedConstructor('from')) {
+      requireListSupport(element.library, requireClass);
+      return (target, entry) => entry.emit(
+        ListFrom(
+          target.returnType as ClassType,
+          entry.parameters[0],
+          entry.parameters[1],
+        ),
+      );
+    }
     if (element == list.getNamedConstructor('filled') ||
         element == list.getNamedConstructor('empty')) {
       requireListSupport(element.library, requireClass);

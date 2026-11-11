@@ -49,10 +49,16 @@ void main() {
         fixed = Constant.boolean(false);
     final empty = NewCollection(type, growable: fixed);
     final list = ListFilled(type, count, fill, fixed);
+    final copy = ListFrom(type, list, fixed);
     expect(empty.inputs, [fixed]);
     expect(list.inputs, [count, fill, fixed]);
     expect(list.type, type);
     expect(list.effects, {Effect.allocates, Effect.mayThrow});
+    expect(copy.type, type);
+    expect(copy.inputs, [list, fixed]);
+    expect(copy.effects, containsAll([Effect.callsUserCode, Effect.mayThrow]));
+    expect(() => ListFrom(type, fill, fixed), throwsArgumentError);
+    expect(() => ListFrom(type, list, count), throwsArgumentError);
     expect(
       () => ListFilled(type, fill, const Constant.nullValue(), fixed),
       throwsArgumentError,

@@ -72,6 +72,7 @@ export 'src/ir/value.dart'
         PatternMatchFailure,
         NewCollection,
         ListFilled,
+        ListFrom,
         CollectionAdd,
         CollectionSpread,
         MapPut,

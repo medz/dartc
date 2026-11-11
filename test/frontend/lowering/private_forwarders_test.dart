@@ -197,6 +197,7 @@ void main() {
     () {
       final bodies = fixture.program.functions.where(
         (f) =>
+            f.target.library.scheme != 'dart' &&
             f.target.privateSelectorLibrary != null &&
             f.target.privateSelectorLibrary != f.target.library,
       );

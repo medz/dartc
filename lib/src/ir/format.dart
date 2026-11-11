@@ -96,6 +96,8 @@ void writeFunction(
       'newCollection ${op.type.dartName}${op.growable == null ? '' : ', growable: ${value(op.growable!)}'}',
     ListFilled() =>
       'listFilled ${op.type.dartName} ${op.inputs.map(value).join(', ')}',
+    ListFrom() =>
+      'listFrom ${op.type.dartName} ${op.inputs.map(value).join(', ')}',
     CollectionAdd() =>
       'collectionAdd ${value(op.collection)}, ${value(op.value)}',
     CollectionSpread() =>

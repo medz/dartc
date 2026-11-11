@@ -12,10 +12,10 @@ enum ListMutability() {
 
 /// Owns List storage and generates ordinary Dart member bodies for it.
 final class ListStorage({
+  ClassType? listBase,
   final IrCallable? indexError,
   final IrCallable? rangeError,
   final IrCallable? unsupportedError,
-  final IrCallable? iteratorConstructor,
   final IrCallable? concurrentModificationError,
   final FunctionTarget Function(ClassType)? allocate,
   final bool hasConstants = false,
@@ -37,14 +37,17 @@ final class ListStorage({
   final buffer = ClassType(_uri, '_ListData');
   late final ClassType type;
   late final InstanceField length, data, mutability;
-  late final FunctionTarget initializer, empty, filled, reserve;
+  late final FunctionTarget initializer, empty, filled, from, reserve;
   final _functions = <(FunctionKind, String), IrFunction>{};
   final entryPoints = <FunctionTarget>{};
   FunctionTarget? _allocation;
 
   this {
     type = ClassType.declare(_uri, '_List', typeParameters: [element]);
-    type.initializeHierarchy(interfaces: [CoreTypes.listOf(element)]);
+    type.initializeHierarchy(
+      superclass: listBase?.instantiate([element]) ?? ValueType.object,
+      interfaces: [CoreTypes.listOf(element)],
+    );
     length = InstanceField(type, 'length', .integer);
     data = InstanceField(type, 'data', buffer);
     mutability = InstanceField(type, 'mutability', .integer);
@@ -55,6 +58,10 @@ final class ListStorage({
     ], .initializer);
     empty = _target('empty', type, [.boolean], .factory);
     filled = _target('filled', type, [.integer, element, .boolean], .factory);
+    from = _target('from', type, [
+      CoreTypes.iterableOf(.object.nullable),
+      .boolean,
+    ], .factory);
     reserve = _target('_reserve', .voidType, [.integer], .method);
   }
 
@@ -78,6 +85,7 @@ final class ListStorage({
           when collectionType.declaration == CoreTypes.list =>
         empty,
       ListFilled() => filled,
+      ListFrom() => from,
       CollectionSpread(:final collection, isMethodCall: false)
           when CoreTypes.view(collection.type, CoreTypes.list) != null =>
         _spread,
@@ -86,7 +94,11 @@ final class ListStorage({
     if (target != null) {
       _define(
         target,
-        () => target == _spread ? _append(false) : _factory(target == filled),
+        () => target == _spread
+            ? _append(false)
+            : target == from
+            ? _copy()
+            : _factory(target == filled),
       );
       entryPoints.add(target);
     }
@@ -182,8 +194,6 @@ final class ListStorage({
       (FunctionKind.method, '[]=') => () => _access(true),
       (FunctionKind.method, 'add') => _add,
       (FunctionKind.method, 'addAll') => () => _append(true),
-      (FunctionKind.method, 'elementAt') => _elementAt,
-      (FunctionKind.getter, 'iterator') => _iterator,
       _ => null,
     };
     return build == null ? null : _functions.putIfAbsent(key, build);
@@ -207,41 +217,6 @@ final class ListStorage({
       Return(entry.emit(LoadField(length, entry.parameters.single))),
     );
     return IrFunction(getter, [entry]);
-  }
-
-  IrFunction _elementAt() {
-    final read = _member((kind: .method, name: '[]', privateLibrary: null))!;
-    final elementAt = _target('elementAt', element, [.integer], .method);
-    final at = Block(elementAt.parameterTypes);
-    at.finish(Return(at.emit(DirectCall(read.target, at.parameters))));
-    return IrFunction(elementAt, [at]);
-  }
-
-  IrFunction _iterator() {
-    final target = _target(
-      'iterator',
-      CoreTypes.iteratorOf(element),
-      [],
-      .getter,
-    );
-    final entry = Block(target.parameterTypes);
-    final constructor =
-        iteratorConstructor?.target ??
-        (throw UnsupportedError(
-          'List iteration requires the SDK ListIterator constructor.',
-        ));
-    entry.finish(
-      Return(
-        entry.emit(
-          Construct(
-            constructor,
-            entry.parameters,
-            instantiatedType: constructor.owner!.instantiate([element]),
-          ),
-        ),
-      ),
-    );
-    return IrFunction(target, [entry]);
   }
 
   late final _newBuffer = FunctionTarget(_uri, 'buffer', buffer, [.integer]);
@@ -332,6 +307,27 @@ final class ListStorage({
       create.finish(Return(list));
     }
     return IrFunction(target, blocks);
+  }
+
+  IrFunction _copy() {
+    _define(empty, () => _factory(false));
+    _define(_spread, () => _append(false));
+    final entry = Block(from.parameterTypes), fixed = Block(), done = Block();
+    final list = entry.emit(
+      DirectCall(empty, [const Constant.boolean(true)], ownerType: type),
+    );
+    entry.emit(
+      DirectCall(
+        _spread,
+        [list, entry.parameters[0]],
+        typeArguments: [element],
+      ),
+    );
+    entry.finish(Branch(entry.parameters[1], Jump(done), Jump(fixed)));
+    fixed.emit(StoreField(mutability, list, _int(ListMutability.fixed.index)));
+    fixed.finish(Jump(done));
+    done.finish(Return(list));
+    return IrFunction(from, [entry, fixed, done]);
   }
 
   IrFunction _access(bool write) {
