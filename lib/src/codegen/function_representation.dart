@@ -155,6 +155,12 @@ final class FunctionRepresentation(
         if (block.end case Invoke(:final operation)) operation,
       ],
     ];
+    // An address-only temporary has no observable object identity.
+    final addressOnly = <Value>{
+      for (final operation in operations)
+        if (operation is PointerFromAddress || operation is PointerOffset)
+          operation,
+    };
     stackCells.addAll(
       operations.whereType<NewCell>().where(
         (cell) => !(cell.type as CellType).isLate,
@@ -162,6 +168,9 @@ final class FunctionRepresentation(
     );
     for (final operation in operations) {
       for (final input in operation.inputs) {
+        if (operation is! PointerAddress && operation is! PointerOffset) {
+          addressOnly.remove(input);
+        }
         if (!(operation is ReadCell && operation.cell == input ||
             operation is WriteCell && operation.cell == input)) {
           stackCells.remove(input);
@@ -170,10 +179,31 @@ final class FunctionRepresentation(
     }
     for (final block in function.blocks) {
       if (block.end case Return(value: final value?)) stackCells.remove(value);
+      switch (block.end) {
+        case Return(value: final value?) ||
+            Throw(exception: final value) ||
+            Yield(:final value) ||
+            Await(operand: final value):
+          addressOnly.remove(value);
+        default:
+          break;
+      }
       for (final edge in block.successors) {
         stackCells.removeAll(edge.arguments);
+        addressOnly.removeAll(edge.arguments);
       }
     }
+    Value pointerAddress(Value pointer, List<Value> into) {
+      if (!addressOnly.contains(pointer)) {
+        return _load(layouts.pointers.address, pointer, into);
+      }
+      final address = PointerAddress(pointer);
+      aliases.add(address);
+      _operands[address] = [pointer];
+      into.add(address);
+      return address;
+    }
+
     bool needsBox(Value value, ValueType type) {
       if (value is TestedValue) value = value.test.operand;
       return value is! Constant &&
@@ -346,13 +376,16 @@ final class FunctionRepresentation(
             case PointerAddress(pointer: final receiver) ||
                 StringLength(string: final receiver)) {
           _operands[instruction] = [
-            _load(
-              instruction is PointerAddress
-                  ? layouts.pointers.address
-                  : layouts.strings.length,
-              receiver,
-              body,
-            ),
+            if (instruction is PointerAddress && addressOnly.contains(receiver))
+              receiver
+            else
+              _load(
+                instruction is PointerAddress
+                    ? layouts.pointers.address
+                    : layouts.strings.length,
+                receiver,
+                body,
+              ),
           ];
           aliases.add(instruction);
           body.add(instruction);
@@ -364,7 +397,7 @@ final class FunctionRepresentation(
             address = value;
           } else {
             final offset = instruction as PointerOffset;
-            final base = _load(layouts.pointers.address, offset.pointer, body);
+            final base = pointerAddress(offset.pointer, body);
             final bytes = IntBinary(
               .multiply,
               offset.index,
@@ -374,6 +407,13 @@ final class FunctionRepresentation(
             );
             address = IntBinary(.add, base, bytes);
             body.addAll([bytes, address]);
+          }
+          if (addressOnly.contains(instruction)) {
+            _resultTypes[instruction] = .integer;
+            _operands[instruction] = [address];
+            aliases.add(instruction);
+            body.add(instruction);
+            continue;
           }
           invocations[instruction] = heap.constructorFor(
             layouts.pointers.initializer,

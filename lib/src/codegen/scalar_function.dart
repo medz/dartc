@@ -365,19 +365,20 @@ final class ScalarFunction<R extends Object>(
             instruction is ReifyType ||
             instruction is ObjectRuntimeType) {
           final operand = selection.body.inputsOf(instruction).single;
+          final type = selection.body.typeOf(instruction);
           final R destination;
           if (layouts.representation(selection.body.typeOf(operand)) ==
-              layouts.representation(instruction.type)) {
+              layouts.representation(type)) {
             final source = allocation.read(operand);
             allocation.release(operand);
             destination = allocation.allocate(
-              selection.bank(instruction.type),
+              selection.bank(type),
               preferred: source,
             );
             emitter.move(destination, source);
           } else {
-            destination = allocation.allocate(selection.bank(instruction.type));
-            allocation.load(operand, destination, asType: instruction.type);
+            destination = allocation.allocate(selection.bank(type));
+            allocation.load(operand, destination, asType: type);
             allocation.release(operand);
           }
           allocation.define(instruction, destination);
