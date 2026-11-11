@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dartc/ir.dart';
-import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 import 'numeric_order.dart';
@@ -1778,10 +1777,10 @@ final class IrInterpreter(
         case PointerAddress(:final pointer):
           values[op] = (read(pointer) as ffi.Pointer).address;
         case PointerOffset(:final pointer, :final index):
-          final element = FfiTypes.pointerElement(op.type)!;
+          final size = FfiTypes.pointerElementSize(op.type)!;
           values[op] = ffi.Pointer<ffi.Void>.fromAddress(
             (read(pointer) as ffi.Pointer).address +
-                (read(index) as int) * element.nativeSize,
+                (read(index) as int) * size,
           );
         case NativeCall(:final pointer, :final arguments):
           final invoke = callNative;

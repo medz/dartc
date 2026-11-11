@@ -3,7 +3,7 @@ import 'dart:ffi';
 import 'package:dartc/target.dart';
 
 import '../../support/native_assets.dart';
-import 'pointers.dart' show MixedNative, MixedDart;
+import 'pointers.dart' show MixedNative, MixedDart, ReadPointer;
 
 final class PointerLibrary() {
   final _library = NativeAssets(Target.host()).open('compiler/pointers');
@@ -53,6 +53,33 @@ final class PointerLibrary() {
         Int64 Function(Pointer<Int64>),
         int Function(Pointer<Int64>)
       >('declaredMember');
+  late final exchangePointer = _library
+      .lookupFunction<
+        Pointer<Int64> Function(Pointer<Pointer<Int64>>, Int64, Pointer<Int64>),
+        Pointer<Int64> Function(Pointer<Pointer<Int64>>, int, Pointer<Int64>)
+      >('exchangePointer');
+  late final swapSlots = _library
+      .lookupFunction<
+        Pointer<Int64> Function(Pointer<Pointer<Int64>>, Int64),
+        Pointer<Int64> Function(Pointer<Pointer<Int64>>, int)
+      >('swapSlots');
+  late final offsetSlots = _library
+      .lookupFunction<
+        Pointer<Pointer<Int64>> Function(Pointer<Pointer<Int64>>, Int64, Int64),
+        Pointer<Pointer<Int64>> Function(Pointer<Pointer<Int64>>, int, int)
+      >('offsetSlots');
+  late final readThroughSlot = _library
+      .lookupFunction<
+        Int64 Function(Pointer<ReadPointer>, Pointer<Int64>),
+        int Function(Pointer<ReadPointer>, Pointer<Int64>)
+      >('readThroughSlot');
+  late final readPointer = _library
+      .lookup<NativeFunction<Int64 Function(Pointer<Int64>)>>('read');
+  late final retainSlot = _library
+      .lookupFunction<
+        Pointer<Int64> Function(Pointer<Pointer<Int64>>, Int64),
+        Pointer<Int64> Function(Pointer<Pointer<Int64>>, int)
+      >('retainSlot');
 
   void close() {
     _library.close();

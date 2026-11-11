@@ -80,6 +80,27 @@ void main() {
     );
   });
 
+  test(
+    'pointer slots are sized independently of the pointed-to native type',
+    () {
+      final parameter = TypeParameterType('T')
+        ..initializeBound(FfiTypes.nativeType)
+        ..initializeDefaultType(FfiTypes.nativeType);
+      for (final element in [
+        FfiTypes.voidType,
+        FfiTypes.nativeFunction.instantiate([FunctionType(.integer, [])]),
+        parameter,
+      ]) {
+        final pointer = FfiTypes.pointer.instantiate([element]);
+        expect(FfiTypes.pointerElementSize(pointer), isNull);
+        final slots = FfiTypes.pointer.instantiate([pointer]);
+        expect(FfiTypes.pointerElementSize(slots), 8);
+        final value = PointerFromAddress(address, slots);
+        expect(PointerOffset(value, address).type, slots);
+      }
+    },
+  );
+
   test('native memory operations retain types and observable effects', () {
     expect(pointer.type, FfiTypes.int64Pointer);
     expect(pointer.type, isNot(ValueType.integer));

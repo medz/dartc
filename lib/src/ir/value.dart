@@ -626,10 +626,10 @@ final class PointerAddress(final Value pointer) extends Instruction {
 final class PointerOffset(final Value pointer, final Value index)
     extends Instruction {
   this : super(pointer.type) {
-    if (FfiTypes.pointerElement(pointer.type) == null ||
+    if (FfiTypes.pointerElementSize(pointer.type) == null ||
         index.type != .integer) {
       throw ArgumentError(
-        'Expected a native scalar pointer and integer index.',
+        'Expected a pointer to sized native storage and integer index.',
       );
     }
   }

@@ -52,6 +52,60 @@ void main() {
     }
   });
 
+  test('pointer slots preserve bits, aliases and adjacent storage', () {
+    final bytes = memory.cast<Uint8>().asTypedList(96);
+    final slots = (memory + 4).cast<Pointer<Int64>>();
+    for (final index in [-2, 0, 2]) {
+      for (final bits in [0, -1, -0x8000000000000000, memory.address]) {
+        bytes.fillRange(0, bytes.length, 0xa5);
+        slots[index] = memory;
+        final value = Pointer<Int64>.fromAddress(bits);
+        final actual = library.exchangePointer(slots, index, value);
+        final contents = bytes.toList();
+        bytes.fillRange(0, bytes.length, 0xa5);
+        slots[index] = memory;
+        expect(actual, sdk.exchangePointer(slots, index, value));
+        expect(contents, bytes);
+        expect(slots[index], value);
+      }
+    }
+    for (final index in [0, 1]) {
+      slots[0] = memory;
+      slots[1] = memory + 1;
+      final actual = library.swapSlots(slots, index);
+      final values = [slots[0], slots[1]];
+      slots[0] = memory;
+      slots[1] = memory + 1;
+      expect(actual, sdk.swapSlots(slots, index));
+      expect(values, [slots[0], slots[1]]);
+    }
+  });
+
+  test('pointer slot offsets scale addresses without accessing storage', () {
+    for (final bits in [0, -1, 0x7fffffffffffffff]) {
+      final slots = Pointer<Pointer<Int64>>.fromAddress(bits);
+      for (final index in [0, -3, 7, -0x8000000000000000]) {
+        for (var operation = 0; operation < 3; operation++) {
+          expect(
+            library.offsetSlots(slots, index, operation),
+            sdk.offsetSlots(slots, index, operation),
+          );
+        }
+      }
+    }
+  });
+
+  test('loaded pointers survive collection and retain callable signatures', () {
+    final slots = (memory + 4).cast<Pointer<Int64>>();
+    slots[0] = memory;
+    slots[1] = memory + 1;
+    memory.value = 73;
+    expect(library.retainSlot(slots, 4000), memory);
+    final callbacks = slots.cast<sdk.ReadPointer>();
+    callbacks.value = library.readPointer;
+    expect(library.readThroughSlot(callbacks, memory), 73);
+  });
+
   test(
     'pointer transfers across loops, branches and calls retain identity',
     () {

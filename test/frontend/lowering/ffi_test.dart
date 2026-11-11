@@ -160,6 +160,28 @@ void main() {
       expect(instructions('address').whereType<PointerAddress>(), hasLength(1));
       expect(instructions('read').whereType<LoadNative>(), hasLength(1));
       expect(instructions('write').whereType<StoreNative>(), hasLength(1));
+      final slot = functions['exchangeSlot']!;
+      final element = (slot.target.signature.parameters.first as ClassType)
+          .typeArguments
+          .single;
+      expect(slot.target.returnType, element);
+      expect(
+        instructions('exchangeSlot')
+            .whereType<PointerFromAddress>()
+            .single
+            .type,
+        element,
+      );
+      expect(
+        instructions('exchangeSlot').whereType<LoadNative>().single.nativeType,
+        NativeScalarType(Uint64),
+      );
+      expect(
+        result.program.externals.any(
+          (f) => f.target.name.startsWith('PointerPointer.'),
+        ),
+        isFalse,
+      );
       final bounded = instructions('boundedWrite').toList();
       expect(bounded.whereType<PointerFromAddress>(), hasLength(2));
       expect(bounded.whereType<PointerOffset>(), hasLength(2));

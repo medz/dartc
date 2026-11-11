@@ -108,6 +108,67 @@ Pointer<Int64> forward(
 @Export<Int64 Function(Pointer<Int64>)>()
 int declaredMember(Pointer<Int64> pointer) => customMember(pointer);
 
+Pointer<T> exchangeSlot<T extends NativeType>(
+  Pointer<Pointer<T>> slots,
+  int index,
+  Pointer<T> value,
+) {
+  final previous = slots[index];
+  (slots + index).value = value;
+  return previous;
+}
+
+@Export<
+  Pointer<Int64> Function(Pointer<Pointer<Int64>>, Int64, Pointer<Int64>)
+>()
+Pointer<Int64> exchangePointer(
+  Pointer<Pointer<Int64>> slots,
+  int index,
+  Pointer<Int64> value,
+) => exchangeSlot(slots, index, value);
+
+@Export<Pointer<Int64> Function(Pointer<Pointer<Int64>>, Int64)>()
+Pointer<Int64> swapSlots(Pointer<Pointer<Int64>> slots, int index) {
+  final first = slots.value;
+  slots.value = slots[index];
+  slots[index] = first;
+  return slots.value;
+}
+
+@Export<
+  Pointer<Pointer<Int64>> Function(Pointer<Pointer<Int64>>, Int64, Int64)
+>()
+Pointer<Pointer<Int64>> offsetSlots(
+  Pointer<Pointer<Int64>> slots,
+  int index,
+  int operation,
+) => switch (operation) {
+  0 => slots + index,
+  1 => slots - index,
+  // ignore: deprecated_member_use
+  _ => slots.elementAt(index),
+};
+
+typedef ReadPointer = Pointer<NativeFunction<Int64 Function(Pointer<Int64>)>>;
+
+@Export<Int64 Function(Pointer<ReadPointer>, Pointer<Int64>)>()
+int readThroughSlot(Pointer<ReadPointer> slots, Pointer<Int64> value) =>
+    slots.value.asFunction<int Function(Pointer<Int64>)>()(value);
+
+final class SlotNode(final Pointer<Int64> pointer, final SlotNode? previous);
+
+@Export<Pointer<Int64> Function(Pointer<Pointer<Int64>>, Int64)>()
+Pointer<Int64> retainSlot(Pointer<Pointer<Int64>> slots, int count) {
+  var node = SlotNode(slots.value, null);
+  for (var i = 0; i < count; i++) {
+    node = SlotNode(slots[i % 2], node);
+  }
+  while (node.previous != null) {
+    node = node.previous!;
+  }
+  return node.pointer;
+}
+
 void boundedWrite<I extends int, F extends double>(
   I address,
   I index,

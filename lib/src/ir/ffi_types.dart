@@ -121,11 +121,13 @@ abstract final class FfiTypes() {
     throw UnsupportedError('Native declaration: ${type.dartName}');
   }
 
-  /// The native scalar element of [type], or null for another Dart type.
-  static Type? pointerElement(ValueType type) {
+  /// The pointee size on supported 64-bit targets, or null if unsized.
+  static int? pointerElementSize(ValueType type) {
     if (type is ClassType && type.declaration == pointer) {
+      final element = type.typeArguments.single;
+      if (isPointer(element)) return (ffi.Pointer<ffi.Void>).nativeSize;
       for (final MapEntry(:key, :value) in scalarTypes.entries) {
-        if (type.typeArguments.single == value) return key;
+        if (element == value) return key.nativeSize;
       }
     }
     return null;

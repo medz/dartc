@@ -1,5 +1,4 @@
 import 'package:dartc/ir.dart';
-import 'package:dartc/interop.dart';
 
 import 'program_layout.dart';
 import 'checked_casts.dart';
@@ -410,7 +409,7 @@ final class FunctionRepresentation(
               .multiply,
               offset.index,
               Constant.integer(
-                FfiTypes.pointerElement(offset.pointer.type)!.nativeSize,
+                FfiTypes.pointerElementSize(offset.pointer.type)!,
               ),
             );
             address = IntBinary(.add, base, bytes);

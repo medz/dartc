@@ -106,58 +106,79 @@ Value? lowerFfi(
       FfiTypes.isPointer(operands.single.type)) {
     return emit(ObjectHashCode(operands.single));
   }
-  for (final MapEntry(key: native, value: type)
-      in FfiTypes.scalarTypes.entries) {
-    final storage = NativeScalarType(native);
-    final access = library.getExtension('${type.name}Pointer')!;
-    if (member == access.getGetter('value')) {
-      return emit(LoadNative(emit(PointerAddress(operands.single)), storage));
+  final access = member.enclosingElement;
+  if (access is! ExtensionElement) return null;
+  final pointerElements = access == library.getExtension('PointerPointer');
+  NativeScalarType? storage;
+  if (pointerElements) {
+    storage = NativeScalarType(ffi.Uint64);
+  } else {
+    for (final MapEntry(key: native, value: type)
+        in FfiTypes.scalarTypes.entries) {
+      if (access == library.getExtension('${type.name}Pointer')) {
+        storage = NativeScalarType(native);
+        break;
+      }
     }
-    if (member == access.getSetter('value')) {
-      return emit(
-        StoreNative(
-          emit(PointerAddress(operands[0])),
-          storage,
-          scalar(operands[1], FfiTypes.valueType(FfiTypes.describe(type))),
-        ),
-      );
-    }
-    if (member == access.getMethod('+') ||
-        member == access.getMethod('elementAt')) {
-      return emit(PointerOffset(operands[0], scalar(operands[1], .integer)));
-    }
-    if (member == access.getMethod('-')) {
-      final index = emit(
-        IntBinary(
-          .subtract,
-          const Constant.integer(0),
-          scalar(operands[1], .integer),
-        ),
-      );
-      return emit(PointerOffset(operands[0], index));
-    }
-    final read = member == access.getMethod('[]');
-    if (read || member == access.getMethod('[]=')) {
-      final offset = emit(
-        IntBinary(
-          .multiply,
-          scalar(operands[1], .integer),
-          Constant.integer(storage.nativeSize),
-        ),
-      );
-      final address = emit(
-        IntBinary(.add, emit(PointerAddress(operands[0])), offset),
-      );
-      return emit(
-        read
-            ? LoadNative(address, storage)
-            : StoreNative(
-                address,
-                storage,
-                scalar(operands[2], FfiTypes.valueType(storage)),
-              ),
-      );
-    }
+  }
+  if (storage == null) return null;
+  final nativeStorage = storage;
+  Value load(Value address) {
+    final value = emit(LoadNative(address, nativeStorage));
+    return pointerElements
+        ? emit(
+            PointerFromAddress(
+              value,
+              (operands.first.type as ClassType).typeArguments.single
+                  as ClassType,
+            ),
+          )
+        : value;
+  }
+
+  Value store(Value address, Value value) => emit(
+    StoreNative(
+      address,
+      nativeStorage,
+      pointerElements
+          ? emit(PointerAddress(value))
+          : scalar(value, FfiTypes.valueType(nativeStorage)),
+    ),
+  );
+
+  if (member == access.getGetter('value')) {
+    return load(emit(PointerAddress(operands.single)));
+  }
+  if (member == access.getSetter('value')) {
+    return store(emit(PointerAddress(operands[0])), operands[1]);
+  }
+  if (member == access.getMethod('+') ||
+      member == access.getMethod('elementAt')) {
+    return emit(PointerOffset(operands[0], scalar(operands[1], .integer)));
+  }
+  if (member == access.getMethod('-')) {
+    final index = emit(
+      IntBinary(
+        .subtract,
+        const Constant.integer(0),
+        scalar(operands[1], .integer),
+      ),
+    );
+    return emit(PointerOffset(operands[0], index));
+  }
+  final read = member == access.getMethod('[]');
+  if (read || member == access.getMethod('[]=')) {
+    final offset = emit(
+      IntBinary(
+        .multiply,
+        scalar(operands[1], .integer),
+        Constant.integer(storage.nativeSize),
+      ),
+    );
+    final address = emit(
+      IntBinary(.add, emit(PointerAddress(operands[0])), offset),
+    );
+    return read ? load(address) : store(address, operands[2]);
   }
   return null;
 }
