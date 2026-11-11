@@ -1,5 +1,4 @@
 import 'package:dartc/src/codegen/heap_plan.dart';
-import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
@@ -54,7 +53,7 @@ void main() {
         ProgramLayout(closures.classes, closureStorage: closures),
         CheckedCasts(),
         members,
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       expect(
         body.instructions.values.expand((v) => v).whereType<TypeCast>(),
@@ -85,7 +84,7 @@ void main() {
         layouts,
         CheckedCasts(),
         members,
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       final read = StorageRead(field, receiver);
       final write = StorageWrite(field, receiver, read);
@@ -180,7 +179,7 @@ void main() {
         ProgramLayout(program.classes),
         CheckedCasts(),
         MemberCalls(program, program.reachableFrom([function.target])),
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       final selected = body.invocations.keys.single;
       expect(body.invocations[selected], same(implementation));
@@ -232,7 +231,7 @@ void main() {
         ]),
         CheckedCasts(),
         members,
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       final invoke = body.ends[entry] as Invoke;
       expect(invoke.operation, isA<TypeCast>());
@@ -297,7 +296,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     final actual = body.instructions[entry]!
         .whereType<ObjectRuntimeType>()
@@ -341,7 +340,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     final calls = body.instructions[entry]!.whereType<DirectCall>().toList();
     expect(calls, hasLength(2));
@@ -378,7 +377,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     final boxes = body.boxes.keys.toList();
     final flow = FunctionLiveness(body, body.inputsOf, {...boxes, call});
@@ -411,7 +410,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     final flow = FunctionLiveness(body, body.inputsOf, body.boxes.keys.toSet());
     final branch = body.ends[entry] as Branch;
@@ -437,7 +436,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     final branch = body.ends[entry] as Branch;
     expect(branch.ifTrue.target, isNot(same(branch.ifFalse.target)));
@@ -482,7 +481,7 @@ void main() {
         layouts,
         CheckedCasts(),
         members,
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       final selected = body.ends[entry] as Invoke;
       final normalEdge = selected.onReturn!.target,
@@ -527,7 +526,7 @@ void main() {
       layouts,
       CheckedCasts(),
       members,
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     final box = body.boxes.keys.single;
     final flow = FunctionLiveness(body, body.inputsOf, {box});

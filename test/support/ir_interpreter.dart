@@ -1792,6 +1792,8 @@ final class IrInterpreter(
           final address = (read(pointer) as ffi.Pointer).address;
           values[op] = invoke(op, address, arguments.map(read).toList());
         case LoadObjectData() ||
+            ReferenceAddress() ||
+            ReferenceFromAddress() ||
             StoreObjectData() ||
             LoadObjectReference() ||
             StoreObjectReference():

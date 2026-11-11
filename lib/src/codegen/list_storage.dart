@@ -117,7 +117,7 @@ final class ListStorage({
   Value _offset(Block block, Value index) => _op(
     block,
     .add,
-    _int(ObjectLayout.fieldsOffset),
+    _int(ObjectHeader.fieldsOffset),
     _op(block, .multiply, index, _int(8)),
   );
   Value _get(Block block, Value buffer, Value index) =>
@@ -229,7 +229,7 @@ final class ListStorage({
         overflow = Block();
     final count = entry.parameters.single;
     // The allocator reports OOM before an oversized element count can wrap to bytes.
-    const maximum = (0x1ffffffffffffff8 - ObjectLayout.fieldsOffset) ~/ 8;
+    const maximum = (0x1ffffffffffffff8 - ObjectHeader.fieldsOffset) ~/ 8;
     entry.finish(
       Branch(
         _op(entry, .greaterThan, count, _int(maximum)),
@@ -420,12 +420,12 @@ final class ListStorage({
     final [list, required] = entry.parameters;
     final storage = entry.emit(LoadField(data, list));
     final bytes = entry.emit(
-      LoadObjectData(storage, _int(ObjectLayout.sizeOffset), .new(Uint64)),
+      LoadObjectData(storage, _int(ObjectHeader.sizeOffset), .new(Uint64)),
     );
     final capacity = _op(
       entry,
       .shiftRight,
-      _op(entry, .subtract, bytes, _int(ObjectLayout.fieldsOffset)),
+      _op(entry, .subtract, bytes, _int(ObjectHeader.fieldsOffset)),
       _int(3),
     );
     entry.finish(

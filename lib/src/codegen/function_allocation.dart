@@ -244,7 +244,7 @@ final class FunctionAllocation<R extends Object>(
         emitter.loadMemory(
           destination,
           source,
-          offset: ObjectLayout.fieldsOffset,
+          offset: ObjectHeader.fieldsOffset,
           bytes: 8,
           signed: false,
         );

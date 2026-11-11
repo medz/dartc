@@ -6,9 +6,12 @@ void main() {
   test(
     'source resources share analysis identities and lifetime with inputs',
     () async {
-      final session = AnalysisSession([path], resources: ['runtime/heap.dart']);
+      final session = AnalysisSession(
+        [path],
+        resources: ['dartc/src/runtime/space.dart'],
+      );
       final checked = await session.resolve();
-      final runtime = checked.resources['runtime/heap.dart']!;
+      final runtime = checked.resources['dartc/src/runtime/space.dart']!;
       expect(runtime.session, same(checked.libraries.first.session));
       expect(
         runtime.element.typeProvider.intType.element,

@@ -12,7 +12,7 @@ final class StringStorage({
   final IrCallable? argumentError,
   final FunctionTarget Function(ClassType)? allocate,
 }) {
-  static const dataOffset = ObjectLayout.fieldsOffset + ObjectLayout.alignment;
+  static const dataOffset = ObjectHeader.fieldsOffset + ObjectHeader.alignment;
   static final _unit = NativeScalarType(Uint16);
   final length = InstanceField(ValueType.string, 'length', .integer);
   late final IrClass declaration;

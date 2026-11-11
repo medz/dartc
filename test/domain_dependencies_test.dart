@@ -11,7 +11,7 @@ void main() {
       'target': {},
       'layout': {},
       'sdk': {},
-      'runtime': {},
+      'runtime': {'layout'},
       'assembler': {'target'},
       'frontend': {'sdk', 'ir', 'interop'},
       'abi': {'assembler', 'target', 'interop'},
@@ -42,6 +42,7 @@ void main() {
       for (final domain in dependencies.keys) '$domain.dart': domain,
       'assembler/arm64.dart': 'assembler',
       'assembler/x64.dart': 'assembler',
+      'layout/memory.dart': 'layout',
       'object/elf.dart': 'object',
       'object/mach_o.dart': 'object',
     };
@@ -111,9 +112,10 @@ void main() {
               reason: '$owner -> $dependency',
             );
             expect(
-              uri.scheme == 'package' &&
-                  uri.pathSegments.first == 'dartc' &&
-                  entries[uri.pathSegments.skip(1).join('/')] == dependency,
+              entries[target.pathSegments
+                      .skip(lib.pathSegments.length - 1)
+                      .join('/')] ==
+                  dependency,
               isTrue,
               reason: file.path,
             );

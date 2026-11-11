@@ -551,6 +551,8 @@ sealed class Instruction(super.type) extends Value {
     StringLength() ||
     LoadObjectData() ||
     LoadObjectReference() ||
+    ReferenceAddress() ||
+    ReferenceFromAddress() ||
     LoadNative() => const {.readsStorage},
     StringCodeUnitAt() => const {.readsStorage, .mayThrow},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
@@ -592,6 +594,43 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => effects.contains(Effect.mayThrow);
+}
+
+/// Observes a reference's current address; null has address zero.
+///
+/// Trusted memory code must not retain the address across a moving collection.
+final class ReferenceAddress(final Value object) extends Instruction {
+  this : super(.integer) {
+    if (!ValueType.object.nullable.accepts(object.type) ||
+        object.type == .integer ||
+        object.type == .floating ||
+        object.type == .boolean) {
+      throw ArgumentError('Expected an object reference.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [object];
+}
+
+/// Recovers an existing reference from initialized storage without allocating.
+///
+/// The caller proves the address has [type], remains live and obeys its layout.
+/// Zero is permitted only when [type] admits null. This is not a checked cast.
+final class ReferenceFromAddress(final Value address, super.type)
+    extends Instruction {
+  this {
+    if (address.type != .integer ||
+        type == .voidType ||
+        type == .never ||
+        type == .integer ||
+        type == .floating ||
+        type == .boolean ||
+        type is CellType) {
+      throw ArgumentError('Expected an integer address and a value type.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [address];
 }
 
 /// Creates a native pointer without accessing or owning its target.

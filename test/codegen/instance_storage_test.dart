@@ -1,5 +1,4 @@
 import 'package:dartc/src/codegen/heap_plan.dart';
-import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
@@ -40,7 +39,7 @@ void main() {
         layouts,
         CheckedCasts(),
         MemberCalls(IrProgram([], []), {}),
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       final shape = closures.cell(cell.type as CellType);
       final reads = body.inputsOf(copy).whereType<StorageRead>().toList();
@@ -152,7 +151,7 @@ void main() {
         layouts,
         CheckedCasts(),
         MemberCalls(IrProgram([], []), {}),
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       var block = entry;
       final operations = <Value>[];

@@ -40,23 +40,27 @@ final class ProgramSelection(
         );
       }
     }
-    final pending = [entry], checked = <FunctionTarget>{};
+    final pending = [(entry, <FunctionTarget>[])], checked = <FunctionTarget>{};
     while (pending.isNotEmpty) {
-      final target = pending.removeLast();
+      final (target, path) = pending.removeLast();
       if (!checked.add(target)) continue;
+      if (heap.runtime?.primitives.containsKey(target) == true) continue;
       final body = functions[target];
       if (body == null ||
-          target == heap.heap.allocate ||
+          target == heap.allocate ||
           heap.allocates([target]) ||
           body.ends.values.any((end) => end is Throw || end is Invoke) ||
           body.instructions.values.any(
             (values) => values.any((value) => value is NativeInvocation),
           )) {
         throw UnsupportedError(
-          'Runtime call must not allocate, throw or enter foreign code: ${target.name}',
+          'Runtime call must not allocate, throw or enter foreign code: '
+          '${[...path, target].map((t) => t.name).join(' -> ')} (${target.signature.dartName})',
         );
       }
-      pending.addAll(body.invocations.values);
+      pending.addAll(
+        body.invocations.values.map((callee) => (callee, [...path, target])),
+      );
     }
   }
 
@@ -118,8 +122,7 @@ final class ProgramSelection(
       ...layouts.types.functions,
       if (heap.initializers.contains(layouts.pointers.initializer))
         layouts.pointers.function,
-      if (managed) ...heap.functions,
-      if (managed) frames.function,
+      if (capture) frames.function,
       ...traceFunctions,
     ];
     final calls = {
@@ -150,16 +153,17 @@ final class ProgramSelection(
         break;
       }
       if (!capture && needsTrace) {
-        traceFunctions = traces.functions(heap.heap.invalid);
+        traceFunctions = traces.functions(heap.invalid);
       }
       capture = needsTrace;
       managed = needsHeap;
     }
+    if (managed) calls.addAll([heap.allocate, heap.release]);
     heap.retain(calls);
     calls.addAll(heap.initializers);
     primitives = managed
         ? heap.primitives
-        : {if (calls.contains(heap.heap.invalid)) heap.heap.invalid};
+        : {if (calls.contains(heap.invalid)) heap.invalid};
     final missing = calls.difference({
       ...functions.keys,
       ...primitives,

@@ -20,7 +20,6 @@ import 'constant_data.dart';
 import 'stack_maps.dart';
 import 'heap_plan.dart';
 import 'heap_entry.dart';
-import 'heap_functions.dart';
 import 'heap_runtime.dart';
 import 'frame_lookup.dart';
 import 'stack_traces.dart';
@@ -51,22 +50,34 @@ base class ScalarCodeGenerator<R extends Object>(
     HeapRuntime? runtime,
   }) {
     if (runtime != null) {
-      final missing = <IrFunction>[];
-      for (final function in runtime.functions) {
-        final existing = program.implementationOf(function.target);
+      final functions = {
+        for (final function in program.functions) function.target: function,
+      };
+      for (final function in runtime.program.functions) {
+        final existing = functions[function.target];
         if (existing != null && !identical(existing, function)) {
-          throw ArgumentError('Conflicting heap runtime definition.');
+          throw ArgumentError(
+            'Conflicting runtime definition: ${function.target.name}',
+          );
         }
-        if (existing == null) missing.add(function);
+        functions[function.target] = function;
       }
-      if (missing.isNotEmpty) {
-        program = IrProgram(
-          program.classes,
-          [...program.functions, ...missing],
-          globals: program.globals,
-          externals: program.externals,
-        );
-      }
+      program = IrProgram(
+        {
+          for (final c in [...runtime.program.classes, ...program.classes])
+            c.type: c,
+        }.values,
+        functions.values,
+        globals: {...program.globals, ...runtime.program.globals},
+        externals: {
+          for (final external in [
+            ...runtime.program.externals,
+            ...program.externals,
+          ])
+            if (!functions.containsKey(external.target))
+              external.target: external,
+        }.values,
+      );
     }
     final selected = definitions.toSet();
     if (selected.isEmpty ||
@@ -99,7 +110,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ..clear()
         ..addAll(sourceDefinitions);
       final frames = FrameLookup();
-      final heap = HeapPlan(frames, runtime: runtime);
+      final heap = HeapPlan(runtime: runtime);
       final traces = StackTraces(frames);
       final casts = CheckedCasts();
       IrCallable? constructor(ValueType? type, [String name = 'new']) {
@@ -363,8 +374,8 @@ base class ScalarCodeGenerator<R extends Object>(
       break;
     }
     if (resolved.managed) {
-      for (final function in runtime!.functions) {
-        resolved.checkNonAllocating(function.target);
+      for (final function in runtime!.nonAllocating) {
+        resolved.checkNonAllocating(function);
       }
     }
     final selection = resolved;
@@ -429,7 +440,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ? null
         : HeapEntry(
             emitter,
-            heap.heap,
+            heap.release,
             (fixup) => rootAddresses.add((code.length, fixup)),
             (fixup) => errorAddresses.add((code.length, fixup)),
             (fixup) => uncaughtAddresses.add((code.length, fixup)),
@@ -463,7 +474,7 @@ base class ScalarCodeGenerator<R extends Object>(
         argument,
         (fixup) => contextAddresses.add((code.length, fixup)),
       );
-      call(emitter.call(), heap.heap.release);
+      call(emitter.call(), heap.release);
       emitter.epilogue(frame);
       return emitter.finish();
     }
@@ -649,8 +660,8 @@ base class ScalarCodeGenerator<R extends Object>(
       );
       sections.add(Section.data(globalData, alignment: 8));
       relocations.addAll([
-        Relocation.address(section, ObjectLayout.descriptorOffset, descriptor!),
-        Relocation.address(section, ObjectLayout.typeOffset, globalType!),
+        Relocation.address(section, ObjectHeader.descriptorOffset, descriptor!),
+        Relocation.address(section, ObjectHeader.typeOffset, globalType!),
       ]);
       for (final (start, fixup) in globalAddresses) {
         relocations.add(
@@ -670,12 +681,12 @@ base class ScalarCodeGenerator<R extends Object>(
           '.dartc.heap',
           sections.length,
           0,
-          HeapFunctions.contextBytes,
+          RuntimeContext.size,
           kind: .data,
           binding: .local,
         ),
       );
-      sections.add(Section.zeroFill(HeapFunctions.contextBytes, alignment: 8));
+      sections.add(Section.zeroFill(RuntimeContext.size, alignment: 8));
       for (final (start, fixup) in contextAddresses) {
         relocations.add(
           Relocation.instruction(

@@ -172,7 +172,7 @@ final class MapStorage({
   Value _offset(Block b, Value index) => _op(
     b,
     .add,
-    _int(ObjectLayout.fieldsOffset),
+    _int(ObjectHeader.fieldsOffset),
     _op(b, .multiply, index, _int(8)),
   );
   Value _bucket(Block b, Value data, Value index) => b.emit(

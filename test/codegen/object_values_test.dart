@@ -71,12 +71,12 @@ void main() {
         addresses.add(address);
         final object = module.symbols[address];
         expect(
-          data.getInt64(object.offset + ObjectLayout.fieldsOffset, .little),
+          data.getInt64(object.offset + ObjectHeader.fieldsOffset, .little),
           texts[i].length,
         );
-        final units = object.offset + ObjectLayout.fieldsOffset + 8;
+        final units = object.offset + ObjectHeader.fieldsOffset + 8;
         expect(
-          data.getInt64(object.offset + ObjectLayout.sizeOffset, .little),
+          data.getInt64(object.offset + ObjectHeader.sizeOffset, .little),
           object.size,
         );
         expect(object.size, 40 + ((texts[i].length + 3) ~/ 4) * 8);
@@ -205,11 +205,11 @@ void main() {
         expect(words.getInt64(descriptor.offset + 16, .little), 8);
         if (i < 4) {
           expect(
-            words.getInt64(object.offset + ObjectLayout.fieldsOffset, .little),
+            words.getInt64(object.offset + ObjectHeader.fieldsOffset, .little),
             7,
           );
           final floating = words.getFloat64(
-            object.offset + ObjectLayout.fieldsOffset + 8,
+            object.offset + ObjectHeader.fieldsOffset + 8,
             .little,
           );
           expect(
@@ -219,13 +219,13 @@ void main() {
         } else {
           expect(
             words.getInt64(descriptor.offset + 24, .little),
-            ObjectLayout.fieldsOffset,
+            ObjectHeader.fieldsOffset,
           );
           expect(
             module.relocations
                 .whereType<AddressRelocation>()
                 .singleWhere(
-                  (r) => r.offset == object.offset + ObjectLayout.fieldsOffset,
+                  (r) => r.offset == object.offset + ObjectHeader.fieldsOffset,
                 )
                 .symbol,
             addresses.first,

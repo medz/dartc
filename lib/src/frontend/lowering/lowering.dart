@@ -146,7 +146,19 @@ final class Lowering({final bool enableAssertions = false}) {
       for (final function in [...functions, ...intrinsics]) function.target,
     };
     final program = IrProgram(
-      [...classes, ...bindings.mixinApplications, ...intrinsicClasses],
+      [
+        ...classes,
+        if (classes.any(
+              (c) => c.type.asInstanceOf(CoreTypes.enumeration) != null,
+            ) &&
+            !classes.any((c) => c.type == CoreTypes.enumeration))
+          IrClass(CoreTypes.enumeration, [
+            CoreTypes.enumIndex,
+            CoreTypes.enumName,
+          ]),
+        ...bindings.mixinApplications,
+        ...intrinsicClasses,
+      ],
       [
         ...functions.whereType<IrFunction>(),
         ...intrinsics,

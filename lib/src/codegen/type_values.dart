@@ -158,7 +158,7 @@ final class TypeValues() {
   /// Reads the built-in runtime type without invoking user overrides.
   Value runtimeTypeOf(Value receiver, List<Value> into) {
     final actual = ObjectRuntimeType(receiver, direct: true);
-    final concrete = TypeCast(actual, TypeValues.type);
+    final concrete = TypeReference(actual);
     into.addAll([actual, concrete]);
     return concrete;
   }
@@ -780,5 +780,14 @@ final class TypeValues() {
       yes,
       no,
     ]);
+  }
+}
+
+/// The concrete metadata representation produced by a built-in runtimeType read.
+final class TypeReference(final ObjectRuntimeType operand) extends Value {
+  this : super(TypeValues.type) {
+    if (!operand.direct) {
+      throw ArgumentError('A built-in type read is required.');
+    }
   }
 }

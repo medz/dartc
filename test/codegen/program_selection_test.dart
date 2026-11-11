@@ -24,7 +24,7 @@ void main() {
       ...arithmetic.classes,
       traces.declaration,
     ]);
-    final heap = HeapPlan(frames, runtime: heapRuntime);
+    final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
       'round',
@@ -35,7 +35,7 @@ void main() {
     entry.finish(
       Return(entry.emit(NumericRoundToDouble(entry.parameters.single, .round))),
     );
-    heap.functions.add(IrFunction(helper, [entry]));
+
     final division = FunctionTarget(helper.library, 'divide', .integer, [
       .integer,
       .integer,
@@ -52,7 +52,7 @@ void main() {
         ),
       ),
     );
-    heap.functions.add(IrFunction(division, [divide]));
+
     final selection = ProgramSelection(
       layouts,
       heap,
@@ -64,8 +64,12 @@ void main() {
       GlobalStorage([]),
       layouts.instances,
     );
-    heapRuntime.functions.forEach(selection.include);
-    expect(selection.close(persistent: true), isEmpty);
+    selection.include(IrFunction(helper, [entry]));
+    selection.include(IrFunction(division, [divide]));
+    expect(selection.close(persistent: true), {
+      heapRuntime.allocate,
+      heapRuntime.release,
+    });
     expect(arithmetic.functions.length, greaterThanOrEqualTo(2));
     expect(
       () => layouts.storageOf(CoreTypes.integerDivisionByZeroException),
@@ -74,6 +78,8 @@ void main() {
     final definitions = {
       ...selection.functions.keys,
       ...selection.primitives,
+      heapRuntime.allocate,
+      heapRuntime.release,
       if (selection.capture) traces.capture,
     };
     for (final body in selection.functions.values) {
@@ -112,7 +118,7 @@ void main() {
       ...program.classes,
       traces.declaration,
     ]);
-    final heap = HeapPlan(frames, runtime: heapRuntime);
+    final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
       'shift',
@@ -131,7 +137,7 @@ void main() {
         ),
       ),
     );
-    heap.functions.add(IrFunction(helper, [entry]));
+
     final selection = ProgramSelection(
       layouts,
       heap,
@@ -143,7 +149,11 @@ void main() {
       GlobalStorage([]),
       layouts.instances,
     );
-    heapRuntime.functions.forEach(selection.include);
-    expect(selection.close(persistent: true), {constructor});
+    selection.include(IrFunction(helper, [entry]));
+    expect(selection.close(persistent: true), {
+      constructor,
+      heapRuntime.allocate,
+      heapRuntime.release,
+    });
   });
 }

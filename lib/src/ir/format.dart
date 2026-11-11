@@ -122,6 +122,8 @@ void writeFunction(
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
     PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
+    ReferenceAddress() => 'referenceAddress ${value(op.object)}',
+    ReferenceFromAddress() => 'referenceFromAddress ${value(op.address)}',
     PointerAddress() => 'pointerAddress ${value(op.pointer)}',
     PointerOffset() => 'pointerOffset ${value(op.pointer)}, ${value(op.index)}',
     LoadNative() => 'loadNative ${op.nativeType} ${value(op.address)}',

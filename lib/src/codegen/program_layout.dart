@@ -182,8 +182,8 @@ final class ClassStorage(
 
   this {
     errorTraceOffset = storesErrorTrace
-        ? ObjectLayout.fieldsOffset +
-              this.fields.length * ObjectLayout.alignment
+        ? ObjectHeader.fieldsOffset +
+              this.fields.length * ObjectHeader.alignment
         : null;
     layout = .new([
       ...this.fields.map((f) => program.representation(f.type)),

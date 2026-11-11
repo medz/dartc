@@ -5,16 +5,17 @@ import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
+import 'double_bits.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
-import 'function_selection.dart';
 import 'function_representation.dart';
-import 'storage_access.dart';
-import 'double_bits.dart';
+import 'function_selection.dart';
+import 'heap_entry.dart';
 import 'native_adapter.dart';
 import 'native_invocation.dart';
 import 'stack_traces.dart';
-import 'heap_entry.dart';
+import 'storage_access.dart';
+import 'type_values.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
@@ -129,8 +130,8 @@ final class ScalarFunction<R extends Object>(
             result,
             value,
             offset: instruction is ObjectRuntimeType
-                ? ObjectLayout.typeOffset
-                : ObjectLayout.identityHashOffset,
+                ? ObjectHeader.typeOffset
+                : ObjectHeader.identityHashOffset,
             bytes: 8,
             signed: false,
           );
@@ -296,7 +297,7 @@ final class ScalarFunction<R extends Object>(
               emitter.loadMemory(
                 destination,
                 result,
-                offset: ObjectLayout.fieldsOffset,
+                offset: ObjectHeader.fieldsOffset,
                 bytes: 8,
                 signed: false,
               );
@@ -354,14 +355,33 @@ final class ScalarFunction<R extends Object>(
             emitter.loadMemory(
               destination,
               stored,
-              offset: ObjectLayout.fieldsOffset,
+              offset: ObjectHeader.fieldsOffset,
               bytes: 8,
               signed: false,
             );
           }
           allocation.define(instruction, destination);
+        } else if (instruction is ReferenceAddress ||
+            instruction is ReferenceFromAddress) {
+          final operand = instruction is ReferenceAddress
+              ? instruction.object
+              : (instruction as ReferenceFromAddress).address;
+          final referenceType = instruction is ReferenceAddress
+              ? operand.type
+              : instruction.type;
+          if (layouts.representation(referenceType) != .reference) {
+            throw UnsupportedError(
+              'Memory access requires a reference representation.',
+            );
+          }
+          final source = allocation.read(operand);
+          allocation.release(operand);
+          final destination = allocation.allocate(.general, preferred: source);
+          emitter.move(destination, source);
+          allocation.define(instruction, destination);
         } else if (selection.body.aliases.contains(instruction) ||
             instruction is TypeView ||
+            instruction is TypeReference ||
             instruction is ReifyType ||
             instruction is ObjectRuntimeType) {
           final operand = selection.body.inputsOf(instruction).single;

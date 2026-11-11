@@ -1,3 +1,5 @@
+import 'memory_layout.dart';
+
 /// The interpretation of one 64-bit value slot.
 enum ValueRepresentation() {
   /// An unboxed integer or boolean.
@@ -27,36 +29,19 @@ final class ObjectLayout(
   /// Immutable representations in physical field order.
   final List<ValueRepresentation> fields = .unmodifiable(fields);
 
-  /// The alignment and width of every object slot.
-  static const int alignment = 8;
-
-  /// The byte offset of the immutable storage descriptor address.
-  static const int descriptorOffset = 0;
-
-  /// The byte offset of the managed runtime type reference.
-  static const int typeOffset = alignment;
-
-  /// The byte offset of the identity hash retained when the object moves.
-  static const int identityHashOffset = 2 * alignment;
-
-  /// The aligned allocation size, including any trailing inline payload.
-  static const int sizeOffset = 3 * alignment;
-
-  /// The byte offset of the first instance field or boxed scalar payload.
-  static const int fieldsOffset = 4 * alignment;
-
   /// The fixed storage size, including the header but excluding inline payloads.
-  int get size => fieldsOffset + fields.length * alignment;
+  int get size =>
+      ObjectHeader.fieldsOffset + fields.length * ObjectHeader.alignment;
 
   /// The byte offset of [field] in this object's storage.
   int offsetOf(int field) {
     RangeError.checkValidIndex(field, fields, 'field');
-    return fieldsOffset + field * alignment;
+    return ObjectHeader.fieldsOffset + field * ObjectHeader.alignment;
   }
 
   /// The runtime type and fields traced by the collector, excluding other headers.
   Iterable<int> get referenceOffsets sync* {
-    yield typeOffset;
+    yield ObjectHeader.typeOffset;
     for (final (i, representation) in fields.indexed) {
       if (representation == .reference) yield offsetOf(i);
     }

@@ -4,14 +4,14 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 
 import 'function_emitter.dart';
-import 'heap_functions.dart';
 
 /// Enters an activation-local heap or a module-owned heap with linked roots.
 final class HeapEntry<R extends Object>(
   final FunctionEmitter<R> emitter,
-  final HeapFunctions functions,
+  final FunctionTarget releaseFunction,
   final void Function(Fixup) roots,
   final void Function(Fixup) error,
   final void Function(Fixup) uncaught,
@@ -22,7 +22,7 @@ final class HeapEntry<R extends Object>(
   static const message = 'Unhandled exception:\nOut of Memory\n';
   static const uncaughtMessage =
       'Unhandled Dart exception at native boundary.\n';
-  static const _result = HeapFunctions.contextBytes, _failure = _result + 8;
+  static const _result = RuntimeContext.size, _failure = _result + 8;
 
   FrameLayout<R> frame(int outgoingStackBytes) =>
       emitter.convention.frameLayout(
@@ -40,41 +40,41 @@ final class HeapEntry<R extends Object>(
       emitter.loadMemory(
         emitter.failureRegister,
         emitter.heapRegister,
-        offset: HeapFunctions.active,
+        offset: RuntimeContext.active,
         bytes: 8,
         signed: false,
       );
       emitter.storeStack(
         emitter.failureRegister,
-        frame.localOffset + HeapFunctions.previousEntry,
+        frame.localOffset + RuntimeContext.previousEntry,
       );
       emitter.stackAddress(emitter.failureRegister, frame.localOffset);
       emitter.storeMemory(
         emitter.failureRegister,
         emitter.heapRegister,
-        offset: HeapFunctions.active,
+        offset: RuntimeContext.active,
         bytes: 8,
       );
       emitter.loadImmediate(emitter.failureRegister, 0);
       emitter.storeStack(
         emitter.failureRegister,
-        frame.localOffset + HeapFunctions.suspendedSp,
+        frame.localOffset + RuntimeContext.suspendedSp,
       );
       emitter.storeStack(
         emitter.failureRegister,
-        frame.localOffset + HeapFunctions.suspendedPc,
+        frame.localOffset + RuntimeContext.suspendedPc,
       );
       emitter.address(emitter.failureRegister, globals!);
       emitter.storeMemory(
         emitter.failureRegister,
         emitter.heapRegister,
-        offset: HeapFunctions.globalRoots,
+        offset: RuntimeContext.globalRoots,
         bytes: 8,
       );
     } else {
       emitter.stackAddress(emitter.heapRegister, frame.localOffset);
       emitter.loadImmediate(emitter.failureRegister, 0);
-      for (var offset = 0; offset < HeapFunctions.contextBytes; offset += 8) {
+      for (var offset = 0; offset < RuntimeContext.size; offset += 8) {
         emitter.storeMemory(
           emitter.failureRegister,
           emitter.heapRegister,
@@ -87,7 +87,7 @@ final class HeapEntry<R extends Object>(
     emitter.storeMemory(
       emitter.failureRegister,
       emitter.heapRegister,
-      offset: HeapFunctions.maps,
+      offset: RuntimeContext.maps,
       bytes: 8,
     );
     emitter.loadImmediate(emitter.failureRegister, 0);
@@ -105,7 +105,7 @@ final class HeapEntry<R extends Object>(
     emitter.loadMemory(
       emitter.failureRegister,
       emitter.heapRegister,
-      offset: HeapFunctions.active,
+      offset: RuntimeContext.active,
       bytes: 8,
       signed: false,
     );
@@ -113,7 +113,7 @@ final class HeapEntry<R extends Object>(
     emitter.storeMemory(
       scratch,
       emitter.failureRegister,
-      offset: HeapFunctions.suspendedSp,
+      offset: RuntimeContext.suspendedSp,
       bytes: 8,
     );
     final addresses = <Fixup>[];
@@ -121,7 +121,7 @@ final class HeapEntry<R extends Object>(
     emitter.storeMemory(
       scratch,
       emitter.failureRegister,
-      offset: HeapFunctions.suspendedPc,
+      offset: RuntimeContext.suspendedPc,
       bytes: 8,
     );
     return addresses;
@@ -133,12 +133,12 @@ final class HeapEntry<R extends Object>(
     if (persistent) {
       emitter.loadStack(
         emitter.failureRegister,
-        frame.localOffset + HeapFunctions.previousEntry,
+        frame.localOffset + RuntimeContext.previousEntry,
       );
       emitter.storeMemory(
         emitter.failureRegister,
         emitter.heapRegister,
-        offset: HeapFunctions.active,
+        offset: RuntimeContext.active,
         bytes: 8,
       );
     }
@@ -150,7 +150,7 @@ final class HeapEntry<R extends Object>(
                   .single
               as RegisterArgument<R>;
       emitter.move(location.register, emitter.heapRegister);
-      call(emitter.call(), functions.release);
+      call(emitter.call(), releaseFunction);
     }
 
     if (!persistent || release) {

@@ -10,21 +10,18 @@ import '../support/runtime.dart';
 
 void main() {
   setUpAll(prepareRuntime);
-  final uri = Uri.parse('memory:runtime-calls');
+  final uri = Uri.parse('memory:runtime-contract');
   final entry = FunctionTarget(uri, 'entry', .integer, []);
 
-  test('heap runtime rejects incompatible source signatures', () {
-    expect(
-      () => HeapRuntime(
-        capacity: heapRuntime.capacity,
-        copy: heapRuntime.clear,
-        clear: heapRuntime.clear,
-      ),
-      throwsArgumentError,
-    );
-  });
+  HeapRuntime withCritical(FunctionTarget function) => HeapRuntime(
+    heapRuntime.program,
+    allocate: heapRuntime.allocate,
+    release: heapRuntime.release,
+    primitives: heapRuntime.primitives,
+    nonAllocating: [...heapRuntime.nonAllocating, function],
+  );
 
-  IrFunction mainBody({required bool managed}) {
+  IrFunction mainBody(bool managed) {
     final block = Block();
     block.finish(
       Return(
@@ -40,71 +37,119 @@ void main() {
     return IrFunction(entry, [block]);
   }
 
+  test('runtime entries must implement their machine boundary signatures', () {
+    expect(
+      () => HeapRuntime(
+        heapRuntime.program,
+        allocate: heapRuntime.release,
+        release: heapRuntime.release,
+        primitives: heapRuntime.primitives,
+        nonAllocating: [],
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => HeapRuntime(
+        heapRuntime.program,
+        allocate: heapRuntime.allocate,
+        release: heapRuntime.release,
+        primitives: {
+          heapRuntime.primitives.entries
+                  .singleWhere((entry) => entry.value == .map)
+                  .key:
+              .fail,
+        },
+        nonAllocating: [],
+      ),
+      throwsArgumentError,
+    );
+  });
+
   for (final CodeGenerator generator in [
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
-    test('${generator.target} rejects caller-side runtime boxing', () {
-      final target = FunctionTarget(uri, 'clear', .voidType, [
-        FfiTypes.int64Pointer,
-        .integer,
-      ]);
-      final block = Block(target.parameterTypes);
-      block.emit(Identical(block.parameters.first, block.parameters.first));
-      block.finish(const Return());
-      expect(
-        () => generator.generate(
-          IrProgram([], [mainBody(managed: true)]),
+    test('${generator.target} trims runtime from unmanaged programs', () {
+      for (final managed in [false, true]) {
+        final program = IrProgram([], [mainBody(managed)]);
+        final module = generator.generate(
+          program,
           definitions: [entry],
-          runtime: HeapRuntime(
-            capacity: heapRuntime.capacity,
-            copy: heapRuntime.copy,
-            clear: IrFunction(target, [block]),
-          ),
-        ),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (e) => e.message,
-            'contract',
-            contains('requires a managed object'),
-          ),
-        ),
-      );
+          runtime: heapRuntime,
+        );
+        for (final target in [heapRuntime.allocate, heapRuntime.release]) {
+          expect(module.symbols.any((s) => s.name == target.name), managed);
+        }
+        if (managed) {
+          expect(
+            () => generator.generate(program, definitions: [entry]),
+            throwsArgumentError,
+          );
+        }
+      }
     });
 
-    test('${generator.target} rejects foreign runtime dependencies', () {
-      final foreign = FunctionTarget(uri, 'foreign', .integer, [
-        .integer,
-        .integer,
-      ]);
-      final target = FunctionTarget(
-        uri,
-        'capacity',
-        .integer,
-        foreign.parameterTypes,
-      );
-      final block = Block(target.parameterTypes);
-      block.finish(Return(block.emit(DirectCall(foreign, block.parameters))));
+    test(
+      '${generator.target} rejects transitive allocation and exceptions',
+      () {
+        for (final allocates in [true, false]) {
+          final leaf = FunctionTarget(uri, 'leaf', .integer, [.integer]);
+          final caller = FunctionTarget(uri, 'critical', .integer, [.integer]);
+          final call = Block(caller.parameterTypes);
+          call.finish(Return(call.emit(DirectCall(leaf, call.parameters))));
+          final body = Block(leaf.parameterTypes);
+          if (allocates) {
+            final boxed = body.emit(TypeView(body.parameters.single, .object));
+            body.finish(Return(body.emit(ObjectHashCode(boxed, direct: true))));
+          } else {
+            body.finish(Throw(Constant.string('failure')));
+          }
+          expect(
+            () => generator.generate(
+              IrProgram([], [
+                mainBody(true),
+                IrFunction(caller, [call]),
+                IrFunction(leaf, [body]),
+              ]),
+              definitions: [entry, caller, leaf],
+              runtime: withCritical(caller),
+            ),
+            throwsA(
+              isA<UnsupportedError>().having(
+                (e) => e.message,
+                'contract',
+                contains('must not allocate'),
+              ),
+            ),
+          );
+        }
+      },
+    );
+
+    test('${generator.target} rejects native calls inside collection', () {
+      final foreign = FunctionTarget(uri, 'foreign', .integer, []);
+      final critical = FunctionTarget(uri, 'critical', .integer, []);
+      final block = Block();
+      block.finish(Return(block.emit(DirectCall(foreign, []))));
       expect(
         () => generator.generate(
           IrProgram(
             [],
-            [mainBody(managed: true)],
+            [
+              mainBody(true),
+              IrFunction(critical, [block]),
+            ],
             externals: [IrExternal(foreign)],
           ),
-          definitions: [entry, foreign],
+          definitions: [entry, critical, foreign],
           imports: {
             foreign: NativeImport(
               'foreign',
-              NativeSignature(Int64, [Int64, Int64]),
+              NativeSignature(Int64, []),
               isLeaf: true,
             ),
           },
-          runtime: HeapRuntime(
-            capacity: IrFunction(target, [block]),
-            copy: heapRuntime.copy,
-            clear: heapRuntime.clear,
-          ),
+          runtime: withCritical(critical),
         ),
         throwsA(
           isA<UnsupportedError>().having(
@@ -114,81 +159,6 @@ void main() {
           ),
         ),
       );
-    });
-
-    test(
-      '${generator.target} retains source runtime only for managed code',
-      () {
-        for (final managed in [false, true]) {
-          final program = IrProgram([], [mainBody(managed: managed)]);
-          final module = generator.generate(
-            program,
-            definitions: [entry],
-            runtime: heapRuntime,
-          );
-          for (final function in heapRuntime.functions) {
-            expect(
-              module.symbols.any((s) => s.name == function.target.name),
-              managed,
-            );
-          }
-          if (managed) {
-            expect(
-              () => generator.generate(program, definitions: [entry]),
-              throwsArgumentError,
-            );
-          }
-        }
-      },
-    );
-
-    test('${generator.target} checks transitive runtime effects', () {
-      for (final allocates in [false, true]) {
-        final target = FunctionTarget(uri, 'capacity', .integer, [
-          .integer,
-          .integer,
-        ]);
-        final dependency = FunctionTarget(uri, 'dependency', .integer, [
-          .integer,
-        ]);
-        final call = Block(target.parameterTypes);
-        call.finish(
-          Return(call.emit(DirectCall(dependency, [call.parameters.first]))),
-        );
-        final helper = Block(dependency.parameterTypes);
-        if (allocates) {
-          final object = helper.emit(
-            TypeView(helper.parameters.single, .object),
-          );
-          helper.finish(
-            Return(helper.emit(ObjectHashCode(object, direct: true))),
-          );
-        } else {
-          helper.finish(Throw(Constant.string('capacity failure')));
-        }
-        final program = IrProgram([], [
-          mainBody(managed: true),
-          IrFunction(dependency, [helper]),
-        ]);
-        expect(
-          () => generator.generate(
-            program,
-            definitions: [entry],
-            runtime: HeapRuntime(
-              capacity: IrFunction(target, [call]),
-              copy: heapRuntime.copy,
-              clear: heapRuntime.clear,
-            ),
-          ),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.message,
-              'contract',
-              contains('must not allocate'),
-            ),
-          ),
-        );
-      }
     });
   }
 }

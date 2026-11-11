@@ -1,6 +1,5 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
-import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
@@ -38,7 +37,7 @@ void main() {
         layouts,
         CheckedCasts(),
         members,
-        HeapPlan(FrameLookup()),
+        HeapPlan(),
       );
       for (final parameter in function.entry.parameters) {
         expect(parameter.type, pointerType);
@@ -82,7 +81,7 @@ void main() {
       ProgramLayout([]),
       CheckedCasts(),
       MemberCalls(program, {target}),
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
   }
 

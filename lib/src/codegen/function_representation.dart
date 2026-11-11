@@ -114,6 +114,7 @@ final class FunctionRepresentation(
   Iterable<Value> inputsOf(Value operation) => switch (operation) {
     StorageAccess(:final inputs) => inputs,
     DoubleBits(:final operand) => [operand],
+    TypeReference(:final operand) => [operand],
     ReferenceEquality(:final left, :final right) => [left, right],
     NativeInvocation(:final inputs) => inputs,
     Instruction() => _operands[operation] ?? operation.inputs,
@@ -146,7 +147,7 @@ final class FunctionRepresentation(
   };
 
   this {
-    final valueOperations = ValueOperations(this, layouts, heap.heap.invalid);
+    final valueOperations = ValueOperations(this, layouts, heap.invalid);
     checkCellInitialization(function);
     final operations = [
       for (final block in function.blocks) ...[
@@ -677,6 +678,38 @@ final class FunctionRepresentation(
                           .entries)
                     entry.key: (target: entry.value, closure: null),
                 };
+          final plainObject =
+              receiver.type is ClassType &&
+              ![
+                ValueType.integer,
+                ValueType.floating,
+                ValueType.boolean,
+                ValueType.string,
+                ValueType.typeType,
+                TypeValues.type,
+                ValueType.function,
+                FfiTypes.pointerRuntimeType,
+              ].any(receiver.type.accepts);
+          if (targets.isEmpty &&
+              plainObject &&
+              (instruction is Equals || instruction is ObjectHashCode)) {
+            final Value result = switch (instruction) {
+              Equals(:final left, :final right, :final negated) =>
+                layouts.representation(right.type) == .reference
+                    ? ReferenceEquality(left, right, negated: negated)
+                    : Constant.boolean(negated),
+              ObjectHashCode(:final operand) => ObjectHashCode(
+                operand,
+                direct: true,
+              ),
+              _ => throw StateError('Expected object equality or hashing.'),
+            };
+            if (result is! Constant) body.add(result);
+            aliases.add(instruction);
+            _operands[instruction] = [result];
+            body.add(instruction);
+            continue;
+          }
           if (instruction is Equals) {
             targets[TypeValues.type] = (
               target: layouts.types.equality,
@@ -743,7 +776,7 @@ final class FunctionRepresentation(
               instructions[missing] = [hash];
               ends[missing] = Jump(join!, [hash]);
             default:
-              final invalid = DirectCall(heap.heap.invalid, []);
+              final invalid = DirectCall(heap.invalid, []);
               instructions[missing] = [invalid];
               ends[missing] = Unreachable(invalid);
           }

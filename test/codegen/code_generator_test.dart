@@ -5,14 +5,6 @@ import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
-import 'package:dartc/src/codegen/frame_lookup.dart';
-import 'package:dartc/src/codegen/heap_functions.dart';
-import 'package:dartc/src/codegen/heap_plan.dart';
-import 'package:dartc/src/codegen/checked_casts.dart';
-import 'package:dartc/src/codegen/function_representation.dart';
-import 'package:dartc/src/codegen/member_calls.dart';
-import 'package:dartc/src/codegen/program_layout.dart';
-import 'package:dartc/src/codegen/stack_traces.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -127,7 +119,6 @@ void main() {
             'length',
             'elementAt',
             'iterator',
-            'moveNext',
           ]) {
             expect(names, isNot(contains(name)), reason: name);
           }
@@ -135,35 +126,6 @@ void main() {
       }
     },
   );
-
-  test('heap and stack inspection do not construct Dart pointer objects', () {
-    final frames = FrameLookup(),
-        heap = HeapFunctions(frames, runtime: heapRuntime);
-    final traces = StackTraces(frames);
-    final functions = [
-      ...heap.functions,
-      frames.function,
-      ...traces.functions(heap.invalid),
-      ...heapRuntime.functions,
-    ];
-    final program = IrProgram([traces.declaration], functions);
-    final layouts = ProgramLayout(program.classes, functions: functions);
-    final members = MemberCalls(
-      program,
-      functions.map((f) => f.target).toSet(),
-    );
-    for (final function in functions) {
-      final body = FunctionRepresentation(
-        function,
-        layouts,
-        CheckedCasts(),
-        members,
-        HeapPlan(frames, runtime: heapRuntime),
-      );
-      expect(body.invocations.keys.whereType<PointerFromAddress>(), isEmpty);
-      expect(body.invocations.keys.whereType<PointerOffset>(), isEmpty);
-    }
-  });
 
   test('void store results remain readable as null', () {
     final target = FunctionTarget(

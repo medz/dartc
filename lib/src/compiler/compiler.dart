@@ -1,3 +1,5 @@
+import 'runtime.dart';
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -57,16 +59,11 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       paths,
       includeDependencies: true,
       sdk: sdk,
-      resources: const ['runtime/heap.dart'],
+      resources: const ['dartc/src/runtime/heap.dart'],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
-      final library = input.resources['runtime/heap.dart']!.element.uri;
-      final functions = {
-        for (final function in lowered.program.functions)
-          if (function.target.library == library &&
-              function.target.owner == null)
-            function.target.name: function,
-      };
+      final library =
+          input.resources['dartc/src/runtime/heap.dart']!.element.uri;
       return (
         lowered,
         [
@@ -74,11 +71,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
             if (!input.resources.containsValue(library))
               for (final unit in library.units) File(unit.path).absolute.uri,
         ],
-        HeapRuntime(
-          capacity: functions['heapCapacity']!,
-          copy: functions['copyWords']!,
-          clear: functions['clearWords']!,
-        ),
+        bindRuntime(lowered.program, library),
       );
     });
     final (:program, :exports, :imports, :entryPoint) = lowered;

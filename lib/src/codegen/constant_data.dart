@@ -130,16 +130,16 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     int size,
     ValueType runtimeType,
   ) {
-    _words[(offset + ObjectLayout.sizeOffset) ~/ 8] = size;
-    _words[(offset + ObjectLayout.identityHashOffset) ~/ 8] =
+    _words[(offset + ObjectHeader.sizeOffset) ~/ 8] = size;
+    _words[(offset + ObjectHeader.identityHashOffset) ~/ 8] =
         ((symbol + 1) * 0x9e3779b9) & 0x3fffffff;
     relocations.add(
-      .address(1, offset + ObjectLayout.descriptorOffset, _type(type, layout)),
+      .address(1, offset + ObjectHeader.descriptorOffset, _type(type, layout)),
     );
     relocations.add(
       .address(
         1,
-        offset + ObjectLayout.typeOffset,
+        offset + ObjectHeader.typeOffset,
         addressOf(layouts.types.constant(runtimeType)),
       ),
     );
@@ -179,16 +179,24 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     if (_types[type] case final symbol?) return symbol;
     final references = layout.referenceOffsets.toList();
     final start = _words.length;
-    final symbol = _types[type] = _reserve('type', 4 + references.length);
-    _words[start] = layout.size;
-    _words[start + 1] = references.length;
-    _words.setRange(start + 2, start + 2 + references.length, references);
-    _words[start + 2 + references.length] = layouts.isBoxable(type)
+    final symbol = _types[type] = _reserve(
+      'type',
+      ObjectDescriptor.baseWords + references.length,
+    );
+    _words[start + ObjectDescriptor.size] = layout.size;
+    _words[start + ObjectDescriptor.referenceCount] = references.length;
+    _words.setRange(
+      start + ObjectDescriptor.references,
+      start + ObjectDescriptor.references + references.length,
+      references,
+    );
+    _words[start +
+        ObjectDescriptor.traceBase +
+        references.length] = layouts.isBoxable(type)
         ? 0
         : layouts.storageOf(type).errorTraceOffset ?? 0;
-    _words[start + 3 + references.length] = layout.tracesPayload
-        ? layout.size
-        : 0;
+    _words[start + ObjectDescriptor.payloadBase + references.length] =
+        layout.tracesPayload ? layout.size : 0;
     return symbol;
   }
 
@@ -215,7 +223,7 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     }
     return .readOnlyData(
       data.buffer.asUint8List(),
-      alignment: ObjectLayout.alignment,
+      alignment: ObjectHeader.alignment,
     );
   }
 }

@@ -1,10 +1,28 @@
 import 'dart:io';
 
 import 'package:dartc/sdk.dart';
-import 'package:dartc/src/runtime/heap.dart';
+import 'package:dartc/src/runtime/space.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('space reservation leaves state intact when capacity is exhausted', () {
+    final space = Space()
+      ..start = 4096
+      ..capacity = 64;
+    expect(space.reserve(24), 4096);
+    expect(space.reserve(-8), 0);
+    expect(space.reserve(48), 0);
+    expect(space.used, 24);
+    expect(space.reserve(40), 4120);
+    expect(space.contains(4096), isTrue);
+    expect(space.contains(4160), isFalse);
+    space.scanned = 64;
+    space.reset();
+    expect(space.used, 0);
+    expect(space.scanned, 0);
+    expect(space.reserve(64), 4096);
+  });
+
   test('grows semispaces without overflowing the maximum capacity', () {
     const maximum = 0x2000000000000000;
     for (final current in [
@@ -45,10 +63,18 @@ void main() {
     expect(heapCapacity(maximum + 1, 0), 0);
   });
 
-  test('bundles the maintained runtime source unchanged', () async {
-    expect(
-      (await DartSdk.load()).sources.read('runtime/heap.dart'),
-      File('lib/src/runtime/heap.dart').readAsBytesSync(),
-    );
+  test('bundles runtime and shared memory contracts unchanged', () async {
+    final sources = (await DartSdk.load()).sources;
+    for (final path in [
+      'src/runtime/heap.dart',
+      'src/runtime/space.dart',
+      'src/runtime/memory.dart',
+      'src/runtime/roots.dart',
+      'src/runtime/object_memory.dart',
+      'src/layout/memory_layout.dart',
+      'layout/memory.dart',
+    ]) {
+      expect(sources.read('dartc/$path'), File('lib/$path').readAsBytesSync());
+    }
   });
 }

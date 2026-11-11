@@ -1,38 +1,51 @@
 import 'package:dartc/ir.dart';
 
-/// Checked source functions used while allocating and moving managed objects.
-///
-/// Their transitive call dependencies must be supplied in the program and must
-/// not allocate, throw or enter foreign code. Code generation checks that closure.
-/// Pointer arguments must be consumed as addresses without observing, returning
-/// or retaining their Dart object identities; entry must not require boxing.
-final class HeapRuntime({
-  /// Calculates capacity from current and required bytes, or returns zero.
-  ///
-  /// A successful capacity must satisfy the requirement and not exceed `2^61`.
-  required final IrFunction capacity,
+/// Machine services available to checked runtime source.
+enum MemoryPrimitive() {
+  map,
+  unmap,
+  fail,
+}
 
-  /// Copies a word count between aligned, valid, nonoverlapping native regions.
-  required final IrFunction copy,
-
-  /// Clears a word count in an aligned, writable native region.
-  required final IrFunction clear,
+/// Source program and entry contracts used by managed code generation.
+final class HeapRuntime(
+  final IrProgram program, {
+  required final FunctionTarget allocate,
+  required final FunctionTarget release,
+  required Map<FunctionTarget, MemoryPrimitive> primitives,
+  required Iterable<FunctionTarget> nonAllocating,
 }) {
-  /// The ordinary Dart bodies required by the heap implementation.
-  Iterable<IrFunction> get functions => [capacity, copy, clear];
+  /// Explicit machine entries; their signatures must match the selected service.
+  final Map<FunctionTarget, MemoryPrimitive> primitives = .unmodifiable(
+    primitives,
+  );
+
+  /// Closures that cannot allocate, throw, or call foreign code after selection.
+  final List<FunctionTarget> nonAllocating = .unmodifiable(nonAllocating);
 
   this {
-    final pointer = FfiTypes.int64Pointer;
-    for (final (function, signature) in [
-      (capacity, FunctionType(.integer, [.integer, .integer])),
-      (copy, FunctionType(.voidType, [pointer, pointer, .integer])),
-      (clear, FunctionType(.voidType, [pointer, .integer])),
+    for (final (target, signature) in [
+      (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
+      (release, FunctionType(.voidType, [.integer])),
     ]) {
-      final target = function.target;
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||
-          target.signature != signature) {
-        throw ArgumentError('Invalid heap runtime signature: ${target.name}');
+          target.signature != signature ||
+          program.implementationOf(target) is! IrFunction) {
+        throw ArgumentError('Invalid runtime entry: ${target.name}');
+      }
+    }
+    for (final MapEntry(key: target, value: service) in primitives.entries) {
+      final signature = switch (service) {
+        .map => FunctionType(.integer, [.integer]),
+        .unmap => FunctionType(.voidType, [.integer, .integer]),
+        .fail => FunctionType(.never, []),
+      };
+      if (target.kind != .function ||
+          target.typeParameters.isNotEmpty ||
+          target.signature != signature ||
+          program.implementationOf(target) is! IrExternal) {
+        throw ArgumentError('Invalid memory service: ${target.name}');
       }
     }
   }

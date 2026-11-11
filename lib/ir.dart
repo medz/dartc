@@ -93,6 +93,8 @@ export 'src/ir/value.dart'
         Identical,
         Effect,
         Instruction,
+        ReferenceAddress,
+        ReferenceFromAddress,
         PointerFromAddress,
         PointerAddress,
         PointerOffset,

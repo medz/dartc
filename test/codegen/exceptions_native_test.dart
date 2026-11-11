@@ -11,7 +11,7 @@ import 'fixtures/stack_roots_ffi.dart' show RootVisitor;
 
 void main() {
   test('exception identity, traces and Error storage survive rethrow and collection', () {
-    const payload = ObjectLayout.fieldsOffset ~/ ObjectLayout.alignment;
+    const payload = ObjectHeader.fieldsOffset ~/ ObjectHeader.alignment;
     final native = ExceptionCalls();
     addTearDown(native.close);
     final maps = <int, StackRoots>{};

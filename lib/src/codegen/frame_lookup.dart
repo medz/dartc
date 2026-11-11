@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/ir.dart';
 
-/// Generates the shared return-PC lookup for stack roots and captured traces.
+/// Generates return-PC lookup for captured stack traces.
 final class FrameLookup() {
   final target = FunctionTarget(
     Uri.parse('dartc:stack'),

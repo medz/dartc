@@ -3,13 +3,14 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 import 'binary_encoding.dart';
+import 'double_bits.dart';
 import 'function_emitter.dart';
 import 'function_liveness.dart';
 import 'function_representation.dart';
-import 'storage_access.dart';
-import 'double_bits.dart';
-import 'reference_equality.dart';
 import 'native_invocation.dart';
+import 'reference_equality.dart';
+import 'storage_access.dart';
+import 'type_values.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -181,7 +182,10 @@ final class FunctionSelection<R>(
                 when native.isSinglePrecision && _floatingTemporaries == 0) {
               _floatingTemporaries = 1;
             }
-          case LoadNative():
+          case TypeReference() ||
+              ReferenceAddress() ||
+              ReferenceFromAddress() ||
+              LoadNative():
             break;
           case StoreNative(:final nativeType):
             if (nativeType.isSinglePrecision && _floatingTemporaries == 0) {

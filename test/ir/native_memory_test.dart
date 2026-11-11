@@ -10,6 +10,25 @@ void main() {
   const address = Constant.integer(-1);
   final pointer = PointerFromAddress(address, FfiTypes.int64Pointer);
 
+  test('reference recovery preserves traced types without allocating', () {
+    final object = Block([.object.nullable]).parameters.single;
+    final location = ReferenceAddress(object);
+    final recovered = ReferenceFromAddress(location, .object.nullable);
+    expect(location.type, ValueType.integer);
+    expect(recovered.type, ValueType.object.nullable);
+    expect(recovered.effects, {Effect.readsStorage});
+    expect(() => ReferenceAddress(address), throwsArgumentError);
+    for (final type in [
+      ValueType.integer,
+      ValueType.floating,
+      ValueType.boolean,
+      ValueType.voidType,
+    ]) {
+      expect(() => ReferenceFromAddress(address, type), throwsArgumentError);
+    }
+    expect(() => ReferenceFromAddress(object, .object), throwsArgumentError);
+  });
+
   test('function pointers preserve native signatures without acquiring storage operations', () {
     final signature = NativeSignature(ffi.Int64, [ffi.Int8]);
     final descriptor = NativePointerType(NativeFunctionType(signature));

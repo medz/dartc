@@ -7,23 +7,38 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
-import 'heap_functions.dart';
 import 'function_emitter.dart';
 import 'program_layout.dart';
-import 'frame_lookup.dart';
 import 'type_values.dart';
 import 'heap_runtime.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
-final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
+final class HeapPlan({final HeapRuntime? runtime}) {
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
   final _initializers = <FunctionTarget, FunctionTarget>{};
   final _payloads = <ClassType, FunctionTarget>{};
-  final heap = HeapFunctions(frames, runtime: runtime);
+  static final _invalid = FunctionTarget(
+    Uri.parse('dartc:memory'),
+    'invalid',
+    .never,
+    [],
+  );
 
-  List<IrFunction> get functions => heap.functions;
+  FunctionTarget get invalid =>
+      runtime?.primitives.entries
+          .where((entry) => entry.value == .fail)
+          .firstOrNull
+          ?.key ??
+      _invalid;
+  FunctionTarget get allocate => _runtime.allocate;
+  FunctionTarget get release => _runtime.release;
+  HeapRuntime get _runtime =>
+      runtime ??
+      (throw ArgumentError(
+        'Managed allocation requires a Dart runtime program.',
+      ));
 
   bool allocates(Iterable<FunctionTarget> calls) =>
       calls.any(_factories.containsKey);
@@ -60,9 +75,8 @@ final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
       _factories.removeWhere((target, _) => !calls.contains(target));
 
   Set<FunctionTarget> get primitives => {
-    heap.map,
-    heap.unmap,
-    heap.invalid,
+    ...?runtime?.primitives.keys,
+    invalid,
     ..._factories.keys,
   };
 
@@ -76,9 +90,13 @@ final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
     void Function(int, StackRoots) safepoint,
     void Function(Fixup, int) codeAddress,
   ) {
-    if (target == heap.map) return emitter.mapMemory();
-    if (target == heap.unmap) return emitter.unmapMemory();
-    if (target == heap.invalid) {
+    if (runtime?.primitives[target] == MemoryPrimitive.map) {
+      return emitter.mapMemory();
+    }
+    if (runtime?.primitives[target] == MemoryPrimitive.unmap) {
+      return emitter.unmapMemory();
+    }
+    if (target == invalid) {
       emitter.abort(71);
       return emitter.finish();
     }
@@ -138,7 +156,7 @@ final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
     } else {
       emitter.loadImmediate(arguments[4], 0);
     }
-    call(emitter.call(), heap.allocate);
+    call(emitter.call(), allocate);
     final position = emitter.position;
     for (final fixup in returnAddress) {
       codeAddress(fixup, position);
@@ -173,7 +191,7 @@ final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
     emitter.storeMemory(
       runtimeType,
       allocation.result!,
-      offset: ObjectLayout.typeOffset,
+      offset: ObjectHeader.typeOffset,
       bytes: 8,
     );
     emitter.loadImmediate(emitter.failureRegister, 0);
@@ -187,7 +205,7 @@ final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
       emitter.storeMemory(
         value,
         allocation.result!,
-        offset: ObjectLayout.fieldsOffset,
+        offset: ObjectHeader.fieldsOffset,
         bytes: 8,
       );
       // The payload scratch may also carry the call failure flag.

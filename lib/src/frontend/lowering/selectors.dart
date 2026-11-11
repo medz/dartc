@@ -538,6 +538,16 @@ final class SelectorChain(
     }
     final args = context.arguments(arguments, evaluate);
     if (args == null) return null;
+    if (args.named.isEmpty && isPointerCast(member)) {
+      return context.normal(
+        lowerFfi(
+          member,
+          [known, ...args.positional],
+          context.emit,
+          result: FfiTypes.pointer.instantiate(typeArguments),
+        )!,
+      );
+    }
     if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
         !coreRuntimeMember(member) &&

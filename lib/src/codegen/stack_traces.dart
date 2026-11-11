@@ -9,7 +9,6 @@ import 'package:dartc/layout.dart';
 
 import 'frame_lookup.dart';
 import 'function_emitter.dart';
-import 'heap_functions.dart';
 
 /// Captures managed call frames as an ordinary, GC-traced object chain.
 final class StackTraces(final FrameLookup frames) {
@@ -153,7 +152,7 @@ final class StackTraces(final FrameLookup frames) {
     emitter.loadMemory(
       arguments[0],
       emitter.heapRegister,
-      offset: HeapFunctions.maps,
+      offset: RuntimeContext.maps,
       bytes: 8,
       signed: false,
     );

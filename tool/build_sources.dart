@@ -17,7 +17,7 @@ Future<void> main(List<String> arguments) async {
   final files = <String, List<int>>{};
   for (final (prefix, directory) in [
     ('sdk', sdk),
-    ('runtime', Directory('lib/src/runtime')),
+    ('dartc/src/runtime', Directory('lib/src/runtime')),
   ]) {
     if (!directory.existsSync()) continue;
     for (final file in directory.listSync(
@@ -33,6 +33,9 @@ Future<void> main(List<String> arguments) async {
           .join('/');
       files['$prefix/$name'] = file.readAsBytesSync();
     }
+  }
+  for (final path in ['layout/memory.dart', 'src/layout/memory_layout.dart']) {
+    files['dartc/$path'] = File('lib/$path').readAsBytesSync();
   }
   final names = files.keys.toList()..sort();
   files['manifest.json'] = utf8.encode(

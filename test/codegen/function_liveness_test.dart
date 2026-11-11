@@ -1,5 +1,4 @@
 import 'package:dartc/src/codegen/heap_plan.dart';
-import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
@@ -43,7 +42,7 @@ void main() {
       ProgramLayout([], instanceStorage: instances, closureStorage: closures),
       CheckedCasts(),
       MemberCalls(IrProgram([], []), {}),
-      HeapPlan(FrameLookup()),
+      HeapPlan(),
     );
     return FunctionLiveness(body, body.inputsOf, {
       ...body.boxes.keys,

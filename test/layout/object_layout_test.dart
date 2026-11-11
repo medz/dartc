@@ -22,8 +22,8 @@ void main() {
     expect(() => layout.offsetOf(-1), throwsRangeError);
     expect(() => layout.offsetOf(5), throwsRangeError);
     expect(ObjectLayout([]).size, 32);
-    expect(ObjectLayout.sizeOffset, 24);
-    expect(ObjectLayout.identityHashOffset, 16);
+    expect(ObjectHeader.sizeOffset, 24);
+    expect(ObjectHeader.identityHashOffset, 16);
     expect(ObjectLayout([]).referenceOffsets, [8]);
     final buffer = ObjectLayout([], tracesPayload: true);
     expect(buffer.size, 32);
