@@ -8,6 +8,22 @@ final class Lists() {
   final _library = NativeAssets(Target.host()).open('compiler/lists');
   late final constantOnly = _library
       .lookupFunction<Int64 Function(), int Function()>('listConstantOnly');
+  late final append = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('listAppend');
+  late final appendFailures = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listAppendFailures',
+      );
+  late final appendProtocol = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listAppendProtocol',
+      );
+  late final spread = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('listSpread');
+  late final appendReferences = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'listAppendReferences',
+      );
   late final iteratorProtocol = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>(
         'iteratorProtocol',

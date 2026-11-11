@@ -16,20 +16,31 @@ final class ListStorage({
   final IrCallable? rangeError,
   final IrCallable? unsupportedError,
   final IrCallable? iteratorConstructor,
+  final IrCallable? concurrentModificationError,
   final FunctionTarget Function(ClassType)? allocate,
+  final bool hasConstants = false,
 }) {
   static final _uri = Uri.parse('dartc:lists');
   final element = TypeParameterType('E')
     ..initializeBound(.object.nullable)
     ..initializeDefaultType(.dynamicType);
+  final _spreadElement = TypeParameterType('T')
+    ..initializeBound(.object.nullable)
+    ..initializeDefaultType(.dynamicType);
+  late final _spread = FunctionTarget(
+    _uri,
+    'spread',
+    .voidType,
+    [CoreTypes.listOf(_spreadElement), CoreTypes.iterableOf(.object.nullable)],
+    typeParameters: [_spreadElement],
+  );
   final buffer = ClassType(_uri, '_ListData');
   late final ClassType type;
   late final InstanceField length, data, mutability;
   late final FunctionTarget initializer, empty, filled, reserve;
-  final _functions = <IrFunction>[];
+  final _functions = <(FunctionKind, String), IrFunction>{};
   final entryPoints = <FunctionTarget>{};
   FunctionTarget? _allocation;
-  late final IrClass declaration;
 
   this {
     type = ClassType.declare(_uri, '_List', typeParameters: [element]);
@@ -47,10 +58,19 @@ final class ListStorage({
     reserve = _target('_reserve', .voidType, [.integer], .method);
   }
 
-  Iterable<IrFunction> get functions => _functions;
+  Iterable<IrFunction> get functions => _functions.values;
   Iterable<FunctionTarget> get allocations => [?_allocation];
+  bool get isEmpty => _functions.isEmpty && !hasConstants;
+  IrClass get declaration => IrClass(
+    type,
+    [length, data, mutability],
+    constructors: functions
+        .map((f) => f.target)
+        .where((t) => t.kind == .initializer || t.kind == .factory),
+    members: functions.map((f) => f.target).where((t) => t.kind.isVirtual),
+  );
   Iterable<IrClass> get classes =>
-      _functions.isEmpty ? [] : [declaration, IrClass(buffer, [])];
+      isEmpty ? [] : [declaration, IrClass(buffer, [])];
 
   FunctionTarget? callFor(Instruction operation) {
     final target = switch (operation) {
@@ -58,10 +78,16 @@ final class ListStorage({
           when collectionType.declaration == CoreTypes.list =>
         empty,
       ListFilled() => filled,
+      CollectionSpread(:final collection, isMethodCall: false)
+          when CoreTypes.view(collection.type, CoreTypes.list) != null =>
+        _spread,
       _ => null,
     };
     if (target != null) {
-      prepare();
+      _define(
+        target,
+        () => target == _spread ? _append(false) : _factory(target == filled),
+      );
       entryPoints.add(target);
     }
     return target;
@@ -110,12 +136,51 @@ final class ListStorage({
     );
   }
 
-  /// Defines storage members before native reachability is computed.
-  void prepare() {
-    if (_functions.isNotEmpty) return;
-    _allocation =
-        allocate?.call(buffer) ??
-        (throw UnsupportedError('List storage requires managed allocation.'));
+  IrFunction _define(FunctionTarget target, IrFunction Function() build) =>
+      _functions.putIfAbsent((target.kind, target.name), build);
+
+  /// Defines referenced List members and their generated dependencies.
+  void prepareMembers(Iterable<IrCallable> roots) {
+    if (isEmpty) return;
+    final pending = <IrCallable>[...roots, ...functions];
+    for (var i = 0; i < pending.length; i++) {
+      final body = pending[i], previous = _functions.length;
+      for (final member in [
+        for (final target in body.virtualMembers)
+          (receiver: target.owner!, selector: target.selector),
+        ...body.implicitMembers,
+      ]) {
+        if (member.receiver.nonNullable case final ClassType owner
+            when type.asInstanceOf(owner.declaration) == null) {
+          continue;
+        }
+        _member(member.selector);
+      }
+      pending.addAll(functions.skip(previous));
+    }
+  }
+
+  IrFunction? _member(MemberSelector selector) {
+    if (selector.privateLibrary != null && selector.privateLibrary != _uri) {
+      return null;
+    }
+    final key = (selector.kind, selector.name);
+    if (_functions[key] case final known?) return known;
+    final build = switch (key) {
+      (FunctionKind.getter, 'length') => _length,
+      (FunctionKind.setter, 'length') => _resize,
+      (FunctionKind.method, '[]') => () => _access(false),
+      (FunctionKind.method, '[]=') => () => _access(true),
+      (FunctionKind.method, 'add') => _add,
+      (FunctionKind.method, 'addAll') => () => _append(true),
+      (FunctionKind.method, 'elementAt') => _elementAt,
+      (FunctionKind.getter, 'iterator') => _iterator,
+      _ => null,
+    };
+    return build == null ? null : _functions.putIfAbsent(key, build);
+  }
+
+  IrFunction _initialize() {
     final init = Block(initializer.parameterTypes);
     for (final (i, field) in [length, data, mutability].indexed) {
       init.emit(
@@ -123,35 +188,24 @@ final class ListStorage({
       );
     }
     init.finish(const Return());
-    final read = _access(false), write = _access(true);
+    return IrFunction(initializer, [init]);
+  }
+
+  IrFunction _length() {
     final getter = _target('length', .integer, [], .getter);
     final entry = Block(getter.parameterTypes);
     entry.finish(
       Return(entry.emit(LoadField(length, entry.parameters.single))),
     );
-    _functions.addAll([
-      IrFunction(initializer, [init]),
-      _bufferBody(),
-      _factory(false),
-      _factory(true),
-      read,
-      write,
-      IrFunction(getter, [entry]),
-      _reserve(),
-      _add(),
-      _resize(),
-      if (iteratorConstructor != null) _iterator(),
-    ]);
+    return IrFunction(getter, [entry]);
+  }
+
+  IrFunction _elementAt() {
+    final read = _member((kind: .method, name: '[]', privateLibrary: null))!;
     final elementAt = _target('elementAt', element, [.integer], .method);
     final at = Block(elementAt.parameterTypes);
     at.finish(Return(at.emit(DirectCall(read.target, at.parameters))));
-    _functions.add(IrFunction(elementAt, [at]));
-    declaration = IrClass(
-      type,
-      [length, data, mutability],
-      constructors: [initializer, empty, filled],
-      members: _functions.map((f) => f.target).where((t) => t.kind.isVirtual),
-    );
+    return IrFunction(elementAt, [at]);
   }
 
   IrFunction _iterator() {
@@ -162,7 +216,11 @@ final class ListStorage({
       .getter,
     );
     final entry = Block(target.parameterTypes);
-    final constructor = iteratorConstructor!.target;
+    final constructor =
+        iteratorConstructor?.target ??
+        (throw UnsupportedError(
+          'List iteration requires the SDK ListIterator constructor.',
+        ));
     entry.finish(
       Return(
         entry.emit(
@@ -179,6 +237,9 @@ final class ListStorage({
 
   late final _newBuffer = FunctionTarget(_uri, 'buffer', buffer, [.integer]);
   IrFunction _bufferBody() {
+    _allocation =
+        allocate?.call(buffer) ??
+        (throw UnsupportedError('List storage requires managed allocation.'));
     final entry = Block(_newBuffer.parameterTypes),
         valid = Block(),
         overflow = Block();
@@ -206,6 +267,8 @@ final class ListStorage({
   }
 
   IrFunction _factory(bool fill) {
+    _define(initializer, _initialize);
+    _define(_newBuffer, _bufferBody);
     final target = fill ? filled : empty;
     final entry = Block(target.parameterTypes);
     final count = fill ? entry.parameters[0] : _int(0);
@@ -340,6 +403,7 @@ final class ListStorage({
   }
 
   IrFunction _reserve() {
+    _define(_newBuffer, _bufferBody);
     final entry = Block(reserve.parameterTypes),
         grow = Block(),
         smaller = Block(),
@@ -408,6 +472,7 @@ final class ListStorage({
   }
 
   IrFunction _add() {
+    _define(reserve, _reserve);
     final target = _target('add', .voidType, [element], .method);
     final entry = Block(target.parameterTypes), blocks = [entry];
     final [list, value] = entry.parameters;
@@ -421,7 +486,72 @@ final class ListStorage({
     return IrFunction(target, blocks);
   }
 
+  IrFunction _append(bool method) {
+    final elementType = method ? element : _spreadElement;
+    final target = method
+        ? _target('addAll', .voidType, [CoreTypes.iterableOf(element)], .method)
+        : _spread;
+    final entry = Block(target.parameterTypes), blocks = [entry];
+    final [list, source] = entry.parameters;
+    final start = method
+        ? _modifiable(entry, list, blocks, resizing: true)
+        : entry;
+    final done = Block(),
+        loop = Block([if (method) ValueType.integer]),
+        write = Block();
+    blocks.addAll([loop, write, done]);
+    Block current = start;
+    Block? failed;
+    Value? count;
+    if (method) {
+      count = start.emit(LoadField(length, list));
+      final same = Block(), iterate = Block();
+      failed = Block();
+      blocks.addAll([same, iterate, failed]);
+      start.finish(
+        Branch(start.emit(Identical(list, source)), Jump(same), Jump(iterate)),
+      );
+      same.finish(
+        Branch(same.emit(Equals(count, _int(0))), Jump(done), Jump(failed)),
+      );
+      failed.finish(Throw(_error(failed, concurrentModificationError, [list])));
+      current = iterate;
+    }
+    final iterator = current.emit(GetIterator(source));
+    current.finish(Jump(loop, [?count]));
+    loop.finish(
+      Branch(loop.emit(IteratorMoveNext(iterator)), Jump(write), Jump(done)),
+    );
+    final value = write.emit(
+      TypeCast(write.emit(IteratorCurrent(iterator)), elementType),
+    );
+    current = write;
+    if (method) {
+      final append = Block();
+      blocks.add(append);
+      write.finish(
+        Branch(
+          write.emit(
+            Equals(write.emit(LoadField(length, list)), loop.parameters.single),
+          ),
+          Jump(append),
+          Jump(failed!),
+        ),
+      );
+      current = append;
+    }
+    current.emit(CollectionAdd(list, value));
+    current.finish(
+      Jump(loop, [
+        if (method) _op(current, .add, loop.parameters.single, _int(1)),
+      ]),
+    );
+    done.finish(const Return());
+    return IrFunction(target, blocks);
+  }
+
   IrFunction _resize() {
+    _define(reserve, _reserve);
     final target = _target('length', .voidType, [.integer], .setter);
     final entry = Block(target.parameterTypes), blocks = [entry];
     final [list, count] = entry.parameters;

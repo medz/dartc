@@ -7,7 +7,7 @@ final _uri = Uri.parse('memory:references');
 const _one = Constant.integer(1);
 
 void main() {
-  test('nested constant defaults and implicit iterator members retain dependencies', () {
+  test('nested constants, iterator calls and addAll retain dependencies', () {
     final inner = SequenceConstant(CoreTypes.listOf(.integer), [_one]);
     final outer = SequenceConstant(CoreTypes.listOf(inner.type), [inner]);
     final target = FunctionTarget(_uri, 'iterate', .integer, [
@@ -17,12 +17,15 @@ void main() {
     final iterator = entry.emit(GetIterator(entry.parameters.single));
     entry.emit(IteratorMoveNext(iterator));
     entry.emit(IteratorCurrent(iterator));
+    final values = entry.parameters.single;
+    entry.emit(CollectionSpread(values, values, isMethodCall: true));
+    expect(CollectionSpread(values, values).implicitMember, isNull);
     entry.finish(const Return(_one));
     final function = IrFunction(target, [entry], defaults: {0: outer});
     expect(function.sequenceConstants, {outer, inner});
     expect(
       function.implicitMembers.map((member) => member.selector.name),
-      unorderedEquals(['iterator', 'moveNext', 'current']),
+      unorderedEquals(['iterator', 'moveNext', 'current', 'addAll']),
     );
   });
 

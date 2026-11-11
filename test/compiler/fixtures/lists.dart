@@ -193,6 +193,13 @@ final class _Custom() implements List<int> {
   }
 
   @override
+  void addAll(Iterable<int> values) {
+    for (final item in values) {
+      value += item * 10;
+    }
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw StateError('Unexpected member');
 }
@@ -305,6 +312,103 @@ int iteratorProtocol(int failure) {
     _iterationTrace = _iterationTrace * 10 + 5;
   }
   return _iterationTrace * 10 + total;
+}
+
+@Export<Int64 Function(Int64)>()
+int listAppend(int mode) {
+  final List<int> values = mode == 1 ? _Custom() : <int>[3];
+  if (mode == 0) {
+    values.addAll(const <int>[5, 7]);
+  } else {
+    final append = values.addAll;
+    append(const <int>[5, 7]);
+  }
+  return values.length * 100 + values[0] + values[values.length - 1];
+}
+
+@Export<Int64 Function(Int64)>()
+int listAppendFailures(int mode) {
+  final List<num> values = switch (mode) {
+    0 || 2 || 6 => List<int>.empty(),
+    1 => const <int>[],
+    _ => <int>[],
+  };
+  _iterationTrace = 0;
+  try {
+    switch (mode) {
+      case 0 || 1:
+        values.addAll(_Sequence(0));
+      case 2 || 3:
+        values.addAll(<num>[]);
+      case 4:
+        values.addAll(values);
+      case 5:
+        values.add(7);
+        values.addAll(values);
+      case 6:
+        values.addAll(const <int>[]);
+    }
+  } on UnsupportedError {
+    return 100 + _iterationTrace;
+  } on TypeError {
+    return 200 + _iterationTrace;
+  } on ConcurrentModificationError {
+    return 300 + values.length;
+  }
+  return values.length;
+}
+
+@Export<Int64 Function(Int64)>()
+int listAppendProtocol(int failure) {
+  _iterationTrace = 0;
+  try {
+    <int>[].addAll(_Sequence(failure));
+  } on StateError {
+    // The trace records the last completed iterator operation.
+  } finally {
+    _iterationTrace = _iterationTrace * 10 + 5;
+  }
+  return _iterationTrace;
+}
+
+int _spreadLast() {
+  _iterationTrace = _iterationTrace * 10 + 4;
+  return 9;
+}
+
+@Export<Int64 Function(Int64)>()
+int listSpread(int mode) {
+  final dynamic source = switch (mode) {
+    0 => _Sequence(0),
+    1 => <num>[1, 2],
+    2 => <num>[1, 2.5],
+    _ => null,
+  };
+  _iterationTrace = 0;
+  try {
+    final values = <int>[7, ...?source, _spreadLast()];
+    return _iterationTrace * 100 +
+        values.length * 10 +
+        values[values.length - 1];
+  } on TypeError {
+    return 1000 + _iterationTrace;
+  }
+}
+
+@Export<Int64 Function(Int64)>()
+int listAppendReferences(int count) {
+  final source = <_Box>[for (var i = 0; i < count; i++) _Box(i)];
+  final values = <_Box>[...source];
+  values.addAll(source);
+  _saved = values;
+  for (var i = 0; i < count; i++) {
+    _Box(i);
+  }
+  var total = 0;
+  for (final value in values) {
+    total += value.value;
+  }
+  return total;
 }
 
 @Export<Int64 Function(Int64)>()

@@ -132,7 +132,13 @@ base class ScalarCodeGenerator<R extends Object>(
         argumentError: constructor(.argumentError),
         unsupportedError: constructor(.unsupportedError),
       );
+      final constantLists = bodies.any(
+        (body) => body.sequenceConstants.any(
+          (value) => (value.type as ClassType).declaration == CoreTypes.list,
+        ),
+      );
       final lists = ListStorage(
+        hasConstants: constantLists,
         allocate: heap.allocatePayload,
         indexError: strings.indexError,
         rangeError: strings.rangeError,
@@ -147,13 +153,17 @@ base class ScalarCodeGenerator<R extends Object>(
               .firstOrNull
               ?.type,
         ),
-      );
-      final constantLists = bodies.any(
-        (body) => body.sequenceConstants.any(
-          (value) => (value.type as ClassType).declaration == CoreTypes.list,
+        concurrentModificationError: constructor(
+          program.classes
+              .where(
+                (c) =>
+                    c.type.library == Uri.parse('dart:core') &&
+                    c.type.name == 'ConcurrentModificationError',
+              )
+              .firstOrNull
+              ?.type,
         ),
       );
-      if (constantLists) lists.prepare();
       final globals = GlobalStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
@@ -183,7 +193,8 @@ base class ScalarCodeGenerator<R extends Object>(
         ...globals.functions,
         ...instances.functions,
       ];
-      if (helpers.isNotEmpty || lists.functions.isNotEmpty) {
+      lists.prepareMembers([...bodies, ...helpers]);
+      if (helpers.isNotEmpty || !lists.isEmpty) {
         final expanded = IrProgram(
           [
             for (final declaration in sourceProgram.classes)

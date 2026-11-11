@@ -306,6 +306,12 @@ final class FunctionRepresentation(
           continue;
         }
         if (layouts.lists.callFor(instruction) case final target?) {
+          final element = instruction is CollectionSpread
+              ? CoreTypes.view(
+                  instruction.collection.type,
+                  CoreTypes.list,
+                )!.typeArguments.single
+              : (instruction.type as ClassType).typeArguments.single;
           final inputs = instruction is NewCollection
               ? [instruction.growable ?? const Constant.boolean(true)]
               : instruction.inputs.toList();
@@ -314,9 +320,9 @@ final class FunctionRepresentation(
             for (final (i, input) in inputs.indexed)
               convert(input, target.parameterTypes[i], body),
             _reify(
-              layouts.lists.type.instantiate(
-                (instruction.type as ClassType).typeArguments,
-              ),
+              instruction is CollectionSpread
+                  ? element
+                  : layouts.lists.type.instantiate([element]),
               body,
             ),
           ];
@@ -998,6 +1004,16 @@ final class FunctionRepresentation(
                 collection,
                 value,
               ),
+              CollectionSpread(
+                :final collection,
+                :final source,
+                :final isMethodCall,
+              ) =>
+                CollectionSpread(
+                  collection,
+                  source,
+                  isMethodCall: isMethodCall,
+                ),
               ListSet(:final collection, :final key, :final value) => ListSet(
                 collection,
                 key,

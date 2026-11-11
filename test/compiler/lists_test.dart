@@ -17,6 +17,59 @@ void main() {
     addTearDown(native.close);
   });
 
+  test(
+    'addAll dispatch checks argument types and mutability before iteration',
+    () {
+      for (final (mode, expected) in [(0, 310), (1, 621), (2, 310)]) {
+        expect(sdk.listAppend(mode), expected);
+        expect(native.append(mode), expected);
+      }
+      for (final (mode, expected) in [
+        (0, 100),
+        (1, 100),
+        (2, 200),
+        (3, 200),
+        (4, 0),
+        (5, 301),
+        (6, 100),
+      ]) {
+        expect(sdk.listAppendFailures(mode), expected);
+        expect(native.appendFailures(mode), expected);
+      }
+      for (final (mode, expected) in [(0, 1232325), (1, 12325), (2, 123235)]) {
+        expect(sdk.listAppendProtocol(mode), expected);
+        expect(native.appendProtocol(mode), expected);
+      }
+    },
+  );
+
+  test(
+    'literal spreads check each element and preserve null and evaluation order',
+    () {
+      for (final (mode, expected) in [
+        (0, 123232449),
+        (1, 449),
+        (2, 1000),
+        (3, 429),
+      ]) {
+        expect(sdk.listSpread(mode), expected);
+        expect(native.spread(mode), expected);
+      }
+    },
+  );
+
+  test('spread and addAll retain shared references across allocation and native calls', () {
+    for (final count in [0, 40000]) {
+      expect(sdk.listAppendReferences(count), count * (count - 1));
+      expect(native.appendReferences(count), count * (count - 1));
+      if (count != 0) {
+        expect(native.saved(0), 0);
+        expect(native.saved(count), 0);
+        expect(native.saved(count * 2 - 1), count - 1);
+      }
+    }
+  });
+
   test('iteration dispatch preserves constants, mutation checks and iterator roots', () {
     for (final (mode, expected) in [
       (0, 1234234253),

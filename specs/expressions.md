@@ -75,7 +75,9 @@ const List 保留实际元素类型、嵌套内容和规范身份，支持读取
 
 同步 for-in、iterator、moveNext、current 和 elementAt 已接通普通派发，包括自定义 Iterable/Iterator、提取的 moveNext 方法及迭代器跨入口保存。内置列表按索引顺序遍历，元素改写可以被后续步骤读取；两次迭代步骤之间长度变化时抛出 ConcurrentModificationError。循环只在 moveNext 返回 true 后读取 current，异常仍执行 finally；在未改变集合且迭代完成后，再次 moveNext 返回 false。不把首次移动前、结束后或 moveNext 抛错后的 current 固化为特定结果。依据为 [List 迭代约束](https://api.dart.dev/stable/3.13.7/dart-core/List-class.html)、[Iterator.current](https://api.dart.dev/stable/3.13.7/dart-core/Iterator/current.html)和 [Iterator.moveNext](https://api.dart.dev/stable/3.13.7/dart-core/Iterator/moveNext.html)，验证见[原生 List 与迭代用例](../test/compiler/lists_test.dart)。
 
-sublist、addAll、spread、其他构造器及 typed_data 的原生实现仍是缺口；上表的 IR 范围不等于这些行为已经原生执行。
+List.addAll 支持普通调用、方法提取及用户重写，先检查实际元素类型要求的 Iterable 参数，再检查目标可增长性；固定长度和 const List 即使追加空源也拒绝修改。字面量 spread 按迭代顺序逐项转换元素，支持 dynamic 源和 null-aware spread；类型错误或迭代异常停止后续求值并保留 finally。追加及展开后的元素保持别名，经过回收和跨入口保存后仍可读取。依据为 [List.addAll](https://api.dart.dev/stable/3.13.7/dart-core/List/addAll.html)和[语言规范的集合元素求值](https://github.com/dart-lang/language/blob/main/specification/dartLangSpec.tex#L9518)，验证见[原生 List 用例](../test/compiler/lists_test.dart)。
+
+sublist、其他构造器、Set/Map 存储及 typed_data 的原生实现仍是缺口；上表的 IR 范围不等于这些行为已经原生执行。
 
 ## 数值比较与 SDK 差异
 

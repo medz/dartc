@@ -439,6 +439,10 @@ sealed class Instruction(super.type) extends Value {
           receiver: collection.type,
           selector: (kind: .method, name: 'add', privateLibrary: null),
         ),
+        CollectionSpread(:final collection, isMethodCall: true) => (
+          receiver: collection.type,
+          selector: (kind: .method, name: 'addAll', privateLibrary: null),
+        ),
         ObjectRuntimeType(:final operand, direct: false) => (
           receiver: operand.type,
           selector: (kind: .getter, name: 'runtimeType', privateLibrary: null),

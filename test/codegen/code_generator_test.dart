@@ -13,6 +13,39 @@ import 'package:test/test.dart';
 import 'fixtures/aliases.dart';
 
 void main() {
+  test('List length needs no unused SDK error or iterator declarations', () {
+    for (final constant in [false, true]) {
+      final entry = Block();
+      final type = CoreTypes.listOf(.integer);
+      final list = constant
+          ? SequenceConstant(type, [const Constant.integer(7)])
+          : entry.emit(NewCollection(type));
+      entry.finish(Return(entry.emit(CollectionLength(list))));
+      final function = IrFunction(
+        FunctionTarget(
+          .parse('memory:list-length'),
+          'lengthOnly',
+          .integer,
+          [],
+        ),
+        [entry],
+      );
+      final program = IrProgram([], [function]);
+      for (final CodeGenerator generator in [
+        Arm64CodeGenerator(const Target(.macos, .arm64)),
+        X64CodeGenerator(const Target(.linux, .x64)),
+      ]) {
+        expect(
+          generator
+              .generate(program, definitions: [function.target])
+              .symbols
+              .map((s) => s.name),
+          contains('length'),
+        );
+      }
+    }
+  });
+
   test(
     'List constants and construction select only required native bodies',
     () async {
