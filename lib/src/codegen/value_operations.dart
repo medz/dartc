@@ -82,6 +82,54 @@ final class ValueOperations(
     return done;
   }
 
+  Block identical(
+    Value left,
+    Value right,
+    Block block,
+    void Function(TypeTest, List<Value>) prepareTest,
+  ) {
+    final done = graph.addBlock([.boolean]);
+    for (final type in [
+      ValueType.integer,
+      ValueType.floating,
+      ValueType.boolean,
+    ]) {
+      if (layouts.typeTest(left.type, type) == .constantFalse ||
+          layouts.typeTest(right.type, type) == .constantFalse) {
+        continue;
+      }
+      final matching = graph.addBlock(),
+          equal = graph.addBlock([type, type]),
+          next = graph.addBlock();
+      final a = TypeTest(left, type), b = TypeTest(right, type);
+      prepareTest(a, graph.instructions[block]!);
+      graph.ends[block] = Branch(a, Jump(matching), Jump(next));
+      prepareTest(b, graph.instructions[matching]!);
+      graph.ends[matching] = Branch(
+        b,
+        Jump(equal, [a.refinement(true)!, b.refinement(true)!]),
+        Jump(next),
+      );
+      Value av = equal.parameters[0], bv = equal.parameters[1];
+      if (type == ValueType.floating) {
+        av = DoubleBits(av);
+        bv = DoubleBits(bv);
+        graph.instructions[equal]!.addAll([av, bv]);
+      }
+      final comparison = Equals(av, bv);
+      graph.instructions[equal]!.add(comparison);
+      graph.ends[equal] = Jump(done, [comparison]);
+      block = next;
+    }
+    final identity =
+        layouts.isReference(left.type) && layouts.isReference(right.type)
+        ? ReferenceEquality(left, right)
+        : const Constant.boolean(false);
+    if (identity is ReferenceEquality) graph.instructions[block]!.add(identity);
+    graph.ends[block] = Jump(done, [identity]);
+    return done;
+  }
+
   Block hashScalar(Value value, Block entry) {
     final done = graph.addBlock([.integer]);
     if (value.type == .nullType) {

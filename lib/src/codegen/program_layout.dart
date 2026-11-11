@@ -8,6 +8,7 @@ import 'closure_storage.dart';
 import 'type_values.dart';
 import 'instance_storage.dart';
 import 'type_relations.dart';
+import 'pointer_storage.dart';
 
 enum TypeTestKind() {
   constantTrue,
@@ -27,6 +28,7 @@ final class ProgramLayout(
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues();
+  final pointers = PointerStorage();
   late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
@@ -34,6 +36,7 @@ final class ProgramLayout(
   final _storage = <ClassType, ClassStorage>{};
 
   this {
+    _classes[FfiTypes.pointer] = pointers.declaration;
     for (final declaration in types.classes) {
       _classes[declaration.type] = declaration;
     }
@@ -64,7 +67,6 @@ final class ProgramLayout(
   ValueRepresentation representation(ValueType type) {
     if (type == .integer || type == .boolean) return .word;
     if (type == .floating) return .floating;
-    if (FfiTypes.isPointer(type)) return .address;
     return .reference;
   }
 

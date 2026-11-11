@@ -79,4 +79,6 @@ analyzer 14.7 的常量求值也存在相同的精度问题，还会将 `0.0 == 
 
 模式常量、Map 模式重复键与 switch 穷尽性使用同一求值结果，覆盖常量别名、record、枚举及 sealed 层次；带守卫的 case 不保证覆盖。见[模式常量验证](../test/frontend/analysis/pattern_constants_test.dart)。原始 analyzer 对象仍保留上游诊断，包含可能受错误常量折叠影响的不可达警告；会话验收与 IR 转换使用重新检查的结果。
 
+运行时 `identical` 支持普通调用和函数值调用，不执行用户的 `==`。整数按值、double 按位模式比较身份，区分正负零及不同 NaN 位模式；其余已支持原生存储的对象保持引用身份。record 不承诺持久身份，其原生存储尚未接通。见[声明绑定验证](../test/frontend/lowering/identity_test.dart)、[原生身份验证](../test/compiler/pointer_values_test.dart)和 [`identical` 契约](https://api.dart.dev/dart-core/identical.html)。
+
 跨 int/double 的 `identical` 常量结果仍未接通；analyzer 为这类依赖目标表示的判断保留未知值，当前转换会明确拒绝，不能把未知值当作 false。

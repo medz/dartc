@@ -81,6 +81,8 @@ final class ProgramSelection(
       ...casts.functions,
       ...layouts.relations.functions,
       ...layouts.types.functions,
+      if (heap.initializers.contains(layouts.pointers.initializer))
+        layouts.pointers.function,
       if (managed) ...heap.functions,
       if (managed) frames.function,
       ...traceFunctions,
@@ -138,6 +140,8 @@ final class ProgramSelection(
         ...arithmetic.classes,
         ...layouts.closures.classes,
         ...layouts.types.classes,
+        if (functions.containsKey(layouts.pointers.initializer))
+          layouts.pointers.declaration,
         ...layouts.relations.classes,
         if (capture) traces.declaration,
       ],

@@ -215,14 +215,19 @@ int retain(int count) {
 int representations(int count) {
   late double number = 2.5;
   late bool flag = true;
+  late Pointer<Int64> pointer = Pointer.fromAddress(16);
   double readNumber() => number;
   bool readFlag() => flag;
+  Pointer<Int64> readPointer() => pointer;
   churn(count);
-  var flags = readNumber() == 2.5 && readFlag() ? 1 : 0;
+  var flags = readNumber() == 2.5 && readFlag() && readPointer().address == 16
+      ? 1
+      : 0;
   number = -3.5;
   flag = false;
+  pointer = Pointer.fromAddress(24);
   churn(count);
-  if (readNumber() == -3.5 && !readFlag()) {
+  if (readNumber() == -3.5 && !readFlag() && readPointer().address == 24) {
     flags |= 2;
   }
   return flags;

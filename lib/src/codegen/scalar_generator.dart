@@ -14,6 +14,7 @@ import 'function_emitter.dart';
 import 'program_selection.dart';
 import 'scalar_function.dart';
 import 'native_adapter.dart';
+import 'native_bindings.dart';
 import 'program_layout.dart';
 import 'constant_data.dart';
 import 'stack_maps.dart';
@@ -61,6 +62,11 @@ base class ScalarCodeGenerator<R extends Object>(
         }
       }
     }
+    final bindings = NativeBindings(program, imports, exports);
+    program = bindings.program;
+    imports = bindings.imports;
+    exports = bindings.exports;
+    selected.addAll(bindings.definitions);
     final sourceProgram = program;
     final sourceDefinitions = {...selected};
     late final ProgramSelection resolved;
@@ -182,25 +188,11 @@ base class ScalarCodeGenerator<R extends Object>(
       for (final declaration in selected) {
         final function = program.implementationOf(declaration);
         final binding = imports[declaration];
-        if (binding != null) {
-          if (function is! IrExternal ||
-              declaration.kind.hasReceiver ||
-              declaration.typeParameters.isNotEmpty ||
-              !FfiTypes.canCall(binding.signature, declaration.signature)) {
-            throw ArgumentError(
-              'Native import requires a matching external declaration: ${declaration.name}',
-            );
-          }
-        } else if (declaration == globals.address) {
-          // The module storage address is emitted below as a leaf primitive.
-        } else if (function is! IrFunction) {
+        if (binding != null || declaration == globals.address) continue;
+        if (function is! IrFunction) {
           throw ArgumentError('Definition has no body: ${declaration.name}');
         } else {
           selection.include(function);
-        }
-        final export = exports[declaration];
-        if (export != null && !_matches(declaration, export.signature)) {
-          throw ArgumentError('Native signature mismatch: ${declaration.name}');
         }
       }
       final missing = selection.close(persistent: persistent);
@@ -594,14 +586,6 @@ base class ScalarCodeGenerator<R extends Object>(
       ],
     );
   }
-
-  bool _matches(FunctionTarget declaration, NativeSignature signature) =>
-      declaration.typeParameters.isEmpty &&
-      signature.parameters.length == declaration.parameterTypes.length &&
-      declaration.returnType == FfiTypes.valueType(signature.result) &&
-      declaration.parameterTypes.indexed.every(
-        (p) => p.$2 == FfiTypes.valueType(signature.parameters[p.$1]),
-      );
 
   bool _needsEntry(NativeSignature signature) => [
     signature.result,

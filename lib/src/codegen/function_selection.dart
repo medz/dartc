@@ -9,6 +9,7 @@ import 'function_representation.dart';
 import 'storage_access.dart';
 import 'double_bits.dart';
 import 'reference_equality.dart';
+import 'native_invocation.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
@@ -30,7 +31,7 @@ final class FunctionSelection<R>(
       <Instruction, ({Comparison comparison, Value integer, Value floating})>{};
   final calls =
       <
-        Instruction,
+        Value,
         ({CallLayout<R> layout, FunctionTarget? target, List<Value> arguments})
       >{};
   final constantTests = <TypeTest, bool>{};
@@ -118,7 +119,7 @@ final class FunctionSelection<R>(
                 constant: value is ScalarConstant,
               );
             }
-          case NativeCall(:final signature, :final arguments):
+          case NativeInvocation(:final signature, :final arguments):
             calls[instruction] = (
               layout: emitter.convention.classify(signature),
               target: null,
@@ -171,10 +172,7 @@ final class FunctionSelection<R>(
             } else {
               throw StateError('Unresolved type test.');
             }
-          case PointerFromAddress() ||
-              PointerAddress() ||
-              PointerOffset() ||
-              LoadNative():
+          case LoadNative():
             break;
           case StoreNative(:final nativeType):
             if (nativeType.isSinglePrecision && _floatingTemporaries == 0) {
@@ -297,8 +295,6 @@ final class FunctionSelection<R>(
             }
             final BinaryEncoding<R> encoding =
                 left.type == right.type ||
-                    FfiTypes.isPointer(left.type) &&
-                        FfiTypes.isPointer(right.type) ||
                     (nullComparison || typeLiteral) &&
                         layouts.representation(left.type) == .reference &&
                         layouts.representation(right.type) == .reference
@@ -432,8 +428,5 @@ final class FunctionSelection<R>(
       layouts.representation(type) == .floating ? .floating : .general;
 
   bool _scalar(ValueType type) =>
-      type == .integer ||
-      type == .boolean ||
-      type == .floating ||
-      FfiTypes.isPointer(type);
+      type == .integer || type == .boolean || type == .floating;
 }

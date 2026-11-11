@@ -315,10 +315,7 @@ final class ClosureStorage(
   }
 
   ValueType _stored(ValueType type) =>
-      type == .integer ||
-          type == .boolean ||
-          type == .floating ||
-          FfiTypes.isPointer(type)
+      type == .integer || type == .boolean || type == .floating
       ? type
       : ValueType.object.nullable;
 

@@ -38,9 +38,9 @@ void main() {
     () {
       for (final arch in Architecture.values) {
         final module = controlFlow(Target(.linux, arch));
-        final symbol = module.symbols.last;
+        final symbol = module.symbols.singleWhere((s) => s.name == 'forever');
         final bytes = Uint8List.sublistView(
-          module.sections.single.bytes,
+          module.sections[symbol.section].bytes,
           symbol.offset,
           symbol.offset + symbol.size!,
         );

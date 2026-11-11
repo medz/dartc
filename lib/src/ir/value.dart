@@ -517,6 +517,7 @@ sealed class Instruction(super.type) extends Value {
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() => const {.allocates},
+    Identical() ||
     Equals() ||
     IntBinary() ||
     NumericBinary() ||
@@ -1327,6 +1328,16 @@ final class Equals(
 
   /// Whether the comparison may call a user-defined equality operator.
   bool get mayCallUserCode => !left.type.hasScalarEquality;
+  @override
+  Iterable<Value> get inputs => [left, right];
+}
+
+/// Dart object identity, including integer values and double bit patterns.
+///
+/// Does not call user equality. Records do not promise persistent identity.
+final class Identical(final Value left, final Value right) extends Instruction {
+  this : super(.boolean);
+
   @override
   Iterable<Value> get inputs => [left, right];
 }

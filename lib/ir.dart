@@ -88,6 +88,7 @@ export 'src/ir/value.dart'
         DynamicDispatch,
         MakeInvocation,
         Equals,
+        Identical,
         Effect,
         Instruction,
         PointerFromAddress,

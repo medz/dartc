@@ -8,7 +8,7 @@ import 'package:dartc/interop.dart';
 import 'function_emitter.dart';
 import 'heap_entry.dart';
 
-/// Converts between native scalar signatures and full-width Dart calls.
+/// Converts native scalars and addresses to full-width internal call locations.
 final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
   /// Emits an incoming or outgoing native boundary and reports its direct call.
   Uint8List generate(

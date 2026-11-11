@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/interop.dart';
 import 'package:dartc/layout.dart';
 
 import 'function_allocation.dart';
@@ -13,6 +12,7 @@ import 'function_representation.dart';
 import 'storage_access.dart';
 import 'double_bits.dart';
 import 'native_adapter.dart';
+import 'native_invocation.dart';
 import 'stack_traces.dart';
 import 'heap_entry.dart';
 
@@ -149,7 +149,7 @@ final class ScalarFunction<R extends Object>(
           :final target,
           :final arguments,
         )) {
-          final native = instruction is NativeCall ? instruction : null;
+          final native = instruction is NativeInvocation ? instruction : null;
           final parameterTypes = target == null
               ? null
               : layouts.entryTypes(target);
@@ -223,8 +223,8 @@ final class ScalarFunction<R extends Object>(
                     (p) => p is RegisterArgument<R> && p.register == r,
                   ),
             );
-            allocation.load(native.pointer, address);
-            allocation.release(native.pointer);
+            allocation.load(native.address, address);
+            allocation.release(native.address);
             emitter.callRegister(address);
           }
           for (final fixup in parked) {
@@ -371,22 +371,6 @@ final class ScalarFunction<R extends Object>(
             allocation.release(operand);
           }
           allocation.define(instruction, destination);
-        } else if (instruction case PointerOffset(
-          :final pointer,
-          :final index,
-        )) {
-          final base = allocation.read(pointer),
-              offset = allocation.read(index, except: [base]);
-          allocation.release(pointer);
-          allocation.release(index);
-          final destination = allocation.allocate(.general, preferred: base);
-          emitter.addScaled(
-            destination,
-            base,
-            offset,
-            scale: FfiTypes.pointerElement(pointer.type)!.nativeSize,
-          );
-          allocation.define(instruction, destination);
         } else if (instruction case StoreNative(
           :final address,
           :final nativeType,
@@ -405,29 +389,24 @@ final class ScalarFunction<R extends Object>(
           }
           allocation.release(address);
           emptyResult(instruction);
-        } else if (instruction
-            case PointerFromAddress(address: final operand) ||
-                PointerAddress(pointer: final operand) ||
-                LoadNative(address: final operand)) {
+        } else if (instruction case LoadNative(
+          address: final operand,
+          :final nativeType,
+        )) {
           final source = allocation.read(operand);
           allocation.release(operand);
           final destination = allocation.allocate(
             selection.bank(instruction.type),
             preferred: source,
           );
-          if (instruction is LoadNative) {
-            final native = instruction.nativeType;
-            emitter.loadMemory(
-              destination,
-              source,
-              bytes: native.nativeSize,
-              signed: native.integerLayout?.signed ?? false,
-            );
-            if (native.isSinglePrecision) {
-              emitter.convertFloatToDouble(destination, destination);
-            }
-          } else {
-            emitter.move(destination, source);
+          emitter.loadMemory(
+            destination,
+            source,
+            bytes: nativeType.nativeSize,
+            signed: nativeType.integerLayout?.signed ?? false,
+          );
+          if (nativeType.isSinglePrecision) {
+            emitter.convertFloatToDouble(destination, destination);
           }
           allocation.define(instruction, destination);
         } else if (instruction case NumericToInt(:final operand)) {

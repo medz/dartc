@@ -2226,6 +2226,8 @@ final class IrInterpreter(
             .greaterThan => a > b,
             .greaterOrEqual => a >= b,
           };
+        case Identical(:final left, :final right):
+          values[op] = identical(read(left), read(right));
         case Equals(:final left, :final right, :final negated):
           final a = read(left), b = read(right);
           values[op] =

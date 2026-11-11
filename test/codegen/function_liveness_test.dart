@@ -6,6 +6,8 @@ import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
+import 'package:dartc/src/codegen/closure_storage.dart';
+import 'package:dartc/src/codegen/instance_storage.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -17,9 +19,28 @@ void main() {
       result,
       blocks.first.parameters.map((p) => p.type),
     );
+    final function = IrFunction(target, blocks);
+    final error = ClassType(library, 'LateError');
+    final initialize = FunctionTarget(
+      library,
+      'new',
+      .voidType,
+      [.string],
+      owner: error,
+      kind: .initializer,
+    );
+    final instances = InstanceStorage(
+      [function],
+      lateError: IrFunction(initialize, [
+        Block(initialize.parameterTypes)..finish(const Return()),
+      ]),
+    );
+    final closures = ClosureStorage([
+      function,
+    ], lateFailure: instances.failure?.target);
     final body = FunctionRepresentation(
-      IrFunction(target, blocks),
-      ProgramLayout([]),
+      function,
+      ProgramLayout([], instanceStorage: instances, closureStorage: closures),
       CheckedCasts(),
       MemberCalls(IrProgram([], []), {}),
       HeapPlan(FrameLookup()),
@@ -129,36 +150,33 @@ void main() {
     },
   );
 
-  test(
-    'a failed write retains old contents only when its handler reads them',
-    () {
-      for (final readsOldValue in [false, true]) {
-        final entry = Block([.object, .object]),
-            success = Block(),
-            failure = Block();
-        final [initial, replacement] = entry.parameters;
-        final cell = entry.emit(
-          NewCell(CellType(.object, isLate: true, isFinal: true), initial),
-        );
-        final collect = FunctionTarget(library, 'collect', .voidType, []);
-        final call = entry.emit(DirectCall(collect, []));
-        entry.finish(
-          Invoke(
-            WriteCell(cell, replacement),
-            onReturn: Jump(success),
-            onThrow: Jump(failure),
-          ),
-        );
-        success.finish(Return(replacement));
-        failure.finish(
-          Return(readsOldValue ? failure.emit(ReadCell(cell)) : replacement),
-        );
+  test('late binding storage stays rooted before a write regardless of its handler', () {
+    for (final readsOldValue in [false, true]) {
+      final entry = Block([.object, .object]),
+          success = Block(),
+          failure = Block();
+      final [initial, replacement] = entry.parameters;
+      final cell = entry.emit(
+        NewCell(CellType(.object, isLate: true, isFinal: true), initial),
+      );
+      final collect = FunctionTarget(library, 'collect', .voidType, []);
+      final call = entry.emit(DirectCall(collect, []));
+      entry.finish(
+        Invoke(
+          WriteCell(cell, replacement),
+          onReturn: Jump(success),
+          onThrow: Jump(failure),
+        ),
+      );
+      success.finish(Return(replacement));
+      failure.finish(
+        Return(readsOldValue ? failure.emit(ReadCell(cell)) : replacement),
+      );
 
-        final flow = analyze([entry, success, failure], .object);
-        expect(flow.acrossCalls[call], {replacement, if (readsOldValue) cell});
-      }
-    },
-  );
+      final flow = analyze([entry, success, failure], .object);
+      expect(flow.acrossCalls[call], {replacement, cell});
+    }
+  });
 
   test('a Never result is not a runtime operand of Unreachable', () {
     final entry = Block([.object]);

@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import 'program_layout.dart';
 import 'checked_casts.dart';
@@ -11,6 +12,7 @@ import 'double_bits.dart';
 import 'reference_equality.dart';
 import 'selected_graph.dart';
 import 'value_operations.dart';
+import 'native_invocation.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
@@ -114,6 +116,7 @@ final class FunctionRepresentation(
     StorageAccess(:final inputs) => inputs,
     DoubleBits(:final operand) => [operand],
     ReferenceEquality(:final left, :final right) => [left, right],
+    NativeInvocation(:final inputs) => inputs,
     Instruction() => _operands[operation] ?? operation.inputs,
     _ => throw ArgumentError('Expected a selected operation.'),
   };
@@ -214,13 +217,22 @@ final class FunctionRepresentation(
     void runtimeType(ObjectRuntimeType instruction, List<Value> into) {
       final source = instruction.operand.type;
       if (source == .nullType || layouts.representation(source) != .reference) {
-        _operands[instruction] = [
-          _reify(
-            FfiTypes.isPointer(source) ? FfiTypes.pointerRuntimeType : source,
-            into,
-          ),
-        ];
+        _operands[instruction] = [_reify(source, into)];
       }
+    }
+
+    void typeTest(TypeTest instruction, List<Value> into) {
+      final kind = tests[instruction] = layouts.typeTest(
+        instruction.operand.type,
+        instruction.testedType,
+      );
+      if (kind == .subtype) {
+        final actual = ObjectRuntimeType(instruction.operand, direct: true);
+        runtimeType(actual, into);
+        into.add(actual);
+        _operands[instruction] = [actual, _reify(instruction.testedType, into)];
+      }
+      into.add(instruction);
     }
 
     Jump edge(Jump jump) {
@@ -285,6 +297,85 @@ final class FunctionRepresentation(
             onThrow,
           _ => null,
         };
+        if (instruction case Identical(:final left, :final right)) {
+          block = valueOperations.identical(left, right, block, typeTest);
+          body = instructions[block]!;
+          body.add(instruction);
+          aliases.add(instruction);
+          _operands[instruction] = block.parameters;
+          continue;
+        }
+        if (instruction case PointerAddress(:final pointer)) {
+          _operands[instruction] = [
+            _load(layouts.pointers.address, pointer, body),
+          ];
+          aliases.add(instruction);
+          body.add(instruction);
+          continue;
+        }
+        if (instruction is PointerFromAddress || instruction is PointerOffset) {
+          final Value address;
+          if (instruction case PointerFromAddress(address: final value)) {
+            address = value;
+          } else {
+            final offset = instruction as PointerOffset;
+            final base = _load(layouts.pointers.address, offset.pointer, body);
+            final bytes = IntBinary(
+              .multiply,
+              offset.index,
+              Constant.integer(
+                FfiTypes.pointerElement(offset.pointer.type)!.nativeSize,
+              ),
+            );
+            address = IntBinary(.add, base, bytes);
+            body.addAll([bytes, address]);
+          }
+          invocations[instruction] = heap.constructorFor(
+            layouts.pointers.initializer,
+            layouts,
+          );
+          _operands[instruction] = [
+            address,
+            layouts.types.constant(FfiTypes.pointerRuntimeType),
+          ];
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case NativeCall(
+          :final pointer,
+          :final arguments,
+          :final signature,
+          :final isLeaf,
+        )) {
+          final raw = NativeInvocation(
+            _load(layouts.pointers.address, pointer, body),
+            [
+              for (final value in arguments)
+                if (FfiTypes.isPointer(value.type))
+                  _load(layouts.pointers.address, value, body)
+                else
+                  value,
+            ],
+            signature,
+            isLeaf: isLeaf,
+          );
+          body.add(raw);
+          if (FfiTypes.isPointer(instruction.type)) {
+            invocations[instruction] = heap.constructorFor(
+              layouts.pointers.initializer,
+              layouts,
+            );
+            _operands[instruction] = [
+              raw,
+              layouts.types.constant(FfiTypes.pointerRuntimeType),
+            ];
+          } else {
+            aliases.add(instruction);
+            _operands[instruction] = [raw];
+          }
+          body.add(instruction);
+          continue;
+        }
         if (instruction case MakeClosure(:final target, :final inputs)) {
           final shape = layouts.closures.closures[target]!;
           final arguments = <Value>[Constant.integer(shape.tag)];
@@ -319,8 +410,6 @@ final class FunctionRepresentation(
               ValueType.integer => const Constant.integer(0),
               ValueType.floating => const Constant.floating(0),
               ValueType.boolean => const Constant.boolean(false),
-              final ClassType pointer when FfiTypes.isPointer(pointer) =>
-                PointerFromAddress(const Constant.integer(0), pointer),
               _ => const Constant.nullValue(),
             };
             if (initial is Instruction) body.add(initial);
@@ -377,16 +466,37 @@ final class FunctionRepresentation(
           continue;
         }
         if (instruction case ObjectHashCode(:final operand, direct: false)
-            when operand.type == .nullType || layouts.isBoxable(operand.type)) {
-          block = valueOperations.hashScalar(operand, block);
+            when operand.type == .nullType ||
+                layouts.isBoxable(operand.type) ||
+                FfiTypes.isPointer(operand.type)) {
+          block = valueOperations.hashScalar(
+            FfiTypes.isPointer(operand.type)
+                ? _load(layouts.pointers.address, operand, body)
+                : operand,
+            block,
+          );
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
           _operands[instruction] = block.parameters;
           continue;
         }
+        if (instruction case Equals(:final left, :final right, :final negated)
+            when FfiTypes.isPointer(left.type) &&
+                FfiTypes.isPointer(right.type)) {
+          final equal = Equals(
+            _load(layouts.pointers.address, left, body),
+            _load(layouts.pointers.address, right, body),
+            negated: negated,
+          );
+          body.addAll([equal, instruction]);
+          aliases.add(instruction);
+          _operands[instruction] = [equal];
+          continue;
+        }
         if (instruction case Equals(:final left, :final right)
-            when layouts.isBoxable(left.type) &&
+            when (layouts.isBoxable(left.type) ||
+                    FfiTypes.isPointer(left.type)) &&
                 right.type != .nullType &&
                 layouts.representation(right.type) == .reference) {
           invocations[instruction] = members.builtin(left.type, hash: false);
@@ -478,6 +588,7 @@ final class FunctionRepresentation(
               ValueType.integer,
               ValueType.floating,
               ValueType.boolean,
+              FfiTypes.pointerRuntimeType,
             ]) {
               targets[type] = (
                 target: members.builtin(
@@ -569,7 +680,9 @@ final class FunctionRepresentation(
               final test = Equals(
                 shape,
                 Constant.integer(
-                  closure != null ? closure.tag : layouts.types.id(type),
+                  closure != null
+                      ? closure.tag
+                      : layouts.types.id(type.declaration),
                 ),
               );
               instructions[next]!.add(test);
@@ -1081,17 +1194,9 @@ final class FunctionRepresentation(
           _operands[instruction] = [_reify(template, body)];
         }
         if (instruction is ObjectRuntimeType) runtimeType(instruction, body);
-        if (instruction case TypeTest(:final operand, :final testedType)) {
-          final kind = tests[instruction] = layouts.typeTest(
-            operand.type,
-            testedType,
-          );
-          if (kind == .subtype) {
-            final actual = ObjectRuntimeType(operand, direct: true);
-            runtimeType(actual, body);
-            body.add(actual);
-            _operands[instruction] = [actual, _reify(testedType, body)];
-          }
+        if (instruction is TypeTest) {
+          typeTest(instruction, body);
+          continue;
         }
         if (instruction
             case TypeCast(:final operand) || NullCheck(:final operand)) {

@@ -33,6 +33,8 @@ final class MemberCalls(
     for (final other
         in type == .boolean
             ? [ValueType.boolean]
+            : FfiTypes.isPointer(type)
+            ? [FfiTypes.pointerRuntimeType]
             : [ValueType.integer, ValueType.floating]) {
       final yes = Block([other]), no = Block();
       blocks.addAll([yes, no]);

@@ -802,7 +802,10 @@ final class Bindings({
       }
       if (element.library.isInSdk &&
           element.isStatic &&
-          !element.isExternal &&
+          (!element.isExternal ||
+              element.library.isDartCore &&
+                  element.baseElement ==
+                      element.library.getTopLevelFunction('identical')) &&
           !element.isAbstract &&
           (element is TopLevelFunctionElement || element is MethodElement)) {
         sdkFunctions.add(element);

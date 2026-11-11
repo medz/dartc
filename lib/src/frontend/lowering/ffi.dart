@@ -93,6 +93,10 @@ Value? lowerFfi(
       FfiTypes.isPointer(operands.single.type)) {
     return emit(PointerAddress(operands.single));
   }
+  if (member == pointer.getGetter('hashCode') &&
+      FfiTypes.isPointer(operands.single.type)) {
+    return emit(ObjectHashCode(operands.single));
+  }
   for (final MapEntry(key: native, value: type)
       in FfiTypes.scalarTypes.entries) {
     final storage = NativeScalarType(native);

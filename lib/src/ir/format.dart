@@ -144,6 +144,7 @@ void writeFunction(
     RecordGet() => 'field ${value(op.record)}[${op.slot}]',
     Equals() =>
       '${value(op.left)} ${op.negated ? '!=' : '=='} ${value(op.right)}',
+    Identical() => 'identical ${value(op.left)}, ${value(op.right)}',
     ReifyType() => 'reify ${op.template.dartName}',
     ObjectRuntimeType() =>
       '${op.direct ? 'direct ' : ''}runtimeType ${value(op.operand)}',

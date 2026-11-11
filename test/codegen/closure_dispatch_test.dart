@@ -8,7 +8,7 @@ void main() {
     for (final arch in Architecture.values) {
       final platform = Target(os, arch);
       test(
-        '$platform rejects unsupported pointer boxing in function results',
+        '$platform preserves pointer references in wider function results',
         () {
           final uri = Uri.parse('memory:pointer-result');
           final pointer = FfiTypes.pointer.instantiate([FfiTypes.int64]);
@@ -42,15 +42,7 @@ void main() {
               program,
               definitions: program.reachableFrom([caller]),
             ),
-            throwsA(
-              isA<UnsupportedError>().having(
-                (error) => error.message,
-                'reason',
-                contains(
-                  'Native representation conversion: Pointer<Int64> to Object?',
-                ),
-              ),
-            ),
+            returnsNormally,
           );
         },
       );
