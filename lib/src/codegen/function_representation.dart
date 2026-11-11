@@ -701,7 +701,9 @@ final class FunctionRepresentation(
                                 )
                               : {member!.owner!: member})
                           .entries)
-                    entry.key: (target: entry.value, closure: null),
+                    if (layouts.typeTest(receiver.type, entry.key) !=
+                        .constantFalse)
+                      entry.key: (target: entry.value, closure: null),
                 };
           final plainObject =
               receiver.type.nonNullable is ClassType &&
@@ -947,9 +949,16 @@ final class FunctionRepresentation(
                 shape.initializer!,
                 layouts,
               );
+              final captures = <Value>[];
+              final captured = convert(
+                receiver,
+                shape.captures.single.type,
+                captures,
+              );
+              captures.forEach(append);
               _operands[bound] = [
                 Constant.integer(shape.tag),
-                receiver,
+                captured,
                 ...classTypes,
                 actualType,
               ];

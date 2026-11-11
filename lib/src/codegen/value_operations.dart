@@ -107,7 +107,7 @@ final class ValueOperations(
       prepareTest(b, graph.instructions[matching]!);
       graph.ends[matching] = Branch(
         b,
-        Jump(equal, [a.refinement(true)!, b.refinement(true)!]),
+        Jump(equal, [a.refinement(true) ?? left, b.refinement(true) ?? right]),
         Jump(next),
       );
       Value av = equal.parameters[0], bv = equal.parameters[1];

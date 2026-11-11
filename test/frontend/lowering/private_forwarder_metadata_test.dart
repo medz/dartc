@@ -72,16 +72,7 @@ class Replacement extends Base implements Contract, Other {}
 
         final bindings = Bindings();
         for (final library in input.libraries) {
-          for (final source in library.units) {
-            for (final declaration
-                in source.unit.declarations.whereType<ast.ClassDeclaration>()) {
-              bindings.registerClass(
-                declaration.declaredFragment!.element,
-                source,
-                declaration,
-              );
-            }
-          }
+          bindings.registerLibrary(library);
         }
         final forwarder = bindings.forwarders(element).single;
         expect(forwarder.selector.privateLibrary, imported.uri);

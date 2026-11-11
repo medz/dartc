@@ -34,9 +34,11 @@ final class Bindings({
   final bool enableAssertions = false,
   ConstantEvaluation? constants,
   final Uri? runtimeContracts,
+  final Set<Uri> runtimeSources = const {},
 }) {
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
+  final _numericClasses = <ClassType>{};
   (InterfaceElement, FieldElement, FieldElement)? _constantMapStorage;
 
   /// SDK functions with Dart bodies, discovered while binding direct references.
@@ -46,6 +48,8 @@ final class Bindings({
   final _intrinsics =
       <FunctionTarget, Value? Function(FunctionTarget, Block)>{};
 
+  bool isIntrinsic(FunctionTarget target) => _intrinsics.containsKey(target);
+
   /// Builds intrinsic bodies after their SDK declarations have been lowered.
   List<IrFunction> lowerIntrinsics() {
     final functions = <IrFunction>[];
@@ -53,7 +57,13 @@ final class Bindings({
       final entry = Block(target.parameterTypes);
       final value = build(target, entry);
       if (value != null) entry.finish(Return(value));
-      functions.add(IrFunction(target, [entry], defaults: defaults(target)));
+      final blocks = <Block>[entry];
+      for (var i = 0; i < blocks.length; i++) {
+        for (final edge in blocks[i].successors) {
+          if (!blocks.contains(edge.target)) blocks.add(edge.target);
+        }
+      }
+      functions.add(IrFunction(target, blocks, defaults: defaults(target)));
     }
     return functions;
   }
@@ -61,6 +71,7 @@ final class Bindings({
   /// Compiler-owned classes, retaining all referenced abstract members.
   Iterable<IrClass> get intrinsicClasses => [
     for (final owner in {
+      ..._numericClasses,
       for (final target in _intrinsics.keys)
         if (target.owner != null) target.owner!,
     })
@@ -68,11 +79,11 @@ final class Bindings({
         owner,
         [],
         members: [
-          for (final target in _targets.values)
+          for (final target in _targets.values.toSet())
             if (target.owner == owner && target.kind.isVirtual) target,
         ],
         constructors: [
-          for (final target in _targets.values)
+          for (final target in _targets.values.toSet())
             if (target.owner == owner && target.kind == .factory) target,
         ],
       ),
@@ -83,7 +94,9 @@ final class Bindings({
 
   /// Includes a constructed SDK class and the bodies it inherits.
   void requireSdkClass(InterfaceElement element) {
-    if (!element.library.isInSdk || sdkClasses.contains(element)) {
+    if (!element.library.isInSdk ||
+        _numericImplementation(element) != null ||
+        sdkClasses.contains(element)) {
       return;
     }
     if (element.supertype case final parent?) requireSdkClass(parent.element);
@@ -181,8 +194,7 @@ final class Bindings({
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
   final _constants = <VariableElement, Constant>{};
 
-  final _modeledClasses =
-      <InterfaceElement, (ResolvedUnitResult, ast.AstNode)>{};
+  final _libraries = <LibraryElement, ResolvedLibraryResult>{};
   final _implementationPlans =
       <InterfaceElement, Map<MemberSelector, FunctionTarget>>{};
   // Eligibility for later nSM replacement, including direct wrappers over nSM.
@@ -199,17 +211,10 @@ final class Bindings({
   final _unsupportedForwarders = <InterfaceElement, Set<MemberSelector>>{};
   final _planningClasses = <InterfaceElement>{};
 
-  /// Records source ownership before any body (including super calls) is lowered.
-  void registerClass(
-    InterfaceElement element,
-    ResolvedUnitResult unit,
-    ast.AstNode site,
-  ) {
-    _modeledClasses[element] = (unit, site);
-  }
-
-  /// Records a library's class sources before binding inherited members.
+  /// Records checked source fragments before binding inherited members.
   void registerLibrary(ResolvedLibraryResult library) {
+    if (_libraries.containsKey(library.element)) return;
+    _libraries[library.element] = library;
     for (final unit in library.units) {
       for (final node in unit.unit.declarations) {
         final element = switch (node) {
@@ -220,11 +225,7 @@ final class Bindings({
           _ => null,
         };
         if (element == null) continue;
-        registerClass(element, unit, node);
-        if (runtimeContracts != null &&
-            unit.uri.toString().startsWith(
-              runtimeContracts!.resolve('.').toString(),
-            )) {
+        if (runtimeContracts != null && runtimeSources.contains(unit.uri)) {
           for (final annotation in node.metadata) {
             final value = constants.annotation(unit, annotation);
             if (value?.type case dart.InterfaceType(element: final contract)
@@ -252,7 +253,18 @@ final class Bindings({
   }
 
   (ResolvedUnitResult, ast.AstNode)? sourceOf(InterfaceElement element) =>
-      _modeledClasses[element];
+      fragmentSource(element.firstFragment);
+
+  (ResolvedUnitResult, ast.AstNode)? fragmentSource(Fragment fragment) {
+    final source = _libraries[fragment.element.library]?.getFragmentDeclaration(
+      fragment,
+    );
+    return source == null ? null : (source.resolvedUnit!, source.node);
+  }
+
+  Iterable<(ResolvedUnitResult, ast.AstNode)> fragmentsOf(
+    InterfaceElement element,
+  ) => element.fragments.map((fragment) => fragmentSource(fragment)!);
 
   MemberSelector _memberSelector(
     ExecutableElement member, [
@@ -292,7 +304,7 @@ final class Bindings({
     InterfaceElement element,
   ) {
     if (_implementationPlans[element] case final previous?) return previous;
-    final source = _modeledClasses[element];
+    final source = sourceOf(element);
     if (source == null) return const {};
     final (unit, site) = source;
     if (!_planningClasses.add(element)) {
@@ -363,7 +375,7 @@ final class Bindings({
       }
       final unmodeledParent =
           parent != null &&
-          !_modeledClasses.containsKey(parent) &&
+          sourceOf(parent) == null &&
           !element.supertype!.isDartCoreObject;
       if (inherited == null) {
         if (candidate.overridesConcrete) {
@@ -777,8 +789,28 @@ final class Bindings({
     element = element.baseElement;
     final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
-    final parameters = element.formalParameters;
     final container = element.enclosingElement;
+    if (element.library.isDartCore &&
+        !element.isStatic &&
+        container is InterfaceElement &&
+        const {'int', 'double', 'num'}.contains(container.name)) {
+      for (final name in switch (container.name) {
+        'int' => ['_IntegerImplementation'],
+        'double' => ['_Double'],
+        _ => ['_IntegerImplementation', '_Double'],
+      }) {
+        final implementation = element.library.getClass(name);
+        final member = switch (element) {
+          GetterElement() => implementation?.getGetter(element.name!),
+          SetterElement() => implementation?.getSetter(element.name!),
+          _ => implementation?.getMethod(element.name!),
+        };
+        if (member == null) continue;
+        final concrete = target(member, unit, site);
+        if (container.name != 'num') return _targets[element] = concrete;
+      }
+    }
+    final parameters = element.formalParameters;
     final owner = container is InterfaceElement
         ? classType(container, unit, site)
         : null;
@@ -889,16 +921,25 @@ final class Bindings({
       _targets[element] = function;
       if (element is ConstructorElement &&
           element.library.isInSdk &&
-          !element.isExternal) {
+          !element.isExternal &&
+          intrinsic == null) {
         requireSdkClass(element.enclosingElement);
       }
+      final numeric =
+          container is InterfaceElement &&
+          _numericImplementation(container) != null;
+      if (numeric) _numericClasses.add(owner!);
+      if (element.library.isDartCore && container?.name == 'num') {
+        _numericClasses.add(ValueType.number);
+      }
       if (element.library.isInSdk &&
-          element.isStatic &&
-          !element.isExternal &&
+          (numeric || element.isStatic && !element.isExternal) &&
           !element.isAbstract &&
+          intrinsic == null &&
           (element is TopLevelFunctionElement ||
               element is MethodElement ||
-              element is PropertyAccessorElement)) {
+              element is PropertyAccessorElement ||
+              numeric && element is ConstructorElement)) {
         sdkFunctions.add(element);
       }
     }
@@ -1043,8 +1084,9 @@ final class Bindings({
   Iterable<(IrClass, ResolvedUnitResult, ast.AstNode)>
   get mixinDeclarations sync* {
     for (final application in mixinApplications) {
-      final (unit, source) =
-          _modeledClasses[_applicationOwners[application.type]!.source]!;
+      final (unit, source) = sourceOf(
+        _applicationOwners[application.type]!.source,
+      )!;
       yield (application, unit, source);
     }
   }
@@ -1640,8 +1682,8 @@ final class Bindings({
             'AssertionError' => ValueType.assertionError,
             'StackTrace' => ValueType.stackTrace,
             'num' => ValueType.number,
-            'int' => ValueType.integer,
-            'double' => ValueType.floating,
+            'int' || '_IntegerImplementation' => ValueType.integer,
+            'double' || '_Double' => ValueType.floating,
             'String' => ValueType.string,
             'bool' => ValueType.boolean,
             'Record' => ValueType.record,
@@ -1692,7 +1734,7 @@ final class Bindings({
         parent != null && !parent.isDartCoreObject;
         parent = parent.element.supertype
       ) {
-        if (!_modeledClasses.containsKey(parent.element) &&
+        if (sourceOf(parent.element) == null &&
             !(parent.element.library.isDartCore &&
                 parent.element.name == 'Enum')) {
           unsupported(
@@ -1827,7 +1869,7 @@ final class Bindings({
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
-    if (!_modeledClasses.containsKey(element)) {
+    if (sourceOf(element) == null) {
       unsupported(unit, site, 'unmodeled mixin source');
     }
   }
@@ -1898,3 +1940,12 @@ bool isClassLike(Element? element) =>
     element is ClassElement ||
     element is EnumElement ||
     element is MixinElement;
+
+ClassType? _numericImplementation(InterfaceElement element) =>
+    !element.library.isDartCore
+    ? null
+    : switch (element.name) {
+        '_IntegerImplementation' => ValueType.integer,
+        '_Double' => ValueType.floating,
+        _ => null,
+      };

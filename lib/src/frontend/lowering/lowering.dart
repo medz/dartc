@@ -32,6 +32,7 @@ final class Lowering({final bool enableAssertions = false}) {
       enableAssertions: enableAssertions,
       constants: input.constants,
       runtimeContracts: input.runtimeContracts,
+      runtimeSources: input.runtimeSources,
     );
     for (final library in input.libraries) {
       bindings.registerLibrary(library);
@@ -117,7 +118,7 @@ final class Lowering({final bool enableAssertions = false}) {
       final declaration = library.getFragmentDeclaration(
         element is PropertyAccessorElement && element.isOriginVariable
             ? element.variable.firstFragment
-            : element.firstFragment,
+            : element.fragments.last,
       );
       if (declaration == null) {
         throw UnsupportedError('SDK declaration unavailable: ${element.name}');
@@ -135,7 +136,8 @@ final class Lowering({final bool enableAssertions = false}) {
       final body = switch (declaration.node) {
         ast.FunctionDeclaration(:final functionExpression) =>
           functionExpression.body,
-        ast.MethodDeclaration(:final body) => body,
+        ast.MethodDeclaration(:final body) ||
+        ast.ConstructorDeclaration(:final body) => body,
         _ => throw UnsupportedError(
           'SDK function unavailable: ${element.name}',
         ),

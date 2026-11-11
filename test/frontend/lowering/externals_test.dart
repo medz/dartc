@@ -9,10 +9,20 @@ void main() {
     final program = await AnalysisSession([
       'test/frontend/lowering/fixtures/externals.dart',
     ]).use((input) async => (await Lowering().lower(input)).program);
-    expect(program.externals, hasLength(11));
-    expect(program.functions.map((f) => f.target.name), ['use']);
-    expect(program.globals, isEmpty);
-    final api = program.classes.single;
+    expect(
+      program.externals.where((f) => f.target.library.scheme != 'dart'),
+      hasLength(11),
+    );
+    expect(
+      program.functions
+          .where((f) => f.target.library.scheme != 'dart')
+          .map((f) => f.target.name),
+      ['use'],
+    );
+    expect(program.globals.where((g) => g.library.scheme != 'dart'), isEmpty);
+    final api = program.classes.singleWhere(
+      (c) => c.type.library.scheme != 'dart',
+    );
     expect(api.fields, isEmpty);
     expect(api.constructors.keys, unorderedEquals(['new', 'named']));
     expect(
@@ -32,7 +42,13 @@ void main() {
     final runner = IrInterpreter(program, {
       (library, 'identity'): (int value) => value,
     });
-    expect(runner.run(program.functions.single, []), 4);
+    expect(
+      runner.run(
+        program.functions.singleWhere((f) => f.target.library == library),
+        [],
+      ),
+      4,
+    );
     for (final target in api.constructors.values.followedBy(
       api.members.values,
     )) {

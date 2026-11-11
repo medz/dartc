@@ -2,6 +2,8 @@
 
 转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数、静态方法、属性、全局存储及构造器和常量所属类按声明身份读取源码，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
 
+接入的 SDK 实现片段在所属库内完成静态检查，包括未使用的方法体。原声明保留类型、默认参数、构造器初始化及已有 Dart 方法体；实现不得增添公开 API、改变类继承关系或覆盖已有 Dart 方法。签名和返回类型不一致仍是错误，见[实现片段检查](../test/frontend/analysis/sdk_patches_test.dart)。
+
 | 特性 | 当前 IR 范围 |
 | --- | --- |
 | 编译单元、具名/无名 library、脚本标记 | analyzer 解析；转换库内声明，脚本标记不生成 IR。 |
@@ -60,7 +62,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端支持同步标量/指针调用和入口内对象存活；支持从闭包发起调用，跨线程托管调用协议尚未接通。 |
 | `asFunction` | 前端按 `dart:ffi` 声明身份将调用转换成捕获当时指针值的普通闭包 IR，其函数体执行 `NativeCall`。支持显式/推断 Dart 函数类型、显式 extension override、空参数/void 结果、上述标量和指针签名及兼容的指针返回类型扩大；`isLeaf` 按常量参数求值，默认 false。返回的函数可经普通 IR 的返回、局部变量、集合、分支、循环、动态调用及嵌套闭包使用。同名用户方法仍是普通调用。已接通同步闭包的原生调用，保留捕获指针、参数及返回对象经过回收后的地址与身份；原生 ABI 接点传递原始地址。`asFunction` 方法本身的提取与间接调用、Dart 原生回调及跨线程协议仍待接通。 |
 | 函数体 | 整数常量、加法、减法、乘法、截断除法、欧几里得取模、remainder、按位与/或/异或/取反及相应复合赋值、有符号比较，整数与布尔值的相等/不等比较；整数运算保留 64 位环绕结果，`int / int` 产生 double。支持条件表达式、逻辑短路、if/else、while/do/for、含标签的 break/continue、多返回，以及批次内跨库调用和递归。Dart 函数间的直接调用支持可选位置参数、命名参数及常量默认值；原生导出仍只接受必需位置参数。同步异常与清理见[原生异常范围](statements.md#原生异常与清理)，对象存储见[类的原生范围](classes.md#原生执行范围)。除零与负移位按 Dart 异常路径传播，保留 catch/finally；三种整数移位保留完整计数及 64 位边界，异步尚未接入原生后端。 |
-| 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。toInt/truncate/floor/ceil/round 支持已知和装箱数值，保留整数精度、有限溢出饱和和非有限异常。已接通保留 double 结果的舍入方法及浮点、混合和装箱 `~/`；浮点取模、compareTo 及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
+| 浮点 | 支持静态 int/double 操作数的混合加、减、乘、IEEE 除法、全部数值比较及 `toDouble`，另支持 double 常量和取负；比较保持整数的原始数值，不因算术转换而丢失精度。保留 NaN、无穷、次正规数和正负零行为，不做融合乘加或 fast-math 改写。参数、结果、分支汇合和调用保持 double 表示。部分混合数值常量表达式尚未实现，见[数值比较](expressions.md#数值比较与-sdk-差异)。toInt/truncate/floor/ceil/round 支持已知和装箱数值，保留整数精度、有限溢出饱和和非有限异常。已接通保留 double 结果的舍入方法及浮点、混合和装箱 `~/`；abs/sign、分类查询、compareTo/clamp 及装箱 num 的四则运算已接通；浮点取模、数值格式化及完整数学库尚未接入。当前执行验证使用 SDK 宿主的默认浮点控制环境，非默认控制状态尚未验证。 |
 | WeakReference | 支持泛型工厂、构造器提取和只读 `target`。弱引用不会保活目标；普通强引用保留目标，失去强引用后允许清空。原生验证覆盖用户对象、自引用环、集合、闭包、类型对象、常量和跨导出调用存活，以及数值、字符串、布尔值和 FFI 指针的 `ArgumentError`。records、Struct/Union 的目标表示尚缺，未验证其拒绝路径。见[源码与原生验证](../test/compiler/weak_references_test.dart)。回收时机和是否清空不构成语言保证。 |
 | Expando | 支持可选名称、构造器提取、`name`、`toString`、按对象身份读取/替换属性及写入 null 删除；相同名称的实例互不共享属性。不调用键的重写 hashCode/==；写入保持实际泛型值类型检查。GC 仅在 Expando 与 key 均存活时保留 value，支持跨 Expando 的条件依赖与循环回收。数值、字符串、布尔值和 FFI 指针键抛出 ArgumentError，动态 null 参数受非空类型检查；records、Struct/Union 的目标表示仍缺。见[源码与原生验证](../test/compiler/expandos_test.dart)。 |
 | 终结 | `Finalizer<T>` 支持可空 token、多重附着、弱 target/detach key、创建 Zone 绑定及至多一次的事件回调。detach 也取消尚未执行的回调；失去 finalizer 本身的强引用不保留其记录。GC 仅入队，回调可分配并再次触发 GC；关闭堆丢弃剩余附着，不强制调用回调。`NativeFinalizer`、外部内存计量与原生资源关闭保证仍待实现。 |

@@ -307,7 +307,7 @@ void main() {
           );
         },
       );
-      test('$target supports aliases and requires the SDK late error body', () {
+      test('$target supports aliases and checked late storage', () {
         for (final late in [false, true]) {
           final entry = Block(declaration.parameterTypes);
           final cell = entry.emit(
@@ -322,33 +322,16 @@ void main() {
           final program = IrProgram([], [
             IrFunction(declaration, [entry, next]),
           ]);
-          if (late) {
-            expect(
-              () => generator.generate(
-                program,
-                runtime: heapRuntime,
-                definitions: [declaration],
-              ),
-              throwsA(
-                isA<UnsupportedError>().having(
-                  (error) => error.message,
-                  'reason',
-                  contains('LateError constructor'),
-                ),
-              ),
-            );
-          } else {
-            expect(
-              generator
-                  .generate(
-                    program,
-                    runtime: heapRuntime,
-                    definitions: [declaration],
-                  )
-                  .sections,
-              isNotEmpty,
-            );
-          }
+          expect(
+            generator
+                .generate(
+                  program,
+                  runtime: heapRuntime,
+                  definitions: [declaration],
+                )
+                .sections,
+            isNotEmpty,
+          );
         }
       });
     }

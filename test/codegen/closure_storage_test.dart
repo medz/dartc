@@ -1,3 +1,4 @@
+import 'package:dartc/layout.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
@@ -90,7 +91,13 @@ void main() {
       final layouts = ProgramLayout(program.classes);
       final fields = layouts.storageOf(shape.type);
       expect(fields.fields.first, same(storage.tag));
-      expect(fields.layout.referenceOffsets, [8, 40, 48, 64, 72]);
+      expect(fields.layout.referenceOffsets, [
+        ObjectHeader.typeOffset,
+        ObjectHeader.fieldsOffset + 8,
+        ObjectHeader.fieldsOffset + 16,
+        ObjectHeader.fieldsOffset + 32,
+        ObjectHeader.fieldsOffset + 40,
+      ]);
       expect(storage.cell(CellType(.integer)).value.type, ValueType.integer);
     },
   );

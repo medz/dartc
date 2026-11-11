@@ -9,7 +9,8 @@ final class NumericOperations({
   final IrCallable? _unsupportedError = unsupportedError;
   static final _uri = Uri.parse('dartc:numeric');
   final _functions = <IntOperator, IrFunction>{};
-  final _quotients = <(ValueType, ValueType), IrFunction>{};
+  final _binaries = <(NumericOperator, ValueType, ValueType), IrFunction>{};
+  final _unary = <bool, IrFunction>{};
   final _conversions = <(IntegerRounding, bool), IrFunction>{};
   final _finiteConversions = <IntegerRounding, IrFunction>{};
   final _doubleRoundings = <(IntegerRounding, bool), IrFunction>{};
@@ -19,7 +20,8 @@ final class NumericOperations({
   final classes = [IrClass(CoreTypes.integerDivisionByZeroException, [])];
 
   Iterable<IrFunction> get functions => _functions.values
-      .followedBy(_quotients.values)
+      .followedBy(_binaries.values)
+      .followedBy(_unary.values)
       .followedBy(_conversions.values)
       .followedBy(_finiteConversions.values)
       .followedBy(_doubleRoundings.values);
@@ -58,12 +60,17 @@ final class NumericOperations({
           ? null
           : _doubleRounding(rounding, operand.type == .floating).target;
     }
-    if (instruction case NumericBinary(
-      operator: .truncateDivide,
-      :final left,
-      :final right,
-    )) {
-      return _quotient(left.type, right.type).target;
+    if (instruction
+        case NumericBinary(:final operator, :final left, :final right)
+        when operator == .truncateDivide ||
+            !_unboxed(left.type) ||
+            !_unboxed(right.type)) {
+      return _binary(operator, left.type, right.type).target;
+    }
+    if (instruction
+        case NumericToDouble(:final operand) || NumericNegate(:final operand)
+        when !_unboxed(operand.type)) {
+      return _unaryOperation(instruction is NumericToDouble).target;
     }
     final operator = _operator(instruction);
     return operator == null ? null : _function(operator).target;
@@ -90,28 +97,82 @@ final class NumericOperations({
         _ => null,
       };
 
-  IrFunction _quotient(ValueType leftType, ValueType rightType) {
+  bool _unboxed(ValueType type) => type == .integer || type == .floating;
+
+  IrFunction _unaryOperation(bool toDouble) => _unary.putIfAbsent(toDouble, () {
+    final target = FunctionTarget(
+      _uri,
+      toDouble ? 'toDouble' : 'negate',
+      toDouble ? .floating : .number,
+      [.number],
+    );
+    final entry = Block(target.parameterTypes),
+        integer = Block(),
+        floating = Block();
+    final value = entry.parameters.single;
+    entry.finish(
+      Branch(
+        entry.emit(TypeTest(value, .integer)),
+        Jump(integer),
+        Jump(floating),
+      ),
+    );
+    for (final (block, type) in [
+      (integer, ValueType.integer),
+      (floating, ValueType.floating),
+    ]) {
+      final narrowed = block.emit(TypeCast(value, type));
+      block.finish(
+        Return(
+          block.emit(
+            toDouble
+                ? NumericToDouble(narrowed)
+                : type == ValueType.integer
+                ? IntBinary(.subtract, const Constant.integer(0), narrowed)
+                : NumericNegate(narrowed),
+          ),
+        ),
+      );
+    }
+    return IrFunction(target, [entry, integer, floating]);
+  });
+
+  IrFunction _binary(
+    NumericOperator operator,
+    ValueType leftType,
+    ValueType rightType,
+  ) {
     if (leftType != .integer && leftType != .floating) leftType = .number;
     if (rightType != .integer && rightType != .floating) rightType = .number;
-    if (leftType == .integer && rightType == .integer) {
+    if (operator == .truncateDivide &&
+        leftType == .integer &&
+        rightType == .integer) {
       return _function(.truncateDivide);
     }
-    return _quotients.putIfAbsent((leftType, rightType), () {
+    return _binaries.putIfAbsent((operator, leftType, rightType), () {
       final target = FunctionTarget(
         _uri,
-        'quotient.${leftType.dartName}.${rightType.dartName}',
-        .integer,
+        '${operator.name}.${leftType.dartName}.${rightType.dartName}',
+        operator.result(leftType, rightType),
         [leftType, rightType],
       );
       final entry = Block(target.parameterTypes);
       final [left, right] = entry.parameters;
       if (leftType != .number && rightType != .number) {
-        final quotient = entry.emit(NumericBinary(.divide, left, right));
+        final result = entry.emit(
+          NumericBinary(
+            operator == .truncateDivide ? .divide : operator,
+            left,
+            right,
+          ),
+        );
         entry.finish(
           Return(
-            entry.emit(
-              DirectCall(_conversion(.truncate, true).target, [quotient]),
-            ),
+            operator == .truncateDivide
+                ? entry.emit(
+                    DirectCall(_conversion(.truncate, true).target, [result]),
+                  )
+                : result,
           ),
         );
         return IrFunction(target, [entry]);
@@ -137,7 +198,7 @@ final class NumericOperations({
           Return(
             block.emit(
               DirectCall(
-                _quotient(arguments[0].type, arguments[1].type).target,
+                _binary(operator, arguments[0].type, arguments[1].type).target,
                 arguments,
               ),
             ),

@@ -59,6 +59,8 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 ## 原生转整数与字符串常量
 
+`abs`、`sign`、`isNaN`、`isInfinite`、`isFinite`、`isNegative`、`compareTo` 和 `clamp` 支持 int、double 及装箱 num，包括直接调用、虚调用和方法提取。保留整数边界、负零、NaN 的排序及无效上下界的 ArgumentError；clamp 返回选中的原值或边界值。装箱 num 的加、减、乘、除、取负和 toDouble 根据实际数值类型执行，支持跨调用、返回及泛型传值。见[原生数值方法验证](../test/compiler/numeric_methods_test.dart)及[固定 SDK num 契约](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/num.dart)。
+
 `toInt`、`truncate`、`floor`、`ceil` 和 `round` 支持 int、double 及装箱 num 接收者。整数保持全部 64 位；浮点的 toInt/truncate 向零舍入，floor 向下、ceil 向上，round 就近舍入且半数远离零。有限值超出有符号 64 位范围时饱和到对应边界；正负零转换为 0，NaN 与正负无穷抛出 UnsupportedError。求值和 finally 顺序不变，未使用转换结果仍须执行可能抛错的转换。错误通过 SDK 构造器携带当前固定版本的字符串消息，用户同名成员与 extension 不会被拦截。见 [num.truncate](https://api.dart.dev/dart-core/num/truncate.html)、[num.round](https://api.dart.dev/dart-core/num/round.html)、[double.round](https://api.dart.dev/dart-core/double/round.html)和[原生转换验证](../test/compiler/numeric_conversions_test.dart)。浮点余数仍未接通。
 
 `truncateToDouble`、`floorToDouble`、`ceilToDouble` 和 `roundToDouble` 同样支持 int、double 及装箱 num，返回 double 而不饱和到整数范围。已经为整数的 double、正负零和非有限值保持不变；负数舍入到零得到 -0.0，roundToDouble 的半数远离零。int 接收者仅执行通常的 int 到 double 转换。实现先排除绝对值大于等于 2^52 的 double，再复用安全范围内的整数舍入计算，不把 NaN 或无穷送进整数转换。契约见[固定 SDK double 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/double.dart)，行为及负零位模式由同一[原生转换验证](../test/compiler/numeric_conversions_test.dart)覆盖。

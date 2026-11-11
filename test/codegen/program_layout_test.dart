@@ -1,3 +1,4 @@
+import 'package:dartc/layout.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/constant_data.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
@@ -93,13 +94,23 @@ void main() {
       IrClass(implementation, []),
     ]);
     final storage = layouts.storageOf(child);
-    expect(layouts.storageOf(ValueType.error).errorTraceOffset, 32);
-    expect(layouts.storageOf(base).errorTraceOffset, 40);
-    expect(storage.errorTraceOffset, 48);
-    expect(storage.layout.size, 56);
-    expect(storage.layout.referenceOffsets, [8, 40, 48]);
-    expect(layouts.fieldOffset(number), 32);
-    expect(layouts.fieldOffset(reference), 40);
+    expect(
+      layouts.storageOf(ValueType.error).errorTraceOffset,
+      ObjectHeader.fieldsOffset,
+    );
+    expect(
+      layouts.storageOf(base).errorTraceOffset,
+      ObjectHeader.fieldsOffset + 8,
+    );
+    expect(storage.errorTraceOffset, ObjectHeader.fieldsOffset + 16);
+    expect(storage.layout.size, ObjectHeader.fieldsOffset + 24);
+    expect(storage.layout.referenceOffsets, [
+      ObjectHeader.typeOffset,
+      ObjectHeader.fieldsOffset + 8,
+      ObjectHeader.fieldsOffset + 16,
+    ]);
+    expect(layouts.fieldOffset(number), ObjectHeader.fieldsOffset);
+    expect(layouts.fieldOffset(reference), ObjectHeader.fieldsOffset + 8);
     expect(layouts.storageOf(implementation).errorTraceOffset, isNull);
     expect(layouts.storageOf(implementation).layout.referenceOffsets, [8]);
     expect(

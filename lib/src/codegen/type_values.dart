@@ -157,6 +157,12 @@ final class TypeValues() {
 
   /// Reads the built-in runtime type without invoking user overrides.
   Value runtimeTypeOf(Value receiver, List<Value> into) {
+    if (receiver.type == ValueType.integer ||
+        receiver.type == ValueType.floating ||
+        receiver.type == ValueType.boolean ||
+        receiver.type == ValueType.nullType) {
+      return constant(receiver.type);
+    }
     final actual = ObjectRuntimeType(receiver, direct: true);
     final concrete = TypeReference(actual);
     into.addAll([actual, concrete]);

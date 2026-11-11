@@ -61,6 +61,97 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
     )!;
   }
   if (element.library.isDartCore) {
+    final owner = element.enclosingElement;
+    if (element.isExternal && owner == element.library.getClass('_Double')) {
+      final operator = switch (element.name) {
+        '_add' => NumericOperator.add,
+        '_sub' => NumericOperator.subtract,
+        '_mul' => NumericOperator.multiply,
+        '_div' => NumericOperator.divide,
+        '_modulo' => NumericOperator.modulo,
+        '_remainder' => NumericOperator.remainder,
+        '_greaterThan' => NumericOperator.greaterThan,
+        _ => null,
+      };
+      if (operator != null) {
+        return (target, entry) => entry.emit(
+          NumericBinary(operator, entry.parameters[0], entry.parameters[1]),
+        );
+      }
+      final rounding = switch (element.name) {
+        'roundToDouble' => IntegerRounding.round,
+        'floorToDouble' => IntegerRounding.floor,
+        'ceilToDouble' => IntegerRounding.ceil,
+        'truncateToDouble' || 'toInt' => IntegerRounding.truncate,
+        _ => null,
+      };
+      if (rounding != null) {
+        if (element.name == 'toInt') {
+          requireClass(element.library.getClass('UnsupportedError')!);
+        }
+        return (target, entry) => entry.emit(
+          element.name == 'toInt'
+              ? NumericToInt(entry.parameters.single, rounding)
+              : NumericRoundToDouble(entry.parameters.single, rounding),
+        );
+      }
+      switch (element.name) {
+        case 'fromInteger':
+          return (target, entry) =>
+              entry.emit(NumericToDouble(entry.parameters.single));
+        case 'hashCode':
+          return (target, entry) =>
+              entry.emit(ObjectHashCode(entry.parameters.single));
+        case '_equal':
+          return (target, entry) =>
+              entry.emit(Equals(entry.parameters[0], entry.parameters[1]));
+        case 'isNaN':
+          return (target, entry) => entry.emit(
+            Equals(
+              entry.emit(
+                Equals(entry.parameters.single, entry.parameters.single),
+              ),
+              const Constant.boolean(false),
+            ),
+          );
+        case 'isNegative':
+        case 'isInfinite':
+          return (target, entry) {
+            final value = entry.parameters.single;
+            final yes = Block(), no = Block();
+            final negative = element.name == 'isNegative';
+            entry.finish(
+              Branch(
+                entry.emit(
+                  negative
+                      ? NumericBinary(
+                          .lessThan,
+                          value,
+                          const Constant.floating(0),
+                        )
+                      : Equals(value, const Constant.floating(double.infinity)),
+                ),
+                Jump(yes),
+                Jump(no),
+              ),
+            );
+            yes.finish(const Return(Constant.boolean(true)));
+            no.finish(
+              Return(
+                no.emit(
+                  negative
+                      ? Identical(value, const Constant.floating(-0.0))
+                      : Equals(
+                          value,
+                          const Constant.floating(double.negativeInfinity),
+                        ),
+                ),
+              ),
+            );
+            return null;
+          };
+      }
+    }
     if (element == element.library.getClass('Error')!.getMethod('_throw')) {
       return (target, entry) {
         entry.finish(

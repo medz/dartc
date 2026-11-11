@@ -1,7 +1,6 @@
 import 'dart:ffi';
 
 import 'package:dartc/codegen.dart';
-import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
@@ -16,9 +15,9 @@ void main() {
   test(
     'string construction prepares Lists used only by generated bodies',
     () async {
-      final lowered = await AnalysisSession([
+      final lowered = await prepareRuntime(
         'test/compiler/fixtures/strings.dart',
-      ]).use((input) => Lowering().lower(input));
+      );
       final entry = lowered.program.functions
           .firstWhere((f) => f.target.name == 'stringCodesProtocol')
           .target;
@@ -92,9 +91,9 @@ void main() {
         ('lists_overflow', 'main', 'filled'),
         ('lists', 'listConstantOnly', '[]'),
       ]) {
-        final lowered = await AnalysisSession([
+        final lowered = await prepareRuntime(
           'test/compiler/fixtures/$fixture.dart',
-        ]).use((input) => Lowering().lower(input));
+        );
         final entry = lowered.program.functions
             .firstWhere((body) => body.target.name == root)
             .target;

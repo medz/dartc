@@ -87,6 +87,7 @@ final class FunctionLowering._(
     FunctionTarget? destination,
   }) {
     final target = destination ?? bindings.target(element, unit, site);
+    if (bindings.isIntrinsic(target)) return;
     if (element.isExternal) {
       output.add(IrExternal(target, defaults: bindings.defaults(target)));
       return;

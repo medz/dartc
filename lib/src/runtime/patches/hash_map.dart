@@ -1,11 +1,13 @@
 @patch
 class HashMap<K, V> {
+  @patch
   factory HashMap({
     bool Function(K, K)? equals,
     int Function(K)? hashCode,
     bool Function(dynamic)? isValidKey,
   }) => _HashMap<K, V>(equals, hashCode, isValidKey);
 
+  @patch
   factory HashMap.identity() =>
       _HashMap<K, V>(identical, identityHashCode, null);
 }

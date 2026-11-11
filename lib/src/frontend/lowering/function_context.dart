@@ -13,7 +13,7 @@ import 'closures.dart';
 /// The open control-flow graph and local bindings for one function.
 final class FunctionContext(
   /// The source unit used for resolved identities and diagnostic locations.
-  final ResolvedUnitResult unit,
+  var ResolvedUnitResult unit,
 
   /// The call targets shared by all functions in this batch.
   final Bindings bindings,

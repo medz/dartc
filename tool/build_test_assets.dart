@@ -49,6 +49,7 @@ const _compilerLibraries = {
   'stack_calls',
   'integer_operations',
   'numeric_conversions',
+  'numeric_methods',
   'scalar_globals',
   'managed_globals',
   'late_fields',

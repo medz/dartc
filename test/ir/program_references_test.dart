@@ -129,7 +129,7 @@ void main() {
     );
     expect(root.callees, {newFirst});
     expect(root.virtualMembers, {declaration});
-    expect(root.instantiatedClasses, {first});
+    expect(root.instantiatedClasses, {first, ValueType.integer});
     expect(reference.instantiatedClasses, {second});
     expect(reference.functionConstants.single.target, same(factory));
     expect(program.reachableFrom([root.target]), {

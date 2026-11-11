@@ -85,8 +85,11 @@ void main() {
 
   test('extension static storage and names remain distinct', () {
     fixture.compare('staticExtension', [], sdk.staticExtension);
-    expect(fixture.program.globals, hasLength(2));
-    expect(fixture.program.globals.map((g) => g.name).toSet(), hasLength(2));
+    final own = fixture.program.globals.where(
+      (g) => g.library.scheme != 'dart',
+    );
+    expect(own, hasLength(2));
+    expect(own.map((g) => g.name).toSet(), hasLength(2));
   });
 
   test('extension bodies use direct targets, not nominal receiver objects', () {

@@ -111,33 +111,10 @@ final class AnalysisSession(
       SourceFiles(sources.sources, root, extraSources: sourceArchive),
     );
     final sdkPath = path.join(root, 'sdk');
+    final patches = SdkPatches(files);
     if (sourceArchive?.contains('dartc/src/runtime/patches/core.dart') ==
         true) {
-      SdkPatches(files).apply(
-        path.join(sdkPath, 'lib/core/core.dart'),
-        path.join(sdkPath, 'lib/core/weak.dart'),
-        path.join(root, 'dartc/src/runtime/patches/core.dart'),
-      );
-      SdkPatches(files).apply(
-        path.join(sdkPath, 'lib/async/async.dart'),
-        path.join(sdkPath, 'lib/async/schedule_microtask.dart'),
-        path.join(root, 'dartc/src/runtime/patches/async.dart'),
-      );
-      SdkPatches(files).apply(
-        path.join(sdkPath, 'lib/internal/internal.dart'),
-        path.join(sdkPath, 'lib/internal/print.dart'),
-        path.join(root, 'dartc/src/runtime/patches/print.dart'),
-      );
-      SdkPatches(files).apply(
-        path.join(sdkPath, 'lib/async/async.dart'),
-        path.join(sdkPath, 'lib/async/timer.dart'),
-        path.join(root, 'dartc/src/runtime/patches/timer.dart'),
-      );
-      SdkPatches(files).apply(
-        path.join(sdkPath, 'lib/collection/collection.dart'),
-        path.join(sdkPath, 'lib/collection/hash_map.dart'),
-        path.join(root, 'dartc/src/runtime/patches/hash_map.dart'),
-      );
+      patches.install(sdkPath, path.join(root, 'dartc/src/runtime/patches'));
     }
     final options = path.join(
       path.dirname(inputs.first),
@@ -183,12 +160,23 @@ final class AnalysisSession(
         }
       }
     }
+    final runtimeSources = {
+      for (final name in sourceArchive?.paths ?? const <String>[])
+        if (name.startsWith('dartc/src/runtime/'))
+          path.toUri(path.join(root, name)),
+    };
     return CheckedLibraries._(
       libraries,
       resources,
       sourceArchive?.contains('dartc/src/runtime/contracts.dart') == true
           ? path.toUri(path.join(root, 'dartc/src/runtime/contracts.dart'))
           : null,
+      {
+        ...runtimeSources,
+        for (final MapEntry(key: view, value: origin)
+            in patches.origins.entries)
+          if (runtimeSources.contains(origin)) view,
+      },
       _checkOpen,
     );
   }
@@ -199,6 +187,7 @@ final class CheckedLibraries._(
   Iterable<ResolvedLibraryResult> input,
   Map<String, ResolvedLibraryResult> resources,
   final Uri? _runtimeContracts,
+  final Set<Uri> _runtimeSources,
   void Function() checkOpen,
 ) {
   final List<ResolvedLibraryResult> _libraries = .unmodifiable(input);
@@ -255,6 +244,7 @@ final class CheckedLibraries._(
 // Internal handoff; this extension is not exported by frontend.dart.
 extension CheckedSources on CheckedLibraries {
   Uri? get runtimeContracts => _runtimeContracts;
+  Set<Uri> get runtimeSources => _runtimeSources;
 
   ConstantEvaluation get constants {
     _checkOpen();

@@ -4,7 +4,7 @@ analyzer:
   exclude:
     - build/**
     - .worktrees/**
-    # SDK parts are checked after their external implementations are installed.
+    # Checked in their owning SDK libraries by sdk_patches_test.dart and compilation.
     - lib/src/runtime/patches/**
 
 linter:

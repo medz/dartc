@@ -1,3 +1,4 @@
+import 'package:dartc/layout.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
@@ -87,8 +88,11 @@ void main() {
         layouts.instances.slots(number).$2,
       ],
     ]);
-    expect(storage.layout.size, 64);
-    expect(storage.layout.referenceOffsets, [8, 32]);
+    expect(storage.layout.size, ObjectHeader.fieldsOffset + 32);
+    expect(storage.layout.referenceOffsets, [
+      ObjectHeader.typeOffset,
+      ObjectHeader.fieldsOffset,
+    ]);
     expect(layouts.fieldOffset(value), layouts.fieldOffset(backing));
     expect(storage.offsetOf(bound), layouts.storageOf(owner).offsetOf(bound));
     expect(layouts.instances.slots(value).$1, same(backing));
