@@ -35,17 +35,76 @@ import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/support/native_assets.dart';
 import '../test/support/runtime.dart';
-import 'build_compiler_test_assets.dart' as compiler_assets;
+
+const _compilerLibraries = {
+  'arithmetic',
+  'calls',
+  'closures',
+  'function_values',
+  'bound_methods',
+  'function_instantiation',
+  'control_flow',
+  'nullability',
+  'stack_calls',
+  'integer_operations',
+  'numeric_conversions',
+  'scalar_globals',
+  'managed_globals',
+  'late_fields',
+  'late_locals',
+  'pointers',
+  'pointer_arithmetic',
+  'pointer_values',
+  'strings',
+  'lists',
+  'maps',
+  'doubles',
+  'mixed_numeric',
+  'math',
+  'native_integers',
+  'native_floats',
+  'native_function_pointers',
+  'native_imports',
+  'managed_objects',
+  'heap_runtime',
+  'numeric_boxes',
+  'exceptions',
+  'type_checks',
+  'type_arguments',
+  'class_types',
+  'member_calls',
+  'object_members',
+};
+
+Set<String> selectCompilerFixtures(Iterable<String> names) {
+  const available = {..._compilerLibraries, 'entry', 'descriptor_write'};
+  final selected = names.toSet();
+  final unknown = selected.difference(available);
+  if (unknown.isNotEmpty) {
+    throw ArgumentError('Unknown compiler fixtures: ${unknown.join(', ')}');
+  }
+  if (selected.isEmpty) return available;
+  if (selected.contains('native_imports') ||
+      selected.contains('pointer_values')) {
+    selected.add('native_function_pointers');
+  }
+  return selected;
+}
 
 Future<void> main(List<String> args) async {
-  await prepareRuntime();
-  await compiler_assets.main();
-  final targets = args.isEmpty
+  const prefix = '--fixture=';
+  final requested = args.where((arg) => arg.startsWith(prefix)).toList();
+  final selected = selectCompilerFixtures(
+    requested.map((arg) => arg.substring(prefix.length)),
+  );
+  final targetNames = args.where((arg) => !arg.startsWith(prefix)).toList();
+  final targets = targetNames.isEmpty
       ? [
           for (final os in OperatingSystem.values)
             for (final arch in Architecture.values) Target(os, arch),
         ]
-      : args.map(Target.parse).toList();
+      : targetNames.map(Target.parse).toList();
+  if (requested.isEmpty) await prepareRuntime();
   for (final target in targets) {
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),
@@ -71,42 +130,40 @@ Future<void> main(List<String> args) async {
       ], name: output.uri.pathSegments.last),
     );
 
-    for (final fixture in ['return', 'void', 'status', 'exported', 'math']) {
-      final needsBindings =
-          fixture == 'status' || fixture == 'exported' || fixture == 'math';
-      final result = await Compiler(target).compile(
-        ['test/compiler/fixtures/entry/$fixture.dart'],
-        output: const .executable(),
-        nativeSymbols: needsBindings ? entrySymbols : const {},
-        linkInputs: needsBindings ? entryInputs(target) : const [],
-      );
-      await result.write(assets.file('compiler/entry_$fixture'));
+    if (selected.contains('entry')) {
+      for (final fixture in ['return', 'void', 'status', 'exported', 'math']) {
+        final needsBindings =
+            fixture == 'status' || fixture == 'exported' || fixture == 'math';
+        final result = await Compiler(target).compile(
+          ['test/compiler/fixtures/entry/$fixture.dart'],
+          output: const .executable(),
+          nativeSymbols: needsBindings ? entrySymbols : const {},
+          linkInputs: needsBindings ? entryInputs(target) : const [],
+        );
+        await result.write(assets.file('compiler/entry_$fixture'));
+      }
     }
 
-    final managedEntry = await Compiler(target).compile([
-      'test/compiler/fixtures/managed_objects.dart',
-    ], output: const .executable());
-    await managedEntry.write(assets.file('compiler/entry_managed'));
-    final listOverflow = await Compiler(target).compile([
-      'test/compiler/fixtures/lists_overflow.dart',
-    ], output: const .executable());
-    await listOverflow.write(assets.file('compiler/entry_lists_overflow'));
-    final managedGlobalEntry = await Compiler(target).compile([
-      'test/compiler/fixtures/managed_globals.dart',
-    ], output: const .executable());
-    await managedGlobalEntry.write(
-      assets.file('compiler/entry_managed_globals'),
-    );
-    final exceptionEntry = await Compiler(target).compile([
-      'test/compiler/fixtures/exceptions.dart',
-    ], output: const .executable());
-    await exceptionEntry.write(assets.file('compiler/entry_exception'));
+    for (final (fixture, output) in [
+      ('managed_objects', 'entry_managed'),
+      ('lists', 'entry_lists_overflow'),
+      ('managed_globals', 'entry_managed_globals'),
+      ('exceptions', 'entry_exception'),
+    ]) {
+      if (!selected.contains(fixture)) continue;
+      final source = fixture == 'lists' ? 'lists_overflow' : fixture;
+      final entry = await Compiler(target).compile([
+        'test/compiler/fixtures/$source.dart',
+      ], output: const .executable());
+      await entry.write(assets.file('compiler/$output'));
+    }
     if (target.operatingSystem == .linux) {
-      for (final name in [
-        'managed_failure',
-        'managed_growth_failure',
-        'boxing_null_entry',
+      for (final (fixture, name) in [
+        ('managed_objects', 'managed_failure'),
+        ('managed_objects', 'managed_growth_failure'),
+        ('numeric_boxes', 'boxing_null_entry'),
       ]) {
+        if (!selected.contains(fixture)) continue;
         final failure = await Compiler(target).compile(
           ['test/compiler/fixtures/$name.dart'],
           output: const .executable(),
@@ -119,78 +176,45 @@ Future<void> main(List<String> args) async {
       }
     }
 
-    final io = await Compiler(target).compile([
-      'test/compiler/fixtures/descriptor_write.dart',
-    ], nativeSymbols: ioSymbols);
-    final scriptedIo = await Compiler(target).compile([
-      'test/compiler/fixtures/scripted_write.dart',
-    ], nativeSymbols: ioSymbols);
-    await io.write(assets.file('compiler/descriptor_write.o'));
-    await scriptedIo.write(assets.file('compiler/scripted_write.o'));
-    final ioModule = format.decodeObject(io.bytes), storage = ioStorage(target);
-    final ioLibrary = assets.library('compiler/descriptor_write');
-    await ioLibrary.writeAsBytes(
-      linker.linkSharedLibrary([
-        .object(ioModule),
-        .object(storage),
-        .sharedLibrary(
-          target.operatingSystem == .macos
-              ? '/usr/lib/libSystem.B.dylib'
-              : 'libc.so.6',
-          symbols: {
-            target.nativeSymbol('test_write'): target.nativeSymbol('write'),
-            target.nativeSymbol('test_errno'): target.nativeSymbol(
-              target.operatingSystem == .macos ? '__error' : '__errno_location',
-            ),
-          },
-        ),
-      ], name: ioLibrary.uri.pathSegments.last),
-    );
-    await shared([
-      ioModule,
-      format.decodeObject(scriptedIo.bytes),
-      storage,
-    ], assets.library('compiler/descriptor_write_scripted'));
+    if (selected.contains('descriptor_write')) {
+      final io = await Compiler(target).compile([
+        'test/compiler/fixtures/descriptor_write.dart',
+      ], nativeSymbols: ioSymbols);
+      final scriptedIo = await Compiler(target).compile([
+        'test/compiler/fixtures/scripted_write.dart',
+      ], nativeSymbols: ioSymbols);
+      await io.write(assets.file('compiler/descriptor_write.o'));
+      await scriptedIo.write(assets.file('compiler/scripted_write.o'));
+      final ioModule = format.decodeObject(io.bytes),
+          storage = ioStorage(target);
+      final ioLibrary = assets.library('compiler/descriptor_write');
+      await ioLibrary.writeAsBytes(
+        linker.linkSharedLibrary([
+          .object(ioModule),
+          .object(storage),
+          .sharedLibrary(
+            target.operatingSystem == .macos
+                ? '/usr/lib/libSystem.B.dylib'
+                : 'libc.so.6',
+            symbols: {
+              target.nativeSymbol('test_write'): target.nativeSymbol('write'),
+              target.nativeSymbol('test_errno'): target.nativeSymbol(
+                target.operatingSystem == .macos
+                    ? '__error'
+                    : '__errno_location',
+              ),
+            },
+          ),
+        ], name: ioLibrary.uri.pathSegments.last),
+      );
+      await shared([
+        ioModule,
+        format.decodeObject(scriptedIo.bytes),
+        storage,
+      ], assets.library('compiler/descriptor_write_scripted'));
+    }
 
-    for (final fixture in [
-      'arithmetic',
-      'calls',
-      'closures',
-      'function_values',
-      'bound_methods',
-      'function_instantiation',
-      'control_flow',
-      'nullability',
-      'stack_calls',
-      'integer_operations',
-      'numeric_conversions',
-      'scalar_globals',
-      'managed_globals',
-      'late_fields',
-      'late_locals',
-      'pointers',
-      'pointer_arithmetic',
-      'pointer_values',
-      'strings',
-      'lists',
-      'maps',
-      'doubles',
-      'mixed_numeric',
-      'math',
-      'native_integers',
-      'native_floats',
-      'native_function_pointers',
-      'native_imports',
-      'managed_objects',
-      'heap_runtime',
-      'numeric_boxes',
-      'exceptions',
-      'type_checks',
-      'type_arguments',
-      'class_types',
-      'member_calls',
-      'object_members',
-    ]) {
+    for (final fixture in _compilerLibraries.where(selected.contains)) {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target).compile(
         ['test/compiler/fixtures/$fixture.dart'],
@@ -238,6 +262,28 @@ Future<void> main(List<String> args) async {
           ], name: dynamicLibrary.uri.pathSegments.last),
         );
       }
+    }
+    const storageNames = {
+      'doubles': 'double',
+      'mixed_numeric': 'numeric',
+      'math': 'numeric',
+      'pointers': 'pointer',
+      'managed_objects': 'pointer',
+      'exceptions': 'pointer',
+      'type_checks': 'pointer',
+      'native_integers': 'integer',
+      'native_floats': 'float',
+      'pointer_arithmetic': 'index',
+    };
+    late final data = dataModules(target);
+    for (final name in {
+      for (final fixture in selected) ?storageNames[fixture],
+    }) {
+      await shared([data.first], assets.library('compiler/${name}_storage'));
+    }
+    if (requested.isNotEmpty) {
+      print('Built compiler fixtures ${selected.join(', ')} for $target.');
+      continue;
     }
     await shared([
       floatingFrames(target),
@@ -332,7 +378,6 @@ Future<void> main(List<String> args) async {
     await shared([
       functions(target, symbolValues),
     ], assets.library('linker/symbols'));
-    final data = dataModules(target);
     final decodedData = await objects('data_', data);
     await shared(decodedData, assets.library('linker/data'));
     await shared([decodedData.first], assets.library('linker/storage'));
@@ -368,18 +413,6 @@ Future<void> main(List<String> args) async {
           provider,
         ], name: library.uri.pathSegments.last),
       );
-    }
-    for (final name in [
-      'double',
-      'numeric',
-      'pointer',
-      'integer',
-      'float',
-      'index',
-    ]) {
-      await shared([
-        decodedData.first,
-      ], assets.library('compiler/${name}_storage'));
     }
     await assets
         .file('linker/data.a')

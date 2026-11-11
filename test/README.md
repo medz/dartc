@@ -16,7 +16,7 @@ Use the standard runner's concurrency. Override `--concurrency` only when measur
 | `dart test <paths>` | The changed contract and affected callers | Only if the selected suites have the `assets` tag |
 | `dart test -P unit` | All suites that need no prebuilt assets | None |
 | `dart test -P native` | Host Compiler/CLI integration, standalone compilation and native execution | Current target and host compiler assets |
-| `dart test` | All suites on the current host, including all-target file-format checks | All targets |
+| `dart test` | All suites on the current host, including all-target file-format checks | All targets and host compiler assets |
 
 The `assets` tag marks suites that consume prebuilt files. The `native` tag selects host compilation, output handling and actual FFI calls; the preset lists the participating files and domains. Add new native suites to that preset without including unrelated test files. Keep target-independent assertions outside native suites so they can run without loading a library.
 
@@ -24,12 +24,20 @@ For host execution, build only its assets:
 
 ```sh
 dart run tool/build_test_assets.dart macos-arm64
+dart run tool/build_compiler_test_assets.dart
 dart test -P native
 ```
 
-The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. With no arguments it builds all supported targets. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target and binding configuration, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise object, static, shared and executable output requests.
+The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. Without target names it builds all supported targets, including when selecting fixtures. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target and binding configuration, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise object, static, shared and executable output requests.
 
-The builder also compiles and packages the real `bin/dartc.dart` executable and builds a fixed Dart FFI client with the development SDK. It prepares a standalone input with explicit package dependencies and an archive for the SDK build-input tests. To prepare only these assets, including executable resource tests, run `dart run tool/build_compiler_test_assets.dart`. The builder reads the bundled SDK data and needs no source download. Acquisition tests serve their prepared archive over loopback, checking content integrity, invalid archives and interrupted preparation.
+For a compiler fixture, pass `--fixture=<name>`; repeat the option to select more than one. Names match the library fixtures in `test/compiler/fixtures/`, with `entry` selecting the basic executable group and `descriptor_write` selecting both IO variants. Required provider libraries, FFI storage and associated executables are built with the selection. Unknown names fail before building anything. Other domains still use the full target build.
+
+```sh
+dart run tool/build_test_assets.dart macos-arm64 --fixture=pointers
+dart test test/compiler/pointers_test.dart
+```
+
+Prepare CLI and SDK integration assets separately with `dart run tool/build_compiler_test_assets.dart`. This compiles and packages the real `bin/dartc.dart` executable, builds a fixed Dart FFI client with the development SDK, and prepares a standalone input with explicit package dependencies and an archive for the SDK build-input tests. Fixture builds do not rebuild these assets. The builder reads the bundled SDK data and needs no source download. Acquisition tests serve their prepared archive over loopback, checking content integrity, invalid archives and interrupted preparation.
 
 The standalone test invokes the prepared dartc executable with an empty `PATH` and no inherited environment, then uses the prepared FFI client to execute its library output. It also compiles and launches a standalone executable. This compilation is the behavior under test. For full environment isolation, copy only those executables and the prepared input to a container without an SDK, checkout or source caches and run with `--network none`.
 
