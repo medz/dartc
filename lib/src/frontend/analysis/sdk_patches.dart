@@ -3,7 +3,7 @@ import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 
-/// Installs checked factory bodies and private declarations into an SDK library.
+/// Completes SDK external members with Dart bodies and private storage.
 final class SdkPatches(final OverlayResourceProvider files) {
   void apply(String libraryPath, String partPath, String patchPath) {
     final library = files.getFile(libraryPath);
@@ -37,7 +37,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         continue;
       }
       if (declaration is! ClassDeclaration) {
-        throw FormatException('Expected a factory patch class: $patchPath');
+        throw FormatException('Expected a patch class: $patchPath');
       }
       final match = classes[declaration.namePart.typeName.lexeme];
       if (match == null ||
@@ -45,32 +45,86 @@ final class SdkPatches(final OverlayResourceProvider files) {
               declaration.namePart.typeParameters?.toSource()) {
         throw FormatException('SDK patch class does not match: $patchPath');
       }
+      final privateMembers = <String>[];
       for (final member in declaration.body.members) {
-        if (member is! ConstructorDeclaration ||
-            member.factoryKeyword == null) {
-          throw FormatException('Expected a factory patch: $patchPath');
+        if (member is FieldDeclaration &&
+                member.fields.variables.every(
+                  (field) => field.name.lexeme.startsWith('_'),
+                ) ||
+            member is MethodDeclaration && member.name.lexeme.startsWith('_')) {
+          privateMembers.add(source.substring(member.offset, member.end));
+          continue;
         }
-        final target = match.body.members
-            .whereType<ConstructorDeclaration>()
-            .where((ctor) => ctor.name?.lexeme == member.name?.lexeme)
-            .singleOrNull;
-        if (target == null ||
-            target.externalKeyword == null ||
-            target.factoryKeyword == null ||
-            target.parameters.toSource() != member.parameters.toSource() ||
-            member.body is EmptyFunctionBody) {
-          throw FormatException('SDK factory patch does not match: $patchPath');
+        switch (member) {
+          case ConstructorDeclaration():
+            final target = match.body.members
+                .whereType<ConstructorDeclaration>()
+                .where((ctor) => ctor.name?.lexeme == member.name?.lexeme)
+                .singleOrNull;
+            if (target == null ||
+                target.externalKeyword == null ||
+                (target.factoryKeyword == null) !=
+                    (member.factoryKeyword == null) ||
+                target.parameters.toSource() != member.parameters.toSource() ||
+                member.body is EmptyFunctionBody &&
+                    member.initializers.isEmpty) {
+              throw FormatException(
+                'SDK constructor patch does not match: $patchPath',
+              );
+            }
+            edits.add((
+              target.externalKeyword!.offset,
+              target.externalKeyword!.end,
+              '',
+            ));
+            edits.add((
+              target.parameters.end,
+              target.end,
+              source.substring(member.parameters.end, member.end),
+            ));
+          case MethodDeclaration():
+            final target = match.body.members
+                .whereType<MethodDeclaration>()
+                .where(
+                  (method) =>
+                      method.name.lexeme == member.name.lexeme &&
+                      method.propertyKeyword?.lexeme ==
+                          member.propertyKeyword?.lexeme,
+                )
+                .singleOrNull;
+            if (target == null ||
+                target.externalKeyword == null ||
+                target.isStatic != member.isStatic ||
+                target.returnType?.toSource() !=
+                    member.returnType?.toSource() ||
+                target.typeParameters?.toSource() !=
+                    member.typeParameters?.toSource() ||
+                target.parameters?.toSource() !=
+                    member.parameters?.toSource() ||
+                member.body is EmptyFunctionBody) {
+              throw FormatException(
+                'SDK method patch does not match: $patchPath',
+              );
+            }
+            edits.add((
+              target.externalKeyword!.offset,
+              target.externalKeyword!.end,
+              '',
+            ));
+            edits.add((
+              target.body.offset,
+              target.body.end,
+              source.substring(member.body.offset, member.body.end),
+            ));
+          default:
+            throw FormatException(
+              'Expected an external member or private storage: $patchPath',
+            );
         }
-        edits.add((
-          target.externalKeyword!.offset,
-          target.externalKeyword!.end,
-          '',
-        ));
-        edits.add((
-          target.body.offset,
-          target.body.end,
-          source.substring(member.body.offset, member.body.end),
-        ));
+      }
+      if (privateMembers.isNotEmpty) {
+        final end = match.body.endToken.offset;
+        edits.add((end, end, privateMembers.join('\n')));
       }
     }
     var content = partSource;

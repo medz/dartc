@@ -45,7 +45,9 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普通用户对象保留重写、异常和副作用；继承 Object 默认实现时使用身份相等与稳定身份哈希。null 的相等比较不调用用户运算符。int、double、bool 和 null 的内置行为不因装箱改变；数值相等保留整数精度及 NaN 规则，相等的 int/double 与正负零具有相同哈希。见[宽类型与数值边界验证](../test/compiler/bound_methods_test.dart)。函数与 Type 的规则分别见[函数值](functions.md)和[类型值](types.md)。
 
-原生字符串目前只有规范化字面量；一般字符串的值比较和哈希、record 结构比较、dynamic 成员派发仍待接通。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
+原生字符串按内容比较和哈希；record 结构比较、dynamic 成员派发仍待接通。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
+
+`identityHashCode` 支持普通调用，不调用用户重写的 hashCode。已支持的非 record 对象保持与 identical 相容的稳定哈希，数值与布尔值不因重复装箱改变结果，null 也可作为参数。见[原生身份哈希验证](../test/compiler/expandos_test.dart)。
 
 ## 原生整数除法、余数与移位
 
@@ -66,6 +68,8 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 `String.fromCharCode` 支持直接调用和构造器值；0 到 0xffff（含单独代理项）生成一个码元，0x10000 到 0x10ffff 生成代理对，范围外抛出 RangeError。`[]` 从 `codeUnitAt` 结果构造单码元字符串，越界保留接收者、下标的求值及清理顺序。`+` 按顺序连接全部码元，空串与孤立代理项不改变内容；动态字符串经过回收、绑定方法及跨入口全局保存后仍可读取。`==`、`!=` 和 hashCode 按内容处理，包括 Object 视图；相等字符串的哈希相同，不要求与 SDK 的具体哈希值一致。见 [`fromCharCode`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCode.html)、[`[]`](https://api.dart.dev/stable/3.13.7/dart-core/String/operator_get.html)及[构造、拼接与回收验证](../test/compiler/strings_test.dart)。插值的一般值格式化、切片、编码和其余 String API 尚未接通。异常格式化和 Error.stackTrace getter 也尚未接通。
 
 `String.fromCharCodes` 支持 Iterable<int>、构造器值和可选 start/end。范围要求 `0 <= start <= end`；输入不足时截短，跳过的元素不读 current，空区间不获取迭代器。16 位值保留为码元，较大合法码点分解为代理对；无效码点抛出 ArgumentError。自定义迭代器的 getter、moveNext、current、异常与 finally 保留求值顺序。`String.codeUnits` 返回不可修改的 List<int>，支持长度、索引、迭代及跨回收/入口保存，修改方法仍执行其参数检查后拒绝写入。依据为 [`fromCharCodes`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCodes.html)和[固定 SDK String 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/string.dart)。[原生验证](../test/compiler/strings_test.dart)也覆盖从借用的 Int64 指针输入到有容量上限的 UTF-16 输出，以及调用方释放输入后字符串仍存活。
+
+静态类型限定为 String 或 null 的插值已支持原生执行，null 转换成文本 `null`，其余字符串保留码元；插值表达式先按源码顺序求值。固定 SDK 的 `Expando.toString` 使用此路径，见[原生验证](../test/compiler/expandos_test.dart)；一般值的插值格式化仍是缺口。
 
 ## 原生 List
 

@@ -440,7 +440,22 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         }
         return true;
       }
-      return append(expression) ? context.emit(Interpolate(parts)) : null;
+      if (!append(expression)) return null;
+      if (parts.any((part) => !ValueType.string.nullable.accepts(part.type))) {
+        return context.emit(Interpolate(parts));
+      }
+      Value result = Constant.string('');
+      for (final part in parts) {
+        final text = context.ifNull(
+          part,
+          .string,
+          () => Constant.string('null'),
+        )!;
+        result = result is ScalarConstant && result.value == ''
+            ? text
+            : context.emit(StringConcat(result, text));
+      }
+      return result;
     case ast.ParenthesizedExpression(:final expression):
       return lowerExpression(context, expression);
     case ast.IsExpression(:final expression, :final type, :final notOperator):

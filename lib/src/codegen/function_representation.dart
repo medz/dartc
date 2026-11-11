@@ -360,6 +360,14 @@ final class FunctionRepresentation(
           _operands[instruction] = block.parameters;
           continue;
         }
+        if (instruction case ObjectHashCode(:final operand, direct: true)) {
+          block = valueOperations.identityHash(operand, block, typeTest);
+          body = instructions[block]!;
+          body.add(instruction);
+          aliases.add(instruction);
+          _operands[instruction] = block.parameters;
+          continue;
+        }
         if (layouts.maps.callFor(instruction) case final target?) {
           invocations[instruction] = target;
           _operands[instruction] = [

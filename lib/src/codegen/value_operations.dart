@@ -130,6 +130,39 @@ final class ValueOperations(
     return done;
   }
 
+  Block identityHash(
+    Value value,
+    Block block,
+    void Function(TypeTest, List<Value>) prepareTest,
+  ) {
+    if (value.type == .nullType || layouts.isBoxable(value.type)) {
+      return hashScalar(value, block);
+    }
+    final done = graph.addBlock([.integer]);
+    for (final type in [
+      ValueType.integer,
+      ValueType.floating,
+      ValueType.boolean,
+    ]) {
+      if (layouts.typeTest(value.type, type) == .constantFalse) continue;
+      final scalar = graph.addBlock([type]), next = graph.addBlock();
+      final test = TypeTest(value, type);
+      prepareTest(test, graph.instructions[block]!);
+      graph.ends[block] = Branch(
+        test,
+        Jump(scalar, [test.refinement(true)!]),
+        Jump(next),
+      );
+      final hashed = hashScalar(scalar.parameters.single, scalar);
+      graph.ends[hashed] = Jump(done, hashed.parameters);
+      block = next;
+    }
+    final hash = ObjectHashCode(value, direct: true);
+    graph.instructions[block]!.add(hash);
+    graph.ends[block] = Jump(done, [hash]);
+    return done;
+  }
+
   Block hashScalar(Value value, Block entry) {
     final done = graph.addBlock([.integer]);
     if (value.type == .nullType) {

@@ -131,7 +131,7 @@ final class ObjectRuntimeType(
 final class ObjectHashCode(
   final Value operand, {
 
-  /// Whether `super` selected Object's identity hash without virtual dispatch.
+  /// Whether to use Object's identity hash without virtual dispatch.
   final bool direct = false,
 }) extends Instruction {
   this : super(.integer) {

@@ -61,6 +61,11 @@ Value Function(FunctionTarget, Block)? intrinsicFor(
     )!;
   }
   if (element.library.isDartCore) {
+    if (element.baseElement ==
+        element.library.getTopLevelFunction('identityHashCode')) {
+      return (target, entry) =>
+          entry.emit(ObjectHashCode(entry.parameters.single, direct: true));
+    }
     if (element == element.library.getClass('Map')!.unnamedConstructor) {
       requireMapSupport(element.library, requireClass);
       return (target, entry) =>

@@ -69,6 +69,7 @@ const _compilerLibraries = {
   'managed_objects',
   'heap_runtime',
   'weak_references',
+  'expandos',
   'numeric_boxes',
   'exceptions',
   'type_checks',

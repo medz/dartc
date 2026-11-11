@@ -43,7 +43,7 @@
 
 同步原生入口内支持对象分配与不可达对象回收，保留引用别名及循环引用。含引用全局槽的模块跨入口保留堆，同模块、同线程的同步原生回调重入共享堆及 GC 根，包括暂停的外层栈帧。没有引用全局槽时，入口及重入仍使用各自的独立堆，返回即释放。持久堆在 dartc 链接的共享库卸载时释放，独立程序退出前显式释放，见[模块清理与卸载](libraries.md#模块清理与卸载)。并发调用、跨线程调用、跨模块托管值 ABI 及异步执行尚未实现。同步异常传播与清理见[原生异常范围](statements.md#原生异常与清理)。分配失败目前仍作为未捕获错误终止进程；可捕获的 `OutOfMemoryError` 尚未实现。
 
-弱引用槽不会保活目标；条件 key/value 引用在所属对象与 key 存活时保留 value，并处理条件引用之间的依赖闭包。仅由 key/value 互相引用形成的循环不会自行存活，多个独立弱槽分别清理。见[弱槽与条件引用验证](../test/codegen/weak_heap_native_test.dart)。公开 `WeakReference<T>` 已接通普通工厂、字段读取和回收路径，见[标准库支持](libraries.md)；Expando 与终结 API 仍是缺口。
+弱引用槽不会保活目标；条件 key/value 引用在所属对象与 key 存活时保留 value，并处理条件引用之间的依赖闭包。仅由 key/value 互相引用形成的循环不会自行存活，多个独立弱槽分别清理。见[弱槽与条件引用验证](../test/codegen/weak_heap_native_test.dart)。公开 `WeakReference<T>` 与 `Expando<T>` 已接通源码和回收路径，见[标准库支持](libraries.md)；终结 API 仍是缺口。
 
 [布局契约](../test/layout/object_layout_test.dart)、[常量身份与表示检查](../test/codegen/object_values_test.dart)和[原生对象引用验证](../test/codegen/object_values_native_test.dart)覆盖字段、具体类型身份、嵌套引用、寄存器与栈参数、调用保存、循环交换及 null。
 
