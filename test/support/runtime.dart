@@ -1,16 +1,22 @@
+import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
-import 'package:dartc/ir.dart';
 
-late IrFunction heapCapacity;
+late HeapRuntime heapRuntime;
 
 Future<void> prepareRuntime() async {
-  heapCapacity = await AnalysisSession(['lib/src/runtime/heap.dart']).use(
-    (input) async =>
-        (await Lowering().lower(input)).program.functions.singleWhere(
-          (f) =>
-              f.target.library == input.libraries.single.element.uri &&
-              f.target.owner == null &&
-              f.target.name == 'heapCapacity',
-        ),
-  );
+  heapRuntime = await AnalysisSession(['lib/src/runtime/heap.dart'])
+      .use((input) async {
+        final program = (await Lowering().lower(input)).program;
+        final functions = {
+          for (final function in program.functions)
+            if (function.target.library == input.libraries.single.element.uri &&
+                function.target.owner == null)
+              function.target.name: function,
+        };
+        return HeapRuntime(
+          capacity: functions['heapCapacity']!,
+          copy: functions['copyWords']!,
+          clear: functions['clearWords']!,
+        );
+      });
 }

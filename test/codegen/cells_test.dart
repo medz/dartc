@@ -207,7 +207,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: [declaration, child],
             ),
             throwsA(
@@ -250,7 +250,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: [declaration],
                   )
                   .sections,
@@ -260,7 +260,7 @@ void main() {
             expect(
               () => generator.generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: [declaration],
               ),
               throwsA(
@@ -294,7 +294,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: [declaration],
             ),
             throwsA(
@@ -326,7 +326,7 @@ void main() {
             expect(
               () => generator.generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: [declaration],
               ),
               throwsA(
@@ -342,7 +342,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: [declaration],
                   )
                   .sections,

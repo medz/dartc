@@ -4,12 +4,70 @@ import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
+import 'package:dartc/src/codegen/pointer_parameters.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:pointer-representation');
   final pointerType = FfiTypes.int64Pointer;
+
+  test('direct call chains agree on unboxed pointer parameters', () {
+    final read = FunctionTarget(uri, 'read', .integer, [pointerType]);
+    final forward = FunctionTarget(uri, 'forward', .integer, [pointerType]);
+    final caller = FunctionTarget(uri, 'caller', .integer, []);
+    final a = Block(read.parameterTypes);
+    a.finish(Return(a.emit(PointerAddress(a.parameters.single))));
+    final b = Block(forward.parameterTypes);
+    b.finish(Return(b.emit(DirectCall(read, b.parameters))));
+    final c = Block();
+    final pointer = c.emit(
+      PointerFromAddress(const Constant.integer(32), pointerType),
+    );
+    c.finish(Return(c.emit(DirectCall(forward, [pointer]))));
+    final program = IrProgram([], [
+      IrFunction(read, [a]),
+      IrFunction(forward, [b]),
+      IrFunction(caller, [c]),
+    ]);
+    final layouts = ProgramLayout([], functions: program.functions);
+    final members = MemberCalls(program, {read, forward, caller});
+    for (final function in program.functions) {
+      final body = FunctionRepresentation(
+        function,
+        layouts,
+        CheckedCasts(),
+        members,
+        HeapPlan(FrameLookup()),
+      );
+      for (final parameter in function.entry.parameters) {
+        expect(parameter.type, pointerType);
+        expect(body.typeOf(parameter), ValueType.integer);
+      }
+      expect(body.boxes, isEmpty);
+      expect(body.invocations.keys.whereType<PointerFromAddress>(), isEmpty);
+    }
+    expect(layouts.entryTypes(forward), [ValueType.integer]);
+  });
+
+  test('identity observation propagates through recursive call cycles', () {
+    for (final observe in [false, true]) {
+      final a = FunctionTarget(uri, 'a', .integer, [pointerType]);
+      final b = FunctionTarget(uri, 'b', .integer, [pointerType]);
+      final x = Block(a.parameterTypes), y = Block(b.parameterTypes);
+      x.finish(Return(x.emit(DirectCall(b, x.parameters))));
+      if (observe) {
+        y.emit(Identical(y.parameters.single, y.parameters.single));
+      }
+      y.finish(Return(y.emit(DirectCall(a, y.parameters))));
+      final parameters = PointerParameters([
+        IrFunction(a, [x]),
+        IrFunction(b, [y]),
+      ]);
+      expect(parameters.contains(a, 0), !observe);
+      expect(parameters.contains(b, 0), !observe);
+    }
+  });
 
   FunctionRepresentation select(
     ValueType result,

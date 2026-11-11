@@ -12,15 +12,16 @@ import 'function_emitter.dart';
 import 'program_layout.dart';
 import 'frame_lookup.dart';
 import 'type_values.dart';
+import 'heap_runtime.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
-final class HeapPlan(FrameLookup frames, {FunctionTarget? capacity}) {
+final class HeapPlan(FrameLookup frames, {HeapRuntime? runtime}) {
   final _factories =
       <FunctionTarget, ({FunctionTarget? initializer, ClassType type})>{};
   final _boxes = <ValueType, FunctionTarget>{};
   final _initializers = <FunctionTarget, FunctionTarget>{};
   final _payloads = <ClassType, FunctionTarget>{};
-  final heap = HeapFunctions(frames, capacity: capacity);
+  final heap = HeapFunctions(frames, runtime: runtime);
 
   List<IrFunction> get functions => heap.functions;
 
@@ -86,7 +87,7 @@ final class HeapPlan(FrameLookup frames, {FunctionTarget? capacity}) {
         emitter.convention.classify(
           NativeSignature.types(
             layouts.callType(function.returnType),
-            function.parameterTypes.map(layouts.callType),
+            layouts.entryTypes(function).map(layouts.callType),
           ),
         );
     final source = classify(target),
@@ -196,18 +197,32 @@ final class HeapPlan(FrameLookup frames, {FunctionTarget? capacity}) {
     }
     emitter.storeStack(allocation.result!, objectOffset);
 
-    int offsetOf(int i) =>
-        i == 0 ? objectOffset : frame.localOffset + (i - 1) * 8;
+    void loadArgument(int i, R register) {
+      emitter.loadStack(
+        register,
+        i == 0 ? objectOffset : frame.localOffset + (i - 1) * 8,
+      );
+      if (layouts.pointerParameters.contains(initializer, i)) {
+        emitter.loadMemory(
+          register,
+          register,
+          offset: layouts.fieldOffset(layouts.pointers.address),
+          bytes: 8,
+          signed: false,
+        );
+      }
+    }
+
     for (final (i, location) in destination!.parameters.indexed) {
       if (location case StackArgument(:final offset)) {
         final register = scratch(initializer.parameterTypes[i]);
-        emitter.loadStack(register, offsetOf(i));
+        loadArgument(i, register);
         emitter.storeStack(register, offset);
       }
     }
     for (final (i, location) in destination.parameters.indexed) {
       if (location case RegisterArgument(:final register)) {
-        emitter.loadStack(register, offsetOf(i));
+        loadArgument(i, register);
       }
     }
     call(emitter.call(), initializer);

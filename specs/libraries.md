@@ -85,6 +85,8 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 
 [指针偏移与索引验证](../test/compiler/pointer_arithmetic_test.dart)覆盖各标量元素宽度、负偏移、地址回绕、索引读写及相邻字节、增减和复合赋值的求值顺序、别名与跨调用存活。预期地址由整数公式独立计算；SDK 另作对照。规范依据为对应元素类型的标准库契约，包括 [Int32Pointer.operator +](https://api.dart.dev/stable/3.13.7/dart-ffi/Int32Pointer/operator_plus.html)、[operator -](https://api.dart.dev/stable/3.13.7/dart-ffi/Int32Pointer/operator_minus.html)、[operator []](https://api.dart.dev/stable/3.13.7/dart-ffi/Int32Pointer/operator_get.html) 与 [FloatPointer.operator []=](https://api.dart.dev/stable/3.13.7/dart-ffi/FloatPointer/operator_put.html)。
 
+[内存循环验证](../test/compiler/runtime_test.dart)通过直接调用与函数值调用复制、清零 `Pointer<Int64>` 指向的区域，检查零长度、原始位模式、源区域不变和相邻存储不被改写；身份观察及持久保存仍由[指针对象验证](../test/compiler/pointer_values_test.dart)覆盖。
+
 [原生整数验证](../test/compiler/native_integers_test.dart)检查各宽度的正负边界、截断与扩展、邻接字节保护、IR 与原生访问、注解函数的普通 Dart 调用，以及窄整数与浮点混合栈参数。整数读写预期由元素位宽独立计算；SDK 对照不替代该预期。规范依据包括 [Int8Pointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/Int8Pointer/value.html)、[Uint8Pointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/Uint8Pointer/value.html)及对应宽度的标准库契约。
 
 [原生浮点存储验证](../test/compiler/native_floats_test.dart)检查 Float 参数与结果、普通调用保持 double 精度、Float/Double 指针读写、复合赋值及混合栈参数。默认浮点环境下的舍入预期使用明确的 binary32 位模式，覆盖中点、次正规数、溢出、正负零与 NaN；另与 SDK 对照。规范依据为 [FloatPointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/FloatPointer/value.html) 和 [DoublePointer.value](https://api.dart.dev/stable/3.13.7/dart-ffi/DoublePointer/value.html)。

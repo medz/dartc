@@ -350,7 +350,7 @@ ObjectModule dynamicBoxes(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
-    heapCapacity: heapCapacity,
+    runtime: heapRuntime,
     definitions: functions.map((f) => f.target),
     exports: exports,
   );

@@ -43,7 +43,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: program.reachableFrom([caller]),
             ),
             returnsNormally,
@@ -73,7 +73,7 @@ void main() {
             generator
                 .generate(
                   program,
-                  heapCapacity: heapCapacity,
+                  runtime: heapRuntime,
                   definitions: program.reachableFrom([hash]),
                 )
                 .sections,
@@ -142,7 +142,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: program.reachableFrom([outer]),
                   )
                   .sections,

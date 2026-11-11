@@ -7,6 +7,11 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/src/codegen/heap_functions.dart';
+import 'package:dartc/src/codegen/heap_plan.dart';
+import 'package:dartc/src/codegen/checked_casts.dart';
+import 'package:dartc/src/codegen/function_representation.dart';
+import 'package:dartc/src/codegen/member_calls.dart';
+import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/stack_traces.dart';
 import 'package:test/test.dart';
 
@@ -40,7 +45,7 @@ void main() {
       ]) {
         final module = generator.generate(
           lowered.program,
-          heapCapacity: heapCapacity,
+          runtime: heapRuntime,
           definitions: definitions,
         );
         expect(
@@ -77,7 +82,7 @@ void main() {
           generator
               .generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: [function.target],
               )
               .symbols
@@ -107,7 +112,7 @@ void main() {
         ]) {
           final module = generator.generate(
             lowered.program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: lowered.program.reachableFrom([entry]),
           );
           final names = module.symbols.map((symbol) => symbol.name);
@@ -133,15 +138,30 @@ void main() {
 
   test('heap and stack inspection do not construct Dart pointer objects', () {
     final frames = FrameLookup(),
-        heap = HeapFunctions(frames, capacity: heapCapacity.target);
-    for (final function in [
+        heap = HeapFunctions(frames, runtime: heapRuntime);
+    final traces = StackTraces(frames);
+    final functions = [
       ...heap.functions,
       frames.function,
-      ...StackTraces(frames).functions(heap.invalid),
-    ]) {
-      final operations = function.blocks.expand((block) => block.instructions);
-      expect(operations.whereType<PointerFromAddress>(), isEmpty);
-      expect(operations.whereType<PointerOffset>(), isEmpty);
+      ...traces.functions(heap.invalid),
+      ...heapRuntime.functions,
+    ];
+    final program = IrProgram([traces.declaration], functions);
+    final layouts = ProgramLayout(program.classes, functions: functions);
+    final members = MemberCalls(
+      program,
+      functions.map((f) => f.target).toSet(),
+    );
+    for (final function in functions) {
+      final body = FunctionRepresentation(
+        function,
+        layouts,
+        CheckedCasts(),
+        members,
+        HeapPlan(frames, runtime: heapRuntime),
+      );
+      expect(body.invocations.keys.whereType<PointerFromAddress>(), isEmpty);
+      expect(body.invocations.keys.whereType<PointerOffset>(), isEmpty);
     }
   });
 
@@ -173,11 +193,7 @@ void main() {
     ]) {
       expect(
         generator
-            .generate(
-              program,
-              heapCapacity: heapCapacity,
-              definitions: [target],
-            )
+            .generate(program, runtime: heapRuntime, definitions: [target])
             .sections,
         isNotEmpty,
       );
@@ -210,7 +226,7 @@ void main() {
       ]) {
         final module = generator.generate(
           program,
-          heapCapacity: heapCapacity,
+          runtime: heapRuntime,
           definitions: [target],
         );
         expect(module.relocations, isEmpty);
@@ -250,7 +266,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [entry],
           ),
           throwsArgumentError,
@@ -275,7 +291,7 @@ void main() {
               ...arithmeticProgram.functions,
               IrFunction(entry, [withSupport]),
             ]),
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [entry],
           ),
           throwsArgumentError,
@@ -283,7 +299,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [callee],
             exports: {
               entry: NativeExport(
@@ -297,7 +313,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [callee],
             exports: {
               callee: NativeExport(
@@ -310,7 +326,7 @@ void main() {
         );
         final module = generator.generate(
           program,
-          heapCapacity: heapCapacity,
+          runtime: heapRuntime,
           definitions: [entry, callee],
         );
         expect(
@@ -350,13 +366,13 @@ void main() {
     ]) {
       final first = generator.generate(
         program,
-        heapCapacity: heapCapacity,
+        runtime: heapRuntime,
         definitions: exports.keys,
         exports: exports,
       );
       final second = generator.generate(
         program,
-        heapCapacity: heapCapacity,
+        runtime: heapRuntime,
         definitions: exports.keys,
         exports: exports,
       );

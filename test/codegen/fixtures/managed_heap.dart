@@ -343,7 +343,7 @@ ObjectModule managedHeap(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
-    heapCapacity: heapCapacity,
+    runtime: heapRuntime,
     definitions: [...functions.map((f) => f.target), qsort],
     imports: {qsort: NativeImport('qsort', qsortSignature)},
     exports: {

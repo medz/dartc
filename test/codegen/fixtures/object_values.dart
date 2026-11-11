@@ -186,7 +186,7 @@ ObjectModule objectValues(Target target) {
       : X64CodeGenerator(target);
   return generator.generate(
     program,
-    heapCapacity: heapCapacity,
+    runtime: heapRuntime,
     definitions: [
       ...program.functions.map((f) => f.target),
       program.externals.single.target,

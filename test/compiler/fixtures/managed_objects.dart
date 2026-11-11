@@ -28,6 +28,26 @@ double allocateAndNotify(int count, double fraction, Pointer<Int64> output) {
 
 void main() => allocateAndNotify(40000, 1.25, .fromAddress(0));
 
+class StackPointerArguments(
+  int a,
+  int b,
+  int c,
+  int d,
+  int e,
+  int f,
+  int g,
+  int h,
+  Pointer<Int64> output,
+) {
+  this {
+    output.value = a + b + c + d + e + f + g + h;
+  }
+}
+
+@Export<Void Function(Pointer<Int64>)>()
+void constructStackPointer(Pointer<Int64> output) =>
+    StackPointerArguments(1, 2, 3, 4, 5, 6, 7, 8, output);
+
 class NumericConstruction<I extends int, F extends double>(
   I integer,
   F floating,

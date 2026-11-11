@@ -35,7 +35,7 @@ ObjectModule aliases(Target target) {
   final program = arithmetic();
   return generator.generate(
     program,
-    heapCapacity: heapCapacity,
+    runtime: heapRuntime,
     definitions: program.functions.map((f) => f.target),
     exports: {
       for (final f in program.functions)

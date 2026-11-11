@@ -21,6 +21,7 @@ import 'stack_maps.dart';
 import 'heap_plan.dart';
 import 'heap_entry.dart';
 import 'heap_functions.dart';
+import 'heap_runtime.dart';
 import 'frame_lookup.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
@@ -47,23 +48,21 @@ base class ScalarCodeGenerator<R extends Object>(
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
     ({FunctionTarget function, String symbol})? entryPoint,
-    IrFunction? heapCapacity,
+    HeapRuntime? runtime,
   }) {
-    if (heapCapacity != null) {
-      final function = heapCapacity.target;
-      if (function.kind != .function ||
-          function.typeParameters.isNotEmpty ||
-          function.signature != FunctionType(.integer, [.integer, .integer])) {
-        throw ArgumentError('Heap capacity requires int Function(int, int).');
+    if (runtime != null) {
+      final missing = <IrFunction>[];
+      for (final function in runtime.functions) {
+        final existing = program.implementationOf(function.target);
+        if (existing != null && !identical(existing, function)) {
+          throw ArgumentError('Conflicting heap runtime definition.');
+        }
+        if (existing == null) missing.add(function);
       }
-      final existing = program.implementationOf(function);
-      if (existing != null && !identical(existing, heapCapacity)) {
-        throw ArgumentError('Conflicting heap capacity definition.');
-      }
-      if (existing == null) {
+      if (missing.isNotEmpty) {
         program = IrProgram(
           program.classes,
-          [...program.functions, heapCapacity],
+          [...program.functions, ...missing],
           globals: program.globals,
           externals: program.externals,
         );
@@ -100,7 +99,7 @@ base class ScalarCodeGenerator<R extends Object>(
         ..clear()
         ..addAll(sourceDefinitions);
       final frames = FrameLookup();
-      final heap = HeapPlan(frames, capacity: heapCapacity?.target);
+      final heap = HeapPlan(frames, runtime: runtime);
       final traces = StackTraces(frames);
       final casts = CheckedCasts();
       IrCallable? constructor(ValueType? type, [String name = 'new']) {
@@ -313,6 +312,7 @@ base class ScalarCodeGenerator<R extends Object>(
           ...closures.classes,
           traces.declaration,
         ],
+        functions: program.functions,
         instanceStorage: instances,
         closureStorage: closures,
         stringStorage: strings,
@@ -362,7 +362,11 @@ base class ScalarCodeGenerator<R extends Object>(
       resolved = selection;
       break;
     }
-    if (resolved.managed) resolved.checkNonAllocating(heapCapacity!.target);
+    if (resolved.managed) {
+      for (final function in runtime!.functions) {
+        resolved.checkNonAllocating(function.target);
+      }
+    }
     final selection = resolved;
     final layouts = selection.layouts, heap = selection.heap;
     final globals = selection.globals, traces = selection.traces;

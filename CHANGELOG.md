@@ -2,7 +2,7 @@
 
 Build a standalone development compiler with `dart run tool/build.dart`. Standard-library sources are stored as an indexed binary resource in the executable; source builds use the same archive from the package. Programmatic callers can supply `Compiler(target, sdk: ...)` or `AnalysisSession(paths, sdk: ...)` with explicit `DartSdk` resources.
 
-`AnalysisSession(resources: ...)` checks bundled Dart libraries in the same session as file inputs. `Compiler` supplies its bundled heap-sizing implementation automatically. Direct `CodeGenerator.generate` callers generating managed code must now supply a checked `heapCapacity` function body; its call dependencies must be present and cannot allocate, throw or enter foreign code.
+`AnalysisSession(resources: ...)` checks bundled Dart libraries in the same session as file inputs. `Compiler` supplies ordinary Dart heap-sizing and memory algorithms automatically. Direct `CodeGenerator.generate` callers generating managed code supply `runtime: HeapRuntime(...)` with checked capacity, copy and clear bodies; their call dependencies must be present and cannot allocate, throw or enter foreign code.
 
 The development checkout uses analyzer 14.7.0 to resolve Dart source, produces verified IR and builds native integer, double and pointer library exports and programs. Executables support synchronous, parameterless main functions. Object construction and reclamation support synchronous native entries and persistent managed globals; concurrent calls, cross-thread execution, cross-module managed values, asynchronous execution and complete standard library support remain unimplemented. Existing native compiler downloads remain available in [0.5.0](https://github.com/medz/dartc/releases/tag/v0.5.0).
 

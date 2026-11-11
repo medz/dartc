@@ -33,11 +33,7 @@ void main() {
         ]);
         expect(
           generator
-              .generate(
-                program,
-                heapCapacity: heapCapacity,
-                definitions: [target],
-              )
+              .generate(program, runtime: heapRuntime, definitions: [target])
               .sections,
           isNotEmpty,
         );
@@ -46,7 +42,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [target],
             exports: {
               target: NativeExport('generic', NativeSignature(Int64, [])),
@@ -76,11 +72,7 @@ void main() {
         ]);
         expect(
           generator
-              .generate(
-                program,
-                heapCapacity: heapCapacity,
-                definitions: [target],
-              )
+              .generate(program, runtime: heapRuntime, definitions: [target])
               .sections,
           isNotEmpty,
         );
@@ -113,11 +105,7 @@ void main() {
         ]);
         expect(
           generator
-              .generate(
-                program,
-                heapCapacity: heapCapacity,
-                definitions: [target],
-              )
+              .generate(program, runtime: heapRuntime, definitions: [target])
               .sections,
           isNotEmpty,
         );
@@ -144,11 +132,7 @@ void main() {
         if (count == 4102) {
           expect(
             generator
-                .generate(
-                  program,
-                  heapCapacity: heapCapacity,
-                  definitions: [target],
-                )
+                .generate(program, runtime: heapRuntime, definitions: [target])
                 .sections
                 .single
                 .bytes,
@@ -158,7 +142,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: [target],
             ),
             throwsRangeError,

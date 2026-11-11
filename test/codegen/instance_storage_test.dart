@@ -232,7 +232,7 @@ void main() {
           generator
               .generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: program.reachableFrom([read]),
               )
               .sections,
@@ -276,7 +276,7 @@ void main() {
           generator
               .generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: program.reachableFrom([read]),
               )
               .sections,

@@ -133,7 +133,7 @@ ObjectModule stackRoots(Target target) {
       functions,
       externals: [IrExternal(external)],
     ),
-    heapCapacity: heapCapacity,
+    runtime: heapRuntime,
     definitions: [...functions.map((f) => f.target), external],
     exports: {
       run: NativeExport(

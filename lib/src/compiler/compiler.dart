@@ -52,7 +52,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
     final (
       lowered,
       sources,
-      heapCapacity,
+      runtime,
     ) = await AnalysisSession(
       paths,
       includeDependencies: true,
@@ -60,7 +60,13 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       resources: const ['runtime/heap.dart'],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
-      final runtime = input.resources['runtime/heap.dart']!.element.uri;
+      final library = input.resources['runtime/heap.dart']!.element.uri;
+      final functions = {
+        for (final function in lowered.program.functions)
+          if (function.target.library == library &&
+              function.target.owner == null)
+            function.target.name: function,
+      };
       return (
         lowered,
         [
@@ -68,11 +74,10 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
             if (!input.resources.containsValue(library))
               for (final unit in library.units) File(unit.path).absolute.uri,
         ],
-        lowered.program.functions.singleWhere(
-          (f) =>
-              f.target.library == runtime &&
-              f.target.owner == null &&
-              f.target.name == 'heapCapacity',
+        HeapRuntime(
+          capacity: functions['heapCapacity']!,
+          copy: functions['copyWords']!,
+          clear: functions['clearWords']!,
         ),
       );
     });
@@ -129,7 +134,7 @@ final class Compiler(final Target target, {final DartSdk? sdk}) {
       entryPoint: output is ExecutableOutput
           ? (function: entryPoint!, symbol: entrySymbol)
           : null,
-      heapCapacity: heapCapacity,
+      runtime: runtime,
     );
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),

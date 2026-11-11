@@ -182,7 +182,7 @@ Future<void> main(List<String> args) async {
       'native_function_pointers',
       'native_imports',
       'managed_objects',
-      'heap_capacity',
+      'heap_runtime',
       'numeric_boxes',
       'exceptions',
       'type_checks',

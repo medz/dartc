@@ -37,11 +37,7 @@ void main() {
       ]);
       expect(
         generator
-            .generate(
-              program,
-              heapCapacity: heapCapacity,
-              definitions: [target],
-            )
+            .generate(program, runtime: heapRuntime, definitions: [target])
             .sections,
         isNotEmpty,
       );
@@ -102,11 +98,7 @@ void main() {
         expect(definitions, {root, target, if (!direct) getter});
         expect(
           generator
-              .generate(
-                program,
-                heapCapacity: heapCapacity,
-                definitions: definitions,
-              )
+              .generate(program, runtime: heapRuntime, definitions: definitions)
               .sections,
           isNotEmpty,
         );
@@ -114,7 +106,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: [root, target],
             ),
             throwsA(
@@ -170,7 +162,7 @@ void main() {
       expect(
         () => generator.generate(
           program,
-          heapCapacity: heapCapacity,
+          runtime: heapRuntime,
           definitions: program.reachableFrom([target]),
         ),
         throwsA(
@@ -207,7 +199,7 @@ void main() {
               IrProgram([], [
                 IrFunction(target, [block]),
               ]),
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: [target],
             );
             expect(
@@ -236,7 +228,7 @@ void main() {
             IrFunction(producer, [produced]),
             IrFunction(target, [body]),
           ]),
-          heapCapacity: heapCapacity,
+          runtime: heapRuntime,
           definitions: [producer, target],
         );
         final call = module.relocations
@@ -286,11 +278,7 @@ void main() {
         );
         expect(
           generator
-              .generate(
-                program,
-                heapCapacity: heapCapacity,
-                definitions: [target],
-              )
+              .generate(program, runtime: heapRuntime, definitions: [target])
               .sections,
           isNotEmpty,
         );
@@ -335,11 +323,7 @@ void main() {
         );
         expect(
           generator
-              .generate(
-                program,
-                heapCapacity: heapCapacity,
-                definitions: [target],
-              )
+              .generate(program, runtime: heapRuntime, definitions: [target])
               .sections,
           isNotEmpty,
         );

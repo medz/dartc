@@ -13,6 +13,17 @@ void main() {
   final uri = Uri.parse('memory:runtime-calls');
   final entry = FunctionTarget(uri, 'entry', .integer, []);
 
+  test('heap runtime rejects incompatible source signatures', () {
+    expect(
+      () => HeapRuntime(
+        capacity: heapRuntime.capacity,
+        copy: heapRuntime.clear,
+        clear: heapRuntime.clear,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   IrFunction mainBody({required bool managed}) {
     final block = Block();
     block.finish(
@@ -33,6 +44,34 @@ void main() {
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
+    test('${generator.target} rejects caller-side runtime boxing', () {
+      final target = FunctionTarget(uri, 'clear', .voidType, [
+        FfiTypes.int64Pointer,
+        .integer,
+      ]);
+      final block = Block(target.parameterTypes);
+      block.emit(Identical(block.parameters.first, block.parameters.first));
+      block.finish(const Return());
+      expect(
+        () => generator.generate(
+          IrProgram([], [mainBody(managed: true)]),
+          definitions: [entry],
+          runtime: HeapRuntime(
+            capacity: heapRuntime.capacity,
+            copy: heapRuntime.copy,
+            clear: IrFunction(target, [block]),
+          ),
+        ),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (e) => e.message,
+            'contract',
+            contains('requires a managed object'),
+          ),
+        ),
+      );
+    });
+
     test('${generator.target} rejects foreign runtime dependencies', () {
       final foreign = FunctionTarget(uri, 'foreign', .integer, [
         .integer,
@@ -61,7 +100,11 @@ void main() {
               isLeaf: true,
             ),
           },
-          heapCapacity: IrFunction(target, [block]),
+          runtime: HeapRuntime(
+            capacity: IrFunction(target, [block]),
+            copy: heapRuntime.copy,
+            clear: heapRuntime.clear,
+          ),
         ),
         throwsA(
           isA<UnsupportedError>().having(
@@ -81,9 +124,14 @@ void main() {
           final module = generator.generate(
             program,
             definitions: [entry],
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
           );
-          expect(module.symbols.any((s) => s.name == 'heapCapacity'), managed);
+          for (final function in heapRuntime.functions) {
+            expect(
+              module.symbols.any((s) => s.name == function.target.name),
+              managed,
+            );
+          }
           if (managed) {
             expect(
               () => generator.generate(program, definitions: [entry]),
@@ -126,7 +174,11 @@ void main() {
           () => generator.generate(
             program,
             definitions: [entry],
-            heapCapacity: IrFunction(target, [call]),
+            runtime: HeapRuntime(
+              capacity: IrFunction(target, [call]),
+              copy: heapRuntime.copy,
+              clear: heapRuntime.clear,
+            ),
           ),
           throwsA(
             isA<UnsupportedError>().having(

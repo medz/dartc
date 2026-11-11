@@ -24,7 +24,7 @@ void main() {
       ...arithmetic.classes,
       traces.declaration,
     ]);
-    final heap = HeapPlan(frames, capacity: heapCapacity.target);
+    final heap = HeapPlan(frames, runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
       'round',
@@ -64,7 +64,7 @@ void main() {
       GlobalStorage([]),
       layouts.instances,
     );
-    selection.include(heapCapacity);
+    heapRuntime.functions.forEach(selection.include);
     expect(selection.close(persistent: true), isEmpty);
     expect(arithmetic.functions.length, greaterThanOrEqualTo(2));
     expect(
@@ -112,7 +112,7 @@ void main() {
       ...program.classes,
       traces.declaration,
     ]);
-    final heap = HeapPlan(frames, capacity: heapCapacity.target);
+    final heap = HeapPlan(frames, runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
       'shift',
@@ -143,7 +143,7 @@ void main() {
       GlobalStorage([]),
       layouts.instances,
     );
-    selection.include(heapCapacity);
+    heapRuntime.functions.forEach(selection.include);
     expect(selection.close(persistent: true), {constructor});
   });
 }

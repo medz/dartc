@@ -29,7 +29,7 @@ void main() {
     ]) {
       final module = generator.generate(
         program,
-        heapCapacity: heapCapacity,
+        runtime: heapRuntime,
         definitions: [target],
       );
       expect(module.imports, isEmpty);
@@ -83,7 +83,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [target],
             exports: {
               target: NativeExport(

@@ -157,6 +157,8 @@ final class FunctionRepresentation(
     ];
     // An address-only temporary has no observable object identity.
     final addressOnly = <Value>{
+      for (final (i, parameter) in function.entry.parameters.indexed)
+        if (layouts.pointerParameters.contains(function.target, i)) parameter,
       for (final operation in operations)
         if (operation is PointerFromAddress || operation is PointerOffset)
           operation,
@@ -167,8 +169,8 @@ final class FunctionRepresentation(
       ),
     );
     for (final operation in operations) {
-      for (final input in operation.inputs) {
-        if (operation is! PointerAddress && operation is! PointerOffset) {
+      for (final (i, input) in operation.inputs.indexed) {
+        if (!layouts.pointerParameters.accepts(operation, i)) {
           addressOnly.remove(input);
         }
         if (!(operation is ReadCell && operation.cell == input ||
@@ -193,6 +195,9 @@ final class FunctionRepresentation(
         addressOnly.removeAll(edge.arguments);
       }
     }
+    for (final parameter in function.entry.parameters) {
+      if (addressOnly.contains(parameter)) _resultTypes[parameter] = .integer;
+    }
     Value pointerAddress(Value pointer, List<Value> into) {
       if (!addressOnly.contains(pointer)) {
         return _load(layouts.pointers.address, pointer, into);
@@ -213,6 +218,9 @@ final class FunctionRepresentation(
     }
 
     Value convert(Value value, ValueType type, List<Value> into) {
+      if (type == .integer && FfiTypes.isPointer(value.type)) {
+        return pointerAddress(value, into);
+      }
       if (!needsBox(value, type)) return value;
       final box = TypeView(
         value,
@@ -1094,7 +1102,14 @@ final class FunctionRepresentation(
               _ => throw StateError('Expected a member call.'),
             };
             invocations[call] = target;
-            _operands[call] = [...arguments, ...invocationTypes];
+            final entryTypes = layouts.entryTypes(target);
+            final converted = <Value>[];
+            _operands[call] = [
+              for (final (i, value) in arguments.indexed)
+                convert(value, entryTypes[i], converted),
+              ...invocationTypes,
+            ];
+            converted.forEach(append);
             if (join == null || target.returnType == .never) {
               instructions[current]!.add(call);
               final returned = join == null ? null : Jump(missing);

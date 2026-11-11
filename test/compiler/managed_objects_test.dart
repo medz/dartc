@@ -13,6 +13,17 @@ import 'fixtures/managed_objects_ffi.dart';
 
 void main() {
   test(
+    'constructor stack arguments use the selected pointer representation',
+    () {
+      final native = ManagedObjects();
+      addTearDown(native.close);
+      native.output.value = -1;
+      native.constructStackPointer(native.output);
+      expect(native.output.value, 36);
+    },
+  );
+
+  test(
     'mapping failures escape allocation and constructor calls cleanly',
     () async {
       for (final name in ['managed_failure', 'managed_growth_failure']) {

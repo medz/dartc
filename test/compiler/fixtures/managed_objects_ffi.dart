@@ -9,6 +9,11 @@ final class ManagedObjects() {
   final _storage = NativeAssets(Target.host()).open('compiler/pointer_storage');
   late final output = _storage.lookup<Int64>('counter');
   late final floatingOutput = _storage.lookup<Double>('state');
+  late final constructStackPointer = _library
+      .lookupFunction<
+        Void Function(Pointer<Int64>),
+        void Function(Pointer<Int64>)
+      >('constructStackPointer');
   late final constructNumbers = _library
       .lookupFunction<
         Void Function(Int64, Double, Int64, Pointer<Int64>, Pointer<Double>),

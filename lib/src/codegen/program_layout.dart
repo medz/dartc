@@ -9,6 +9,7 @@ import 'type_values.dart';
 import 'instance_storage.dart';
 import 'type_relations.dart';
 import 'pointer_storage.dart';
+import 'pointer_parameters.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
 import 'map_storage.dart';
@@ -24,6 +25,7 @@ enum TypeTestKind() {
 /// Assigns physical storage to declaration identities within one compilation.
 final class ProgramLayout(
   Iterable<IrClass> classes, {
+  Iterable<IrFunction> functions = const [],
   Iterable<ClassType> referencedClasses = const [],
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
@@ -35,6 +37,7 @@ final class ProgramLayout(
   final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues();
   final pointers = PointerStorage();
+  final pointerParameters = PointerParameters(functions);
   final strings = stringStorage ?? StringStorage();
   final lists = listStorage ?? ListStorage();
   final maps = mapStorage ?? MapStorage();
@@ -95,18 +98,14 @@ final class ProgramLayout(
     };
   }
 
-  /// Appends factory owner and function type arguments to Dart parameters.
-  List<ValueType> entryTypes(FunctionTarget target) =>
-      target.typeParameters.isEmpty &&
-          !(target.kind == .factory && target.owner!.typeParameters.isNotEmpty)
-      ? target.parameterTypes
-      : [
-          ...target.parameterTypes,
-          if (target.kind == .factory &&
-              target.owner!.typeParameters.isNotEmpty)
-            TypeValues.type,
-          for (final _ in target.typeParameters) TypeValues.type,
-        ];
+  /// Selects parameter storage and appends lexical type arguments.
+  List<ValueType> entryTypes(FunctionTarget target) => [
+    for (final (i, type) in target.parameterTypes.indexed)
+      pointerParameters.contains(target, i) ? .integer : type,
+    if (target.kind == .factory && target.owner!.typeParameters.isNotEmpty)
+      TypeValues.type,
+    for (final _ in target.typeParameters) TypeValues.type,
+  ];
 
   /// Checks transfers before a machine word loses its semantic type.
   void checkTransfer(

@@ -57,7 +57,7 @@ void main() {
           );
           final module = generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [convert],
           );
           expect(
@@ -101,7 +101,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: program.reachableFrom([read]),
                   )
                   .sections,
@@ -112,7 +112,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: program.reachableFrom([read]),
             ),
             throwsA(

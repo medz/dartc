@@ -161,7 +161,7 @@ ObjectModule exceptions(Target target) {
       : X64CodeGenerator(target);
   final module = generator.generate(
     IrProgram(classes, bodies),
-    heapCapacity: heapCapacity,
+    runtime: heapRuntime,
     definitions: bodies.map((f) => f.target),
     exports: exports,
   );

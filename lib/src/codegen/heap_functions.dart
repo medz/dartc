@@ -4,11 +4,12 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
 import 'frame_lookup.dart';
+import 'heap_runtime.dart';
 
 /// Generates allocation and copying collection through ordinary typed IR.
 final class HeapFunctions(
   final FrameLookup frames, {
-  final FunctionTarget? capacity,
+  final HeapRuntime? runtime,
 }) {
   static final _uri = Uri.parse('dartc:heap');
   static const start = 0,
@@ -32,12 +33,14 @@ final class HeapFunctions(
   final _copy = _target('copy', .integer, 2);
   final _collect = _target('collect', .voidType, 5);
 
-  late final List<IrFunction> functions = [
-    _copyBody(),
-    _collectBody(),
-    _allocateBody(),
-    _releaseBody(),
-  ];
+  late final List<IrFunction> functions = _build();
+
+  List<IrFunction> _build() {
+    if (runtime == null) {
+      throw ArgumentError('Managed allocation requires heap runtime bodies.');
+    }
+    return [_copyBody(), _collectBody(), _allocateBody(), _releaseBody()];
+  }
 
   static FunctionTarget _target(
     String name,
@@ -55,7 +58,6 @@ final class HeapFunctions(
         range = Block(),
         header = Block();
     final unchanged = Block(), forwarded = Block(), fresh = Block();
-    final loop = Block([.integer]), word = Block(), done = Block();
     final [context, reference] = entry.parameters;
     _branch(
       entry,
@@ -86,17 +88,15 @@ final class HeapFunctions(
     final size = _load(fresh, reference, ObjectLayout.sizeOffset),
         destination = _load(fresh, context, copied);
     _store(fresh, context, _op(fresh, .add, destination, size), copied);
-    fresh.finish(Jump(loop, [_int(0)]));
-    final offset = loop.parameters.single;
-    _branch(loop, .lessThan, offset, size, word, done);
-    _store(
-      word,
-      _op(word, .add, destination, offset),
-      _load(word, _op(word, .add, reference, offset)),
+    fresh.emit(
+      DirectCall(runtime!.copy.target, [
+        fresh.emit(PointerFromAddress(destination, FfiTypes.int64Pointer)),
+        fresh.emit(PointerFromAddress(reference, FfiTypes.int64Pointer)),
+        _op(fresh, .shiftRight, size, _int(3)),
+      ]),
     );
-    word.finish(Jump(loop, [_op(word, .add, offset, _int(8))]));
-    _store(done, reference, _op(done, .bitOr, destination, _int(1)));
-    done.finish(Return(destination));
+    _store(fresh, reference, _op(fresh, .bitOr, destination, _int(1)));
+    fresh.finish(Return(destination));
     return IrFunction(_copy, [
       entry,
       range,
@@ -104,9 +104,6 @@ final class HeapFunctions(
       unchanged,
       forwarded,
       fresh,
-      loop,
-      word,
-      done,
     ]);
   }
 
@@ -352,7 +349,6 @@ final class HeapFunctions(
         old = Block(),
         ready = Block(),
         failed = Block();
-    final fill = Block([.integer]), zero = Block(), done = Block();
     final [context, descriptor, sp, pc, payloadBytes] = entry.parameters;
     final sized = Block(), aligned = Block();
     _branch(entry, .lessThan, payloadBytes, _int(0), failed, sized);
@@ -415,13 +411,7 @@ final class HeapFunctions(
       size,
     );
     final capacity = grow.emit(
-      DirectCall(
-        this.capacity ??
-            (throw ArgumentError(
-              'Managed allocation requires a heap capacity body.',
-            )),
-        [oldCapacity, needed],
-      ),
+      DirectCall(runtime!.capacity.target, [oldCapacity, needed]),
     );
     _equal(grow, capacity, _int(0), failed, first);
     final from = first.emit(DirectCall(map, [capacity]));
@@ -438,23 +428,24 @@ final class HeapFunctions(
     old.finish(Jump(ready));
     final address = _load(ready, context, top);
     _store(ready, context, _op(ready, .add, address, size), top);
-    ready.finish(Jump(fill, [_int(0)]));
-    final offset = fill.parameters.single;
-    _branch(fill, .lessThan, offset, size, zero, done);
-    _store(zero, _op(zero, .add, address, offset), _int(0));
-    zero.finish(Jump(fill, [_op(zero, .add, offset, _int(8))]));
-    _store(done, address, descriptor);
-    _store(done, address, size, ObjectLayout.sizeOffset);
+    ready.emit(
+      DirectCall(runtime!.clear.target, [
+        ready.emit(PointerFromAddress(address, FfiTypes.int64Pointer)),
+        _op(ready, .shiftRight, size, _int(3)),
+      ]),
+    );
+    _store(ready, address, descriptor);
+    _store(ready, address, size, ObjectLayout.sizeOffset);
     // An odd step visits every 30-bit hash without depending on object addresses.
     final hash = _op(
-      done,
+      ready,
       .bitAnd,
-      _op(done, .add, _load(done, context, identityHash), _int(0x9e3779b9)),
+      _op(ready, .add, _load(ready, context, identityHash), _int(0x9e3779b9)),
       _int(0x3fffffff),
     );
-    _store(done, context, hash, identityHash);
-    _store(done, address, hash, ObjectLayout.identityHashOffset);
-    done.finish(Return(address));
+    _store(ready, context, hash, identityHash);
+    _store(ready, address, hash, ObjectLayout.identityHashOffset);
+    ready.finish(Return(address));
     failed.finish(Return(_int(0)));
     return IrFunction(allocate, [
       entry,
@@ -471,9 +462,6 @@ final class HeapFunctions(
       old,
       ready,
       failed,
-      fill,
-      zero,
-      done,
     ]);
   }
 

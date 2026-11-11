@@ -39,7 +39,7 @@ void main() {
         () {
           final module = generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [first, caller, second],
             imports: {first: binding, second: binding},
             exports: {
@@ -67,7 +67,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: definitions,
           ),
           throwsArgumentError,
@@ -79,7 +79,7 @@ void main() {
           expect(
             () => generator.generate(
               program,
-              heapCapacity: heapCapacity,
+              runtime: heapRuntime,
               definitions: definitions,
               imports: {first: NativeImport('wrong', invalid), second: binding},
             ),
@@ -89,7 +89,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: definitions,
             imports: {first: binding, second: binding, caller: binding},
           ),
@@ -109,7 +109,7 @@ void main() {
         expect(
           () => generator.generate(
             pointerProgram,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [withPointer],
             imports: {
               withPointer: NativeImport(
@@ -127,7 +127,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: [caller],
             imports: {first: binding},
           ),
@@ -136,7 +136,7 @@ void main() {
         expect(
           () => generator.generate(
             program,
-            heapCapacity: heapCapacity,
+            runtime: heapRuntime,
             definitions: definitions,
             imports: {first: binding, second: binding},
             exports: {first: NativeExport('first', binding.signature)},

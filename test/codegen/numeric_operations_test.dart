@@ -33,7 +33,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: [target],
                   )
                   .sections,
@@ -43,7 +43,7 @@ void main() {
             expect(
               () => generator.generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: [target],
               ),
               throwsA(
@@ -89,7 +89,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: [target],
                   )
                   .sections,
@@ -133,7 +133,7 @@ void main() {
               generator
                   .generate(
                     program,
-                    heapCapacity: heapCapacity,
+                    runtime: heapRuntime,
                     definitions: [target],
                   )
                   .sections,
@@ -143,7 +143,7 @@ void main() {
             expect(
               () => generator.generate(
                 program,
-                heapCapacity: heapCapacity,
+                runtime: heapRuntime,
                 definitions: [target],
               ),
               throwsA(
@@ -180,7 +180,7 @@ void main() {
       expect(
         () => generator.generate(
           program,
-          heapCapacity: heapCapacity,
+          runtime: heapRuntime,
           definitions: [target],
         ),
         throwsA(
@@ -220,11 +220,7 @@ void main() {
       );
       expect(
         generator
-            .generate(
-              program,
-              heapCapacity: heapCapacity,
-              definitions: [target],
-            )
+            .generate(program, runtime: heapRuntime, definitions: [target])
             .sections,
         isNotEmpty,
       );

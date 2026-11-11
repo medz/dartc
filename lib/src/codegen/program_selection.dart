@@ -28,8 +28,18 @@ final class ProgramSelection(
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
 
-  /// Rejects hidden allocation, exceptions and foreign calls in a runtime closure.
+  /// Checks a runtime closure entered with raw native pointer arguments.
+  ///
+  /// Caller-side boxing, allocation, exceptions and foreign calls are rejected.
   void checkNonAllocating(FunctionTarget entry) {
+    for (final (i, type) in entry.parameterTypes.indexed) {
+      if (FfiTypes.isPointer(type) &&
+          !layouts.pointerParameters.contains(entry, i)) {
+        throw UnsupportedError(
+          'Runtime pointer parameter requires a managed object: ${entry.name}',
+        );
+      }
+    }
     final pending = [entry], checked = <FunctionTarget>{};
     while (pending.isNotEmpty) {
       final target = pending.removeLast();
