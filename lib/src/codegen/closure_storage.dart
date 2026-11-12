@@ -220,7 +220,7 @@ final class ClosureStorage(
     final owner = ClassType(null, 'Closure$index', superclass: _base);
     final captures = [
       if (target.kind.isVirtual)
-        InstanceField(owner, 'receiver', .object, isFinal: true),
+        InstanceField(owner, 'receiver', .object.nullable, isFinal: true),
       for (final (i, type) in target.captures.indexed)
         InstanceField(owner, 'capture$i', _stored(type), isFinal: true),
     ];

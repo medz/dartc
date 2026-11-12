@@ -20,12 +20,16 @@ Value? lowerCollection(
   if (type.declaration == CoreTypes.list) {
     requireListSupport(
       context.unit.libraryElement,
-      context.bindings.requireSdkClass,
+      context.bindings.requireClass,
     );
   } else if (type.declaration == CoreTypes.map) {
     requireMapSupport(
       context.unit.libraryElement,
-      context.bindings.requireSdkClass,
+      context.bindings.requireClass,
+    );
+  } else if (type.declaration == CoreTypes.set) {
+    context.bindings.requireClass(
+      context.unit.libraryElement.typeProvider.setElement,
     );
   }
   final result = context.emit(NewCollection(type));
@@ -97,7 +101,41 @@ Value? lowerCollection(
             if (checked == null) return;
             value = checked;
           }
-          context.emit(CollectionSpread(result, value));
+          if (type.declaration == CoreTypes.map && type.accepts(value.type)) {
+            context.emit(CollectionSpread(result, value, isMethodCall: true));
+            return;
+          }
+          final iterable = type.declaration == CoreTypes.map
+              ? context.emit(MapEntries(value))
+              : value;
+          final iterator = context.emit(GetIterator(iterable));
+          final header = JumpTarget(context)
+            ..jump()
+            ..enter();
+          final done = JumpTarget(context);
+          context.guard(context.emit(IteratorMoveNext(iterator)), done);
+          final current = context.emit(IteratorCurrent(iterator));
+          if (type.declaration == CoreTypes.map) {
+            final key = context.normal(
+              context.convert(
+                context.emit(LoadField(CoreTypes.mapEntryKey, current)),
+                type.typeArguments[0],
+              ),
+            );
+            if (key != null) {
+              final entry = context.normal(
+                context.convert(
+                  context.emit(LoadField(CoreTypes.mapEntryValue, current)),
+                  type.typeArguments[1],
+                ),
+              );
+              if (entry != null) context.emit(MapPut(result, key, entry));
+            }
+          } else {
+            add(current);
+          }
+          header.jump();
+          done.enter();
         }
         if (node.isNullAware) {
           nonNull(source, spread);

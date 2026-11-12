@@ -71,9 +71,6 @@ void main() {
   });
 
   test('string IR carries typed operands and exception edges', () {
-    final interpolation = Interpolate([const Constant.nullValue()]);
-    expect(interpolation.type, ValueType.string);
-    expect(interpolation.mayThrow, isTrue);
     expect(
       () => StringConcat(const Constant.integer(1), const Constant.string('a')),
       throwsArgumentError,

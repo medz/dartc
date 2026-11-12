@@ -203,7 +203,7 @@ final class IrInterpreter(
     List<Object?> arguments, [
     Map<TypeParameterType, ValueType> environment = const {},
   ]) {
-    if (target.kind.hasReceiver) {
+    if (target.kind.hasReceiver && target.owner != ValueType.nullClass) {
       environment = {
         ...environment,
         ...(_runtimeValueType(arguments.first) as ClassType)
@@ -1024,6 +1024,7 @@ final class IrInterpreter(
         if (receiver != null &&
             receiver is! _Instance &&
             receiver is! _TypeValue &&
+            receiver is! _RecordValue &&
             receiver is! num &&
             receiver is! bool &&
             receiver is! String) {
@@ -1900,6 +1901,13 @@ final class IrInterpreter(
           values[op] = direct
               ? identityHashCode(read(operand))
               : read(operand).hashCode;
+        case ObjectClassName(:final operand):
+          final type = _runtimeValueType(read(operand));
+          values[op] = type is ClassType
+              ? type.name
+              : type is FunctionType
+              ? 'Closure'
+              : type.dartName;
         case ObjectRuntimeType(:final operand, :final direct):
           values[op] = direct
               ? _typeValue(_runtimeValueType(read(operand)))
@@ -2081,6 +2089,10 @@ final class IrInterpreter(
           _storeCell(read(cell) as _Cell, read(value));
         case BindMethod(:final method, :final receiver, :final direct):
           final instance = read(receiver);
+          if (method.owner == ValueType.nullClass) {
+            values[op] = _FunctionValue(method, null);
+            break;
+          }
           if (!direct && _isObjectToString(method) && instance is! _Instance) {
             values[op] = _dynamicBridge(
               instance,
@@ -2196,6 +2208,16 @@ final class IrInterpreter(
           :final named,
         ):
           final value = read(receiver);
+          if (_isObjectToString(member) && value is! _Instance) {
+            values[op] = _dynamicBridge(
+              value,
+              member.selector,
+              positional.map(read).toList(),
+              {for (final e in named.entries) e.key: read(e.value)},
+              typeArguments.map(resolve).toList(),
+            );
+            break;
+          }
           if (value is _GuestFuture ||
               value is _GuestCompleter ||
               value is _GuestStreamIterator) {
@@ -2260,12 +2282,6 @@ final class IrInterpreter(
           values[op] = read(operand);
         case NullCheck(:final operand):
           values[op] = read(operand)!;
-        case Interpolate(:final inputs):
-          final buffer = StringBuffer();
-          for (final input in inputs) {
-            buffer.write(read(input).toString());
-          }
-          values[op] = buffer.toString();
         case StringConcat(:final left, :final right):
           values[op] = (read(left) as String) + (read(right) as String);
         case StringLength(:final string):

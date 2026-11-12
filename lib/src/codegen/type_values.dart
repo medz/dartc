@@ -79,6 +79,12 @@ final class TypeValues() {
   );
   static final kind = InstanceField(type, 'kind', .integer, isFinal: true);
   static final shape = InstanceField(type, 'shape', .integer, isFinal: true);
+  static final className = InstanceField(
+    type,
+    'className',
+    .string,
+    isFinal: true,
+  );
   static final allowsNull = InstanceField(
     type,
     'allowsNull',
@@ -97,7 +103,14 @@ final class TypeValues() {
     null,
     '_Type',
     .voidType,
-    [.integer, .integer, .boolean, list.nullable, functionShape.nullable],
+    [
+      .integer,
+      .integer,
+      .boolean,
+      list.nullable,
+      functionShape.nullable,
+      .string,
+    ],
     owner: type,
     kind: .initializer,
   );
@@ -142,7 +155,7 @@ final class TypeValues() {
     IrClass(namedParameter, [name, nameSlot, requiredName, nextName]),
     IrClass(
       type,
-      [kind, shape, allowsNull, parts, signature],
+      [kind, shape, allowsNull, parts, signature, className],
       constructors: [if (_functions.containsKey(_init)) _init],
     ),
     IrClass(
@@ -233,6 +246,7 @@ final class TypeValues() {
       parts = ObjectConstant(list, {head: child, tail: parts});
     }
     return ObjectConstant(type, {
+      className: Constant.string(_label(kind, shape)),
       TypeValues.kind: Constant.integer(kind.index),
       TypeValues.shape: Constant.integer(shape),
       allowsNull: Constant.boolean(
@@ -273,6 +287,12 @@ final class TypeValues() {
   }
 
   int id(Object key) => _shapes.putIfAbsent(key, () => _shapes.length);
+
+  String _label(TypeKind kind, int shape) => kind == .nominal
+      ? (_shapes.keys.elementAt(shape) as ClassType).name
+      : kind == .function
+      ? 'Closure'
+      : kind.name;
 
   ValueType _bound(
     TypeParameterType parameter,
@@ -483,6 +503,7 @@ final class TypeValues() {
       allowsNull ?? Constant.boolean(kind == .nullable),
       childrenList,
       signature ?? const Constant.nullValue(),
+      label: Constant.string(_label(kind, shape)),
     );
   }
 
@@ -500,8 +521,9 @@ final class TypeValues() {
     Value shape,
     Value allowsNull,
     Value parts,
-    Value signature,
-  ) {
+    Value signature, {
+    Value? label,
+  }) {
     _functions.putIfAbsent(
       _init,
       () => _initializer(_init, [
@@ -510,10 +532,18 @@ final class TypeValues() {
         TypeValues.allowsNull,
         TypeValues.parts,
         TypeValues.signature,
+        TypeValues.className,
       ]),
     );
     return block.emit(
-      Construct(_init, [kind, shape, allowsNull, parts, signature]),
+      Construct(_init, [
+        kind,
+        shape,
+        allowsNull,
+        parts,
+        signature,
+        label ?? Constant.string('Type'),
+      ]),
     );
   }
 

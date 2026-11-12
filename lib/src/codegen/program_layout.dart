@@ -66,10 +66,10 @@ final class ProgramLayout(
     }
   }
 
-  FunctionTarget get mapFactory =>
-      _classes[CoreTypes.map]?.constructors['new'] ??
+  FunctionTarget collectionFactory(ClassType type) =>
+      _classes[type.declaration]?.constructors['new'] ??
       (throw ArgumentError(
-        'Map construction requires the checked SDK factory.',
+        'Collection construction requires the checked SDK factory: ${type.name}',
       ));
 
   TypeTestKind typeTest(ValueType source, ValueType tested) {

@@ -9,7 +9,7 @@
 | Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有源码字面量及其常量依赖仍明确拒绝，避免消费 analyzer 丢失库身份后的错误折叠结果。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/frontend/lowering/fixtures/symbols.dart)。 |
 | Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
 | Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/frontend/lowering/fixtures/records.dart)。 |
-| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled/of/from 和 length setter。支持 const List 的内容和规范身份；其他集合构造器和完整 SDK API 待实现。原生范围见下文。 |
+| 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled/of/from/generate/unmodifiable 和 length setter。支持 const List 的内容和规范身份；原生集合范围见下文。 |
 | Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey/entries，以及 MapEntry 的普通与 const 构造、key/value。支持 const Set/Map；完整 SDK API 待实现。 |
 | List if/for/for-in、spread | 支持 List、Set、Map 的 if/else、三段式 for、同步 for-in 和 spread，按源码顺序执行。sequence spread 使用源 Iterable 的 iterator；Map spread 需要逐项类型检查时使用 entries，否则使用 forEach。dynamic 源先核对 Iterable/Map 协议，再逐项转换。addAll 调用还在遍历前检查实际接收者要求的源类型。 |
 | 空感知集合元素 | 支持空感知元素、spread 以及 Map 的空感知 key/value。空 key 跳过对应 value 的求值。 |
@@ -65,7 +65,7 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 `int.parse`、`int.tryParse`、`int.toString` 和 `int.toRadixString` 支持原生执行，包括静态及绑定方法值。进制为 2–36，字母数字不区分大小写，允许前导正负号和外围 Unicode 空白；显式进制的结果必须落在有符号 64 位范围内。省略 radix 的正数 `0x`/`0X` 前缀允许完整无符号 64 位值，并按相同位模式解释为有符号 int。无效文本和溢出使 parse 抛出 FormatException、tryParse 返回 null；异常保留原 source。无效进制的非空输入抛出 RangeError。格式化使用小写数字，对最小 int 也满足往返契约。FormatException 的具体消息和错误定位不承诺与 SDK 实现逐字相同。
 
-调用点仍能证明值为 int 时，通过 num/Object 视图调用 toString 使用整数实现；一般动态格式化和 double 格式化仍未接通。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
+int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。double 支持 toString、toStringAsFixed、toStringAsExponential 和 toStringAsPrecision，保留负零、非有限值、二进制浮点的十进制舍入及精度范围检查；可提取为绑定方法值。通用 dynamic 成员派发仍待接通。见[原生文本对照](../test/compiler/object_text_test.dart)。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
 
 ## 原生转整数与字符串常量
 
@@ -101,7 +101,11 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 `sublist` 支持省略或显式 null 的 end、空范围和边界错误。内置 List、const/固定长度列表与 String.codeUnits 的切片返回独立的可增长 List，保留实际元素类型和共享对象；用户重写和方法值使用选中实现的默认参数。列表模式中的命名 rest 同样复制相应元素。依据为 [List.sublist](https://api.dart.dev/stable/3.13.7/dart-core/List/sublist.html)，验证见[SDK 与原生 List 对照](../test/compiler/lists_test.dart)。
 
-其他 List 构造器和完整集合 API、Set 存储及 typed_data 的原生实现仍有缺口；上表的 IR 范围不等于这些行为已经原生执行。
+`List.generate` 按索引顺序调用生成器，支持固定长度结果；`List.unmodifiable` 复制元素槽。不可修改列表拒绝修改操作，包括空源、空范围和不命中元素的操作。列表支持默认 Comparable 排序、重叠 setRange、insertAll、replaceRange、removeWhere、reversed、asMap 和 cast 视图。惰性 Iterable 的 where/map/take/skip/fold/any/every 保留遍历顺序与回调。标量 typed_data 的范围见[标准库](libraries.md)。
+
+## 原生 Set
+
+支持可变与 const Set 字面量，Set/LinkedHashSet/HashSet 的普通、identity/from/of 构造，以及 Set.unmodifiable、插入、删除、查询、遍历和集合运算。默认 Set 保留插入顺序；重复的相等值保留最先插入的对象，lookup 返回该对象。自定义 equals/hashCode/isValidKey 与 toSet 副本保持相等策略。不可修改集合拒绝空修改；cast 视图保留底层元素类型检查。结构变化使正在遍历的迭代器抛出 ConcurrentModificationError。见[原生集合对照](../test/compiler/object_text_test.dart)。
 
 ## 原生 Map
 
@@ -109,7 +113,7 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 协变视图的写入按实际键和值类型检查；类型错误、hashCode 或 == 抛错时不执行该次条目写入，异常保留 catch/finally。keys 是实时视图，迭代器检查新增、删除及清空等结构修改；仅替换已有值不改变键的迭代顺序。支持 values、entries、forEach、addAll、putIfAbsent 和 update 的普通库行为，以及用户 Map 重写、方法值和已有 Map 模式。键、值和迭代状态在移动回收及跨原生入口保存后保持有效，用户哈希和相等回调中也可分配。见[原生 Map 验证](../test/compiler/maps_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
 
-`const Map` 通过不可变 Dart 实现保留查询、键顺序、类型参数与常量身份；写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。字面量 Map spread、未验证的工厂和完整集合 API 仍是原生实现缺口。
+`const Map` 通过不可变 Dart 实现保留查询、键顺序、类型参数与常量身份；写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。Map spread 保留逐项转换和求值顺序。Map.from/of/fromEntries/fromIterables/unmodifiable、identity、map、update、putIfAbsent、removeWhere 与 cast 视图使用 SDK 算法；不可修改 Map 复制输入并拒绝空修改。List、Set、Map 的 toString 调用元素的实际方法，并终止对循环容器的递归。见[原生集合与格式化对照](../test/compiler/object_text_test.dart)。
 
 ## 数值比较与 SDK 差异
 

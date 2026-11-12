@@ -53,7 +53,6 @@ void main() {
       ..initializeHierarchy(interfaces: [CoreTypes.listOf(element)]);
     final length = InstanceField(type, 'length', .integer);
     final data = InstanceField(type, 'data', ClassType(null, 'References'));
-    final mode = InstanceField(type, 'mode', .integer);
     final parameter = TypeParameterType('T')
       ..initializeBound(ValueType.object.nullable)
       ..initializeDefaultType(ValueType.dynamicType);
@@ -69,35 +68,24 @@ void main() {
     );
     IrClass(
       type,
-      [length, data, mode],
-      listStorage: (
-        length: length,
-        data: data,
-        mutability: mode,
-        spread: spread,
-      ),
+      [length, data],
+      listStorage: (length: length, data: data, spread: spread),
     );
     expect(
       () => IrClass(
         type,
-        [length, data, mode],
-        listStorage: (
-          length: length,
-          data: data,
-          mutability: length,
-          spread: spread,
-        ),
+        [length, data],
+        listStorage: (length: length, data: length, spread: spread),
       ),
       throwsArgumentError,
     );
     expect(
       () => IrClass(
         type,
-        [length, data, mode],
+        [length, data],
         listStorage: (
           length: length,
           data: data,
-          mutability: mode,
           spread: FunctionTarget(null, 'untyped', .voidType, []),
         ),
       ),

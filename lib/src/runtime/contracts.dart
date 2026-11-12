@@ -37,6 +37,7 @@ enum MemoryOperation() {
   float64FromBits,
   float32Bits,
   float64Bits,
+  className,
 }
 
 /// Excludes this reference slot from strong tracing.
@@ -48,11 +49,13 @@ final class const EphemeronKey(final String valueField);
 /// Identifies the immutable map implementation and its parallel constant lists.
 final class const ConstantMapStorage(final String keys, final String values);
 
+/// Identifies the immutable set implementation and its constant map field.
+final class const ConstantSetStorage(final String entries);
+
 /// Identifies List storage for constant materialization and literal spreading.
 final class const ConstantListStorage(
   final String length,
   final String data,
-  final String mutability,
   final String spread,
 );
 

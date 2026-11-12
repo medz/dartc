@@ -2,6 +2,45 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('primitive ordering interfaces retain their actual type arguments', () {
+    expect(
+      ValueType.integer.asInstanceOf(ValueType.comparable),
+      ValueType.comparable.instantiate([ValueType.number]),
+    );
+    expect(
+      ValueType.floating.asInstanceOf(ValueType.comparable),
+      ValueType.comparable.instantiate([ValueType.number]),
+    );
+    expect(
+      ValueType.string.asInstanceOf(ValueType.comparable),
+      ValueType.comparable.instantiate([ValueType.string]),
+    );
+    expect(ValueType.boolean.asInstanceOf(ValueType.comparable), isNull);
+  });
+
+  test('Null members bind the null value without requiring a heap object', () {
+    final target = FunctionTarget(
+      Uri.parse('dart:core'),
+      'toString',
+      .string,
+      [],
+      owner: ValueType.nullClass,
+      kind: .method,
+    );
+    expect(target.parameterTypes, [ValueType.nullType]);
+    expect(
+      DirectCall(target, [const Constant.nullValue()]).type,
+      ValueType.string,
+    );
+    expect(
+      BindMethod(target, const Constant.nullValue(), direct: true).type,
+      target.signature,
+    );
+    expect(
+      () => BindMethod(target, const Constant.integer(1)),
+      throwsArgumentError,
+    );
+  });
   TypeParameterType parameter(String name) =>
       TypeParameterType(name)..initializeBound(ValueType.object.nullable);
   test('nullable structure retains its parameter before flow narrowing', () {

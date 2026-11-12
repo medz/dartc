@@ -21,14 +21,9 @@ final class IrClass(
   final bool referencePayload = false,
 
   /// Storage for a concrete class with one type parameter implementing `List<E>`.
-  /// The fields are length, a traced non-generic buffer, and mutability; spread
+  /// The fields are length and a traced non-generic buffer; spread
   /// takes `List<T>` and `Iterable<Object?>` and returns void.
-  final ({
-    InstanceField length,
-    InstanceField data,
-    InstanceField mutability,
-    FunctionTarget spread,
-  })?
+  final ({InstanceField length, InstanceField data, FunctionTarget spread})?
   listStorage,
 }) {
   /// Declared fields in initialization order, excluding inherited storage.
@@ -74,7 +69,9 @@ final class IrClass(
       if (member.owner != type ||
           !member.kind.isVirtual ||
           result.containsKey(member.selector)) {
-        throw ArgumentError('Foreign or repeated instance member.');
+        throw ArgumentError(
+          'Foreign or repeated instance member: ${type.dartName}.${member.name} (${member.owner?.dartName}).',
+        );
       }
       result[member.selector] = member;
     }
@@ -110,14 +107,9 @@ final class IrClass(
       if (type.isAbstract ||
           element == null ||
           CoreTypes.view(type, CoreTypes.list) != CoreTypes.listOf(element) ||
-          {storage.length, storage.data, storage.mutability}.length != 3 ||
-          ![
-            storage.length,
-            storage.data,
-            storage.mutability,
-          ].every(this.fields.contains) ||
+          storage.length == storage.data ||
+          ![storage.length, storage.data].every(this.fields.contains) ||
           storage.length.type != ValueType.integer ||
-          storage.mutability.type != ValueType.integer ||
           storage.data.type is! ClassType ||
           storage.data.type.freeTypeParameters.isNotEmpty ||
           storage.spread.kind != FunctionKind.function ||
@@ -465,7 +457,7 @@ final class IrProgram(
                   _definitions[owner]?.members[t.selector]) !=
               t) {
         throw ArgumentError(
-          'Instance body does not match the declared member.',
+          'Instance body does not match the declared member: ${t.owner?.dartName}.${t.name}.',
         );
       }
       if (t.kind == .fieldInitializer && !fieldInitializers.contains(t)) {

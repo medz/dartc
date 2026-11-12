@@ -71,12 +71,6 @@ final class MemberCalls(
     MemberSelector selector, {
     bool hasBuiltin = false,
   }) {
-    if (!hasBuiltin &&
-        (receiver == ValueType.object || receiver == ValueType.typeType)) {
-      throw UnsupportedError(
-        'Native built-in member unavailable: ${receiver.dartName}.${selector.name}',
-      );
-    }
     final targets = <ClassType, FunctionTarget>{};
     for (final type in _instances) {
       if (hasBuiltin &&

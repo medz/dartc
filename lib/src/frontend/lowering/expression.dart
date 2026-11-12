@@ -33,7 +33,7 @@ Value? _operatorReceiver(FunctionContext context, ast.Expression expression) {
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
   if (expression is ast.StringLiteral) {
-    context.bindings.requireSdkClass(
+    context.bindings.requireClass(
       (expression.staticType! as dart.InterfaceType).element,
     );
   }
@@ -450,16 +450,23 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         return true;
       }
       if (!append(expression)) return null;
-      if (parts.any((part) => !ValueType.string.nullable.accepts(part.type))) {
-        return context.emit(Interpolate(parts));
-      }
       Value result = Constant.string('');
       for (final part in parts) {
-        final text = context.ifNull(
-          part,
-          .string,
+        final text = context.branch(
+          context.testType(part, .nullType),
           () => Constant.string('null'),
-        )!;
+          () => ValueType.string.accepts(part.type)
+              ? part
+              : context.callPositionalMember(
+                  context.unit.libraryElement.typeProvider.objectElement
+                      .getMethod('toString')!,
+                  context.cast(context.refined(part), .object),
+                  [],
+                  expression,
+                ),
+          .string,
+        );
+        if (text == null) return null;
         result = result is ScalarConstant && result.value == ''
             ? text
             : context.emit(StringConcat(result, text));

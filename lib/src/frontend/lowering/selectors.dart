@@ -435,14 +435,48 @@ final class SelectorChain(
       );
     }
 
-    if (receiver?.staticType is dart.DynamicType ||
-        known.type is DynamicType ||
-        !direct &&
-            member is MethodElement &&
-            member.library.isDartCore &&
-            member.enclosingElement?.name == 'Object' &&
-            name == 'toString' &&
-            (known.type.mayBeNull || known.type.classBound == null)) {
+    if (!direct &&
+        member is MethodElement &&
+        member.library.isDartCore &&
+        member.enclosingElement?.name == 'Object' &&
+        name == 'toString' &&
+        known.type.mayBeNull &&
+        (arguments == null || arguments.arguments.isEmpty)) {
+      final binding = arguments == null;
+      final target = context.bindings.target(member, context.unit, node);
+      return context.branch(
+        context.testType(known, .nullType),
+        () {
+          final nullClass = member.library.getClass('Null')!;
+          context.bindings.requireClass(nullClass);
+          final target = context.bindings.target(
+            nullClass.getMethod('toString')!,
+            context.unit,
+            node,
+          );
+          return binding
+              ? context.emit(
+                  BindMethod(target, const Constant.nullValue(), direct: true),
+                )
+              : context.emit(DirectCall(target, [const Constant.nullValue()]));
+        },
+        () => binding
+            ? context.emit(
+                BindMethod(
+                  target,
+                  context.cast(context.refined(known), .object),
+                ),
+              )
+            : context.callPositionalMember(
+                member,
+                context.cast(context.refined(known), .object),
+                [],
+                node,
+              ),
+        binding ? target.signature : ValueType.string,
+      );
+    }
+    if (receiver?.staticType is dart.DynamicType || known.type is DynamicType) {
       final invocation = getterArguments ?? arguments;
       final args = context.dynamicArguments(invocation, evaluate);
       if (args == null) return null;

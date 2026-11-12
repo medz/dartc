@@ -5,7 +5,6 @@ import 'package:dartc/layout.dart';
 import 'package:dartc/object.dart';
 
 import 'program_layout.dart';
-import 'list_storage.dart';
 
 /// Writes canonical constant objects and their concrete type descriptors.
 final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
@@ -84,8 +83,6 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
               ));
     _header(symbol, offset, type, layout, size, carrier?.signature ?? type);
     if (list != null) {
-      _words[(offset + layouts.fieldOffset(layouts.lists.mutability)) ~/ 8] =
-          ListMutability.immutable.index;
       _words[(offset + layouts.fieldOffset(layouts.lists.length)) ~/ 8] =
           list.elements.length;
       relocations.add(

@@ -94,7 +94,9 @@ FunctionReferences verifyCallable(
         throw StateError('Type parameter used outside its lexical scope.');
       }
     }
-    if (type == ValueType.integer || type == ValueType.floating) {
+    if (type == ValueType.integer ||
+        type == ValueType.floating ||
+        type == ValueType.boolean) {
       (instantiatedClasses ??= {}).add(type as ClassType);
     }
     checkedTypes.add(type);

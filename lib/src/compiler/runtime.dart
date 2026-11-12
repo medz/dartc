@@ -21,6 +21,8 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     final args = block.parameters;
     final Value? value;
     switch (operation) {
+      case .className:
+        value = block.emit(ObjectClassName(args.single));
       case .map:
         primitives[target] = .map;
         continue;

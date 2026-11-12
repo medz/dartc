@@ -1,12 +1,5 @@
 import 'package:dartc/ir.dart';
 
-/// Permitted List changes encoded in constant storage.
-enum ListMutability() {
-  immutable,
-  fixed,
-  growable,
-}
-
 /// Binds List storage and construction to checked SDK declarations.
 final class ListStorage(Iterable<IrClass> classes) {
   final _classes = classes.toList();
@@ -29,7 +22,6 @@ final class ListStorage(Iterable<IrClass> classes) {
   ClassType get buffer => data.type as ClassType;
   InstanceField get length => declaration.listStorage!.length;
   InstanceField get data => declaration.listStorage!.data;
-  InstanceField get mutability => declaration.listStorage!.mutability;
 
   FunctionTarget? callFor(Instruction operation) {
     if (operation case CollectionSpread(isMethodCall: false, :final collection)

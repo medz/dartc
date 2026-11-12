@@ -1080,6 +1080,7 @@ final class TypeRelations(
           _load(children, TypeValues.allowsNull, value),
           parts,
           _load(children, TypeValues.signature, value),
+          label: _load(children, TypeValues.className, value),
         ),
       ),
     );

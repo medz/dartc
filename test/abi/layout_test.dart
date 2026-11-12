@@ -8,6 +8,20 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('ARM64 frames address saved registers beyond the scaled-load range', () {
+    final abi = Arm64Abi(const Target(.macos, .arm64));
+    final frame = abi.frameLayout(
+      localBytes: 128 * 1024,
+      localAlignment: 16,
+      savedRegisters: [arm.Register.x19, arm.FloatRegister.d8],
+      outgoingStackBytes: 32,
+    );
+    final code = arm.Assembler();
+    abi.emitPrologue(code, frame);
+    abi.emitEpilogue(code, frame);
+    expect(frame.savedRegisters[arm.Register.x19], 128 * 1024 + 32);
+    expect(code.finish(), isNotEmpty);
+  });
   test('float and double share FP banks but retain distinct stack widths', () {
     for (final os in OperatingSystem.values) {
       for (final abi in <CallingConvention<Object>>[

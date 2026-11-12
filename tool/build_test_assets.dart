@@ -88,6 +88,7 @@ const _compilerLibraries = {
   'class_types',
   'member_calls',
   'object_members',
+  'object_text',
 };
 
 Set<String> selectCompilerFixtures(Iterable<String> names) {

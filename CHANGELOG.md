@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Format ordinary objects through virtual `toString` calls, including nullable receivers and method values. Add `StringBuffer` and exact double formatting for shortest, fixed, exponential and significant-digit output.
+- Use core List, Set and Map factories, collection operations, cast views and recursive formatting. Immutable collections reject empty mutations; default sets preserve insertion order, canonical values and custom equality. Default sorting recognizes the `Comparable` interfaces of numbers and strings.
+- Remove the `Interpolate` IR operation. Interpolation now uses explicit calls and string concatenation; constant List storage no longer carries a mutability flag. ARM64 functions can address stack frames beyond 32 KiB.
+
 - Parse booleans with `bool.parse` and `bool.tryParse`, using the SDK's Dart implementation. Preserve default and explicit ASCII case sensitivity, function values, null results and FormatException source values.
 - Parse integers with `int.parse` and `int.tryParse`, and format them with `toString` and `toRadixString`. Support bases 2–36, signs, surrounding whitespace, signed 64-bit limits and unsigned default hexadecimal literals, including method values. Invalid input and overflow remain catchable.
 - Preserve receiver types in virtual calls and method values when selecting native definitions. IR clients now read `(receiver, target)` entries from `virtualMembers` and `(receiver, method, direct)` entries from `methodTearOffs`; `Value.unviewedType` exposes the type before static upcasts. Integer calls through proven `Object` and `num` views no longer require unrelated floating-point formatting bodies.

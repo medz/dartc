@@ -4,6 +4,63 @@ import '../contracts.dart' as runtime;
 import '../memory.dart';
 
 @patch
+class StringBuffer {
+  final _parts = <String>[];
+  int _length = 0;
+
+  @patch
+  StringBuffer([Object content]) {
+    write(content);
+  }
+  @patch
+  int get length => _length;
+  @patch
+  void write(Object? object) {
+    final text = object.toString();
+    if (text.isNotEmpty) {
+      _parts.add(text);
+      _length += text.length;
+    }
+  }
+
+  @patch
+  void writeCharCode(int charCode) => write(String.fromCharCode(charCode));
+  @patch
+  void writeAll(Iterable objects, [String separator]) {
+    final iterator = objects.iterator;
+    if (!iterator.moveNext()) return;
+    write(iterator.current);
+    while (iterator.moveNext()) {
+      write(separator);
+      write(iterator.current);
+    }
+  }
+
+  @patch
+  void writeln([Object? obj]) {
+    write(obj);
+    write('\n');
+  }
+
+  @patch
+  void clear() {
+    _parts.clear();
+    _length = 0;
+  }
+
+  @patch
+  String toString() {
+    final result = _StringStorage.create(_length);
+    var offset = 0;
+    for (final part in _parts) {
+      _StringStorage.copy(part, 0, part.length, result, offset);
+      offset += part.length;
+    }
+    return result;
+  }
+}
+
+@patch
 class String {
   @patch
   factory String.fromCharCode(int charCode) {

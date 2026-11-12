@@ -176,7 +176,10 @@ final class FunctionTarget(
       ...captures,
       ...signature.parameters,
     ]),
-    _ when kind.hasReceiver => .unmodifiable([owner!, ...signature.parameters]),
+    _ when kind.hasReceiver => .unmodifiable([
+      owner == ValueType.nullClass ? ValueType.nullType : owner!,
+      ...signature.parameters,
+    ]),
     _ => signature.parameters,
   };
 
@@ -342,7 +345,9 @@ final class FunctionTarget(
       .fieldInitializer ||
       .getter ||
       .staticGetter => signature.parameters.isEmpty,
-      .factory => returnType == owner,
+      .factory =>
+        returnType ==
+            (owner == ValueType.nullClass ? ValueType.nullType : owner),
       .setter || .staticSetter =>
         signature.requiredPositional == 1 &&
             signature.parameters.length == 1 &&

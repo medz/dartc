@@ -1,4 +1,5 @@
 import 'dart:collection' show ListBase;
+import 'dart:_internal' show FixedLengthListMixin, UnmodifiableListBase;
 
 import '../../../layout/memory.dart';
 
@@ -21,6 +22,26 @@ class List<E> {
   @patch
   factory List.of(Iterable<E> elements, {bool growable}) =>
       _NativeList<E>.from(elements, growable);
+
+  @patch
+  factory List.generate(
+    int length,
+    E Function(int) generator, {
+    bool growable,
+  }) {
+    RangeError.checkNotNegative(length);
+    final result = _NativeList<E>.empty(true);
+    for (var i = 0; i < length; i++) {
+      result.add(generator(i));
+    }
+    return growable ? result : _FixedList<E>(result._length, result._data);
+  }
+
+  @patch
+  factory List.unmodifiable(Iterable elements) {
+    final copy = _NativeList<E>.from(elements, true);
+    return _ConstantList<E>(copy._length, copy._data);
+  }
 }
 
 @runtime.ReferencePayload()
@@ -45,15 +66,13 @@ final class _ListData {
       Memory.writeReference(this, ObjectHeader.fieldsOffset + index * 8, value);
 }
 
-@runtime.ConstantListStorage('_length', '_data', '_mutability', 'spread')
-final class _NativeList<E>(int length, _ListData data, int mutability)
-    extends ListBase<E> {
+base class _NativeList<E>(int length, _ListData data) extends ListBase<E> {
   int _length = length;
   _ListData _data = data;
-  int _mutability = mutability;
 
-  factory empty(bool growable) =>
-      .new(0, _ListData.create(0), growable ? 2 : 1);
+  factory empty(bool growable) => growable
+      ? .new(0, _ListData.create(0))
+      : _FixedList<E>(0, _ListData.create(0));
 
   factory filled(int length, E fill, bool growable) {
     RangeError.checkNotNegative(length);
@@ -61,30 +80,15 @@ final class _NativeList<E>(int length, _ListData data, int mutability)
     for (var i = 0; i < length; i++) {
       data[i] = fill;
     }
-    return .new(length, data, growable ? 2 : 1);
+    return growable ? .new(length, data) : _FixedList<E>(length, data);
   }
 
   factory from(Iterable<Object?> elements, bool growable) {
     final result = _NativeList<E>.empty(true);
-    spread<E>(result, elements);
-    if (!growable) result._mutability = 1;
-    return result;
-  }
-
-  static void spread<T>(List<T> target, Iterable<Object?> source) {
-    for (final value in source) {
-      target.add(value as T);
+    for (final element in elements) {
+      result.add(element as E);
     }
-  }
-
-  void _checkMutable({bool resizing = false}) {
-    if (_mutability < (resizing ? 2 : 1)) {
-      throw UnsupportedError(
-        resizing
-            ? 'Cannot change the length of a fixed-length list'
-            : 'Cannot modify an unmodifiable list',
-      );
-    }
+    return growable ? result : _FixedList<E>(result._length, result._data);
   }
 
   @override
@@ -92,7 +96,6 @@ final class _NativeList<E>(int length, _ListData data, int mutability)
 
   @override
   set length(int value) {
-    _checkMutable(resizing: true);
     RangeError.checkNotNegative(value);
     if (value > _length) {
       null as E;
@@ -113,7 +116,6 @@ final class _NativeList<E>(int length, _ListData data, int mutability)
 
   @override
   void operator []=(int index, E value) {
-    _checkMutable();
     _checkIndex(index);
     _data[index] = value;
   }
@@ -142,14 +144,12 @@ final class _NativeList<E>(int length, _ListData data, int mutability)
 
   @override
   void add(E value) {
-    _checkMutable(resizing: true);
     _reserve(_length + 1);
     _data[_length++] = value;
   }
 
   @override
   void addAll(Iterable<E> values) {
-    _checkMutable(resizing: true);
     if (identical(values, this)) {
       if (isEmpty) return;
       throw ConcurrentModificationError(this);
@@ -159,6 +159,38 @@ final class _NativeList<E>(int length, _ListData data, int mutability)
       if (_length != expected) throw ConcurrentModificationError(this);
       add(value);
       expected++;
+    }
+  }
+}
+
+final class _FixedList<E>(int length, _ListData data)
+    extends _NativeList<E>
+    with FixedLengthListMixin<E> {
+  this : super(length, data);
+}
+
+@runtime.ConstantListStorage('_length', '_data', 'spread')
+final class _ConstantList<E>(final int _length, final _ListData _data)
+    extends UnmodifiableListBase<E> {
+  @override
+  int get length => _length;
+
+  @override
+  E operator [](int index) {
+    if (index < 0 || index >= _length) {
+      throw IndexError.withLength(
+        index,
+        _length,
+        indexable: this,
+        name: 'index',
+      );
+    }
+    return _data[index] as E;
+  }
+
+  static void spread<T>(List<T> target, Iterable<Object?> source) {
+    for (final value in source) {
+      target.add(value as T);
     }
   }
 }

@@ -63,6 +63,16 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
   }
   if (element.library.isDartCore) {
     final owner = element.enclosingElement;
+    if (element is ConstructorElement &&
+        element.name == 'fromEnvironment' &&
+        [
+          'bool',
+          'int',
+          'String',
+        ].any((name) => owner == element.library.getClass(name))) {
+      // No compilation environment entries are configured for native output.
+      return (target, entry) => entry.parameters[1];
+    }
     if (element.isExternal && owner == element.library.getClass('Object')) {
       switch (element.name) {
         case '==':
@@ -119,6 +129,7 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
           return (target, entry) =>
               entry.emit(ObjectHashCode(entry.parameters.single));
         case '_equal':
+        case '_equalToInteger':
           return (target, entry) =>
               entry.emit(Equals(entry.parameters[0], entry.parameters[1]));
         case 'isNaN':
@@ -166,6 +177,41 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
             );
             return null;
           };
+      }
+    }
+    if (element.isExternal &&
+        owner == element.library.getClass('_IntegerImplementation')) {
+      final operator = switch (element.name) {
+        '_bitAndFromInteger' => IntOperator.bitAnd,
+        '_bitOrFromInteger' => IntOperator.bitOr,
+        '_bitXorFromInteger' => IntOperator.bitXor,
+        '_shrFromInteger' => IntOperator.shiftRight,
+        '_ushrFromInteger' => IntOperator.unsignedShiftRight,
+        '_shlFromInteger' => IntOperator.shiftLeft,
+        '_addFromInteger' => IntOperator.add,
+        '_subFromInteger' => IntOperator.subtract,
+        '_mulFromInteger' => IntOperator.multiply,
+        '_truncDivFromInteger' => IntOperator.truncateDivide,
+        '_moduloFromInteger' => IntOperator.modulo,
+        _ => null,
+      };
+      if (operator != null) {
+        return (target, entry) => entry.emit(
+          IntBinary(operator, entry.parameters[1], entry.parameters[0]),
+        );
+      }
+      if (element.name == '_equalToInteger') {
+        return (target, entry) =>
+            entry.emit(Equals(entry.parameters[0], entry.parameters[1]));
+      }
+      if (element.name == '_greaterThanFromInteger') {
+        return (target, entry) => entry.emit(
+          NumericBinary(.greaterThan, entry.parameters[1], entry.parameters[0]),
+        );
+      }
+      if (element.name == 'hashCode') {
+        return (target, entry) =>
+            entry.emit(ObjectHashCode(entry.parameters.single));
       }
     }
     if (element == element.library.getClass('Error')!.getMethod('_throw')) {

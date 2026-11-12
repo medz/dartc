@@ -29,7 +29,7 @@ Instruction? lowerCoreMember(
       return NumericRoundToDouble(receiver, rounding);
     }
     if (receiver.type != .integer) {
-      bindings.requireSdkClass(member.library.getClass('UnsupportedError')!);
+      bindings.requireClass(member.library.getClass('UnsupportedError')!);
     }
     return NumericToInt(receiver, rounding);
   }
@@ -42,7 +42,7 @@ Instruction? lowerCoreMember(
       )) {
     final right = arguments.single;
     if (receiver.type != .floating && right.type != .floating) {
-      bindings.requireSdkClass(
+      bindings.requireClass(
         member.library.getClass('IntegerDivisionByZeroException')!,
       );
     }

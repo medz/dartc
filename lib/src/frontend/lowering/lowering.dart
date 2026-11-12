@@ -34,20 +34,21 @@ final class Lowering({final bool enableAssertions = false}) {
       constants: input.constants,
       runtimeContracts: input.runtimeContracts,
       runtimeSources: input.runtimeSources,
+      sourceLibraries: {for (final library in input.libraries) library.element},
     );
     for (final library in input.libraries) {
       bindings.registerLibrary(library);
     }
-    Future<void> registerSdkSources(int from) async {
-      for (var i = from; i < bindings.sdkClasses.length; i++) {
-        final element = bindings.sdkClasses[i];
+    Future<void> registerDependencySources(int from) async {
+      for (var i = from; i < bindings.dependencyClasses.length; i++) {
+        final element = bindings.dependencyClasses[i];
         if (bindings.sourceOf(element) == null) {
           bindings.registerLibrary(await input.resolveLibrary(element.library));
         }
       }
     }
 
-    await registerSdkSources(0);
+    await registerDependencySources(0);
     final native = NativeBindings(bindings);
     input.libraries.forEach(native.bind);
     final functions = <IrCallable>[];
@@ -88,17 +89,27 @@ final class Lowering({final bool enableAssertions = false}) {
       }
     }
 
-    var sdkClass = 0, sdkFunction = 0, mixin = 0;
-    while (sdkClass < bindings.sdkClasses.length ||
-        sdkFunction < bindings.sdkFunctions.length ||
+    var dependencyClass = 0, dependencyFunction = 0, mixin = 0;
+    while (dependencyClass < bindings.dependencyClasses.length ||
+        dependencyFunction < bindings.dependencyFunctions.length ||
         mixin < bindings.mixinDeclarations.length) {
-      if (sdkClass < bindings.sdkClasses.length) {
-        await registerSdkSources(sdkClass);
-        final element = bindings.sdkClasses[sdkClass++];
+      if (dependencyClass < bindings.dependencyClasses.length) {
+        await registerDependencySources(dependencyClass);
+        final element = bindings.dependencyClasses[dependencyClass++];
         final (unit, node) =
             bindings.sourceOf(element) ??
-            (throw UnsupportedError('SDK class unavailable: ${element.name}'));
-        classes.add(lowerClass(unit, bindings, node, functions));
+            (throw UnsupportedError(
+              'Class source unavailable: ${element.name}',
+            ));
+        final declaration = lowerClass(unit, bindings, node, functions);
+        // Primitive numeric declarations and their SDK implementations share a class.
+        if (!{
+          ValueType.number,
+          ValueType.integer,
+          ValueType.floating,
+        }.contains(declaration.type)) {
+          classes.add(declaration);
+        }
         continue;
       }
       if (mixin < bindings.mixinDeclarations.length) {
@@ -115,15 +126,23 @@ final class Lowering({final bool enableAssertions = false}) {
         );
         continue;
       }
-      final element = bindings.sdkFunctions[sdkFunction++];
+      final element = bindings.dependencyFunctions[dependencyFunction++];
+      final bound = bindings.boundTarget(element);
+      if (bound != null &&
+          functions.any((function) => function.target == bound)) {
+        continue;
+      }
       final library = await input.resolveLibrary(element.library);
+      bindings.registerLibrary(library);
       final declaration = library.getFragmentDeclaration(
         element is PropertyAccessorElement && element.isOriginVariable
             ? element.variable.firstFragment
             : element.fragments.last,
       );
       if (declaration == null) {
-        throw UnsupportedError('SDK declaration unavailable: ${element.name}');
+        throw UnsupportedError(
+          'Declaration source unavailable: ${element.name}',
+        );
       }
       final target = bindings.target(
         element,
@@ -141,7 +160,7 @@ final class Lowering({final bool enableAssertions = false}) {
         ast.MethodDeclaration(:final body) ||
         ast.ConstructorDeclaration(:final body) => body,
         _ => throw UnsupportedError(
-          'SDK function unavailable: ${element.name}',
+          'Function source unavailable: ${element.name}',
         ),
       };
       FunctionLowering.append(

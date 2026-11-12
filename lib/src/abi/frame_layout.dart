@@ -41,7 +41,7 @@ FrameLayout<R> scalarFrame<R>(
   required Set<R> calleeSaved,
 }) {
   final arm = target.architecture == .arm64;
-  final limit = arm ? 32752 : 0x7ffffff0;
+  final limit = arm ? 0xffffe0 : 0x7ffffff0;
   RangeError.checkValueInInterval(localBytes, 0, limit, 'localBytes');
   RangeError.checkValueInInterval(
     outgoingStackBytes,

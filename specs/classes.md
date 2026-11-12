@@ -18,7 +18,7 @@
 | 构造器函数值 | 支持生成式和工厂构造器提取，包括泛型构造器函数值、显式或上下文实例化、重定向工厂、默认参数和函数值身份。泛型类型别名的参数重排、固定/重复参数和不同界限保留其独立身份。 |
 | 泛型实例、成员代入和协变检查 | 支持类类型参数、界限、嵌套实参、成员类型代入和泛型继承。实例保留实际类型实参，宽化静态引用后的字段写入、方法调用和方法提取仍执行协变检查。类体只保留一份，闭包捕获类型环境。见[泛型样本](../test/frontend/lowering/fixtures/generic_classes.dart)和[泛型工厂重定向样本](../test/frontend/lowering/fixtures/generic_redirect_factory.dart)。 |
 | 简单、增强及泛型枚举 | 复用类的常量存储和成员派发，支持 values、index、隐式 EnumName.name、默认/自定义 toString、字段、方法、运算符、工厂及模式；values 保留每项实际类型参数。具体 enum、Enum 及其类型参数界限支持显式 toString 调用与提取；通用 Object 接收者也支持 toString 调用与提取。带用户存储字段 `_name` 的 enum 因 analyzer 丢失原值而明确拒绝；同名 getter 不受此限制。支持普通及泛型 mixin，保留混入方法对 toString 的重写；Enum/EnumByName 的其他 SDK helper 保留普通导入调用，参考执行器尚未提供这些函数体。见[枚举样本](../test/frontend/lowering/fixtures/enums.dart)。 |
-| Object.toString | Object?/类型参数视图支持虚调用及提取，super 保留选定祖先语义，用户重写优先。静态、dynamic、对象模式及 super 默认方法的绑定身份一致。fixture 当前覆盖用户实例、null/标量、Type、Symbol 及 MapEntry；聚合值、函数、错误及未建模 SDK 存储明确拒绝。见[字符串样本](../test/frontend/lowering/fixtures/object_to_string.dart)。 |
+| Object.toString | Object?/类型参数视图支持虚调用及提取，super 保留选定祖先语义，用户重写优先。静态、dynamic、对象模式及 super 默认方法的绑定身份一致。IR 对照覆盖用户实例、null/标量、Type、Symbol、MapEntry 和 record；原生集合及错误格式化的范围见下文。函数和未建模 SDK 存储仍有缺口。见[字符串样本](../test/frontend/lowering/fixtures/object_to_string.dart)。 |
 | 元数据注解 | analyzer 检查注解表达式及常量要求；IR 尚未保存通用注解。interop 可从已检查元数据绑定 `Export<Int64 Function(...)>`，当前范围见[原生库](libraries.md#原生库)。其他原生绑定仍待实现。 |
 | 普通 extension | 声明与直接方法调用复用普通静态目标，接收者为显式首参数，扩展与方法类型参数按声明顺序展开。支持隐式选择、显式 override、词法调用、静态成员/变量，以及闭包捕获 this 与类型环境。非类、可空、record、函数和类型变量接收者无需伪造类。实例 getter/setter、索引、一元/二元运算符、复合赋值及增减复用同一调用适配器；对象与关系模式使用相同的已解析目标。隐式 call 调用复用静态目标，方法提取复用捕获接收者的普通闭包；部分 analyzer 泛型元数据边界仍明确拒绝，见[扩展访问范围与差异](extension-access.md)。见[扩展样本](../test/frontend/lowering/fixtures/extension_methods.dart)。 |
 | extension type | 支持普通/泛型的主构造器体、生成式/this 重定向/factory body、implements 和表示擦除。自身及继承的 extension type 成员复用静态函数，普通接口在表示对象上虚派发，无名义分配。支持可空/record/函数表示、const、构造器与方法提取，具体范围与拒绝边界见[extension type](extension-types.md)。 |
@@ -39,11 +39,11 @@
 
 普通类的原生方法、getter/setter 和运算符按实际接收者选择实现，支持抽象接口、继承与 mixin；super 保留直接选择的实现。省略参数采用实际实现的默认值，命名实参保持源码求值顺序。协变形参和方法类型实参按接收者的实际类环境检查，失败在执行方法体前抛出 TypeError；检查与方法体共享 catch/finally 清理路径。返回值在声明表示与调用方表示之间转换，装箱值参与回收。见[原生成员调用与 SDK 对照](../test/compiler/member_calls_test.dart)。
 
-原生成员选择限于同一封闭程序中构造或常量提供的类实例；不接收其他模块提供的托管对象。runtimeType 重写及 Type 相等见[类型行为范围](types.md#原生泛型调用与-type-值)，方法提取、Never 形参及 void 返回视图见[函数](functions.md)。其余 Object/Type 成员及 dynamic/noSuchMethod 仍有缺口，尚未提供完整的原生类调用支持。
+原生成员选择限于同一封闭程序中构造或常量提供的类实例；不接收其他模块提供的托管对象。runtimeType 重写及 Type 相等见[类型行为范围](types.md#原生泛型调用与-type-值)，方法提取、Never 形参及 void 返回视图见[函数](functions.md)。普通 Object.toString 调用、可空接收者及绑定方法值保留用户重写、super 和 null 行为。数字、字符串、List/Set/Map、StringBuffer 与 ArgumentError/RangeError/StateError/UnsupportedError 的格式化已接通，见[原生格式化与集合对照](../test/compiler/object_text_test.dart)。Type 的文本表示、record 原生表示及通用 dynamic/noSuchMethod 派发仍有缺口。
 
 同步原生入口内支持对象分配与不可达对象回收，保留引用别名及循环引用。含引用全局槽的模块跨入口保留堆，同模块、同线程的同步原生回调重入共享堆及 GC 根，包括暂停的外层栈帧。没有引用全局槽时，入口及重入仍使用各自的独立堆，返回即释放。持久堆在 dartc 链接的共享库卸载时释放，独立程序退出前显式释放，见[模块清理与卸载](libraries.md#模块清理与卸载)。并发调用、跨线程调用、跨模块托管值 ABI 及异步执行尚未实现。同步异常传播与清理见[原生异常范围](statements.md#原生异常与清理)。分配失败目前仍作为未捕获错误终止进程；可捕获的 `OutOfMemoryError` 尚未实现。
 
-弱引用槽不会保活目标；条件 key/value 引用在所属对象与 key 存活时保留 value，并处理条件引用之间的依赖闭包。仅由 key/value 互相引用形成的循环不会自行存活，多个独立弱槽分别清理。见[弱槽与条件引用验证](../test/codegen/weak_heap_native_test.dart)。公开 `WeakReference<T>`、`Expando<T>` 与 `Finalizer<T>` 已接通源码和回收路径，见[标准库支持](libraries.md)；`NativeFinalizer` 仍是缺口。
+弱引用槽不会保活目标；条件 key/value 引用在所属对象与 key 存活时保留 value，并处理条件引用之间的依赖闭包。仅由 key/value 互相引用形成的循环不会自行存活，多个独立弱槽分别清理。见[弱槽与条件引用验证](../test/codegen/weak_heap_native_test.dart)。公开 `WeakReference<T>`、`Expando<T>` 与 `Finalizer<T>` 已接通源码和回收路径，见[标准库支持](libraries.md)；`NativeFinalizer`、`Finalizable` 和指针 TypedData 的所有权也已接通。
 
 [布局契约](../test/layout/object_layout_test.dart)、[常量身份与表示检查](../test/codegen/object_values_test.dart)和[原生对象引用验证](../test/codegen/object_values_native_test.dart)覆盖字段、具体类型身份、嵌套引用、寄存器与栈参数、调用保存、循环交换及 null。
 

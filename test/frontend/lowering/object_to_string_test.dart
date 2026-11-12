@@ -21,6 +21,7 @@ void main() {
     ('symbolTearOffIdentity', sdk.symbolTearOffIdentity),
     ('sdkStorageString', sdk.sdkStorageString),
     ('sdkStoragePattern', sdk.sdkStoragePattern),
+    ('recordString', sdk.recordString),
   ]) {
     test('$name matches the Dart SDK', () {
       fixture.compare(name, [], expected);
@@ -30,7 +31,6 @@ void main() {
     'functionString',
     'setString',
     'mapString',
-    'recordString',
     'listString',
     'errorString',
   ]) {

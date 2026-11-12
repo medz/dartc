@@ -355,6 +355,14 @@ final class FunctionRepresentation(
             onThrow,
           _ => null,
         };
+        if (instruction case ObjectClassName(:final operand)) {
+          final type = layouts.types.runtimeTypeOf(operand, body);
+          final name = _load(TypeValues.className, type, body);
+          aliases.add(instruction);
+          _operands[instruction] = [name];
+          body.add(instruction);
+          continue;
+        }
         if (instruction case Identical(:final left, :final right)) {
           block = valueOperations.identical(left, right, block, typeTest);
           body = instructions[block]!;
@@ -372,9 +380,24 @@ final class FunctionRepresentation(
           continue;
         }
         if (instruction case NewCollection(:final collectionType)
-            when collectionType.declaration == CoreTypes.map) {
-          invocations[instruction] = layouts.mapFactory;
-          _operands[instruction] = [_reify(collectionType, body)];
+            when collectionType.declaration == CoreTypes.map ||
+                collectionType.declaration == CoreTypes.set) {
+          final target = layouts
+              .collectionFactory(collectionType)
+              .implementation;
+          invocations[instruction] = target;
+          _operands[instruction] = [
+            ...target.signature.bind<Value>(
+              [],
+              {},
+              (index) =>
+                  members.program.implementationOf(target)!.defaults[index]!,
+            ),
+            _reify(
+              target.owner!.instantiate(collectionType.typeArguments),
+              body,
+            ),
+          ];
           body.add(instruction);
           continue;
         }
@@ -843,8 +866,9 @@ final class FunctionRepresentation(
                                 )
                               : {member!.owner!: member})
                           .entries)
-                    if (layouts.typeTest(receiver.type, entry.key) !=
-                        .constantFalse)
+                    if (!virtual ||
+                        layouts.typeTest(receiver.type, entry.key) !=
+                            .constantFalse)
                       entry.key: (target: entry.value, closure: null),
                 };
           final plainObject =

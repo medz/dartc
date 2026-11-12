@@ -175,6 +175,7 @@ void writeFunction(
     ReifyType() => 'reify ${op.template.dartName}',
     ObjectRuntimeType() =>
       '${op.direct ? 'direct ' : ''}runtimeType ${value(op.operand)}',
+    ObjectClassName(:final operand) => 'class-name ${value(operand)}',
     ObjectHashCode() =>
       '${op.direct ? 'direct ' : ''}hashCode ${value(op.operand)}',
     TypeTest() =>
@@ -184,7 +185,6 @@ void writeFunction(
     NullCheck() => 'checkNotNull ${value(op.operand)}',
     NumericBinary() =>
       'numeric.${op.operator.name} ${value(op.left)}, ${value(op.right)}',
-    Interpolate() => 'interpolate [${op.inputs.map(value).join(', ')}]',
     StringConcat() => 'concat ${value(op.left)}, ${value(op.right)}',
     StringLength() => 'stringLength ${value(op.string)}',
     StringFromCharCode() => 'stringFromCharCode ${value(op.code)}',

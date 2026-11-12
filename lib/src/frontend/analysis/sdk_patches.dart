@@ -56,6 +56,8 @@ final class SdkPatches(final OverlayResourceProvider files) {
             coreUri.resolve(part.uri.stringValue!).toFilePath(),
         patches('core')
             .singleWhere((path) => path.endsWith('/bool_patch.dart')),
+        patches('core')
+            .singleWhere((path) => path.endsWith('/bigint_patch.dart')),
       ];
       if (selected.isNotEmpty) {
         throw FormatException(
@@ -70,6 +72,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         '$runtime/list.dart',
         '$runtime/string.dart',
         '$runtime/integer.dart',
+        '$runtime/double.dart',
       ]);
       final internal = patches('_internal')
           .singleWhere((path) => path.endsWith('/internal_patch.dart'));
@@ -295,13 +298,22 @@ final class SdkPatches(final OverlayResourceProvider files) {
             final (ownerPath, owner) =
                 originals[declaration.namePart.typeName.lexeme] ??
                 (throw FormatException('SDK class unavailable: $path'));
+            final interfaces = declaration.implementsClause;
+            final repeatsInterfaces =
+                _official.contains(path) &&
+                interfaces != null &&
+                interfaces.toSource() == owner.implementsClause?.toSource();
             if (declaration.extendsClause != null ||
                 declaration.withClause != null ||
-                declaration.implementsClause != null &&
+                interfaces != null &&
+                    !repeatsInterfaces &&
                     !declaration.namePart.typeName.lexeme.startsWith('_')) {
               throw FormatException(
                 'SDK implementation changes class hierarchy: $path',
               );
+            }
+            if (repeatsInterfaces) {
+              edit(path, interfaces.offset, interfaces.end, '');
             }
             for (final member in declaration.body.members.where(
               (m) => !_patched(m),

@@ -36,15 +36,17 @@ final class Bindings({
   ConstantEvaluation? constants,
   final Uri? runtimeContracts,
   final Set<Uri> runtimeSources = const {},
+  final Set<LibraryElement> sourceLibraries = const {},
 }) {
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final nativeReferences = <FunctionTarget, NativeReference>{};
   final _numericClasses = <ClassType>{};
   (InterfaceElement, FieldElement, FieldElement)? _constantMapStorage;
+  (InterfaceElement, FieldElement)? _constantSetStorage;
 
-  /// SDK functions with Dart bodies, discovered while binding direct references.
-  final sdkFunctions = <ExecutableElement>[];
+  /// Dependency functions with Dart bodies, discovered through direct references.
+  final dependencyFunctions = <ExecutableElement>[];
 
   /// Resolved SDK declarations whose behavior is supplied by the compiler.
   final _intrinsics =
@@ -86,32 +88,38 @@ final class Bindings({
         ],
         constructors: [
           for (final target in _targets.values.toSet())
-            if (target.owner == owner && target.kind == .factory) target,
+            if (target.owner == owner &&
+                (target.kind == .factory || target.kind == .initializer))
+              target,
         ],
       ),
   ];
 
-  /// Constructed SDK classes, with superclasses preceding their children.
-  final sdkClasses = <InterfaceElement>[];
+  /// Referenced dependency classes, with superclasses preceding their children.
+  final dependencyClasses = <InterfaceElement>[];
 
   /// Returns an already-bound declaration without scheduling more lowering.
   FunctionTarget? boundTarget(ExecutableElement element) =>
       _targets[element.baseElement];
 
-  /// Includes a constructed SDK class and the bodies it inherits.
-  void requireSdkClass(InterfaceElement element) {
-    if (!element.library.isInSdk ||
+  bool _needsLowering(LibraryElement library) =>
+      !sourceLibraries.contains(library) &&
+      (library.isInSdk || runtimeSources.contains(library.uri));
+
+  /// Includes a dependency class and the bodies it inherits.
+  void requireClass(InterfaceElement element) {
+    if (!_needsLowering(element.library) ||
         _numericImplementation(element) != null ||
-        sdkClasses.contains(element)) {
+        dependencyClasses.contains(element)) {
       return;
     }
     if (element.supertype case final parent? when element is! EnumElement) {
-      requireSdkClass(parent.element);
+      requireClass(parent.element);
     }
     for (final mixin in element.mixins) {
-      requireSdkClass(mixin.element);
+      requireClass(mixin.element);
     }
-    sdkClasses.add(element);
+    dependencyClasses.add(element);
   }
 
   /// Includes the actual SDK error used by failed late binding operations.
@@ -129,7 +137,7 @@ final class Bindings({
     if (error == null || error.unnamedConstructor == null) {
       unsupported(unit, site, 'SDK late initialization error unavailable');
     }
-    requireSdkClass(error);
+    requireClass(error);
   }
 
   final _typeEnvironments =
@@ -239,11 +247,20 @@ final class Bindings({
             final value = constants.annotation(unit, annotation);
             if (value?.type case dart.InterfaceType(element: final contract)
                 when contract.library.uri == runtimeContracts &&
+                    contract ==
+                        contract.library.getClass('ConstantSetStorage')) {
+              _constantSetStorage = (
+                element,
+                element.getField(value!.getField('entries')!.toStringValue()!)!,
+              );
+            }
+            if (value?.type case dart.InterfaceType(element: final contract)
+                when contract.library.uri == runtimeContracts &&
                     (contract ==
                             contract.library.getClass('ReferencePayload') ||
                         contract ==
                             contract.library.getClass('ConstantListStorage'))) {
-              requireSdkClass(element);
+              requireClass(element);
             }
             if (value?.type case dart.InterfaceType(element: final contract)
                 when contract.library.uri == runtimeContracts &&
@@ -263,7 +280,7 @@ final class Bindings({
             if (element is! EnumElement) ?element.supertype,
             ...element.mixins,
           ]) {
-            if (parent.element.library.isInSdk) requireSdkClass(parent.element);
+            if (parent.element.library.isInSdk) requireClass(parent.element);
           }
         }
       }
@@ -808,6 +825,24 @@ final class Bindings({
     final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
     final container = element.enclosingElement;
+    if (container is InterfaceElement && element is MethodElement) {
+      final numeric = _numericImplementation(container);
+      final declaration = numeric == null
+          ? null
+          : element.library
+                .getClass(numeric.name)
+                ?.methods
+                .where(
+                  (method) =>
+                      _memberSelector(method) == _memberSelector(element),
+                )
+                .firstOrNull;
+      if (declaration != null &&
+          !declaration.isAbstract &&
+          !declaration.isExternal) {
+        return _targets[element] = target(declaration, unit, site);
+      }
+    }
     if (element.library.isDartCore &&
         !element.isStatic &&
         element.isAbstract &&
@@ -822,7 +857,13 @@ final class Bindings({
         final member = switch (element) {
           GetterElement() => implementation?.getGetter(element.name!),
           SetterElement() => implementation?.getSetter(element.name!),
-          _ => implementation?.getMethod(element.name!),
+          _ =>
+            implementation?.methods
+                .where(
+                  (method) =>
+                      _memberSelector(method) == _memberSelector(element),
+                )
+                .firstOrNull,
         };
         if (member == null) continue;
         final concrete = target(member, unit, site);
@@ -896,7 +937,7 @@ final class Bindings({
         ) ??
         intrinsicFor(
           element,
-          requireSdkClass,
+          requireClass,
           (declaration) => target(declaration, unit, site),
         );
     final function = FunctionTarget(
@@ -945,10 +986,10 @@ final class Bindings({
     if (enclosing == null) {
       _targets[element] = function;
       if (element is ConstructorElement &&
-          element.library.isInSdk &&
+          _needsLowering(element.library) &&
           !element.isExternal &&
           intrinsic == null) {
-        requireSdkClass(element.enclosingElement);
+        requireClass(element.enclosingElement);
       }
       final numeric =
           container is InterfaceElement &&
@@ -957,7 +998,7 @@ final class Bindings({
       if (element.library.isDartCore && container?.name == 'num') {
         _numericClasses.add(ValueType.number);
       }
-      if (element.library.isInSdk &&
+      if (_needsLowering(element.library) &&
           (numeric || element.isStatic) &&
           !element.isAbstract &&
           intrinsic == null &&
@@ -965,7 +1006,12 @@ final class Bindings({
               element is MethodElement ||
               element is PropertyAccessorElement ||
               numeric && element is ConstructorElement)) {
-        sdkFunctions.add(element);
+        dependencyFunctions.add(element);
+      }
+      if (container is InterfaceElement &&
+          !element.library.isInSdk &&
+          _needsLowering(element.library)) {
+        requireClass(container);
       }
     }
     if (destination == null && parameters.any((p) => p.isOptional)) {
@@ -1186,7 +1232,7 @@ final class Bindings({
   ) => _globals.putIfAbsent(element.baseElement as VariableElement, () {
     final container = element.enclosingElement;
     if (container is InterfaceElement && element.library.isInSdk) {
-      requireSdkClass(container);
+      requireClass(container);
     }
     final owner =
         container is InterfaceElement && container is! ExtensionTypeElement
@@ -1324,7 +1370,7 @@ final class Bindings({
       if (value.toBoolValue() case final b?) return .boolean(b);
       if (value.toDoubleValue() case final d?) return .floating(d);
       if (value.toStringValue() case final s?) {
-        requireSdkClass((value.type as dart.InterfaceType).element);
+        requireClass((value.type as dart.InterfaceType).element);
         return .string(s);
       }
       if (value.toSymbolValue() case final name?) {
@@ -1385,8 +1431,35 @@ final class Bindings({
       }
       final list = value.toListValue();
       if (list ?? value.toSetValue()?.toList() case final elements?) {
+        if (_constantSetStorage case (final storage, final entries)
+            when list == null) {
+          final (map, keys, values) = _constantMapStorage!;
+          requireClass(storage);
+          requireClass(map);
+          requireListSupport(origin, requireClass);
+          final type = valueType(value.type!, unit, site) as ClassType;
+          final element = type.typeArguments.single;
+          return ObjectConstant(
+            classType(storage, unit, site).instantiate([element]),
+            {
+              field(entries, unit, site): ObjectConstant(
+                classType(map, unit, site).instantiate([element, .nullType]),
+                {
+                  field(keys, unit, site): SequenceConstant(
+                    CoreTypes.listOf(element),
+                    elements.map(convert),
+                  ),
+                  field(values, unit, site): SequenceConstant(
+                    CoreTypes.listOf(.nullType),
+                    elements.map((_) => const Constant.nullValue()),
+                  ),
+                },
+              ),
+            },
+          );
+        }
         if (list != null) {
-          requireListSupport(origin, requireSdkClass);
+          requireListSupport(origin, requireClass);
         }
         return SequenceConstant(
           valueType(value.type!, unit, site) as ClassType,
@@ -1399,8 +1472,8 @@ final class Bindings({
           final keys,
           final values,
         )) {
-          requireSdkClass(storage);
-          requireListSupport(origin, requireSdkClass);
+          requireClass(storage);
+          requireListSupport(origin, requireClass);
           final type = valueType(value.type!, unit, site) as ClassType;
           return ObjectConstant(
             classType(storage, unit, site).instantiate(type.typeArguments),
@@ -1434,7 +1507,7 @@ final class Bindings({
         }
       }
       if (value.type case final dart.InterfaceType objectType) {
-        requireSdkClass(objectType.element);
+        requireClass(objectType.element);
         final fields = <InstanceField, Constant>{};
         DartObject? layer = value;
         while (layer != null) {
@@ -1697,6 +1770,8 @@ final class Bindings({
           ffi ??
           switch (element.name) {
             'Object' => ValueType.object,
+            'Null' => ValueType.nullClass,
+            'Comparable' => ValueType.comparable,
             'Type' => ValueType.typeType,
             'Error' => ValueType.error,
             'Exception' => CoreTypes.exception,
@@ -1730,6 +1805,14 @@ final class Bindings({
             _ => null,
           };
       if (builtin != null) {
+        if (ffi == FfiTypes.pointer ||
+            builtin == ValueType.number ||
+            builtin == ValueType.integer ||
+            builtin == ValueType.floating ||
+            builtin == ValueType.boolean ||
+            builtin == ValueType.string) {
+          requireClass(element);
+        }
         for (final (i, parameter) in element.typeParameters.indexed) {
           _parameters[parameter.baseElement] = builtin.typeParameters[i];
           _boundParameters.add(parameter.baseElement);

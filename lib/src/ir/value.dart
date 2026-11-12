@@ -150,6 +150,15 @@ final class ObjectHashCode(
   Iterable<Value> get inputs => [operand];
 }
 
+/// Reads the implementation class name without invoking an overridable getter.
+final class ObjectClassName(final Value operand) extends Instruction {
+  this : super(.string) {
+    if (operand.type is CellType) throw ArgumentError('Expected a Dart value.');
+  }
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
 /// A canonical tear-off of a top-level function, static method or constructor.
 ///
 /// All types must be closed. Use [InstantiateFunction] to apply lexical types.
@@ -506,6 +515,7 @@ sealed class Instruction(super.type) extends Value {
   Set<Effect> get effects => switch (this) {
     ObjectHashCode(direct: true) => _bindOnce,
     ObjectRuntimeType(direct: true) => const {.readsStorage},
+    ObjectClassName() => const {.readsStorage},
     ObjectRuntimeType() ||
     ObjectHashCode() ||
     ListSublist() ||
@@ -530,7 +540,6 @@ sealed class Instruction(super.type) extends Value {
     FunctionCall() ||
     Construct() ||
     BindMethod(direct: false) ||
-    Interpolate() ||
     Equals(mayCallUserCode: true) => _call,
     NewCollection() ||
     ListFilled() ||
@@ -1759,7 +1768,8 @@ final class DirectCall._(
       ownerEnvironment,
     ) as FunctionType).instantiate(types);
     checkArguments([
-      if (target.kind.hasReceiver) (target.owner!).substitute(ownerEnvironment),
+      if (target.kind.hasReceiver)
+        target.parameterTypes.first.substitute(ownerEnvironment),
       ...signature.parameters,
     ], inputs);
     return ._(
@@ -1972,21 +1982,6 @@ final class NumericSquareRoot(final Value operand) extends Instruction {
   Iterable<Value> get inputs => [operand];
 }
 
-/// Converts evaluated values in order and concatenates their string forms.
-///
-/// All interpolation expressions are evaluated before this instruction. Each
-/// conversion uses Dart's `toString`, including virtual dispatch and null's
-/// string representation. Conversion may throw or execute user code.
-final class Interpolate(Iterable<Value> parts) extends Instruction {
-  @override
-  final List<Value> inputs = .unmodifiable(parts);
-  this : super(.string) {
-    if (inputs.any((value) => value.type is CellType)) {
-      throw ArgumentError('Interpolation cannot expose capture storage.');
-    }
-  }
-}
-
 /// Concatenates two already evaluated, non-nullable strings.
 final class StringConcat(
   /// The first string.
@@ -2059,6 +2054,7 @@ final class StringCodeUnitAt(final Value string, final Value index)
 }
 
 ClassType _classReceiver(ValueType type, [ClassType? owner]) {
+  if (type == ValueType.nullType && owner == ValueType.nullClass) return owner!;
   if (type is PromotedTypeParameterType && owner != null) {
     final view = CoreTypes.view(type, owner);
     if (view != null) return view;

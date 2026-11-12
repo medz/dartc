@@ -146,16 +146,18 @@ final class Arm64Abi(@override final Target target)
     },
   );
 
-  /// Establishes [frame] without changing parameter registers or flags.
+  /// Establishes [frame], using IP0 for large offsets and preserving arguments.
   void emitPrologue(Assembler assembler, FrameLayout<CpuRegister> frame) {
     _checkFrame(frame);
     assembler.addImmediate(.sp, .sp, -frame.stackBytes);
     for (final MapEntry(:key, :value) in frame.savedRegisters.entries) {
+      final large = value > 32760;
+      if (large) assembler.addImmediate(.x16, .sp, value);
       switch (key) {
         case Register():
-          assembler.store(key, .sp, value);
+          assembler.store(key, large ? .x16 : .sp, large ? 0 : value);
         case FloatRegister():
-          assembler.storeDouble(key, .sp, value);
+          assembler.storeDouble(key, large ? .x16 : .sp, large ? 0 : value);
       }
     }
     assembler.addImmediate(.x29, .sp, frame.savedRegisters[Register.x29]!);
@@ -165,11 +167,13 @@ final class Arm64Abi(@override final Target target)
   void emitEpilogue(Assembler assembler, FrameLayout<CpuRegister> frame) {
     _checkFrame(frame);
     for (final MapEntry(:key, :value) in frame.savedRegisters.entries) {
+      final large = value > 32760;
+      if (large) assembler.addImmediate(.x16, .sp, value);
       switch (key) {
         case Register():
-          assembler.load(key, .sp, value);
+          assembler.load(key, large ? .x16 : .sp, large ? 0 : value);
         case FloatRegister():
-          assembler.loadDouble(key, .sp, value);
+          assembler.loadDouble(key, large ? .x16 : .sp, large ? 0 : value);
       }
     }
     assembler

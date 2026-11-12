@@ -2,6 +2,21 @@ import 'package:dartc/interop.dart';
 
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
+  /// The declaring class of Null members; their receiver value has [nullType].
+  static final ClassType nullClass = ClassType(Uri.parse('dart:core'), 'Null');
+
+  /// The generic ordering interface implemented by numbers and strings.
+  static final ClassType comparable = ClassType(
+    Uri.parse('dart:core'),
+    'Comparable',
+    isAbstract: true,
+    typeParameters: [
+      TypeParameterType('T')
+        ..initializeBound(object.nullable)
+        ..initializeDefaultType(dynamicType),
+    ],
+  );
+
   /// A nominal upper bound for selecting possible instance receivers.
   ///
   /// Type arguments remain unresolved; this only excludes unrelated classes.
@@ -1041,6 +1056,8 @@ final class const ClassType._(
   }
 
   List<ClassType> get interfaces => [
+    if (this == ValueType.number || this == ValueType.string)
+      ValueType.comparable.instantiate([this]),
     for (final type
         in (declaration._hierarchy?.interfaces ?? declaration._interfaces))
       type.substitute(typeEnvironment) as ClassType,

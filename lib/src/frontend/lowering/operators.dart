@@ -139,15 +139,13 @@ Value? lowerBinary(
   if ((op == .truncateDivide || op == .modulo) &&
       left.type != .floating &&
       right.type != .floating) {
-    context.bindings.requireSdkClass(
+    context.bindings.requireClass(
       member!.library.getClass('IntegerDivisionByZeroException')!,
     );
   }
   if (left.type == .integer && right.type == .integer) {
     if (op == .shiftLeft || op == .shiftRight || op == .unsignedShiftRight) {
-      context.bindings.requireSdkClass(
-        member!.library.getClass('ArgumentError')!,
-      );
+      context.bindings.requireClass(member!.library.getClass('ArgumentError')!);
     }
     return context.emit(IntBinary(op, left, right));
   }
@@ -169,7 +167,7 @@ Value? lowerBinary(
     _ => unsupported(context.unit, site, 'non-integer bitwise operator'),
   };
   if (numeric == .truncateDivide) {
-    context.bindings.requireSdkClass(
+    context.bindings.requireClass(
       member!.library.getClass('UnsupportedError')!,
     );
   }

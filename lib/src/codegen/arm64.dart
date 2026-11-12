@@ -467,29 +467,29 @@ final class _Arm64Emitter(
     int offset, {
     int bytes = 8,
     bool signed = false,
-  }) => switch (destination) {
-    Register() => assembler.load(
+  }) {
+    final large = offset > 4095 * bytes;
+    if (large) assembler.addImmediate(.x16, .sp, offset);
+    loadMemory(
       destination,
-      .sp,
-      offset,
+      large ? Register.x16 : Register.sp,
+      offset: large ? 0 : offset,
       bytes: bytes,
       signed: signed,
-    ),
-    FloatRegister() =>
-      bytes == 4
-          ? assembler.loadFloat(destination, .sp, offset)
-          : assembler.loadDouble(destination, .sp, offset),
-  };
+    );
+  }
 
   @override
-  void storeStack(CpuRegister source, int offset, {int bytes = 8}) =>
-      switch (source) {
-        Register() => assembler.store(source, .sp, offset, bytes: bytes),
-        FloatRegister() =>
-          bytes == 4
-              ? assembler.storeFloat(source, .sp, offset)
-              : assembler.storeDouble(source, .sp, offset),
-      };
+  void storeStack(CpuRegister source, int offset, {int bytes = 8}) {
+    final large = offset > 4095 * bytes;
+    if (large) assembler.addImmediate(.x16, .sp, offset);
+    storeMemory(
+      source,
+      large ? Register.x16 : Register.sp,
+      offset: large ? 0 : offset,
+      bytes: bytes,
+    );
+  }
 
   @override
   Fixup call() => assembler.call();

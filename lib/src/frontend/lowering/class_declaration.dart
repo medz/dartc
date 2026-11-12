@@ -268,7 +268,8 @@ IrClass lowerClass(
         final method = member.declaredFragment!.element;
         final target = memberTarget(method, member);
         if (target.kind.isVirtual) members.add(target);
-        if (!target.isAbstract &&
+        if (!method.isAbstract &&
+            !target.isAbstract &&
             !functions.any((function) => function.target == target)) {
           FunctionLowering.append(
             functions,
@@ -343,12 +344,7 @@ IrClass lowerClass(
     );
   }
   var referencePayload = false;
-  ({
-    InstanceField length,
-    InstanceField data,
-    InstanceField mutability,
-    FunctionTarget spread,
-  })?
+  ({InstanceField length, InstanceField data, FunctionTarget spread})?
   listStorage;
   for (final (sourceUnit, source) in bindings.fragmentsOf(element)) {
     if (!bindings.runtimeSources.contains(sourceUnit.uri) ||
@@ -370,7 +366,6 @@ IrClass lowerClass(
           listStorage = (
             length: field('length'),
             data: field('data'),
-            mutability: field('mutability'),
             spread: bindings.target(
               element.getMethod(value!.getField('spread')!.toStringValue()!)!,
               sourceUnit,

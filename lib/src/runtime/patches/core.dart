@@ -10,11 +10,15 @@ import '../finalization.dart' as finalization;
 class Map<K, V> {
   @patch
   factory Map() => collection.LinkedHashMap<K, V>();
+
+  @patch
+  factory Map.unmodifiable(Map<dynamic, dynamic> other) =>
+      collection.UnmodifiableMapView<K, V>(Map<K, V>.from(other));
 }
 
 @runtime.ConstantMapStorage('_keys', '_values')
 final class const _ConstantMap<K, V>(final List<K> _keys, final List<V> _values)
-    extends collection.MapBase<K, V> {
+    extends collection.UnmodifiableMapBase<K, V> {
   int _index(Object? key) {
     for (var i = 0; i < _keys.length; i++) {
       if (_keys[i] == key) return i;
@@ -34,12 +38,6 @@ final class const _ConstantMap<K, V>(final List<K> _keys, final List<V> _values)
   int get length => _keys.length;
   @override
   Iterable<K> get keys => _keys;
-  @override
-  void operator []=(K key, V value) => throw UnsupportedError('Immutable map');
-  @override
-  V? remove(Object? key) => throw UnsupportedError('Immutable map');
-  @override
-  void clear() => throw UnsupportedError('Immutable map');
 }
 
 @patch
@@ -68,6 +66,39 @@ final class _Finalizer<T>(void Function(T) callback)
 @patch
 class Object {
   external int get _identityHashCode;
+
+  @runtime.Primitive(.className)
+  external String get _className;
+
+  @patch
+  String toString() => "Instance of '" + _className + "'";
+}
+
+@patch
+class Error {
+  @patch
+  static String _objectToString(Object object) =>
+      "Instance of '" + object._className + "'";
+
+  @patch
+  static String _stringToSafeString(String string) {
+    final result = StringBuffer('"');
+    for (final unit in string.codeUnits) {
+      result.write(switch (unit) {
+        8 => r'\b',
+        9 => r'\t',
+        10 => r'\n',
+        12 => r'\f',
+        13 => r'\r',
+        34 => r'\"',
+        92 => r'\\',
+        < 32 => r'\u' + unit.toRadixString(16).padLeft(4, '0'),
+        _ => String.fromCharCode(unit),
+      });
+    }
+    result.write('"');
+    return result.toString();
+  }
 }
 
 @patch
