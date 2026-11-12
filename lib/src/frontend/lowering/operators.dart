@@ -90,8 +90,7 @@ Value? lowerBinary(
   if (member is MethodElement &&
       (isClassLike(member.enclosingElement) ||
           isExtensionOwner(member.enclosingElement)) &&
-      (!member.library.isDartCore ||
-          !ValueType.number.accepts(left.type) && left.type != .string)) {
+      (!member.library.isDartCore || !ValueType.number.accepts(left.type))) {
     return context.callPositionalMember(
       member,
       left,
@@ -117,11 +116,6 @@ Value? lowerBinary(
       right,
       context.typeOf(member.formalParameters.first.type, site),
     );
-  }
-  if (left.type == .string &&
-      right.type == .string &&
-      (operator.type == .PLUS || operator.type == .PLUS_EQ)) {
-    return context.emit(StringConcat(left, right));
   }
   final IntOperator op = switch (operator.type) {
     .PLUS || .PLUS_EQ || .PLUS_PLUS => .add,

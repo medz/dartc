@@ -2,7 +2,7 @@
 
 转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数、静态方法、属性、全局存储及构造器和常量所属类按声明身份读取源码，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。无参数的同步 main 可作为独立进程入口，其他启动能力见下文。
 
-接入的 SDK 实现片段在所属库内完成静态检查，包括未使用的方法体。原声明保留类型、默认参数、构造器初始化及已有 Dart 方法体；实现不得增添公开 API、改变公共类的继承关系或覆盖已有 Dart 方法。签名和返回类型不一致仍是错误。`dart:ffi` 的 Array 注解实现包含官方私有成员，即使未接入 runtime 源码也必须完成该库的检查。见[实现片段检查](../test/frontend/analysis/sdk_patches_test.dart)。
+接入的 SDK 实现片段在所属库内完成静态检查，包括未使用的方法体。原声明保留类型、默认参数、构造器初始化及已有 Dart 方法体；实现可重写已继承的实例成员，签名由 analyzer 检查；不得增添无对应声明的公开 API、改变公共类的继承关系或覆盖原声明已有的 Dart 方法。签名和返回类型不一致仍是错误。`dart:ffi` 的 Array 注解实现包含官方私有成员，即使未接入 runtime 源码也必须完成该库的检查。见[实现片段检查](../test/frontend/analysis/sdk_patches_test.dart)。
 
 | 特性 | 当前 IR 范围 |
 | --- | --- |
@@ -69,7 +69,7 @@ Linux ARM64/x86-64 输出当前为固定地址、静态解析的 ELF 可执行�
 | WeakReference | 支持泛型工厂、构造器提取和只读 `target`。弱引用不会保活目标；普通强引用保留目标，失去强引用后允许清空。原生验证覆盖用户对象、自引用环、集合、闭包、类型对象、常量和跨导出调用存活，以及数值、字符串、布尔值和 FFI 指针的 `ArgumentError`。records 的目标表示尚缺，Struct/Union 的弱目标拒绝路径尚未验证。见[源码与原生验证](../test/compiler/weak_references_test.dart)。回收时机和是否清空不构成语言保证。 |
 | Expando | 支持可选名称、构造器提取、`name`、`toString`、按对象身份读取/替换属性及写入 null 删除；相同名称的实例互不共享属性。不调用键的重写 hashCode/==；写入保持实际泛型值类型检查。GC 仅在 Expando 与 key 均存活时保留 value，支持跨 Expando 的条件依赖与循环回收。数值、字符串、布尔值和 FFI 指针键抛出 ArgumentError，动态 null 参数受非空类型检查；records、Struct/Union 的目标表示仍缺。见[源码与原生验证](../test/compiler/expandos_test.dart)。 |
 | 终结 | `Finalizer<T>` 支持可空 token、多重附着、弱 target/detach key、创建 Zone 绑定及至多一次的事件回调。detach 也取消尚未执行的回调；失去 finalizer 本身的强引用不保留其记录。GC 仅入队，回调可分配并再次触发 GC；关闭堆丢弃剩余附着，不强制调用回调。`NativeFinalizer` 使用真实原生函数指针，在 GC 完成后执行；附着记录保留终结器，解绑取消回调，外部存储计量影响回收压力，正常进程退出与动态库卸载执行剩余回调。异常终止不保证回调。`Finalizable` 的静态类型、可空类型、类型参数边界和 FutureOr 保留作用域存活；覆盖参数、this、闭包、late 变量、覆盖赋值、循环及 Never 退出。跨线程和 isolate 生命周期仍待实现。见[原生资源测试](../test/compiler/native_finalizers_test.dart)。 |
-| 字符串 | 原生常量保留 UTF-16 码元；`length`、`codeUnitAt` 支持普通调用、泛型接收者和方法值，越界抛出可捕获的 RangeError。`String.fromCharCode`、构造器值、`+`、`[]` 和内容相等/哈希已接通，动态载荷在 GC 与跨入口全局存储中保持有效。fromCharCodes、一般插值格式化与其他 String 方法仍待接通；见[字符串范围与验证](expressions.md#原生转整数与字符串常量)。 |
+| 字符串 | 支持 UTF-16 常量、fromCharCode/fromCharCodes、codeUnits/runes、索引、连接、重复、内容比较/哈希、切片、搜索、替换、分割、填充和 Unicode 空白裁剪。String 实现 Pattern，支持用户 Pattern 与替换回调；载荷在 GC 与跨入口存储中保持有效。Unicode 大小写转换、RegExp、一般值插值格式化和其余文本库仍待接通；见[字符串范围与验证](expressions.md#原生转整数与字符串常量)。 |
 | 参数与存储 | ARM64 的前八个、x86-64 的前六个原生整数或指针参数使用通用寄存器；两者另有八个由 `Float` 和 `Double` 共用的浮点参数寄存器，与通用寄存器独立分配。各类超出的参数按源顺序使用栈：macOS ARM64 按实际大小自然对齐，Linux ARM64 与 x86-64 使用八字节槽。Dart 函数间另支持布尔参数及结果，不隐式扩展原生导出签名。分支、循环和调用之间保留活跃值，块参数遵循同时赋值语义；栈帧保持 16 字节对齐及帧指针链，出参区与局部存储分开。ARM64 帧支持保存 D8–D15 的低 64 位，x86-64 的标量浮点寄存器均按调用可破坏处理。超出当前栈访问、栈帧或分支/调用位移编码范围时明确报错。 |
 | 原生指针 | 支持上述整数、Float 和 Double 元素类型的 `Pointer<T>.fromAddress`、`.address`、相等/不等比较、`+`、`-`、`elementAt`、`.value` 及 `[]`/`[]=` 读写，包括增减和复合赋值。偏移和索引以元素计数，允许负值，地址运算保留目标指针位宽；计算地址不访问存储。整数读取按有符号/无符号规则扩展，写入截断到元素宽度；Float 使用四字节存储，写入舍入精度、读取转换为 double；Double 使用八字节存储。写入不改变原 Dart 变量或赋值表达式的值，不影响邻接字节。接收者、索引及右值按 Dart 顺序各求值一次，别名修改可见。访问要求有效、存活且按元素大小自然对齐的原生存储；不进行集合边界检查，不将机器访存失败当作 Dart 异常。其他元素存储类型、结构体、回调及分配器尚未接入。 |
 | 指针槽 | `Pointer<Pointer<T>>` 支持 `.value`、`[]`/`[]=`、`+`、`-` 和 `elementAt`，包括开放的 `T extends NativeType`。当前 64 位目标的每个槽占八字节；存入地址，读出保持 `Pointer<T>` 类型的值，不读取其指向的内容。零地址及完整地址位保留，相邻槽不受写入影响；读出的指针经过普通调用、托管保存和 GC 后保持有效。函数指针槽保留原生签名，可用于同步 `asFunction` 调用。槽存储须由调用方保证有效、存活及自然对齐。 |

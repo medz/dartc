@@ -1712,6 +1712,7 @@ final class Bindings({
             'int' || '_IntegerImplementation' => ValueType.integer,
             'double' || '_Double' => ValueType.floating,
             'String' => ValueType.string,
+            'Pattern' => ValueType.pattern,
             'bool' => ValueType.boolean,
             'Record' => ValueType.record,
             'Function' => ValueType.function,

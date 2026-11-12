@@ -129,6 +129,8 @@ void main() {
           );
         }
         final expando = core.element.getClass('Expando')!;
+        final string = core.element.getClass('String')!;
+        expect(string.getMethod('toString')!.enclosingElement, string);
         expect(expando.fragments, hasLength(2));
         expect(
           expando.fields.where((field) => field.name == 'name'),
@@ -207,6 +209,8 @@ void main() {
   }
   for (final patch in [
     'class PublicApi {}',
+    '@patch class String { @override int unrelated() => 0; }',
+    '@patch class String { static String toString() => "wrong"; }',
     '@patch class Finalizer<T> extends Object {}',
     '@patch class Expando<T extends Object> { @patch String toString() => "overwritten"; }',
   ]) {

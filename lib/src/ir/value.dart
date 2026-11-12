@@ -1767,8 +1767,12 @@ final class DirectCall._(
 void checkArguments(Iterable<ValueType> types, List<Value> arguments) {
   var i = 0;
   for (final type in types) {
-    if (i == arguments.length || !type.accepts(arguments[i++].type)) {
-      throw ArgumentError('Argument types do not match the parameters.');
+    if (i == arguments.length) throw ArgumentError('Missing argument $i.');
+    final actual = arguments[i++].type;
+    if (!type.accepts(actual)) {
+      throw ArgumentError(
+        'Argument ${i - 1} has type ${actual.dartName}; expected ${type.dartName}.',
+      );
     }
   }
   if (i != arguments.length) throw ArgumentError('Unexpected arguments.');

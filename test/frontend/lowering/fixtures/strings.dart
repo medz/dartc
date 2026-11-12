@@ -5,6 +5,7 @@ String adjacent(Object? a, Object? b) =>
     '; right=${b}'
     '!';
 String concat(String a, String b) => a + b;
+String repeat(String value, int count) => value * count;
 String compound(String a, String b) {
   a += b;
   return a;

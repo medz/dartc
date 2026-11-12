@@ -236,7 +236,12 @@ sealed class const ValueType() {
   static const ClassType boolean = ClassType._core('bool', object, true);
 
   /// The non-nullable `String` type.
-  static const ClassType string = ClassType._core('String', object, true);
+  static const ClassType string = ClassType._core('String', object, true, [
+    pattern,
+  ]);
+
+  /// The string-matching protocol implemented by strings and regular expressions.
+  static const ClassType pattern = ClassType._core('Pattern', object, true);
 
   /// The runtime value of a reified Dart type.
   static const ClassType typeType = ClassType._core('Type', object, true);
@@ -952,19 +957,23 @@ final class const ClassType._(
          nativeType: nativeType,
        );
 
-  const new _core(String name, ClassType? parent, bool isAbstract)
-    : this._(
-        null,
-        name,
-        parent,
-        const [],
-        isAbstract,
-        const [],
-        null,
-        null,
-        null,
-        isCore: true,
-      );
+  const new _core(
+    String name,
+    ClassType? parent,
+    bool isAbstract, [
+    List<ClassType> interfaces = const [],
+  ]) : this._(
+         null,
+         name,
+         parent,
+         interfaces,
+         isAbstract,
+         const [],
+         null,
+         null,
+         null,
+         isCore: true,
+       );
 
   /// Creates a declaration whose hierarchy can be initialized before verification.
   new declare(

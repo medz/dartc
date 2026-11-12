@@ -7,6 +7,16 @@ import 'package:test/test.dart';
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test('strings implement Pattern without making every Pattern a string', () {
+    expect(ValueType.pattern.accepts(.string), isTrue);
+    expect(ValueType.string.accepts(.pattern), isFalse);
+    final join = Block([.pattern]);
+    expect(
+      Jump(join, [const Constant.string('a')]).arguments.single.type,
+      ValueType.string,
+    );
+  });
+
   test('character ranges preserve UTF-16 values and reject invalid codes', () {
     final target = FunctionTarget(
       Uri.parse('memory:characters'),

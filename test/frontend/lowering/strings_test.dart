@@ -51,6 +51,9 @@ void main() {
     }
     compare('concat', ['a\n', '🌈'], sdk.concat);
     compare('compound', ['a', 'b'], sdk.compound);
+    for (final count in [-1, 0, 1, 3]) {
+      compare('repeat', ['🌈', count], sdk.repeat);
+    }
   });
 
   test('conversion dispatch and effects follow SDK evaluation order', () {

@@ -331,6 +331,11 @@ final class IrInterpreter(
     if (program.implementationOf(target) case final IrFunction body) {
       return run(body, arguments, environment);
     }
+    if (target.owner == ValueType.string) {
+      final receiver = arguments.first as String;
+      if (target.name == '+') return receiver + (arguments[1] as String);
+      if (target.name == '*') return receiver * (arguments[1] as int);
+    }
     if (target.library.toString() == 'dart:core' &&
         target.name == 'identical') {
       return identical(arguments[0], arguments[1]);

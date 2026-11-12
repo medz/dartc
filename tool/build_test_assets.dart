@@ -78,6 +78,7 @@ const _compilerLibraries = {
   'finalizers',
   'native_finalizers',
   'native_symbols',
+  'string_operations',
   'numeric_boxes',
   'exceptions',
   'type_checks',

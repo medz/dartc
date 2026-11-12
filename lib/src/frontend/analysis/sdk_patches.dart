@@ -187,6 +187,37 @@ final class SdkPatches(final OverlayResourceProvider files) {
       }
     }
     final edits = <String, List<(int, int, String)>>{};
+    bool inheritsMember(ClassDeclaration owner, ClassMember member) {
+      if (member is! MethodDeclaration || member.isStatic) return false;
+      Iterable<String> parents(ClassDeclaration declaration) => [
+        declaration.extendsClause?.superclass.name.lexeme ?? 'Object',
+        for (final type
+            in declaration.withClause?.mixinTypes ?? const <NamedType>[])
+          type.name.lexeme,
+        for (final type
+            in declaration.implementsClause?.interfaces ?? const <NamedType>[])
+          type.name.lexeme,
+      ];
+      final pending = parents(owner).toList();
+      final visited = {owner.namePart.typeName.lexeme};
+      for (var i = 0; i < pending.length; i++) {
+        final name = pending[i];
+        if (!visited.add(name)) continue;
+        final parent = originals[name]?.$2;
+        if (parent == null) continue;
+        if (parent.body.members.any(
+          (m) =>
+              m is MethodDeclaration &&
+              !m.isStatic &&
+              _memberKey(m) == _memberKey(member),
+        )) {
+          return true;
+        }
+        pending.addAll(parents(parent));
+      }
+      return false;
+    }
+
     void edit(String path, int start, int end, String text) =>
         edits.putIfAbsent(path, () => []).add((start, end, text));
     void augment(
@@ -272,7 +303,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
             for (final member in declaration.body.members.where(
               (m) => !_patched(m),
             )) {
-              _checkPrivate(member, path);
+              if (!inheritsMember(owner, member)) _checkPrivate(member, path);
             }
             final modifiers = [
               if (declaration.abstractKeyword == null) owner.abstractKeyword,
