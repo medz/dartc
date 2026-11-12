@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/layout.dart';
 
 import 'double_bits.dart';
@@ -39,6 +40,7 @@ final class ScalarFunction<R extends Object>(
     void Function(int, StackRoots) safepoint, {
     bool failures = false,
     bool persistent = false,
+    void Function(Fixup, NativeReference)? nativeAddress,
     void Function(Fixup, int)? codeAddress,
   }) {
     final allocation = FunctionAllocation(
@@ -100,6 +102,14 @@ final class ScalarFunction<R extends Object>(
         if (selection.constantTests[instruction] case final value?) {
           final destination = allocation.allocate(.general);
           emitter.loadImmediate(destination, value ? 1 : 0);
+          allocation.define(instruction, destination);
+        } else if (instruction case NativeSymbolAddress(:final reference)) {
+          final destination = allocation.allocate(.general);
+          emitter.address(
+            destination,
+            (fixup) => nativeAddress!(fixup, reference),
+            indirect: true,
+          );
           allocation.define(instruction, destination);
         } else if (instruction case DoubleBits(:final operand)) {
           final source = allocation.read(operand);

@@ -6,6 +6,35 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('native storage accessors retain symbol types without reading an address argument', () async {
+    final result = await AnalysisSession([
+      'test/compiler/fixtures/native_symbols.dart',
+    ], includeDependencies: true).use(Lowering().lower);
+    for (final name in [
+      'integerAddress',
+      'doubleAddress',
+      'pointerAddress',
+      'pairAddress',
+      'functionAddress',
+    ]) {
+      final body = result.program.functions.singleWhere(
+        (f) => f.target.name == name,
+      );
+      final operations = body.blocks.expand((b) => b.instructions).toList();
+      expect(operations.whereType<NativeSymbolAddress>(), hasLength(1));
+      expect(operations.whereType<LoadNative>(), isEmpty);
+      expect(operations.whereType<DirectCall>(), isEmpty);
+    }
+    final getter = result.program.functions.singleWhere(
+      (f) => f.target.name == 'number' && f.target.parameterTypes.isEmpty,
+    );
+    expect(
+      getter.blocks.single.instructions.whereType<LoadNative>(),
+      hasLength(1),
+    );
+    expect(result.imports[getter.target]!.type, NativeTypeRef.of(Int16));
+  });
+
   test(
     'native references retain asset identity, defaults and inferred types',
     () async {
@@ -22,7 +51,10 @@ void main() {
         final reference = imports[name]!;
         expect(reference.assetId, 'package:fixture/default');
         expect(reference.symbol, name);
-        expect(reference.signature, NativeSignature(Int64, [Int8]));
+        expect(
+          reference.type,
+          NativeFunctionType(NativeSignature(Int64, [Int8])),
+        );
         expect(reference.isLeaf, name == 'aliased');
       }
       expect(imports['redirected']!.assetId, 'other');
@@ -35,13 +67,13 @@ void main() {
       );
       for (final name in ['inferred', 'widened']) {
         expect(
-          imports[name]!.signature,
-          NativeSignature(Pointer<Int64>, [Pointer<Int64>]),
+          imports[name]!.type,
+          NativeFunctionType(NativeSignature(Pointer<Int64>, [Pointer<Int64>])),
         );
       }
       expect(
-        imports['release']!.signature,
-        NativeSignature(Void, [Pointer<Void>]),
+        imports['release']!.type,
+        NativeFunctionType(NativeSignature(Void, [Pointer<Void>])),
       );
       for (final target in result.imports.keys) {
         expect(result.program.implementationOf(target), isA<IrExternal>());
@@ -52,20 +84,12 @@ void main() {
     },
   );
 
-  test(
-    'unused native declarations keep static obligations and unsupported kinds',
-    () async {
-      await expectLater(
-        AnalysisSession([
-          'test/frontend/lowering/fixtures/invalid_native_imports.dart',
-        ]).use(Lowering().lower),
-        throwsFormatException,
-      );
-      await expectLater(
-        AnalysisSession(['test/frontend/lowering/fixtures/native_field.dart'])
-            .use(Lowering().lower),
-        throwsUnsupportedError,
-      );
-    },
-  );
+  test('unused native declarations keep static obligations', () async {
+    await expectLater(
+      AnalysisSession([
+        'test/frontend/lowering/fixtures/invalid_native_imports.dart',
+      ]).use(Lowering().lower),
+      throwsFormatException,
+    );
+  });
 }

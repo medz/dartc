@@ -28,6 +28,8 @@ abstract interface class CodeGenerator() {
   /// [imports] binds external declarations to native signatures; [exports]
   /// exposes supplied Dart bodies. The caller supplies native implementations
   /// when linking. Managed values cannot cross native or module boundaries.
+  /// [nativeSymbols] binds address operands to undecorated native names; data
+  /// and function pointers use the linker's address relocations.
   ///
   /// Constants have module-local canonical identity. Objects, closures and shared
   /// cells use traced storage. Reference globals retain a heap across native
@@ -50,6 +52,7 @@ abstract interface class CodeGenerator() {
     required Iterable<FunctionTarget> definitions,
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
+    Map<NativeReference, String> nativeSymbols = const {},
     ({FunctionTarget function, String symbol})? entryPoint,
     HeapRuntime? runtime,
   });

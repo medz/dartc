@@ -154,7 +154,7 @@ final class Lowering({final bool enableAssertions = false}) {
       );
     }
 
-    final intrinsics = bindings.lowerIntrinsics();
+    final intrinsics = [...bindings.lowerIntrinsics(), ...native.accessors];
     final intrinsicTargets = {for (final body in intrinsics) body.target};
     final intrinsicClasses = bindings.intrinsicClasses.where(
       (intrinsic) => !classes.any((source) => source.type == intrinsic.type),

@@ -225,10 +225,18 @@ final class _Arm64Emitter(
   }
 
   @override
-  void address(CpuRegister destination, void Function(Fixup) reference) {
+  void address(
+    CpuRegister destination,
+    void Function(Fixup) reference, {
+    bool indirect = false,
+  }) {
     final register = destination as Register;
     reference(assembler.pageAddress(register));
-    reference(assembler.addPageOffset(register, register));
+    reference(
+      indirect
+          ? assembler.loadPageOffset(register, register)
+          : assembler.addPageOffset(register, register),
+    );
   }
 
   @override

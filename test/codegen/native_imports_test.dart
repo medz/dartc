@@ -4,6 +4,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -34,6 +35,40 @@ void main() {
       final CodeGenerator generator = arch == .arm64
           ? Arm64CodeGenerator(target)
           : X64CodeGenerator(target);
+      test(
+        '$target native addresses require bindings and use address slots',
+        () {
+          final field = NativeReference(
+            'data',
+            'value',
+            NativeTypeRef.of(Int64),
+          );
+          final target = FunctionTarget(null, 'address', .integer, []);
+          final block = Block();
+          block.finish(Return(block.emit(NativeSymbolAddress(field))));
+          final program = IrProgram([], [
+            IrFunction(target, [block]),
+          ]);
+          expect(
+            () => generator.generate(program, definitions: [target]),
+            throwsArgumentError,
+          );
+          final object = generator.generate(
+            program,
+            definitions: [target],
+            nativeSymbols: {field: 'actual_data'},
+          );
+          expect(object.imports, [
+            generator.target.nativeSymbol('actual_data'),
+          ]);
+          expect(
+            object.relocations.whereType<InstructionRelocation>().where(
+              (r) => r.indirect,
+            ),
+            hasLength(arch == .arm64 ? 2 : 1),
+          );
+        },
+      );
       test(
         '$target binds declaration identities and deduplicates native symbols',
         () {

@@ -39,6 +39,7 @@ final class Bindings({
 }) {
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
+  final nativeReferences = <FunctionTarget, NativeReference>{};
   final _numericClasses = <ClassType>{};
   (InterfaceElement, FieldElement, FieldElement)? _constantMapStorage;
 

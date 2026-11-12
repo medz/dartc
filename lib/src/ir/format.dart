@@ -127,6 +127,8 @@ void writeFunction(
     NativeAddress() => 'nativeAddress ${value(op.view)}',
     FloatBitCast() => 'floatBits${op.width} ${value(op.operand)}',
     NativeSize() => 'nativeSize ${op.nativeType}',
+    NativeSymbolAddress(:final reference) =>
+      'nativeSymbol ${reference.assetId}::${reference.symbol}',
     NativeFieldOffset() => 'nativeFieldOffset ${op.owner} ${op.index}',
     CopyNative() =>
       'copyNative ${op.nativeType} ${value(op.destination)}, ${value(op.source)}',

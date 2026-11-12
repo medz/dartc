@@ -384,6 +384,25 @@ Value? lowerFfi(
   return null;
 }
 
+IrFunction nativeVariableBody(
+  FunctionTarget target,
+  NativeReference reference,
+) {
+  final block = Block(target.parameterTypes);
+  final address = block.emit(NativeSymbolAddress(reference));
+  final value = target.parameterTypes.isEmpty
+      ? _load(
+          address,
+          reference.type,
+          target.returnType,
+          const Constant.nullValue(),
+          block.emit,
+        )
+      : _store(address, reference.type, block.parameters.single, block.emit);
+  block.finish(target.parameterTypes.isEmpty ? Return(value) : const Return());
+  return IrFunction(target, [block]);
+}
+
 Value? Function(FunctionTarget, Block)? nativeFieldBody(
   ExecutableElement element,
   ClassType? owner,

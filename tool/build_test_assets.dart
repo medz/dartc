@@ -35,6 +35,7 @@ import '../test/linker/fixtures/finalizers.dart';
 import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/compiler/fixtures/native_finalizers_assets.dart';
+import '../test/compiler/fixtures/native_symbols_assets.dart';
 import '../test/support/native_assets.dart';
 import '../test/support/runtime.dart';
 
@@ -76,6 +77,7 @@ const _compilerLibraries = {
   'expandos',
   'finalizers',
   'native_finalizers',
+  'native_symbols',
   'numeric_boxes',
   'exceptions',
   'type_checks',
@@ -228,9 +230,11 @@ Future<void> main(List<String> args) async {
       final library = assets.library('compiler/$fixture');
       final result = await Compiler(target).compile(
         ['test/compiler/fixtures/$fixture.dart'],
-        nativeSymbols: fixture == 'native_imports'
-            ? nativeImportSymbols
-            : const {},
+        nativeSymbols: switch (fixture) {
+          'native_imports' => nativeImportSymbols,
+          'native_symbols' => nativeSymbols,
+          _ => const {},
+        },
       );
       await result.write(
         assets.file('compiler/$fixture.o'),
@@ -243,6 +247,7 @@ Future<void> main(List<String> args) async {
           'native_floats' ||
           'native_function_pointers' ||
           'native_imports' ||
+          'native_symbols' ||
           'native_aggregates' => assets.file('compiler/$fixture.h'),
           _ => null,
         },
@@ -253,6 +258,7 @@ Future<void> main(List<String> args) async {
           .writeAsBytes(ArchiveWriter(format).encode([module]));
       await shared([
         module,
+        if (fixture == 'native_symbols') nativeSymbolsProvider(target),
         if (fixture == 'native_imports')
           format.decodeObject(
             await assets
@@ -260,16 +266,23 @@ Future<void> main(List<String> args) async {
                 .readAsBytes(),
           ),
       ], library);
-      if (fixture == 'native_imports') {
-        final dynamicLibrary = assets.library(
-          'compiler/native_imports_dynamic',
-        );
+      if (fixture == 'native_symbols') {
+        await shared([
+          nativeSymbolsProvider(target),
+        ], assets.library('compiler/native_symbols_provider'));
+      }
+      if (fixture == 'native_imports' || fixture == 'native_symbols') {
+        final dynamicLibrary = assets.library('compiler/${fixture}_dynamic');
         await dynamicLibrary.writeAsBytes(
           linker.linkSharedLibrary([
             .object(module),
-            dependency(target, 'native_function_pointers', {
-              for (final name in module.imports) name: name,
-            }),
+            dependency(
+              target,
+              fixture == 'native_imports'
+                  ? 'native_function_pointers'
+                  : 'native_symbols_provider',
+              {for (final name in module.imports) name: name},
+            ),
           ], name: dynamicLibrary.uri.pathSegments.last),
         );
       }
@@ -294,7 +307,7 @@ Future<void> main(List<String> args) async {
         ['test/compiler/fixtures/native_finalizers_entry.dart'],
         output: const .executable(),
         nativeSymbols: const {
-          'finalizer-test': {'callback': 'finalizer_callback'},
+          'finalizer-test': {'finish': 'finalizer_exit'},
         },
         linkInputs: [.object(nativeFinalizerExit(target))],
       );

@@ -620,6 +620,36 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           context.checkDeferred(receiver);
         }
       }
+      if (callee.library.uri == Uri.parse('dart:ffi') &&
+          callee == callee.library.getClass('Native')?.getMethod('addressOf')) {
+        var source = argumentList.arguments.single;
+        while (source is ast.ParenthesizedExpression) {
+          source = source.expression;
+        }
+        context.checkDeferred(source);
+        final element = switch (source) {
+          ast.Identifier(:final element) => element,
+          ast.PropertyAccess(
+            propertyName: ast.SimpleIdentifier(:final element),
+          ) =>
+            element,
+          _ => null,
+        };
+        if (element is! ExecutableElement) {
+          unsupported(unit, source, 'native declaration address');
+        }
+        final target = context.bindings.target(element, unit, source);
+        final reference = context.bindings.nativeReferences[target];
+        if (reference == null) {
+          unsupported(unit, source, 'unbound native declaration address');
+        }
+        return context.emit(
+          PointerFromAddress(
+            context.emit(NativeSymbolAddress(reference)),
+            context.typeOf(expression.staticType!, expression) as ClassType,
+          ),
+        );
+      }
       final args = context.arguments(
         argumentList,
         (e) => lowerExpression(context, e),

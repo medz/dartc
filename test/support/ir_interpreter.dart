@@ -1790,6 +1790,7 @@ final class IrInterpreter(
         case NewPayload() ||
             NativeView() ||
             NativeAddress() ||
+            NativeSymbolAddress() ||
             NativeSize() ||
             NativeFieldOffset() ||
             CopyNative():

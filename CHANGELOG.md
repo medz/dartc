@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Bind native global variables and static fields with `@Native`, including scalar, pointer and struct/union storage. Obtain real data and function addresses with `Native.addressOf` through static or dynamic linking. Direct IR clients use `NativeSymbolAddress` and `CodeGenerator.generate(nativeSymbols: ...)`; `NativeReference.type` describes either storage or a `NativeFunctionType`.
+
 - Attach native resource callbacks with `NativeFinalizer`, account for external memory, and preserve `Finalizable` values through their scopes and closures. Normal process shutdown and library unload run remaining native callbacks. `Pointer.asTypedList` supports optional finalizers and tokens; derived views share ownership of the native buffer.
 
 - Read and write fixed inline FFI arrays, including nested arrays, native pointers and struct/union elements. Array views retain their backing storage through collection; indexed accesses check bounds, and array assignments copy into the destination storage.

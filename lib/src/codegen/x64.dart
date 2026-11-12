@@ -240,8 +240,15 @@ final class _X64Emitter(
   }
 
   @override
-  void address(CpuRegister destination, void Function(Fixup) reference) =>
-      reference(assembler.address(destination as Register));
+  void address(
+    CpuRegister destination,
+    void Function(Fixup) reference, {
+    bool indirect = false,
+  }) => reference(
+    indirect
+        ? assembler.loadAddress(destination as Register)
+        : assembler.address(destination as Register),
+  );
 
   @override
   List<CpuRegister> get allocatableRegisters => [

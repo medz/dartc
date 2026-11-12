@@ -1,7 +1,7 @@
 import 'dart:ffi';
 
-@Native<Pointer<NativeFinalizerFunction> Function()>(assetId: 'finalizer-test')
-external Pointer<NativeFinalizerFunction> callback();
+@Native<Void Function(Pointer<Void>)>(assetId: 'finalizer-test')
+external void finish(Pointer<Void> token);
 
 final class Resource() implements Finalizable;
 
@@ -9,5 +9,5 @@ Resource? retained;
 
 void main() {
   retained = Resource();
-  NativeFinalizer(callback()).attach(retained!, nullptr);
+  NativeFinalizer(Native.addressOf(finish)).attach(retained!, nullptr);
 }

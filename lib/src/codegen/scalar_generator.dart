@@ -45,6 +45,7 @@ base class ScalarCodeGenerator<R extends Object>(
     required Iterable<FunctionTarget> definitions,
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
+    Map<NativeReference, String> nativeSymbols = const {},
     ({FunctionTarget function, String symbol})? entryPoint,
     HeapRuntime? runtime,
   }) {
@@ -316,8 +317,9 @@ base class ScalarCodeGenerator<R extends Object>(
     final globals = selection.globals, traces = selection.traces;
     final persistent = !globals.isEmpty && globals.hasReferences(layouts);
     final relocations = <Relocation>[];
-    final nativeSymbols = <String, int>{};
+    final symbolNames = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
+    final nativeAddresses = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
     final functions = {
       for (final body in selection.functions.values)
@@ -472,9 +474,9 @@ base class ScalarCodeGenerator<R extends Object>(
                 );
               },
               (fixup) {
-                final symbol = nativeSymbols.putIfAbsent(
+                final symbol = symbolNames.putIfAbsent(
                   '.dartc.clock',
-                  () => nativeSymbols.length,
+                  () => symbolNames.length,
                 );
                 nativeCalls.add((code.length, fixup, symbol));
               },
@@ -483,9 +485,9 @@ base class ScalarCodeGenerator<R extends Object>(
           ? NativeAdapter(emitter).generate(
               binding.signature,
               (fixup, position, frame) {
-                final symbol = nativeSymbols.putIfAbsent(
+                final symbol = symbolNames.putIfAbsent(
                   target.nativeSymbol(binding.symbol),
-                  () => nativeSymbols.length,
+                  () => symbolNames.length,
                 );
                 nativeCalls.add((code.length, fixup, symbol));
                 safepoint(
@@ -516,6 +518,19 @@ base class ScalarCodeGenerator<R extends Object>(
               safepoint,
               failures: managed,
               persistent: persistent,
+              nativeAddress: (fixup, reference) {
+                final name = nativeSymbols[reference];
+                if (name == null || name.isEmpty || name.contains('\u0000')) {
+                  throw ArgumentError(
+                    'Unbound native address: ${reference.assetId}::${reference.symbol}',
+                  );
+                }
+                final symbol = symbolNames.putIfAbsent(
+                  target.nativeSymbol(name),
+                  () => symbolNames.length,
+                );
+                nativeAddresses.add((code.length, fixup, symbol));
+              },
               codeAddress: codeAddress,
             );
       symbols.add(
@@ -693,10 +708,18 @@ base class ScalarCodeGenerator<R extends Object>(
       target,
       sections,
       symbols,
-      imports: nativeSymbols.keys,
+      imports: symbolNames.keys,
       relocations: [
         ...relocations,
         ...constants.relocations,
+        for (final (start, fixup, symbol) in nativeAddresses)
+          Relocation.instruction(
+            0,
+            start + fixup.offset,
+            fixup.encoding,
+            symbols.length + symbol,
+            indirect: true,
+          ),
         for (final (start, fixup, symbol) in nativeCalls)
           Relocation.instruction(
             0,

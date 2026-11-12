@@ -595,6 +595,7 @@ sealed class Instruction(super.type) extends Value {
     RecordGet() ||
     PointerAddress() ||
     NativeAddress() ||
+    NativeSymbolAddress() ||
     NativeSize() ||
     NativeFieldOffset() ||
     KeepAlive() => const {},
@@ -602,6 +603,15 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => effects.contains(Effect.mayThrow);
+}
+
+/// The link-resolved address of a native declaration, without reading it.
+final class NativeSymbolAddress(final NativeReference reference)
+    extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
 }
 
 /// Observes a reference's current address; null has address zero.

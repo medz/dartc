@@ -95,39 +95,51 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
               ),
             ) ||
             imports.values.any(
-              (import) => import.signature.result is NativePointerType,
+              (import) => switch (import.type) {
+                NativeFunctionType(
+                  signature: NativeSignature(result: NativePointerType()),
+                ) =>
+                  true,
+                _ => false,
+              },
             ))
           FfiTypes.pointer,
       ],
     );
     final nativeImports = <FunctionTarget, NativeImport>{};
+    final addresses = <NativeReference, String>{};
+    String resolve(NativeReference reference) =>
+        nativeSymbols[reference.assetId]?[reference.symbol] ??
+        (throw ArgumentError(
+          'Unbound native symbol ${reference.symbol} in asset ${reference.assetId}',
+        ));
     for (final target in definitions) {
       final function = program.implementationOf(target);
-      if (runtime.primitives.containsKey(target) ||
-          runtime.program.implementationOf(target) is IrFunction) {
+      if (function is IrFunction) {
+        for (final block in function.blocks) {
+          for (final operation in block.instructions) {
+            if (operation case NativeSymbolAddress(:final reference)) {
+              addresses[reference] = resolve(reference);
+            }
+          }
+        }
         continue;
       }
+      if (runtime.primitives.containsKey(target)) continue;
       final reference = imports[target];
-      if (function is IrExternal && reference != null) {
-        final symbol = nativeSymbols[reference.assetId]?[reference.symbol];
-        if (symbol == null) {
-          throw ArgumentError(
-            'Unbound native symbol ${reference.symbol} in asset ${reference.assetId}',
-          );
-        }
+      if (reference?.type case NativeFunctionType(:final signature)
+          when function is IrExternal) {
         nativeImports[target] = NativeImport(
-          symbol,
-          reference.signature,
+          resolve(reference!),
+          signature,
           isLeaf: reference.isLeaf,
         );
         continue;
       }
-      if (function is! IrFunction) {
-        throw UnsupportedError(
-          'Native body unavailable: ${target.library}::'
-          '${target.owner == null ? '' : '${target.owner!.name}.'}${target.name}',
-        );
-      }
+      throw UnsupportedError(
+        'Native body unavailable: ${target.library}::'
+        '${target.owner == null ? '' : '${target.owner!.name}.'}${target.name}',
+      );
     }
     const entrySymbol = '.dartc.start';
     final object = generator.generate(
@@ -135,6 +147,7 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
       definitions: definitions,
       exports: exports,
       imports: nativeImports,
+      nativeSymbols: addresses,
       entryPoint: output is ExecutableOutput
           ? (function: entryPoint!, symbol: entrySymbol)
           : null,

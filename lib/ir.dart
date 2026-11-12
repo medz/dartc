@@ -63,6 +63,7 @@ export 'src/ir/type.dart'
         PromotedTypeParameterType;
 export 'src/ir/value.dart'
     show
+        NativeSymbolAddress,
         AwaitResult,
         LoadLibrary,
         CheckLibraryLoaded,

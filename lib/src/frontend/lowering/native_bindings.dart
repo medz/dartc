@@ -16,7 +16,8 @@ import 'ffi.dart';
 final class NativeBindings(final Bindings bindings)
     extends RecursiveAstVisitor<void> {
   final exports = <FunctionTarget, NativeExport>{};
-  final imports = <FunctionTarget, NativeReference>{};
+  Map<FunctionTarget, NativeReference> get imports => bindings.nativeReferences;
+  final accessors = <IrFunction>[];
   final _names = <String>{};
   late ResolvedUnitResult unit;
   String? _assetId;
@@ -109,6 +110,22 @@ final class NativeBindings(final Bindings bindings)
   }
 
   void _import(ast.Annotation node, DartObject value, dart.InterfaceType type) {
+    final variables = switch (node.parent) {
+      ast.TopLevelVariableDeclaration(:final variables) ||
+      ast.FieldDeclaration(fields: final variables) => variables.variables,
+      _ => null,
+    };
+    if (variables != null) {
+      for (final variable in variables) {
+        _variable(
+          node,
+          variable.declaredFragment!.element as PropertyInducingElement,
+          value,
+          type,
+        );
+      }
+      return;
+    }
     final element = switch (node.parent) {
       ast.FunctionDeclaration(:final declaredFragment) =>
         declaredFragment?.element,
@@ -116,6 +133,12 @@ final class NativeBindings(final Bindings bindings)
         declaredFragment?.element,
       _ => null,
     };
+    if (element is PropertyAccessorElement &&
+        element.isExternal &&
+        element.isStatic) {
+      _variable(node, element.variable, value, type);
+      return;
+    }
     if ((element is! TopLevelFunctionElement && element is! MethodElement) ||
         !element!.isExternal ||
         !element.isStatic) {
@@ -157,9 +180,53 @@ final class NativeBindings(final Bindings bindings)
           _assetId ??
           element.library.uri.toString(),
       value.getField('symbol')!.toStringValue() ?? element.name!,
-      signature,
+      NativeFunctionType(signature),
       isLeaf: value.getField('isLeaf')!.toBoolValue()!,
     );
+  }
+
+  void _variable(
+    ast.Annotation node,
+    PropertyInducingElement variable,
+    DartObject value,
+    dart.InterfaceType annotation,
+  ) {
+    final getter = variable.getter;
+    final external = switch (variable) {
+      FieldElement(:final isExternal) ||
+      TopLevelVariableElement(:final isExternal) => isExternal,
+      _ => false,
+    };
+    if (getter == null ||
+        !(external || getter.isExternal) ||
+        !getter.isStatic) {
+      throw ArgumentError('Native data requires an external static variable.');
+    }
+    final declared = annotation.typeArguments.single;
+    final storage = nativeType(
+      declared is dart.DynamicType ? variable.type : declared,
+      bind: (type) => bindings.valueType(type, unit, node),
+    );
+    final signature = NativeSignature.types(storage, const []);
+    final target = bindings.target(getter, unit, node);
+    if (!FfiTypes.canCall(signature, target.signature)) {
+      throw ArgumentError('Incompatible Dart type for native data.');
+    }
+    final reference = NativeReference(
+      value.getField('assetId')!.toStringValue() ??
+          _assetId ??
+          variable.library.uri.toString(),
+      value.getField('symbol')!.toStringValue() ?? variable.name!,
+      storage,
+    );
+    for (final accessor in [getter, variable.setter].nonNulls) {
+      final target = bindings.target(accessor, unit, node);
+      if (imports.containsKey(target)) {
+        throw ArgumentError('Repeated Native annotation: ${variable.name}');
+      }
+      imports[target] = reference;
+      accessors.add(nativeVariableBody(target, reference));
+    }
   }
 }
 
