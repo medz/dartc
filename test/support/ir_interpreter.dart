@@ -278,7 +278,8 @@ final class IrInterpreter(
       return _typeValue(_runtimeValueType(arguments.single));
     }
     // Keep access on the same canonical storage used by MakeInvocation.
-    if (_isInvocationFactory(target)) {
+    if (_isInvocationFactory(target) &&
+        program.implementationOf(target) is! IrFunction) {
       return target.name == 'method'
           ? _invocation(arguments[0], null, arguments[1], arguments[2], 0)
           : _invocation(
@@ -367,7 +368,18 @@ final class IrInterpreter(
   ]) {
     if (init.owner == CoreTypes.invocationStorage &&
         init.kind == .initializer &&
-        (init.name == 'getter' || init.name == 'setter')) {
+        (init.name == 'getter' ||
+            init.name == 'setter' ||
+            init.name == 'method')) {
+      if (init.name == 'method') {
+        return _invocation(
+          arguments[0],
+          arguments[1],
+          arguments[2],
+          arguments[3],
+          0,
+        );
+      }
       return _invocation(
         arguments[0],
         null,
@@ -2070,9 +2082,7 @@ final class IrInterpreter(
             throw UnsupportedError('Unmodeled fixture method tear-off');
           }
           final function = _FunctionValue(
-            direct
-                ? (_isObjectToString(method) ? _Instance._string : method)
-                : _resolveMember(instance, method),
+            direct ? method : _resolveMember(instance, method),
             instance,
           );
           values[op] = _typeOperation(resolve(op.type), function, cast: true);

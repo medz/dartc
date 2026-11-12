@@ -58,6 +58,7 @@ Future<void> withImplementations(
               'dart:_vm',
               'dart:async',
               'dart:collection',
+              'dart:ffi',
             }.contains(imported.uri.toString()) &&
             !pending.contains(imported)) {
           pending.add(imported);
@@ -82,6 +83,19 @@ void main() {
         ], isEmpty);
         final analyzed = {for (final unit in units) unit.uri};
         expect(analyzed, containsAll(patches.origins.keys));
+        final ffi = libraries.singleWhere(
+          (library) => library.element.uri == Uri.parse('dart:ffi'),
+        );
+        final size = ffi.element.getClass('_ArraySize')!;
+        for (final name in ['_typedDataBase', '_offsetInBytes']) {
+          final source = ffi.getFragmentDeclaration(
+            size.getGetter(name)!.firstFragment,
+          )!;
+          expect(
+            patches.origins[source.resolvedUnit!.uri]!.path,
+            endsWith('/ffi_patch.dart'),
+          );
+        }
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );

@@ -11,12 +11,6 @@ Instruction? lowerCoreMember(
   Bindings bindings,
 ) {
   if (!member.library.isDartCore || member.isStatic) return null;
-  if (member ==
-      member.library.typeProvider.objectElement.getGetter(
-        '_identityHashCode',
-      )) {
-    return ObjectHashCode(receiver, direct: true);
-  }
   final rounding = switch (member.name) {
     'toInt' || 'truncate' || 'truncateToDouble' => IntegerRounding.truncate,
     'floor' || 'floorToDouble' => IntegerRounding.floor,

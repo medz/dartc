@@ -112,10 +112,12 @@ final class AnalysisSession(
     );
     final sdkPath = path.join(root, 'sdk');
     final patches = SdkPatches(files);
-    if (sourceArchive?.contains('dartc/src/runtime/patches/core.dart') ==
-        true) {
-      patches.install(sdkPath, path.join(root, 'dartc/src/runtime/patches'));
-    }
+    patches.install(
+      sdkPath,
+      sourceArchive?.contains('dartc/src/runtime/patches/core.dart') == true
+          ? path.join(root, 'dartc/src/runtime/patches')
+          : null,
+    );
     final options = path.join(
       path.dirname(inputs.first),
       '.dartc-analysis.yaml',

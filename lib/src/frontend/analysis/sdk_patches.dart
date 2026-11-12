@@ -15,7 +15,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
     featureSet: FeatureSet.latestLanguageVersion(),
   ).unit;
 
-  void install(String sdk, String runtime) {
+  void install(String sdk, String? runtime) {
     final root = files.getFile('$sdk/lib/libraries.json').toUri();
     final manifest = jsonDecode(
       files.getFile('$sdk/lib/libraries.json').readAsStringSync(),
@@ -31,45 +31,54 @@ final class SdkPatches(final OverlayResourceProvider files) {
       ],
       _ => const [],
     };
-    final core = patches('core')
-        .singleWhere((path) => path.endsWith('/core_patch.dart'));
-    final coreUri = files.getFile(core).toUri();
-    final selected = {
-      'expando_patch.dart',
-      'weak_property.dart',
-      'double.dart',
-      'integers.dart',
-      'string_patch.dart',
-    };
-    final parts = [
-      for (final part in _parse(core).directives.whereType<PartDirective>())
-        if (selected.remove(part.uri.stringValue))
-          coreUri.resolve(part.uri.stringValue!).toFilePath(),
-    ];
-    if (selected.isNotEmpty) {
-      throw FormatException('SDK implementation parts unavailable: $selected');
+    _apply(
+      library('ffi'),
+      [patches('ffi').singleWhere((path) => path.endsWith('/ffi_patch.dart'))],
+      classes: const {'_ArraySize'},
+    );
+    if (runtime != null) {
+      final core = patches('core')
+          .singleWhere((path) => path.endsWith('/core_patch.dart'));
+      final coreUri = files.getFile(core).toUri();
+      final selected = {
+        'expando_patch.dart',
+        'weak_property.dart',
+        'double.dart',
+        'integers.dart',
+        'string_patch.dart',
+      };
+      final parts = [
+        for (final part in _parse(core).directives.whereType<PartDirective>())
+          if (selected.remove(part.uri.stringValue))
+            coreUri.resolve(part.uri.stringValue!).toFilePath(),
+      ];
+      if (selected.isNotEmpty) {
+        throw FormatException(
+          'SDK implementation parts unavailable: $selected',
+        );
+      }
+      _official.addAll([core, ...parts]);
+      _apply(library('core'), [core, ...parts, '$runtime/core.dart']);
+      final internal = patches('_internal')
+          .singleWhere((path) => path.endsWith('/internal_patch.dart'));
+      _official.add(internal);
+      _apply(library('_internal'), [
+        internal,
+        files
+            .getFile(internal)
+            .toUri()
+            .resolve('class_id_fasta.dart')
+            .toFilePath(),
+        patches('_internal').singleWhere(
+          (path) => path.endsWith('/check_valid_weak_target_patch.dart'),
+        ),
+        '$runtime/internal.dart',
+        '$runtime/print.dart',
+      ]);
+      _apply(library('async'), ['$runtime/async.dart', '$runtime/timer.dart']);
+      _apply(library('collection'), ['$runtime/hash_map.dart']);
+      _apply(library('_vm'), ['$runtime/vm.dart']);
     }
-    _official.addAll([core, ...parts]);
-    apply(library('core'), [core, ...parts, '$runtime/core.dart']);
-    final internal = patches('_internal')
-        .singleWhere((path) => path.endsWith('/internal_patch.dart'));
-    _official.add(internal);
-    apply(library('_internal'), [
-      internal,
-      files
-          .getFile(internal)
-          .toUri()
-          .resolve('class_id_fasta.dart')
-          .toFilePath(),
-      patches('_internal').singleWhere(
-        (path) => path.endsWith('/check_valid_weak_target_patch.dart'),
-      ),
-      '$runtime/internal.dart',
-      '$runtime/print.dart',
-    ]);
-    apply(library('async'), ['$runtime/async.dart', '$runtime/timer.dart']);
-    apply(library('collection'), ['$runtime/hash_map.dart']);
-    apply(library('_vm'), ['$runtime/vm.dart']);
 
     final experimentsPath = '$sdk/lib/_internal/allowed_experiments.json';
     final experiments = jsonDecode(
@@ -78,7 +87,16 @@ final class SdkPatches(final OverlayResourceProvider files) {
     experiments['experimentSets']['dartc'] = ['augmentations'];
     final sdkLibraries =
         experiments['sdk']['libraries'] as Map<String, dynamic>? ?? {};
-    for (final name in ['core', '_internal', 'async', 'collection', '_vm']) {
+    for (final name in [
+      'ffi',
+      if (runtime != null) ...[
+        'core',
+        '_internal',
+        'async',
+        'collection',
+        '_vm',
+      ],
+    ]) {
       sdkLibraries[name] = {'experimentSet': 'dartc'};
     }
     experiments['sdk']['libraries'] = sdkLibraries;
@@ -89,8 +107,11 @@ final class SdkPatches(final OverlayResourceProvider files) {
     );
   }
 
-  /// Preserves each implementation's file; analyzer checks the merged declaration.
-  void apply(String libraryPath, List<String> implementations) {
+  void _apply(
+    String libraryPath,
+    List<String> implementations, {
+    Set<String>? classes,
+  }) {
     final library = files.getFile(libraryPath);
     final libraryUri = library.toUri();
     final unit = _parse(libraryPath);
@@ -114,14 +135,17 @@ final class SdkPatches(final OverlayResourceProvider files) {
       ...implementations,
     ];
     final units = {for (final path in paths) path: _parse(path)};
-    final classes = <String, (String, ClassDeclaration)>{};
+    final originals = <String, (String, ClassDeclaration)>{};
     final functions = <(String, String?), (String, FunctionDeclaration)>{};
     for (final MapEntry(key: path, value: syntax) in units.entries) {
       for (final declaration in syntax.declarations) {
         if (_patched(declaration)) continue;
         switch (declaration) {
           case ClassDeclaration():
-            classes[declaration.namePart.typeName.lexeme] = (path, declaration);
+            originals[declaration.namePart.typeName.lexeme] = (
+              path,
+              declaration,
+            );
           case FunctionDeclaration():
             functions[(
               declaration.name.lexeme,
@@ -188,6 +212,12 @@ final class SdkPatches(final OverlayResourceProvider files) {
       }
       edit(path, 0, 0, "part of '$ownerUri';\n");
       for (final declaration in syntax.declarations) {
+        if (classes != null &&
+            (declaration is! ClassDeclaration ||
+                !classes.contains(declaration.namePart.typeName.lexeme))) {
+          edit(path, declaration.offset, declaration.end, '');
+          continue;
+        }
         if (!_patched(declaration)) {
           if (!libraryName.startsWith('_')) _checkPrivate(declaration, path);
           continue;
@@ -195,11 +225,12 @@ final class SdkPatches(final OverlayResourceProvider files) {
         switch (declaration) {
           case ClassDeclaration():
             final (ownerPath, owner) =
-                classes[declaration.namePart.typeName.lexeme] ??
+                originals[declaration.namePart.typeName.lexeme] ??
                 (throw FormatException('SDK class unavailable: $path'));
             if (declaration.extendsClause != null ||
                 declaration.withClause != null ||
-                declaration.implementsClause != null) {
+                declaration.implementsClause != null &&
+                    !declaration.namePart.typeName.lexeme.startsWith('_')) {
               throw FormatException(
                 'SDK implementation changes class hierarchy: $path',
               );

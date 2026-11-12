@@ -62,6 +62,21 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
   }
   if (element.library.isDartCore) {
     final owner = element.enclosingElement;
+    if (element.isExternal && owner == element.library.getClass('Object')) {
+      switch (element.name) {
+        case '==':
+          return (target, entry) =>
+              entry.emit(Identical(entry.parameters[0], entry.parameters[1]));
+        case 'hashCode':
+        case '_identityHashCode':
+          return (target, entry) =>
+              entry.emit(ObjectHashCode(entry.parameters.single, direct: true));
+        case 'runtimeType':
+          return (target, entry) => entry.emit(
+            ObjectRuntimeType(entry.parameters.single, direct: true),
+          );
+      }
+    }
     if (element.isExternal && owner == element.library.getClass('_Double')) {
       final operator = switch (element.name) {
         '_add' => NumericOperator.add,

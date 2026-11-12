@@ -96,6 +96,7 @@ final class MemberCalls(
       }
       final lookup = program.lookupMember(type, selector);
       if (lookup.target case final target?) {
+        if (hasBuiltin && target.owner == ValueType.object) continue;
         if (!definitions.contains(target)) {
           throw ArgumentError('Missing member definition: ${target.name}');
         }

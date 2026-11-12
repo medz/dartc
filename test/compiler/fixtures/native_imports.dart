@@ -1,11 +1,14 @@
-@DefaultAsset('math:first')
+@defaultAsset
 library;
 
 import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 
-@Native<Int64 Function(Int8)>(symbol: 'step', isLeaf: true)
+const defaultAsset = DefaultAsset('math:first');
+const firstNative = Native<Int64 Function(Int8)>(symbol: 'step', isLeaf: true);
+
+@firstNative
 external int first(int value);
 
 class Other() {
