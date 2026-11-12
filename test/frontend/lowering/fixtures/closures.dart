@@ -3,6 +3,14 @@ import 'effects.dart' as effects;
 typedef Step = int Function(int);
 typedef Read = int Function();
 
+int localOrPattern(int value) {
+  int Function() select(Object input) => switch (input) {
+    (int number, _) || (_, int number) => () => number,
+    _ => () => -1,
+  };
+  return select(value < 0 ? (null, -value) : (value, null))();
+}
+
 (Step, Read) counter(int start) {
   int advance(int n) => start += effects.tick(n);
   int read() => start;

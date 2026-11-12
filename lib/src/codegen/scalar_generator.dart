@@ -119,6 +119,7 @@ base class ScalarCodeGenerator<R extends Object>(
     imports = bindings.imports;
     exports = bindings.exports;
     selected.addAll(bindings.definitions);
+    selected.addAll(program.reachableFrom(bindings.definitions));
     final sourceProgram = program;
     final sourceDefinitions = {...selected};
     late final ProgramSelection resolved;
@@ -341,6 +342,7 @@ base class ScalarCodeGenerator<R extends Object>(
           ...closures.classes,
           traces.declaration,
         ],
+        nativeLayout: NativeLayout(target),
         functions: program.functions,
         instanceStorage: instances,
         closureStorage: closures,
@@ -393,7 +395,9 @@ base class ScalarCodeGenerator<R extends Object>(
     }
     if (resolved.managed) {
       for (final function in runtime!.nonAllocating) {
-        resolved.checkNonAllocating(function);
+        if (resolved.functions.containsKey(function)) {
+          resolved.checkNonAllocating(function);
+        }
       }
     }
     final selection = resolved;
@@ -413,6 +417,7 @@ base class ScalarCodeGenerator<R extends Object>(
     selected.addAll([
       ...functions.keys,
       ...primitives,
+      ...layouts.nativeCalls.signatures.keys,
       if (capture) traces.capture,
     ]);
     final cleanup = FunctionTarget(null, 'release', .voidType, []);
@@ -508,6 +513,23 @@ base class ScalarCodeGenerator<R extends Object>(
             )
           : declaration == traces.capture
           ? traces.emit(emitter, call, safepoint)
+          : layouts.nativeCalls.signatures.containsKey(declaration)
+          ? NativeAdapter(emitter).generate(
+              layouts.nativeCalls.signatures[declaration]!,
+              (_, _, _) =>
+                  throw StateError('Expected an indirect native call.'),
+              intoDart: false,
+              heap: entry(emitter),
+              codeAddress: codeAddress,
+              indirectCall: (position, frame) => safepoint(
+                position,
+                StackRoots(
+                  frame.incomingStackOffset,
+                  frame.returnAddressOffset,
+                  [],
+                ),
+              ),
+            )
           : primitives.contains(declaration)
           ? heap.emit(
               declaration,
@@ -779,8 +801,11 @@ base class ScalarCodeGenerator<R extends Object>(
     );
   }
 
-  bool _needsEntry(NativeSignature signature) => [
-    signature.result,
-    ...signature.parameters,
-  ].any((t) => t.isSinglePrecision || (t.integerLayout?.bytes ?? 8) < 8);
+  bool _needsEntry(NativeSignature signature) =>
+      [signature.result, ...signature.parameters].any(
+        (t) =>
+            t is NativeCompoundType ||
+            t.isSinglePrecision ||
+            (t.integerLayout?.bytes ?? 8) < 8,
+      );
 }

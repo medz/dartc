@@ -210,7 +210,7 @@ An executable is ready to run. Libraries let you bring compiled Dart functions i
 
 Use `.so` for shared-library filenames on Linux. Add `--header math.h` to generate C/C++ declarations for the exported functions.
 
-Native exports accept fixed-width FFI integers, `Float`, `Double`, supported pointer types and `Void` results. See the [native library guide](specs/libraries.md#原生库) for supported signatures and function bodies.
+Native exports accept fixed-width FFI integers, `IntPtr`/`UintPtr`, `Bool`, `Float`/`Double`, typed pointers, structs and unions passed by value, and `Void` results. See the [native library guide](specs/libraries.md#原生库) for supported signatures and function bodies.
 
 ## Supported platforms
 

@@ -75,7 +75,10 @@ final class NativeBindings(final Bindings bindings)
         'Native exports require a non-generic positional FFI function signature.',
       );
     }
-    final signature = nativeSignature(native);
+    final signature = nativeSignature(
+      native,
+      bind: (type) => bindings.valueType(type, unit, node),
+    );
     final target = bindings.target(
       declaration.declaredFragment!.element,
       unit,
@@ -90,11 +93,7 @@ final class NativeBindings(final Bindings bindings)
         target.typeParameters.isNotEmpty ||
         target.signature.optionalSlots.isNotEmpty ||
         target.signature.namedParameters.isNotEmpty ||
-        target.returnType != FfiTypes.valueType(signature.result) ||
-        target.parameterTypes.length != signature.parameters.length ||
-        target.parameterTypes.indexed.any(
-          (p) => p.$2 != FfiTypes.valueType(signature.parameters[p.$1]),
-        )) {
+        !FfiTypes.canExport(signature, target.signature)) {
       throw ArgumentError(
         'Native exports require matching synchronous Dart parameter and result types.',
       );
@@ -126,12 +125,23 @@ final class NativeBindings(final Bindings bindings)
     }
     final native = type.typeArguments.single;
     final signature = switch (native) {
-      dart.FunctionType() => nativeSignature(native),
+      dart.FunctionType() => nativeSignature(
+        native,
+        bind: (type) => bindings.valueType(type, unit, node),
+      ),
       dart.DynamicType() => NativeSignature.types(
         element.returnType is dart.VoidType
             ? NativeTypeRef.of(Void)
-            : nativeType(element.returnType),
-        element.formalParameters.map((p) => nativeType(p.type)),
+            : nativeType(
+                element.returnType,
+                bind: (type) => bindings.valueType(type, unit, node),
+              ),
+        element.formalParameters.map(
+          (p) => nativeType(
+            p.type,
+            bind: (type) => bindings.valueType(type, unit, node),
+          ),
+        ),
       ),
       _ => throw UnsupportedError('Native import signature: $native'),
     };

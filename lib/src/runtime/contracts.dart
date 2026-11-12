@@ -9,6 +9,7 @@ enum RuntimeRole() {
   release,
   runEvents,
   events,
+  copyBytes,
 }
 
 /// Binds an external declaration to one trusted machine operation.
@@ -18,6 +19,7 @@ enum MemoryOperation() {
   map,
   unmap,
   read,
+  readByte,
   write,
   addressOf,
   objectAt,

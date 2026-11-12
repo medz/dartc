@@ -19,10 +19,23 @@ abstract final class FfiTypes() {
     isAbstract: true,
   );
 
+  static final abiSpecificInteger = ClassType(
+    _library,
+    'AbiSpecificInteger',
+    superclass: sizedNativeType,
+    isAbstract: true,
+  );
+
   /// Canonical declarations of the supported native scalar types.
   static final Map<Type, ClassType> scalarTypes = .unmodifiable({
     for (final MapEntry(:key, :value) in _scalars.entries)
-      key: ClassType(_library, value.$1, superclass: sizedNativeType),
+      key: ClassType(
+        _library,
+        value.$1,
+        superclass: key == ffi.IntPtr || key == ffi.UintPtr
+            ? abiSpecificInteger
+            : sizedNativeType,
+      ),
   });
 
   /// The native signed 64-bit type, distinct from Dart `int`.
@@ -91,10 +104,16 @@ abstract final class FfiTypes() {
         signature.parameters.map(resolve),
       ),
     ]),
+    NativeCompoundType() ||
+    NativeArrayType() ||
+    NativeOpaqueType() => throw UnsupportedError(
+      'A source native declaration must be bound before use.',
+    ),
   };
 
   /// Describes an already-bound supported native declaration without host reflection.
   static NativeTypeRef describe(ValueType type) {
+    if (type case ClassType(:final nativeType?)) return nativeType;
     if (type == voidType) return NativeScalarType(ffi.Void);
     for (final MapEntry(:key, :value) in scalarTypes.entries) {
       if (type == value) return NativeScalarType(key);
@@ -136,13 +155,44 @@ abstract final class FfiTypes() {
   /// The Dart value type corresponding to a supported native signature type.
   static ValueType valueType(NativeTypeRef native) => switch (native) {
     NativeScalarType() when native.isVoid => .voidType,
+    NativeScalarType() when native.isBoolean => .boolean,
     NativeScalarType() when native.isFloating => .floating,
     NativeScalarType() => .integer,
     NativePointerType() => resolve(native),
     NativeFunctionType() => throw UnsupportedError(
       'A native function requires a pointer.',
     ),
+    NativeCompoundType() ||
+    NativeArrayType() ||
+    NativeOpaqueType() => throw UnsupportedError(
+      'A source native declaration must be bound before use.',
+    ),
   };
+
+  /// Preserves bound compounds and pointers when converting an FFI declaration.
+  static ValueType dartValueType(ValueType type) =>
+      isPointer(type) ||
+          type is ClassType && type.nativeType is NativeCompoundType
+      ? type
+      : valueType(describe(type));
+
+  /// Whether an export exactly preserves its declared native pointer types.
+  static bool canExport(NativeSignature native, FunctionType dart) {
+    if (!canCall(native, dart)) return false;
+    for (final (type, value) in [
+      (native.result, dart.result),
+      for (final (i, type) in native.parameters.indexed)
+        (type, dart.parameters[i]),
+    ]) {
+      if (type is! NativePointerType) continue;
+      try {
+        if (describe(value) != type) return false;
+      } on UnsupportedError {
+        return false;
+      }
+    }
+    return true;
+  }
 
   /// Whether a Dart function can call [native], including pointer variance.
   static bool canCall(NativeSignature native, FunctionType dart) {
@@ -154,11 +204,21 @@ abstract final class FfiTypes() {
       return false;
     }
     bool matches(NativeTypeRef type, ValueType value, {bool result = false}) {
-      final expected = valueType(type);
-      return type is NativePointerType
-          ? isPointer(value) &&
-                (result ? value.accepts(expected) : expected.accepts(value))
-          : value == expected;
+      if (type is NativeCompoundType) {
+        return value is ClassType && value.nativeType == type;
+      }
+      if (type is NativePointerType) {
+        if (!isPointer(value)) return false;
+        try {
+          if (describe(value) == type) return true;
+          final expected = valueType(type);
+          return result ? value.accepts(expected) : expected.accepts(value);
+        } on UnsupportedError {
+          return result &&
+              (value as ClassType).typeArguments.single == nativeType;
+        }
+      }
+      return value == valueType(type);
     }
 
     return matches(native.result, dart.result, result: true) &&
@@ -169,6 +229,9 @@ abstract final class FfiTypes() {
 }
 
 const _scalars = {
+  ffi.Bool: ('Bool', ffi.Pointer<ffi.Bool>),
+  ffi.IntPtr: ('IntPtr', ffi.Pointer<ffi.IntPtr>),
+  ffi.UintPtr: ('UintPtr', ffi.Pointer<ffi.UintPtr>),
   ffi.Int8: ('Int8', ffi.Pointer<ffi.Int8>),
   ffi.Uint8: ('Uint8', ffi.Pointer<ffi.Uint8>),
   ffi.Int16: ('Int16', ffi.Pointer<ffi.Int16>),

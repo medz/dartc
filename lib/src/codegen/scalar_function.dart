@@ -148,6 +148,9 @@ final class ScalarFunction<R extends Object>(
           } else if (layouts.isReference(selection.body.typeOf(instruction))) {
             allocation.clearCell(instruction);
           }
+        } else if (instruction case KeepAlive(:final value)) {
+          allocation.release(value);
+          emptyResult(instruction);
         } else if (instruction is ReadCell &&
             !selection.body.aliases.contains(instruction)) {
           allocation.readCell(instruction);
@@ -275,7 +278,7 @@ final class ScalarFunction<R extends Object>(
             final result = allocation.allocate(.general);
             emitter.loadImmediate(result, 0);
             allocation.define(instruction, result);
-          } else if (layout.result case final result?) {
+          } else if (layout.resultRegister case final result?) {
             final resultType = selection.body.typeOf(instruction);
             if (instruction
                 case Equals(negated: true) || TypeTest(negated: true)) {
@@ -593,7 +596,7 @@ final class ScalarFunction<R extends Object>(
       }
       switch (selection.body.ends[block]!) {
         case Return(:final value):
-          if (selection.entry.result case final result?) {
+          if (selection.entry.resultRegister case final result?) {
             if (layouts.representation(value!.type) ==
                 layouts.representation(function.target.returnType)) {
               emitter.move(result, allocation.read(value));

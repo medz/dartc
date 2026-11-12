@@ -487,7 +487,13 @@ final class FunctionContext(
 
   Value _close(LocalClosure fn) => emit(
     MakeClosure(fn.target, [
-      for (final key in fn.captures) key == null ? receiver! : _locals[key]!,
+      for (final key in fn.captures)
+        key == null
+            ? receiver!
+            : _locals[key] ??
+                  (throw StateError(
+                    'Unbound capture ${key.name} in ${fn.target.library}::${fn.target.name}',
+                  )),
     ]),
   );
 

@@ -1,7 +1,7 @@
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
-/// Checks native bindings and exposes pointer conversions as ordinary IR calls.
+/// Checks native bindings and preserves typed values across native boundaries.
 final class NativeBindings(
   IrProgram source,
   Map<FunctionTarget, NativeImport> sourceImports,
@@ -23,7 +23,7 @@ final class NativeBindings(
           'Native import requires a matching external declaration: ${target.name}',
         );
       }
-      if (_hasPointers(binding.signature)) {
+      if (_needsBridge(binding.signature)) {
         final raw = _bridge(target, intoDart: false);
         externals.removeWhere((declaration) => declaration.target == target);
         externals.add(IrExternal(raw));
@@ -34,15 +34,10 @@ final class NativeBindings(
     }
     for (final MapEntry(key: target, value: binding) in sourceExports.entries) {
       final signature = binding.signature;
-      if (target.typeParameters.isNotEmpty ||
-          signature.parameters.length != target.parameterTypes.length ||
-          target.returnType != FfiTypes.valueType(signature.result) ||
-          !target.parameterTypes.indexed.every(
-            (p) => p.$2 == FfiTypes.valueType(signature.parameters[p.$1]),
-          )) {
+      if (!FfiTypes.canExport(signature, target.signature)) {
         throw ArgumentError('Native signature mismatch: ${target.name}');
       }
-      exports[_hasPointers(signature)
+      exports[_needsBridge(signature)
               ? _bridge(target, intoDart: true)
               : target] =
           binding;
@@ -57,42 +52,86 @@ final class NativeBindings(
           );
   }
 
-  bool _hasPointers(NativeSignature signature) =>
-      signature.result is NativePointerType ||
-      signature.parameters.any((type) => type is NativePointerType);
+  bool _needsBridge(NativeSignature signature) =>
+      (signature.result is NativePointerType ||
+          signature.result is NativeCompoundType) ||
+      signature.parameters.any(
+        (type) => type is NativePointerType || type is NativeCompoundType,
+      );
 
   FunctionTarget _bridge(FunctionTarget dart, {required bool intoDart}) {
+    bool compound(ValueType type) =>
+        type is ClassType && type.nativeType is NativeCompoundType;
     ValueType rawType(ValueType type) =>
-        FfiTypes.isPointer(type) ? .integer : type;
+        FfiTypes.isPointer(type) || compound(type) ? .integer : type;
+    final resultCompound = compound(dart.returnType);
     final raw = FunctionTarget(
       null,
       'native${_functions.length}',
-      rawType(dart.returnType),
-      dart.parameterTypes.map(rawType),
+      resultCompound ? .voidType : rawType(dart.returnType),
+      [
+        if (resultCompound) ValueType.integer,
+        ...dart.parameterTypes.map(rawType),
+      ],
     );
     definitions.add(raw);
     final (source, destination) = intoDart ? (raw, dart) : (dart, raw);
     final entry = Block(source.parameterTypes);
-    final arguments = [
-      for (final (i, value) in entry.parameters.indexed)
-        if (FfiTypes.isPointer(dart.parameterTypes[i]))
-          entry.emit(
-            intoDart
-                ? PointerFromAddress(value, dart.parameterTypes[i] as ClassType)
-                : PointerAddress(value),
-          )
-        else
-          value,
+    final offset = intoDart && resultCompound ? 1 : 0;
+    final resultStorage = !intoDart && resultCompound
+        ? entry.emit(NativeView(dart.returnType as ClassType))
+        : null;
+    final arguments = <Value>[
+      if (resultStorage != null) entry.emit(NativeAddress(resultStorage)),
     ];
-    Value result = entry.emit(DirectCall(destination, arguments));
-    if (FfiTypes.isPointer(dart.returnType)) {
-      result = entry.emit(
-        intoDart
-            ? PointerAddress(result)
-            : PointerFromAddress(result, dart.returnType as ClassType),
+    for (final (i, type) in dart.parameterTypes.indexed) {
+      final value = entry.parameters[i + offset];
+      arguments.add(
+        FfiTypes.isPointer(type)
+            ? entry.emit(
+                intoDart
+                    ? PointerFromAddress(value, type as ClassType)
+                    : PointerAddress(value),
+              )
+            : compound(type)
+            ? entry.emit(
+                intoDart
+                    ? NativeView(type as ClassType, address: value, copy: true)
+                    : NativeAddress(value),
+              )
+            : value,
       );
     }
-    entry.finish(Return(result));
+    Value result = entry.emit(DirectCall(destination, arguments));
+    if (!intoDart) {
+      for (final value in entry.parameters) {
+        entry.emit(KeepAlive(value));
+      }
+    }
+    if (resultCompound) {
+      if (intoDart) {
+        entry.emit(
+          CopyNative(
+            entry.parameters.first,
+            entry.emit(NativeAddress(result)),
+            (dart.returnType as ClassType).nativeType!,
+          ),
+        );
+        entry.emit(KeepAlive(result));
+        entry.finish(const Return());
+      } else {
+        entry.finish(Return(resultStorage!));
+      }
+    } else {
+      if (FfiTypes.isPointer(dart.returnType)) {
+        result = entry.emit(
+          intoDart
+              ? PointerAddress(result)
+              : PointerFromAddress(result, dart.returnType as ClassType),
+        );
+      }
+      entry.finish(Return(result));
+    }
     _functions.add(IrFunction(source, [entry]));
     return raw;
   }

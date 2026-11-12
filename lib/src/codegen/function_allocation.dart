@@ -151,6 +151,8 @@ final class FunctionAllocation<R extends Object>(
       for (final (i, parameter) in selection.body.entryParameters.indexed) {
         if (_uses.containsKey(parameter)) {
           switch (selection.entry.parameters[i]) {
+            case RegisterAggregate() || IndirectArgument():
+              throw StateError('Internal aggregate values require storage.');
             case RegisterArgument(:final register):
               _registers[parameter] = register;
               _free.remove(register);

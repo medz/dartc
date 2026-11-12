@@ -18,6 +18,7 @@ final class HeapRuntime(
   required final FunctionTarget release,
   required final FunctionTarget runEvents,
   required final FunctionTarget eventAccess,
+  required final FunctionTarget copyBytes,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
 }) {
@@ -35,6 +36,7 @@ final class HeapRuntime(
       (release, FunctionType(.voidType, [.integer])),
       (runEvents, FunctionType(.voidType, [.integer])),
       (eventAccess, FunctionType(eventAccess.returnType, [])),
+      (copyBytes, FunctionType(.voidType, [.integer, .integer, .integer])),
     ]) {
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||

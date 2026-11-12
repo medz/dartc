@@ -1,12 +1,19 @@
+import 'dart:ffi';
+
 import 'package:dartc/assembler/arm64.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/target.dart';
 
 import 'calling_convention.dart';
 import 'call_layout.dart';
+import 'argument_location.dart';
+import 'native_layout.dart';
+
+import 'dart:math' as math;
+
 import 'frame_layout.dart';
 
-/// Classifies scalar calls for macOS and Linux AArch64.
+/// Classifies native calls for macOS and Linux AArch64.
 final class Arm64Abi(@override final Target target)
     implements CallingConvention<CpuRegister> {
   this {
@@ -17,21 +24,96 @@ final class Arm64Abi(@override final Target target)
 
   @override
   CallLayout<CpuRegister> classify(NativeSignature signature) {
-    return .scalars(
-      signature,
-      general: const <Register>[.x0, .x1, .x2, .x3, .x4, .x5, .x6, .x7],
-      floating: FloatRegister.values.take(8).toList(),
-      generalResult: Register.x0,
-      floatingResult: FloatRegister.d0,
-      packedStack: target.operatingSystem == .macos,
-      clobberedRegisters: [
-        for (var i = 0; i <= 17; i++) Register.values[i],
-        if (target.operatingSystem == .linux) Register.x18,
-        Register.x30,
-        ...FloatRegister.values.take(8),
-        ...FloatRegister.values.skip(16),
-      ],
-    );
+    final storage = NativeLayout(target);
+    final apple = target.operatingSystem == .macos;
+    var integers = 0, floats = 0, stack = 0;
+    ArgumentLocation<CpuRegister> stacked(NativeTypeRef type) {
+      final layout = storage.of(type);
+      final alignment = apple
+          ? layout.alignment
+          : math.max(8, layout.alignment);
+      stack = (stack + alignment - 1) & -alignment;
+      final size = apple ? layout.size : (layout.size + 7) & ~7;
+      final location = StackArgument<CpuRegister>(
+        stack,
+        size: size,
+        alignment: alignment,
+      );
+      stack += size;
+      return location;
+    }
+
+    ArgumentLocation<CpuRegister> assign(
+      NativeTypeRef type, {
+      bool result = false,
+    }) {
+      if (type is NativeCompoundType) {
+        final layout = storage.of(type);
+        final hfa = storage.homogeneous(type);
+        if (hfa != null) {
+          if (result || floats + hfa.length <= 8) {
+            final first = result ? 0 : floats;
+            if (!result) floats += hfa.length;
+            return RegisterAggregate([
+              for (final (i, member) in hfa.indexed)
+                RegisterPart<CpuRegister>(
+                  FloatRegister.values[first + i],
+                  member.offset,
+                  member.type.nativeSize,
+                ),
+            ]);
+          }
+          floats = 8;
+          return stacked(type);
+        }
+        if (layout.size > 16) {
+          return IndirectArgument(
+            result
+                ? const RegisterArgument(Register.x8)
+                : assign(NativeTypeRef.of(Pointer<Void>)),
+          );
+        }
+        final words = (layout.size + 7) ~/ 8;
+        if (!result && !apple && layout.alignment == 16) {
+          integers = (integers + 1) & ~1;
+        }
+        if (result || integers + words <= 8) {
+          final first = result ? 0 : integers;
+          if (!result) integers += words;
+          return RegisterAggregate([
+            for (var i = 0; i < words; i++)
+              RegisterPart<CpuRegister>(
+                Register.values[first + i],
+                i * 8,
+                math.min(8, layout.size - i * 8),
+              ),
+          ]);
+        }
+        integers = 8;
+        return stacked(type);
+      }
+      if (type.isFloating) {
+        if (result || floats < 8) {
+          return RegisterArgument(FloatRegister.values[result ? 0 : floats++]);
+        }
+      } else {
+        if (result || integers < 8) {
+          return RegisterArgument(Register.values[result ? 0 : integers++]);
+        }
+      }
+      return stacked(type);
+    }
+
+    final result = signature.result.isVoid
+        ? null
+        : assign(signature.result, result: true);
+    return CallLayout(signature.parameters.map(assign), result, [
+      for (var i = 0; i <= 17; i++) Register.values[i],
+      if (!apple) Register.x18,
+      Register.x30,
+      ...FloatRegister.values.take(8),
+      ...FloatRegister.values.skip(16),
+    ]);
   }
 
   @override

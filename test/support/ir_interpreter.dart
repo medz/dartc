@@ -1787,6 +1787,16 @@ final class IrInterpreter(
 
     void execute(Instruction op) {
       switch (op) {
+        case NativeView() ||
+            NativeAddress() ||
+            NativeSize() ||
+            NativeFieldOffset() ||
+            CopyNative():
+          throw UnsupportedError(
+            'Native aggregate memory requires target execution.',
+          );
+        case KeepAlive():
+          values[op] = null;
         case PointerFromAddress(:final address):
           values[op] = ffi.Pointer<ffi.Void>.fromAddress(read(address) as int);
         case PointerAddress(:final pointer):

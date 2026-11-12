@@ -121,6 +121,14 @@ void writeFunction(
     FunctionCall() =>
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
+    NativeView() =>
+      'nativeView ${op.type.dartName} ${op.address == null ? "new" : value(op.address!)} copy=${op.copy} owner=${value(op.owner)}',
+    NativeAddress() => 'nativeAddress ${value(op.view)}',
+    NativeSize() => 'nativeSize ${op.nativeType}',
+    NativeFieldOffset() => 'nativeFieldOffset ${op.owner} ${op.index}',
+    CopyNative() =>
+      'copyNative ${op.nativeType} ${value(op.destination)}, ${value(op.source)}',
+    KeepAlive() => 'keepAlive ${value(op.value)}',
     PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
     ReferenceAddress() => 'referenceAddress ${value(op.object)}',
     ReferenceFromAddress() => 'referenceFromAddress ${value(op.address)}',

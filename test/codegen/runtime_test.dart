@@ -21,6 +21,7 @@ void main() {
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
     eventAccess: heapRuntime.eventAccess,
+    copyBytes: heapRuntime.copyBytes,
     primitives: heapRuntime.primitives,
     nonAllocating: [...heapRuntime.nonAllocating, function],
   );
@@ -63,6 +64,7 @@ void main() {
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,
+        copyBytes: heapRuntime.copyBytes,
         primitives: heapRuntime.primitives,
         nonAllocating: [],
       ),
@@ -75,6 +77,7 @@ void main() {
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,
+        copyBytes: heapRuntime.copyBytes,
         primitives: {
           heapRuntime.primitives.entries
                   .singleWhere((entry) => entry.value == .map)

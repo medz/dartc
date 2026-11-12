@@ -19,6 +19,11 @@ void main() {
       ffi.Pointer<ffi.Int64>,
     ]);
     expect(FfiTypes.canCall(native, FunctionType(wider, [pointer])), isTrue);
+    expect(FfiTypes.canExport(native, FunctionType(wider, [pointer])), isFalse);
+    expect(
+      FfiTypes.canExport(native, FunctionType(pointer, [pointer])),
+      isTrue,
+    );
     for (final type in [
       FunctionType(pointer, [wider]),
       FunctionType(pointer.nullable, [pointer]),
@@ -34,6 +39,43 @@ void main() {
         FunctionType(.object, [.integer]),
       ),
       isFalse,
+    );
+  });
+
+  test('native compound calls preserve nominal types and owner contracts', () {
+    final description = NativeCompoundType('Pair', [
+      NativeField('value', NativeScalarType(ffi.Double)),
+    ]);
+    final pair = ClassType(
+      Uri.parse('package:example/types.dart'),
+      'Pair',
+      nativeType: description,
+    );
+    final native = FfiTypes.nativeFunction.instantiate([
+      FunctionType(pair, [pair]),
+    ]);
+    final pointer = Block([
+      FfiTypes.pointer.instantiate([native]),
+    ]).parameters.single;
+    final value = NativeView(pair);
+    final call = NativeCall(pointer, [value]);
+    expect(call.type, same(pair));
+    expect(call.signature.result, same(description));
+    expect(
+      () => NativeCall(pointer, [const Constant.integer(1)]),
+      throwsArgumentError,
+    );
+    expect(
+      () => NativeView(pair, owner: const Constant.integer(1)),
+      throwsArgumentError,
+    );
+    expect(
+      CopyNative(
+        const Constant.integer(0),
+        const Constant.integer(8),
+        description,
+      ).effects,
+      {Effect.readsStorage, Effect.writesStorage},
     );
   });
 

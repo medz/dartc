@@ -4,6 +4,7 @@ import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import '../analyzer_metadata.dart';
 import '../constant_evaluation.dart';
@@ -869,11 +870,13 @@ final class Bindings({
         ? _classCovarianceFor(element)
         : (parameters: const <int>{}, bounds: const <int>{});
     final classFlags = classCovariance.parameters;
-    final intrinsic = intrinsicFor(
-      element,
-      requireSdkClass,
-      (declaration) => target(declaration, unit, site),
-    );
+    final intrinsic =
+        nativeFieldBody(element, owner) ??
+        intrinsicFor(
+          element,
+          requireSdkClass,
+          (declaration) => target(declaration, unit, site),
+        );
     final function = FunctionTarget(
       enclosing?.library ?? element.library.uri,
       element.name ?? '<anonymous>',
@@ -933,7 +936,7 @@ final class Bindings({
         _numericClasses.add(ValueType.number);
       }
       if (element.library.isInSdk &&
-          (numeric || element.isStatic && !element.isExternal) &&
+          (numeric || element.isStatic) &&
           !element.isAbstract &&
           intrinsic == null &&
           (element is TopLevelFunctionElement ||
@@ -1746,9 +1749,37 @@ final class Bindings({
       }
     }
     final parameters = registerTypeParameters(element.typeParameters);
+    NativeTypeRef? native;
+    final nativeParent = element.supertype?.element;
+    if (nativeParent?.library.uri.toString() == 'dart:ffi') {
+      if (nativeParent == nativeParent!.library.getClass('Struct') ||
+          nativeParent == nativeParent.library.getClass('Union')) {
+        int? packing;
+        for (final (sourceUnit, source) in fragmentsOf(element)) {
+          if (source is ast.AnnotatedNode) {
+            for (final annotation in source.metadata) {
+              final value = constants.annotation(sourceUnit, annotation);
+              if (value?.type case dart.InterfaceType(:final element)
+                  when element.library.uri.toString() == 'dart:ffi' &&
+                      element == element.library.getClass('Packed')) {
+                packing = value!.getField('memberAlignment')!.toIntValue();
+              }
+            }
+          }
+        }
+        native = NativeCompoundType.declare(
+          element.name!,
+          isUnion: nativeParent.name == 'Union',
+          packing: packing,
+        );
+      } else if (nativeParent == nativeParent.library.getClass('Opaque')) {
+        native = NativeOpaqueType(element.name!);
+      }
+    }
     final type = ClassType.declare(
       element.library.uri,
       element.name!,
+      nativeType: native,
       typeParameters: parameters,
       isAbstract:
           element is MixinElement ||
@@ -1861,6 +1892,76 @@ final class Bindings({
         if (element is MixinElement) ...element.superclassConstraints,
       ].map((interface) => valueType(interface, unit, site) as ClassType),
     );
+    if (native is NativeCompoundType) {
+      final fields = <NativeField>[];
+      for (final (sourceUnit, source) in fragmentsOf(element)) {
+        if (source is! ast.ClassDeclaration) continue;
+        for (final member
+            in source.body.members.whereType<ast.FieldDeclaration>()) {
+          if (member.isStatic) continue;
+          final annotations = [
+            for (final annotation in member.metadata)
+              constants.annotation(sourceUnit, annotation),
+          ].nonNulls;
+          for (final variable in member.fields.variables) {
+            final field = variable.declaredFragment!.element as FieldElement;
+            NativeTypeRef nativeField(
+              dart.DartType sourceType, [
+              int depth = 0,
+            ]) {
+              if (sourceType is dart.InterfaceType &&
+                  sourceType.element.library.uri.toString() == 'dart:ffi' &&
+                  sourceType.element.name == 'Array') {
+                final dimensions = annotations.firstWhere(
+                  (value) =>
+                      value.type is dart.InterfaceType &&
+                      (value.type as dart.InterfaceType).element.name ==
+                          '_ArraySize',
+                );
+                final sizes =
+                    dimensions
+                        .getField('dimensions')
+                        ?.toListValue()
+                        ?.map((v) => v.toIntValue()!)
+                        .toList() ??
+                    [
+                      for (var i = 1; i <= 5; i++)
+                        ?dimensions.getField('dimension$i')?.toIntValue(),
+                    ];
+                return NativeArrayType(
+                  nativeField(sourceType.typeArguments.single, depth + 1),
+                  sizes[depth],
+                );
+              }
+              return FfiTypes.describe(
+                valueType(sourceType, sourceUnit, variable),
+              );
+            }
+
+            final scalar = annotations
+                .where(
+                  (value) =>
+                      value.type is dart.InterfaceType &&
+                      FfiTypes.scalarTypes.containsValue(
+                        ffiClass((value.type as dart.InterfaceType).element),
+                      ),
+                )
+                .firstOrNull;
+            fields.add(
+              NativeField(
+                field.name!,
+                scalar == null
+                    ? nativeField(field.type)
+                    : FfiTypes.describe(
+                        valueType(scalar.type!, sourceUnit, variable),
+                      ),
+              ),
+            );
+          }
+        }
+      }
+      native.define(fields);
+    }
     return type;
   }
 

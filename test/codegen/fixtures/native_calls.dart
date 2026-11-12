@@ -286,6 +286,8 @@ Uint8List _arm(Target target, NativeSignature signature) {
       final type = signature.parameters[i];
       if (type.isFloating) {
         switch (location) {
+          case RegisterAggregate() || IndirectArgument():
+            throw StateError('Expected a scalar fixture.');
           case RegisterArgument(:final register):
             assembler.moveDouble(.d17, register as arm.FloatRegister);
           case StackArgument(:final offset):
@@ -298,6 +300,8 @@ Uint8List _arm(Target target, NativeSignature signature) {
         if (type.isSinglePrecision) assembler.convertFloatToDouble(.d17, .d17);
       } else {
         switch (location) {
+          case RegisterAggregate() || IndirectArgument():
+            throw StateError('Expected a scalar fixture.');
           case RegisterArgument(:final register):
             assembler.move(.x9, register as arm.Register);
           case StackArgument(:final offset):
@@ -347,7 +351,9 @@ Uint8List _arm(Target target, NativeSignature signature) {
     );
   }
   for (final register in layout.clobberedRegisters) {
-    if (register == layout.result || register == arm.Register.x30) continue;
+    if (register == layout.resultRegister || register == arm.Register.x30) {
+      continue;
+    }
     switch (register) {
       case arm.Register():
         assembler.loadImmediate(register, 0);
@@ -370,6 +376,8 @@ Uint8List _x64(Target target, NativeSignature signature) {
       final type = signature.parameters[i];
       if (type.isFloating) {
         switch (location) {
+          case RegisterAggregate() || IndirectArgument():
+            throw StateError('Expected a scalar fixture.');
           case RegisterArgument(:final register):
             assembler.moveDouble(.xmm15, register as x64.FloatRegister);
           case StackArgument(:final offset):
@@ -384,6 +392,8 @@ Uint8List _x64(Target target, NativeSignature signature) {
         }
       } else {
         switch (location) {
+          case RegisterAggregate() || IndirectArgument():
+            throw StateError('Expected a scalar fixture.');
           case RegisterArgument(:final register):
             assembler.move(.r10, register as x64.Register);
           case StackArgument(:final offset):
@@ -432,7 +442,7 @@ Uint8List _x64(Target target, NativeSignature signature) {
     assembler.move(.rax, .rdi);
   }
   for (final register in layout.clobberedRegisters) {
-    if (register == layout.result) continue;
+    if (register == layout.resultRegister) continue;
     switch (register) {
       case x64.Register():
         assembler.loadImmediate(register, 0);

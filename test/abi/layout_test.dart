@@ -32,7 +32,7 @@ void main() {
         expect(slots.map((s) => s.size), packed ? [4, 4, 8] : [8, 8, 8]);
         expect(layout.stackBytes, packed ? 16 : 32);
         expect(
-          layout.result,
+          layout.resultRegister,
           abi.target.architecture == .arm64
               ? arm.FloatRegister.d0
               : x64.FloatRegister.xmm0,
@@ -130,8 +130,8 @@ void main() {
       ]);
       final armCall = armAbi.classify(signature),
           x64Call = x64Abi.classify(signature);
-      expect(armCall.result, arm.FloatRegister.d0);
-      expect(x64Call.result, x64.FloatRegister.xmm0);
+      expect(armCall.resultRegister, arm.FloatRegister.d0);
+      expect(x64Call.resultRegister, x64.FloatRegister.xmm0);
       expect(
         armCall.parameters.whereType<RegisterArgument<arm.CpuRegister>>().map(
           (v) => v.register,
@@ -208,7 +208,7 @@ void main() {
           (armAbi.classify(signature), 8),
           (x64Abi.classify(signature), 6),
         ]) {
-          expect(call.result, isNull);
+          expect(call.resultRegister, isNull);
           expect(
             call.parameters.take(registers).every((p) => p is RegisterArgument),
             isTrue,
@@ -223,11 +223,11 @@ void main() {
           expect(call.stackBytes, (10 - registers) * 8);
         }
         expect(
-          armAbi.classify(NativeSignature(Pointer<Int64>, [])).result,
+          armAbi.classify(NativeSignature(Pointer<Int64>, [])).resultRegister,
           arm.Register.x0,
         );
         expect(
-          x64Abi.classify(NativeSignature(Pointer<Int64>, [])).result,
+          x64Abi.classify(NativeSignature(Pointer<Int64>, [])).resultRegister,
           x64.Register.rax,
         );
       },
@@ -251,8 +251,8 @@ void main() {
         ),
         <x64.Register>[.rdi, .rsi, .rdx, .rcx, .r8, .r9],
       );
-      expect(armCall.result, arm.Register.x0);
-      expect(x64Call.result, x64.Register.rax);
+      expect(armCall.resultRegister, arm.Register.x0);
+      expect(x64Call.resultRegister, x64.Register.rax);
       expect(
         armCall.clobberedRegisters,
         containsAll(<arm.Register>[.x8, .x16, .x17, .x30]),
@@ -342,11 +342,15 @@ void main() {
     expect(armCode.finish(), isEmpty);
     expect(x64Code.finish(), isEmpty);
     expect(
-      () => CallLayout([RegisterArgument(1), RegisterArgument(1)], 0, {0, 1}),
+      () => CallLayout(
+        [RegisterArgument(1), RegisterArgument(1)],
+        RegisterArgument(0),
+        {0, 1},
+      ),
       throwsArgumentError,
     );
     expect(
-      () => CallLayout([RegisterArgument(1)], 0, {1}),
+      () => CallLayout([RegisterArgument(1)], RegisterArgument(0), {1}),
       throwsArgumentError,
     );
     for (final offset in [-8, -1, 1, 7]) {
@@ -358,7 +362,11 @@ void main() {
       [0, 16],
     ]) {
       expect(
-        () => CallLayout(offsets.map(StackArgument<int>.new), 0, {0}),
+        () => CallLayout(
+          offsets.map(StackArgument<int>.new),
+          RegisterArgument(0),
+          {0},
+        ),
         throwsArgumentError,
       );
     }

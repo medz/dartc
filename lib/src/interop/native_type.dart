@@ -44,6 +44,9 @@ extension NativeTypeLayout on Type {
     if (this == Void) return 'void';
     if (this == Float) return 'float';
     if (this == Double) return 'double';
+    if (this == Bool) return 'bool';
+    if (this == IntPtr) return 'intptr_t';
+    if (this == UintPtr) return 'uintptr_t';
     if (integerLayout case final layout?) {
       return '${layout.signed ? '' : 'u'}int${layout.bytes * 8}_t';
     }
@@ -53,6 +56,9 @@ extension NativeTypeLayout on Type {
 }
 
 const _integers = {
+  Bool: (bytes: 1, signed: false, pointer: Pointer<Bool>),
+  IntPtr: (bytes: 8, signed: true, pointer: Pointer<IntPtr>),
+  UintPtr: (bytes: 8, signed: false, pointer: Pointer<UintPtr>),
   Int8: (bytes: 1, signed: true, pointer: Pointer<Int8>),
   Uint8: (bytes: 1, signed: false, pointer: Pointer<Uint8>),
   Int16: (bytes: 2, signed: true, pointer: Pointer<Int16>),

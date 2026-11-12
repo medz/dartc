@@ -1,0 +1,221 @@
+import 'dart:ffi';
+
+import 'package:dartc/abi.dart';
+import 'package:dartc/assembler/arm64.dart' as arm;
+import 'package:dartc/assembler/x64.dart' as x64;
+import 'package:dartc/interop.dart';
+import 'package:dartc/target.dart';
+import 'package:test/test.dart';
+
+void main() {
+  final real = NativeScalarType(Double), integer = NativeScalarType(Int32);
+  final point = NativeCompoundType('Point', [
+    NativeField('x', real),
+    NativeField('y', real),
+  ]);
+  final mixed = NativeCompoundType('Mixed', [
+    NativeField('index', integer),
+    NativeField('value', real),
+  ]);
+  final large = NativeCompoundType('Large', [
+    NativeField('values', NativeArrayType(integer, 7)),
+  ]);
+  final packed = NativeCompoundType('Packed', [
+    NativeField('tag', NativeScalarType(Uint8)),
+    NativeField('value', real),
+  ], packing: 1);
+
+  test('native storage retains nested arrays, unions, packing and recursive pointers', () {
+    for (final target in [
+      const Target(.macos, .arm64),
+      const Target(.linux, .arm64),
+      const Target(.linux, .x64),
+    ]) {
+      final layout = NativeLayout(target);
+      expect(layout.of(mixed).offsets, [0, 8]);
+      expect((layout.of(mixed).size, layout.of(mixed).alignment), (16, 8));
+      expect((layout.of(packed).size, layout.of(packed).alignment), (9, 1));
+      final union = NativeCompoundType('Choice', [
+        NativeField('point', point),
+        NativeField('items', NativeArrayType(integer, 3)),
+      ], isUnion: true);
+      expect(layout.of(union).offsets, [0, 0]);
+      expect(layout.of(union).size, 16);
+      final node = NativeCompoundType.declare('Node');
+      node.define([
+        NativeField('next', NativePointerType(node)),
+        NativeField('value', real),
+      ]);
+      expect(layout.of(node).size, 16);
+      final invalid = NativeCompoundType.declare('Cycle');
+      invalid.define([NativeField('self', invalid)]);
+      expect(() => layout.of(invalid), throwsArgumentError);
+      expect(() => node.define([]), throwsStateError);
+    }
+  });
+
+  test('AAPCS64 separates homogeneous floats, word aggregates and indirect results', () {
+    for (final os in [OperatingSystem.macos, OperatingSystem.linux]) {
+      final abi = Arm64Abi(Target(os, .arm64));
+      final call = abi.classify(
+        NativeSignature.types(point, [mixed, point, large]),
+      );
+      expect((call.result as RegisterAggregate).parts.map((p) => p.register), [
+        arm.FloatRegister.d0,
+        arm.FloatRegister.d1,
+      ]);
+      expect(
+        (call.parameters[0] as RegisterAggregate).parts.map((p) => p.register),
+        [arm.Register.x0, arm.Register.x1],
+      );
+      expect(
+        (call.parameters[1] as RegisterAggregate).parts.map((p) => p.register),
+        [arm.FloatRegister.d0, arm.FloatRegister.d1],
+      );
+      expect(
+        (call.parameters[2] as IndirectArgument).pointer,
+        isA<RegisterArgument>().having(
+          (p) => p.register,
+          'register',
+          arm.Register.x2,
+        ),
+      );
+      expect(
+        (abi.classify(NativeSignature.types(large, [])).result
+                as IndirectArgument)
+            .pointer,
+        isA<RegisterArgument>().having(
+          (p) => p.register,
+          'result address',
+          arm.Register.x8,
+        ),
+      );
+      final spill = abi.classify(
+        NativeSignature.types(real, [...List.filled(7, real), point, real]),
+      );
+      expect(
+        spill.parameters[7],
+        isA<StackArgument>().having((p) => p.size, 'whole HFA', 16),
+      );
+      expect(
+        spill.parameters.last,
+        isA<StackArgument>().having((p) => p.offset, 'later float', 16),
+      );
+    }
+  });
+
+  test(
+    'SysV classifies each eightbyte and rolls back an exhausted aggregate bank',
+    () {
+      final abi = X64Abi(const Target(.linux, .x64));
+      final call = abi.classify(NativeSignature.types(mixed, [mixed]));
+      expect((call.result as RegisterAggregate).parts.map((p) => p.register), [
+        x64.Register.rax,
+        x64.FloatRegister.xmm0,
+      ]);
+      expect(
+        (call.parameters.single as RegisterAggregate).parts.map(
+          (p) => p.register,
+        ),
+        [x64.Register.rdi, x64.FloatRegister.xmm0],
+      );
+      final spill = abi.classify(
+        NativeSignature.types(large, [...List.filled(5, integer), mixed, real]),
+      );
+      expect(
+        spill.result,
+        isA<IndirectArgument>().having(
+          (p) => p.returnedAddress,
+          'echo address',
+          x64.Register.rax,
+        ),
+      );
+      expect(spill.parameters[5], isA<StackArgument>());
+      expect(
+        spill.parameters.last,
+        isA<RegisterArgument>().having(
+          (p) => p.register,
+          'SSE bank remains available',
+          x64.FloatRegister.xmm0,
+        ),
+      );
+      expect(
+        abi.classify(NativeSignature.types(packed, [packed])).result,
+        isA<IndirectArgument>(),
+      );
+      final union = NativeCompoundType('Choice', [
+        NativeField('value', real),
+        NativeField('bits', NativeScalarType(Int64)),
+      ], isUnion: true);
+      expect(
+        (abi.classify(NativeSignature.types(union, [])).result
+                as RegisterAggregate)
+            .parts
+            .single
+            .register,
+        x64.Register.rax,
+      );
+    },
+  );
+
+  test('headers define referenced types once in dependency order', () {
+    final node = NativeCompoundType.declare('Node');
+    node.define([
+      NativeField('next', NativePointerType(node)),
+      NativeField('payload', mixed),
+    ]);
+    final out = StringBuffer();
+    NativeExports([
+      NativeExport(
+        'readNode',
+        NativeSignature.types(mixed, [
+          NativePointerType(node),
+          NativePointerType(NativeOpaqueType('Context')),
+        ]),
+      ),
+    ]).writeHeader(out);
+    final text = out.toString();
+    expect(text, contains('struct Node* next;'));
+    expect(text, contains('struct Mixed payload;'));
+    expect(
+      text.indexOf('struct Mixed {'),
+      lessThan(text.indexOf('struct Node {')),
+    );
+    expect(
+      text,
+      contains('struct Mixed readNode(struct Node*, struct Context*);'),
+    );
+    expect(
+      () => NativeCompoundType('', [NativeField('x', integer)]),
+      throwsArgumentError,
+    );
+    for (final name in ['struct', 'a; int injected', '_Reserved']) {
+      final declaration = NativeCompoundType(name, [NativeField('x', integer)]);
+      expect(NativeLayout(const Target(.linux, .x64)).of(declaration).size, 4);
+      expect(
+        () => NativeExports([
+          NativeExport('value', NativeSignature.types(declaration, [])),
+        ]).writeHeader(StringBuffer()),
+        throwsArgumentError,
+      );
+    }
+  });
+
+  test(
+    'call contracts reject aliased hidden results and truncated addresses',
+    () {
+      expect(
+        () => CallLayout(
+          [const RegisterArgument(0)],
+          IndirectArgument(const RegisterArgument(0)),
+          [0],
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => IndirectArgument(StackArgument<int>(0, size: 4)),
+        throwsArgumentError,
+      );
+    },
+  );
+}

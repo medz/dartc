@@ -126,6 +126,7 @@ final class FunctionSelection<R>(
               target: null,
               arguments: arguments,
             );
+          case KeepAlive():
           case ReifyType():
           case DoubleBits():
             break;

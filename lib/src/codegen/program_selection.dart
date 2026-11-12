@@ -111,6 +111,7 @@ final class ProgramSelection(
   Set<FunctionTarget> close({required bool persistent}) {
     var traceFunctions = <IrFunction>[];
     Iterable<IrFunction> supportFunctions() => [
+      ...?layouts.native?.functions,
       ...members.functions,
       ...layouts.closures.functions,
       ...layouts.strings.functions,
@@ -170,6 +171,7 @@ final class ProgramSelection(
     final missing = calls.difference({
       ...functions.keys,
       ...primitives,
+      ...layouts.nativeCalls.signatures.keys,
       ...members.definitions,
       if (capture) traces.capture,
       if (!globals.isEmpty) globals.address,
@@ -177,6 +179,7 @@ final class ProgramSelection(
     if (missing.isNotEmpty) return missing;
     IrProgram(
       [
+        ...?layouts.native?.classes,
         if (casts.functions.isNotEmpty) ...casts.classes,
         if (!globals.isEmpty) globals.declaration,
         ...arithmetic.classes,
@@ -192,7 +195,11 @@ final class ProgramSelection(
       ],
       support.map((body) => functions[body.target]!.function),
       externals: [
-        for (final target in heap.primitives) IrExternal(target),
+        for (final target in [
+          ...heap.primitives,
+          ...layouts.nativeCalls.signatures.keys,
+        ])
+          IrExternal(target),
         // Source bodies were verified already; this boundary owns generated bodies.
         for (final declaration in [
           layouts.strings.declaration,

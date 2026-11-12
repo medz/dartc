@@ -9,6 +9,24 @@ abstract final class Memory() {
   @Primitive(.writeByte)
   external static void writeByte(int address, int value);
 
+  @Primitive(.readByte)
+  external static int readByte(int address);
+
+  /// Copies live byte storage, preserving overlapping ranges.
+  @RuntimeEntry(.copyBytes)
+  @NonAllocating()
+  static void copyBytes(int destination, int source, int count) {
+    if (destination <= source || destination - source >= count) {
+      for (var i = 0; i < count; i++) {
+        writeByte(destination + i, readByte(source + i));
+      }
+    } else {
+      for (var i = count - 1; i >= 0; i--) {
+        writeByte(destination + i, readByte(source + i));
+      }
+    }
+  }
+
   @Primitive(.writeBytes)
   external static int writeBytes(int descriptor, int address, int count);
 

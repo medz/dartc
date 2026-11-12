@@ -197,6 +197,12 @@ IrClass lowerClass(
     if (fragment != null && fragment != fragment.element.fragments.last) {
       continue;
     }
+    // SDK static functions enter through their own dependency queue.
+    if (element.library.isInSdk &&
+        member is ast.MethodDeclaration &&
+        member.isStatic) {
+      continue;
+    }
     final contracts = bindings.runtimeContracts;
     if (member is ast.FieldDeclaration &&
         contracts != null &&

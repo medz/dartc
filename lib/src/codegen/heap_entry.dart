@@ -25,10 +25,11 @@ final class HeapEntry<R extends Object>(
   static const uncaughtMessage =
       'Unhandled Dart exception at native boundary.\n';
   static const _result = RuntimeContext.size, _failure = _result + 8;
+  static const localBytes = _failure + 8;
 
-  FrameLayout<R> frame(int outgoingStackBytes) =>
+  FrameLayout<R> frame(int outgoingStackBytes, {int extraBytes = 0}) =>
       emitter.convention.frameLayout(
-        localBytes: _failure + 8,
+        localBytes: localBytes + extraBytes,
         localAlignment: 8,
         savedRegisters: [emitter.heapRegister],
         outgoingStackBytes: outgoingStackBytes,

@@ -44,6 +44,8 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
         continue;
       case .read:
         value = block.emit(LoadNative(args.single, .new(Int64)));
+      case .readByte:
+        value = block.emit(LoadNative(args.single, .new(Uint8)));
       case .write:
         block.emit(StoreNative(args.first, .new(Int64), args.last));
         value = null;
@@ -72,11 +74,13 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
   final allocate = annotations.entries[RuntimeRole.allocate],
       release = annotations.entries[RuntimeRole.release],
       runEvents = annotations.entries[RuntimeRole.runEvents],
-      eventAccess = annotations.entries[RuntimeRole.events];
+      eventAccess = annotations.entries[RuntimeRole.events],
+      copyBytes = annotations.entries[RuntimeRole.copyBytes];
   if (allocate == null ||
       release == null ||
       runEvents == null ||
-      eventAccess == null) {
+      eventAccess == null ||
+      copyBytes == null) {
     throw ArgumentError('Missing runtime entry contract.');
   }
   final required = program.reachableFrom([allocate, release, runEvents]);
@@ -122,6 +126,7 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     release: release,
     runEvents: runEvents,
     eventAccess: eventAccess,
+    copyBytes: copyBytes,
     primitives: primitives,
     nonAllocating: annotations.nonAllocating,
   );

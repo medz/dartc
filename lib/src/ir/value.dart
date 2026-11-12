@@ -536,6 +536,7 @@ sealed class Instruction(super.type) extends Value {
     AssertionFailure() ||
     PatternMatchFailure() => _allocate,
     CopyCell() => const {.readsStorage, .allocates, .mayThrow},
+    CopyNative() => const {.readsStorage, .writesStorage},
     LoadGlobal(global: GlobalVariable(initializer: != null)) ||
     LoadField(field: InstanceField(initializer: != null)) ||
     ReadCell(cell: Value(type: CellType(isLate: true))) => _call,
@@ -576,7 +577,8 @@ sealed class Instruction(super.type) extends Value {
       const {.mayThrow},
     ReifyType() ||
     PointerFromAddress() ||
-    PointerOffset() => const {.allocates},
+    PointerOffset() ||
+    NativeView() => const {.allocates},
     Identical() ||
     Equals() ||
     IntBinary() ||
@@ -589,7 +591,11 @@ sealed class Instruction(super.type) extends Value {
     TypeTest() ||
     TypeView() ||
     RecordGet() ||
-    PointerAddress() => const {},
+    PointerAddress() ||
+    NativeAddress() ||
+    NativeSize() ||
+    NativeFieldOffset() ||
+    KeepAlive() => const {},
   };
 
   /// Whether evaluation can transfer control to a Dart exception handler.
@@ -656,6 +662,88 @@ final class PointerAddress(final Value pointer) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => [pointer];
+}
+
+/// A typed native view retaining the owner of its backing storage.
+///
+/// An absent [address] allocates zeroed managed storage; [copy] copies a supplied
+/// address into independent managed storage. Borrowed addresses require an owner
+/// or an external lifetime guarantee.
+final class NativeView(
+  ClassType type, {
+  final Value? address,
+  final Value owner = const Constant.nullValue(),
+  final bool copy = false,
+}) extends Instruction {
+  this : super(type) {
+    if (address != null && address!.type != .integer ||
+        type.nativeType is! NativeCompoundType ||
+        !ValueType.object.nullable.accepts(owner.type) ||
+        owner.type == .integer ||
+        owner.type == .floating ||
+        owner.type == .boolean) {
+      throw ArgumentError('Expected native compound storage and its owner.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [?address, owner];
+}
+
+/// The address of a native compound view; the view owns any managed backing.
+final class NativeAddress(final Value view) extends Instruction {
+  this : super(.integer) {
+    if (view.type is! ClassType ||
+        (view.type as ClassType).nativeType is! NativeCompoundType) {
+      throw ArgumentError('Expected a native compound view.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [view];
+}
+
+/// A native type's byte size, determined from the output target's ABI.
+final class NativeSize(final NativeTypeRef nativeType) extends Instruction {
+  this : super(.integer) {
+    if (!nativeType.isSized) {
+      throw ArgumentError('Expected sized native storage.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// A field's byte offset in the output target's native layout.
+final class NativeFieldOffset(final NativeCompoundType owner, final int index)
+    extends Instruction {
+  this : super(.integer) {
+    RangeError.checkValidIndex(index, owner.fields);
+  }
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Copies one native value, including overlapping source and destination storage.
+final class CopyNative(
+  final Value destination,
+  final Value source,
+  final NativeTypeRef nativeType,
+) extends Instruction {
+  this : super(.voidType) {
+    if (destination.type != .integer ||
+        source.type != .integer ||
+        !nativeType.isSized) {
+      throw ArgumentError('Expected addresses and sized native storage.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [destination, source];
+}
+
+/// Retains a managed owner through preceding native accesses or calls.
+final class KeepAlive(final Value value) extends Instruction {
+  this : super(.voidType);
+  @override
+  Iterable<Value> get inputs => [value];
 }
 
 /// Offsets a native pointer by a signed number of elements, without accessing it.
@@ -1565,9 +1653,8 @@ final class NativeCall._(
 
   /// Whether the caller promises a short, nonblocking call without Dart callbacks.
   final bool isLeaf,
+  super.type,
 ) extends Instruction {
-  this : super(FfiTypes.valueType(signature.result));
-
   factory(Value pointer, Iterable<Value> arguments, {bool isLeaf = false}) {
     if (!FfiTypes.isPointer(pointer.type)) {
       throw ArgumentError('A typed native function pointer is required.');
@@ -1576,8 +1663,22 @@ final class NativeCall._(
       element: NativeFunctionType(:final signature),
     )) {
       final values = List<Value>.unmodifiable(arguments);
-      checkArguments(signature.parameters.map(FfiTypes.valueType), values);
-      return ._(pointer, values, signature, isLeaf);
+      final declaration =
+          (((pointer.type as ClassType).typeArguments.single as ClassType)
+                  .typeArguments
+                  .single
+              as FunctionType);
+      checkArguments(
+        declaration.parameters.map(FfiTypes.dartValueType),
+        values,
+      );
+      return ._(
+        pointer,
+        values,
+        signature,
+        isLeaf,
+        FfiTypes.dartValueType(declaration.result),
+      );
     }
     throw ArgumentError('A typed native function pointer is required.');
   }

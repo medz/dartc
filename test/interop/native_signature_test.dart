@@ -138,7 +138,7 @@ void main() {
   });
 
   test('unsupported native types cannot reach ABI classification', () {
-    for (final type in <Type>[Void, IntPtr, Pointer<IntPtr>, int]) {
+    for (final type in <Type>[Void, int]) {
       expect(() => NativeSignature(Int64, [type]), throwsUnsupportedError);
       if (type != Void) {
         expect(() => NativeSignature(type, []), throwsUnsupportedError);

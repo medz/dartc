@@ -22,6 +22,9 @@ ClassType? ffiClass(InterfaceElement element) {
   final library = element.library;
   if (library.uri != _library) return null;
   if (element == library.getClass('NativeType')) return FfiTypes.nativeType;
+  if (element == library.getClass('AbiSpecificInteger')) {
+    return FfiTypes.abiSpecificInteger;
+  }
   if (element == library.getClass('SizedNativeType')) {
     return FfiTypes.sizedNativeType;
   }
@@ -36,7 +39,11 @@ ClassType? ffiClass(InterfaceElement element) {
   return null;
 }
 
-NativeTypeRef nativeType(dart.DartType type) {
+NativeTypeRef nativeType(
+  dart.DartType type, {
+  ValueType Function(dart.DartType)? bind,
+}) {
+  if (bind != null) return FfiTypes.describe(bind(type));
   if (type is dart.InterfaceType && type.nullabilitySuffix == .none) {
     final library = type.element.library;
     if (library.uri == _library) {
@@ -62,7 +69,10 @@ NativeTypeRef nativeType(dart.DartType type) {
   throw UnsupportedError('Native signature type: $type');
 }
 
-NativeSignature nativeSignature(dart.FunctionType type) {
+NativeSignature nativeSignature(
+  dart.FunctionType type, {
+  ValueType Function(dart.DartType)? bind,
+}) {
   if (type.nullabilitySuffix != .none ||
       type.typeParameters.isNotEmpty ||
       type.formalParameters.any((p) => !p.isRequiredPositional)) {
@@ -71,8 +81,8 @@ NativeSignature nativeSignature(dart.FunctionType type) {
     );
   }
   return NativeSignature.types(
-    nativeType(type.returnType),
-    type.formalParameters.map((p) => nativeType(p.type)),
+    nativeType(type.returnType, bind: bind),
+    type.formalParameters.map((p) => nativeType(p.type, bind: bind)),
   );
 }
 
@@ -108,6 +118,50 @@ Value? lowerFfi(
   }
   final access = member.enclosingElement;
   if (access is! ExtensionElement) return null;
+  if (access == library.getExtension('StructPointer') ||
+      access == library.getExtension('UnionPointer')) {
+    final pointerType = operands.first.type as ClassType;
+    final viewType = pointerType.typeArguments.single as ClassType;
+    final address = emit(PointerAddress(operands.first));
+    Value offset(Value index) => emit(
+      IntBinary(
+        .add,
+        address,
+        emit(
+          IntBinary(.multiply, index, emit(NativeSize(viewType.nativeType!))),
+        ),
+      ),
+    );
+    if (member == access.getGetter('ref') || member == access.getMethod('[]')) {
+      return emit(
+        NativeView(
+          viewType,
+          address: operands.length == 1 ? address : offset(operands[1]),
+          owner: operands.first,
+        ),
+      );
+    }
+    if (member == access.getSetter('ref') ||
+        member == access.getMethod('[]=')) {
+      final result = emit(
+        CopyNative(
+          operands.length == 2 ? address : offset(operands[1]),
+          emit(NativeAddress(operands.last)),
+          viewType.nativeType!,
+        ),
+      );
+      emit(KeepAlive(operands.last));
+      return result;
+    }
+    if (member == access.getMethod('+') ||
+        member == access.getMethod('elementAt') ||
+        member == access.getMethod('-')) {
+      final index = member.name == '-'
+          ? emit(IntBinary(.subtract, const Constant.integer(0), operands[1]))
+          : operands[1];
+      return emit(PointerFromAddress(offset(index), pointerType));
+    }
+  }
   final pointerElements = access == library.getExtension('PointerPointer');
   NativeScalarType? storage;
   if (pointerElements) {
@@ -181,4 +235,75 @@ Value? lowerFfi(
     return read ? load(address) : store(address, operands[2]);
   }
   return null;
+}
+
+Value? Function(FunctionTarget, Block)? nativeFieldBody(
+  ExecutableElement element,
+  ClassType? owner,
+) {
+  if (element is! PropertyAccessorElement ||
+      owner?.nativeType is! NativeCompoundType) {
+    return null;
+  }
+  final native = owner!.nativeType as NativeCompoundType;
+  final field = element.variable as FieldElement;
+  final fields = (field.enclosingElement as InterfaceElement).fields
+      .where((field) => !field.isStatic && !field.isOriginGetterSetter)
+      .toList();
+  final index = fields.indexOf(field);
+  if (index < 0) return null;
+  return (target, block) {
+    final receiver = block.parameters.first;
+    final address = block.emit(
+      IntBinary(
+        .add,
+        block.emit(NativeAddress(receiver)),
+        block.emit(NativeFieldOffset(native, index)),
+      ),
+    );
+    final storage = native.fields[index].type;
+    Value result;
+    if (element is GetterElement) {
+      result = switch (storage) {
+        NativeScalarType() => block.emit(LoadNative(address, storage)),
+        NativePointerType() => block.emit(
+          PointerFromAddress(
+            block.emit(LoadNative(address, NativeScalarType(ffi.Uint64))),
+            target.returnType as ClassType,
+          ),
+        ),
+        NativeCompoundType() => block.emit(
+          NativeView(
+            target.returnType as ClassType,
+            address: address,
+            owner: receiver,
+          ),
+        ),
+        _ => throw UnsupportedError(
+          'Native array access requires a shaped view.',
+        ),
+      };
+    } else {
+      final value = block.parameters.last;
+      result = switch (storage) {
+        NativeScalarType() => block.emit(StoreNative(address, storage, value)),
+        NativePointerType() => block.emit(
+          StoreNative(
+            address,
+            NativeScalarType(ffi.Uint64),
+            block.emit(PointerAddress(value)),
+          ),
+        ),
+        NativeCompoundType() => block.emit(
+          CopyNative(address, block.emit(NativeAddress(value)), storage),
+        ),
+        _ => throw UnsupportedError(
+          'Native array assignment requires a shaped view.',
+        ),
+      };
+      block.emit(KeepAlive(value));
+    }
+    block.emit(KeepAlive(receiver));
+    return result;
+  };
 }

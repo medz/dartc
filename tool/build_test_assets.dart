@@ -67,6 +67,7 @@ const _compilerLibraries = {
   'native_floats',
   'native_function_pointers',
   'native_imports',
+  'native_aggregates',
   'managed_objects',
   'heap_runtime',
   'weak_references',
@@ -238,7 +239,8 @@ Future<void> main(List<String> args) async {
           'native_integers' ||
           'native_floats' ||
           'native_function_pointers' ||
-          'native_imports' => assets.file('compiler/$fixture.h'),
+          'native_imports' ||
+          'native_aggregates' => assets.file('compiler/$fixture.h'),
           _ => null,
         },
       );

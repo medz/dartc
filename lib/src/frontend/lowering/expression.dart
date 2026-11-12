@@ -611,13 +611,36 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           context.checkDeferred(receiver);
         }
       }
-      final target =
-          loadLibrary ?? context.bindings.target(callee, unit, expression);
       final args = context.arguments(
         argumentList,
         (e) => lowerExpression(context, e),
       );
       if (args == null) return null;
+      if (callee.library.uri.toString() == 'dart:ffi') {
+        if (callee == callee.library.getTopLevelFunction('sizeOf')) {
+          final type = context
+              .typeArguments(typeArgumentTypes, expression)
+              .single;
+          return context.emit(NativeSize(FfiTypes.describe(type)));
+        }
+        if (callee == callee.library.getClass('Struct')?.getMethod('create') ||
+            callee == callee.library.getClass('Union')?.getMethod('create')) {
+          if (args.positional.isNotEmpty || args.named.isNotEmpty) {
+            unsupported(
+              unit,
+              expression,
+              'TypedData-backed native compound creation',
+            );
+          }
+          return context.emit(
+            NativeView(
+              context.typeOf(expression.staticType!, expression) as ClassType,
+            ),
+          );
+        }
+      }
+      final target =
+          loadLibrary ?? context.bindings.target(callee, unit, expression);
       if (callee.library.uri == Uri.parse('dart:math') &&
           callee.baseElement == callee.library.getTopLevelFunction('sqrt')) {
         return context.emit(NumericSquareRoot(args.positional.single));

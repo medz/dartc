@@ -308,7 +308,7 @@ final class FunctionTarget(
       throw ArgumentError('Expected a resolved source library URI.');
     }
     if (owner != null &&
-            (owner!.library != library ||
+            (library != null && owner!.library != library ||
                 !identical(owner, owner!.declaration)) ||
         owner == null && (kind.hasReceiver || kind == .factory) ||
         isAbstract && !kind.isVirtual) {

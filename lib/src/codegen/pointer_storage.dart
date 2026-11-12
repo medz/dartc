@@ -9,7 +9,7 @@ final class PointerStorage() {
     isFinal: true,
   );
   final initializer = FunctionTarget(
-    FfiTypes.pointer.library,
+    null,
     'new',
     .voidType,
     [.integer],

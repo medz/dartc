@@ -599,6 +599,7 @@ void main() {
     compare('updateBindings', [], closures.updateBindings);
     for (final n in [-1, 0, 2, 4]) {
       compare('sharedCounter', [n], () => closures.sharedCounter(n));
+      compare('localOrPattern', [n], () => closures.localOrPattern(n));
       compare('transitive', [n], () => closures.transitive(n));
       compare('recursive', [n], () => closures.recursive(n));
       compare('destructuredLoop', [n], () => closures.destructuredLoop(n));

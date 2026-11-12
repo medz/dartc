@@ -12,5 +12,9 @@ export 'src/interop/native_signature.dart'
         NativeTypeRef,
         NativeScalarType,
         NativePointerType,
-        NativeFunctionType;
+        NativeFunctionType,
+        NativeField,
+        NativeCompoundType,
+        NativeArrayType,
+        NativeOpaqueType;
 export 'src/interop/native_type.dart' show NativeTypeLayout;

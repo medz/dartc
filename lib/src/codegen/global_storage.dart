@@ -91,7 +91,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
     final result = emitter.convention.classify(
       NativeSignature(Pointer<Void>, []),
     );
-    emitter.address(result.result!, storage);
+    emitter.address(result.resultRegister!, storage);
     emitter.loadImmediate(emitter.failureRegister, CallStatus.returned.index);
     emitter.ret();
     return emitter.finish();

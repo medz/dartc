@@ -9,6 +9,11 @@ import 'type_values.dart';
 import 'instance_storage.dart';
 import 'type_relations.dart';
 import 'pointer_storage.dart';
+import 'native_storage.dart';
+import 'native_calls.dart';
+
+import 'package:dartc/abi.dart' show NativeLayout;
+
 import 'pointer_parameters.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
@@ -27,6 +32,7 @@ final class ProgramLayout(
   Iterable<IrClass> classes, {
   Iterable<IrFunction> functions = const [],
   Iterable<ClassType> referencedClasses = const [],
+  NativeLayout? nativeLayout,
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
@@ -37,6 +43,10 @@ final class ProgramLayout(
   final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues();
   final pointers = PointerStorage();
+  final nativeCalls = NativeCalls();
+  final NativeStorage? native = nativeLayout == null
+      ? null
+      : NativeStorage(nativeLayout);
   final pointerParameters = PointerParameters(functions);
   final strings = stringStorage ?? StringStorage();
   final lists = listStorage ?? ListStorage();
@@ -135,6 +145,16 @@ final class ProgramLayout(
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;
     if (_storage[declaration] case final known?) return known;
+    if (declaration.nativeType is NativeCompoundType) {
+      final view = native!.view(declaration);
+      return _storage[declaration] = ClassStorage([
+        view.address,
+        view.owner,
+      ], this);
+    }
+    if (declaration == native?.buffer) {
+      return _storage[declaration] = ClassStorage([], this);
+    }
     if (declaration == ValueType.object) {
       return _storage[declaration] = ClassStorage([], this);
     }

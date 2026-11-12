@@ -1,3 +1,5 @@
+import 'package:dartc/interop.dart';
+
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
   /// Normalizes a source type for runtime equality and constant identity.
@@ -905,6 +907,7 @@ final class const ClassType._(
   final ClassType? _declaration,
   final _ClassHierarchy? _hierarchy, {
   final bool _isCore = false,
+  final NativeTypeRef? _nativeType,
 }) extends ValueType {
   new(
     Uri? library,
@@ -912,6 +915,7 @@ final class const ClassType._(
     ClassType superclass = ValueType.object,
     Iterable<ClassType> interfaces = const [],
     bool isAbstract = false,
+    NativeTypeRef? nativeType,
     Iterable<TypeParameterType> typeParameters = const [],
   }) : this._(
          library,
@@ -923,6 +927,7 @@ final class const ClassType._(
          null,
          null,
          null,
+         nativeType: nativeType,
        );
 
   const new _core(String name, ClassType? parent, bool isAbstract)
@@ -945,6 +950,7 @@ final class const ClassType._(
     String name, {
     Iterable<TypeParameterType> typeParameters = const [],
     bool isAbstract = false,
+    NativeTypeRef? nativeType,
   }) : this._(
          library,
          name,
@@ -955,6 +961,7 @@ final class const ClassType._(
          null,
          null,
          _ClassHierarchy(),
+         nativeType: nativeType,
        );
 
   /// Sets the hierarchy once, before a verified graph or program uses this type.
@@ -978,6 +985,9 @@ final class const ClassType._(
     hierarchy.superclass = superclass;
     hierarchy.initialized = true;
   }
+
+  /// Native storage described by this declaration, distinct from managed layout.
+  NativeTypeRef? get nativeType => declaration._nativeType;
 
   static final _coreLibrary = Uri.parse('dart:core');
 

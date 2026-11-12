@@ -259,7 +259,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   }
 
   void _declare(Element element) {
-    if (_current?.element is LocalVariableElement) {
+    if (_current != null) {
       _owners[element] = _current!;
     }
   }

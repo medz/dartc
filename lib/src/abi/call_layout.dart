@@ -1,8 +1,6 @@
-import 'package:dartc/interop.dart';
-
 import 'argument_location.dart';
 
-/// Argument locations and call effects for a native scalar signature.
+/// Argument locations and call effects for a native signature.
 ///
 /// Stack slots follow parameter order with their required alignment. The clobber
 /// set covers represented 64-bit general and floating registers, not allocation
@@ -10,11 +8,18 @@ import 'argument_location.dart';
 /// [result] is absent for a `Void` result.
 final class CallLayout<R>(
   Iterable<ArgumentLocation<R>> parameters,
-  final R? result,
+  final ArgumentLocation<R>? result,
   Iterable<R> clobberedRegisters,
 ) {
   /// Parameter locations in source order.
   final List<ArgumentLocation<R>> parameters = .unmodifiable(parameters);
+
+  /// The result register for a scalar call; aggregate callers use [result].
+  R? get resultRegister => switch (result) {
+    null => null,
+    RegisterArgument(:final register) => register,
+    _ => throw StateError('A native aggregate result has no single register.'),
+  };
 
   /// Registers whose previous contents may be lost across the call.
   final Set<R> clobberedRegisters = .unmodifiable(clobberedRegisters);
@@ -25,61 +30,42 @@ final class CallLayout<R>(
   /// Argument storage at the caller's stack pointer, padded to 16 bytes.
   late final int stackBytes;
 
-  /// Assigns integer and floating banks, then naturally aligned stack slots.
-  ///
-  /// [packedStack] uses each scalar's size, as required by Apple ARM64.
-  /// Otherwise each stack argument occupies eight bytes.
-  factory scalars(
-    NativeSignature signature, {
-    required List<R> general,
-    required List<R> floating,
-    required R generalResult,
-    required R floatingResult,
-    required Iterable<R> clobberedRegisters,
-    bool packedStack = false,
-  }) {
-    var integers = 0, floats = 0, stack = 0;
-    final parameters = <ArgumentLocation<R>>[];
-    for (final type in signature.parameters) {
-      final bank = type.isFloating ? floating : general;
-      final index = type.isFloating ? floats++ : integers++;
-      if (index < bank.length) {
-        parameters.add(RegisterArgument(bank[index]));
-      } else {
-        final size = packedStack ? type.nativeSize : 8;
-        stack = (stack + size - 1) & -size;
-        parameters.add(StackArgument(stack, size: size));
-        stack += size;
-      }
-    }
-    return .new(
-      parameters,
-      signature.result.isVoid
-          ? null
-          : signature.result.isFloating
-          ? floatingResult
-          : generalResult,
-      clobberedRegisters,
-    );
-  }
-
   this {
     final registers = <R>{};
     var bytes = 0;
     for (final location in this.parameters) {
-      switch (location) {
-        case RegisterArgument(:final register):
-          if (!registers.add(register)) {
-            throw ArgumentError('Repeated parameter register: $register');
-          }
-        case StackArgument(:final offset, :final size):
-          if (offset != ((bytes + size - 1) & -size)) {
-            throw ArgumentError('Expected consecutive stack arguments.');
-          }
-          bytes = offset + size;
+      for (final register in location.registers) {
+        if (!registers.add(register)) {
+          throw ArgumentError('Repeated parameter register: $register');
+        }
+      }
+      final storage = location is IndirectArgument<R>
+          ? location.pointer
+          : location;
+      if (storage case StackArgument(
+        :final offset,
+        :final size,
+        :final alignment,
+      )) {
+        if (offset != ((bytes + alignment - 1) & -alignment)) {
+          throw ArgumentError('Expected consecutive stack arguments.');
+        }
+        bytes = offset + size;
       }
     }
-    if (!this.clobberedRegisters.containsAll([...registers, ?result])) {
+    if (result is StackArgument<R> ||
+        result is IndirectArgument<R> &&
+            result!.registers.any(registers.contains)) {
+      throw ArgumentError(
+        'A hidden result address must have a distinct register.',
+      );
+    }
+    if (!this.clobberedRegisters.containsAll([
+      ...registers,
+      ...?result?.registers,
+      if (result case IndirectArgument(:final returnedAddress?))
+        returnedAddress,
+    ])) {
       throw ArgumentError('Parameter and result registers must be clobbered.');
     }
     stackBytes = (bytes + 15) & ~15;

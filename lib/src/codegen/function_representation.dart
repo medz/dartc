@@ -1,3 +1,6 @@
+import 'dart:ffi' show Uint8;
+
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 import 'program_layout.dart';
@@ -406,6 +409,82 @@ final class FunctionRepresentation(
           continue;
         }
         if (instruction
+            case LoadNative(:final address, nativeType: final native)
+            when native.isBoolean) {
+          final byte = LoadNative(address, NativeScalarType(Uint8));
+          final boolean = IntBinary(
+            .greaterThan,
+            byte,
+            const Constant.integer(0),
+          );
+          body.addAll([byte, boolean]);
+          _operands[instruction] = [boolean];
+          aliases.add(instruction);
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case NativeView(
+          type: final ClassType type,
+          :final address,
+          :final owner,
+          :final copy,
+        )) {
+          invocations[instruction] = address == null || copy
+              ? layouts.native!.owned(
+                  type,
+                  heap.allocatePayload(layouts.native!.buffer),
+                  copy: copy,
+                )
+              : heap.constructorFor(
+                  layouts.native!.view(type).initializer,
+                  layouts,
+                );
+          _operands[instruction] = [
+            address ?? const Constant.integer(0),
+            owner,
+            if (address != null && !copy) layouts.types.constant(type),
+          ];
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case NativeAddress(:final view)) {
+          _operands[instruction] = [
+            _load(
+              layouts.native!.view(view.type as ClassType).address,
+              view,
+              body,
+            ),
+          ];
+          aliases.add(instruction);
+          body.add(instruction);
+          continue;
+        }
+        if (instruction is NativeSize || instruction is NativeFieldOffset) {
+          final value = instruction is NativeSize
+              ? layouts.native!.layout.of(instruction.nativeType).size
+              : layouts.native!.layout
+                    .of((instruction as NativeFieldOffset).owner)
+                    .offsets[instruction.index];
+          _operands[instruction] = [Constant.integer(value)];
+          aliases.add(instruction);
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case CopyNative(
+          :final destination,
+          :final source,
+          :final nativeType,
+        )) {
+          invocations[instruction] = heap.runtime!.copyBytes;
+          _operands[instruction] = [
+            destination,
+            source,
+            Constant.integer(layouts.native!.layout.of(nativeType).size),
+          ];
+          body.add(instruction);
+          continue;
+        }
+        if (instruction
             case PointerAddress(pointer: final receiver) ||
                 StringLength(string: final receiver)) {
           _operands[instruction] = [
@@ -465,6 +544,66 @@ final class FunctionRepresentation(
           :final signature,
           :final isLeaf,
         )) {
+          if (signature.result is NativeCompoundType ||
+              signature.parameters.any((type) => type is NativeCompoundType)) {
+            DirectCall? result;
+            if (signature.result is NativeCompoundType) {
+              final type = instruction.type as ClassType;
+              final create = layouts.native!.owned(
+                type,
+                heap.allocatePayload(layouts.native!.buffer),
+                copy: false,
+              );
+              result = DirectCall(create, [
+                const Constant.integer(0),
+                const Constant.nullValue(),
+              ]);
+              invocations[result] = create;
+              body.add(result);
+            }
+            final target = layouts.nativeCalls.target(signature);
+            final call = DirectCall(target, [
+              _load(layouts.pointers.address, pointer, body),
+              if (result != null)
+                _load(
+                  layouts.native!.view(result.type as ClassType).address,
+                  result,
+                  body,
+                ),
+              for (final value in arguments)
+                if (FfiTypes.isPointer(value.type))
+                  _load(layouts.pointers.address, value, body)
+                else if (value.type case ClassType(:final nativeType?)
+                    when nativeType is NativeCompoundType)
+                  _load(
+                    layouts.native!.view(value.type as ClassType).address,
+                    value,
+                    body,
+                  )
+                else
+                  value,
+            ]);
+            invocations[call] = target;
+            body.add(call);
+            for (final value in [pointer, ...arguments]) {
+              body.add(KeepAlive(value));
+            }
+            if (FfiTypes.isPointer(instruction.type)) {
+              invocations[instruction] = heap.constructorFor(
+                layouts.pointers.initializer,
+                layouts,
+              );
+              _operands[instruction] = [
+                call,
+                layouts.types.constant(FfiTypes.pointerRuntimeType),
+              ];
+            } else {
+              aliases.add(instruction);
+              _operands[instruction] = [result ?? call];
+            }
+            body.add(instruction);
+            continue;
+          }
           final raw = NativeInvocation(
             _load(layouts.pointers.address, pointer, body),
             [

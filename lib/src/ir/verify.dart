@@ -320,6 +320,8 @@ FunctionReferences verifyCallable(
       switch (op) {
         case BindMethod(:final method, :final direct):
           (methodTearOffs ??= {}).add((method: method, direct: direct));
+        case NativeView(type: final ClassType type):
+          (instantiatedClasses ??= {}).add(type.declaration);
         case Construct(:final instantiatedType):
           (instantiatedClasses ??= {}).add(instantiatedType.declaration);
         case StringFromCharCode() || StringFromCharCodes() || StringConcat():

@@ -105,7 +105,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     if (runtime?.primitives[target] == MemoryPrimitive.context) {
       final result = emitter.convention
           .classify(NativeSignature(Int64, []))
-          .result!;
+          .resultRegister!;
       emitter.move(result, emitter.heapRegister);
       emitter.loadImmediate(emitter.failureRegister, 0);
       emitter.ret();
@@ -137,7 +137,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     final objectOffset = frame.localOffset + parameterTypes.length * 8;
     R scratch(ValueType type) => emitter.allocatableRegisters.lastWhere(
       (r) =>
-          r != allocation.result &&
+          r != allocation.resultRegister &&
           emitter.bank(r) ==
               (layouts.representation(type) == .floating
                   ? RegisterBank.floating
@@ -182,7 +182,11 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     emitter.loadImmediate(arguments[3], 0);
     emitter
         .comparison(.equal)
-        .emit(emitter.failureRegister, allocation.result!, arguments[3]);
+        .emit(
+          emitter.failureRegister,
+          allocation.resultRegister!,
+          arguments[3],
+        );
     final allocated = emitter.label();
     emitter.jumpIfZero(emitter.failureRegister, allocated);
     emitter.epilogue(frame);
@@ -201,7 +205,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     }
     emitter.storeMemory(
       runtimeType,
-      allocation.result!,
+      allocation.resultRegister!,
       offset: ObjectHeader.typeOffset,
       bytes: 8,
     );
@@ -215,7 +219,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
       emitter.loadStack(value, frame.localOffset);
       emitter.storeMemory(
         value,
-        allocation.result!,
+        allocation.resultRegister!,
         offset: ObjectHeader.fieldsOffset,
         bytes: 8,
       );
@@ -224,7 +228,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
       emitter.epilogue(frame);
       return emitter.finish();
     }
-    emitter.storeStack(allocation.result!, objectOffset);
+    emitter.storeStack(allocation.resultRegister!, objectOffset);
 
     void loadArgument(int i, R register) {
       emitter.loadStack(
@@ -265,7 +269,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     emitter.jumpIfZero(emitter.failureRegister, initialized);
     emitter.epilogue(frame);
     emitter.bind(initialized);
-    emitter.loadStack(source.result!, objectOffset);
+    emitter.loadStack(source.resultRegister!, objectOffset);
     emitter.epilogue(frame);
     return emitter.finish();
   }
