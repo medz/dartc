@@ -21,6 +21,7 @@ void main() {
     for (final kind in [0, 1, 2, 3, 4, 5]) {
       for (final (start, end) in [
         (0, -1),
+        (0, 0),
         (1, -1),
         (1, -2),
         (1, 3),

@@ -46,6 +46,15 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
         value = block.emit(LoadNative(args.single, .new(Int64)));
       case .readByte:
         value = block.emit(LoadNative(args.single, .new(Uint8)));
+      case .allocatePayload:
+        value = block.emit(
+          NewPayload(target.returnType as ClassType, args.single),
+        );
+      case .readReference:
+        value = block.emit(LoadObjectReference(args[0], args[1]));
+      case .writeReference:
+        block.emit(StoreObjectReference(args[0], args[1], args[2]));
+        value = null;
       case .write:
         block.emit(StoreNative(args.first, .new(Int64), args.last));
         value = null;
@@ -83,45 +92,8 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       copyBytes == null) {
     throw ArgumentError('Missing runtime entry contract.');
   }
-  final required = program.reachableFrom([allocate, release, runEvents]);
-  final libraries = {
-    for (final function in program.functions)
-      if (required.contains(function.target)) function.target.library,
-    for (final primitive in annotations.primitives.keys) primitive.library,
-  };
-  final functions = program.functions
-      .where((f) => libraries.contains(f.target.library))
-      .toList();
-  final externals = program.externals
-      .where((f) => libraries.contains(f.target.library))
-      .toList();
-  final classes = <ClassType>{};
-  void include(ClassType type) {
-    if (!classes.add(type.declaration)) return;
-    if (type.superclass case final parent?) include(parent);
-    for (final interface in type.interfaces) {
-      include(interface);
-    }
-  }
-
-  for (final body in [...functions, ...externals]) {
-    body.referencedClasses.forEach(include);
-    if (body.target.owner case final owner?) include(owner);
-  }
-  final globals = {for (final body in functions) ...body.globals};
-  final source = IrProgram(
-    program.classes.where(
-      (c) =>
-          classes.contains(c.type) &&
-          (libraries.contains(c.type.library) ||
-              c.type == CoreTypes.enumeration),
-    ),
-    functions,
-    globals: globals,
-    externals: externals,
-  );
   return HeapRuntime(
-    source,
+    program,
     allocate: allocate,
     release: release,
     runEvents: runEvents,

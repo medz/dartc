@@ -102,6 +102,7 @@ export 'src/ir/value.dart'
         Instruction,
         ReferenceAddress,
         ReferenceFromAddress,
+        NewPayload,
         NativeView,
         NativeAddress,
         NativeSize,

@@ -2,6 +2,14 @@ import 'contracts.dart';
 
 /// Trusted machine capabilities; callers own bounds, alignment and lifetimes.
 abstract final class Memory() {
+  /// Reads a managed slot; [offset] is a byte offset including the object header.
+  @Primitive(.readReference)
+  external static Object? readReference(Object object, int offset);
+
+  /// Writes a managed slot without losing its owner across a collection.
+  @Primitive(.writeReference)
+  external static void writeReference(Object object, int offset, Object? value);
+
   /// The active Dart execution context, preserved across native reentry.
   @Primitive(.context)
   external static int context();

@@ -71,9 +71,14 @@ void main() {
     },
   );
   test('erased constructors use ordinary static functions and no storage', () {
-    expect(disabled.classes, isEmpty);
+    final library = Uri.base.resolve(
+      'test/frontend/lowering/fixtures/extension_types_constructors.dart',
+    );
+    expect(disabled.classes.where((c) => c.type.library == library), isEmpty);
     final constructors = disabled.functions.where(
-      (f) => f.target.name.contains(':constructor:'),
+      (f) =>
+          f.target.library == library &&
+          f.target.name.contains(':constructor:'),
     );
     expect(constructors, isNotEmpty);
     for (final f in constructors) {

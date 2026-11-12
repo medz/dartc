@@ -342,6 +342,45 @@ IrClass lowerClass(
             ),
     );
   }
+  var referencePayload = false;
+  ({
+    InstanceField length,
+    InstanceField data,
+    InstanceField mutability,
+    FunctionTarget spread,
+  })?
+  listStorage;
+  for (final (sourceUnit, source) in bindings.fragmentsOf(element)) {
+    if (!bindings.runtimeSources.contains(sourceUnit.uri) ||
+        source is! ast.AnnotatedNode) {
+      continue;
+    }
+    for (final annotation in source.metadata) {
+      final value = bindings.constants.annotation(sourceUnit, annotation);
+      if (value?.type case dart.InterfaceType(element: final annotationType)
+          when annotationType.library.uri == bindings.runtimeContracts) {
+        if (annotationType ==
+            annotationType.library.getClass('ReferencePayload')) {
+          referencePayload = true;
+        } else if (annotationType ==
+            annotationType.library.getClass('ConstantListStorage')) {
+          InstanceField field(String key) => fields.singleWhere(
+            (field) => field.name == value!.getField(key)!.toStringValue(),
+          );
+          listStorage = (
+            length: field('length'),
+            data: field('data'),
+            mutability: field('mutability'),
+            spread: bindings.target(
+              element.getMethod(value!.getField('spread')!.toStringValue()!)!,
+              sourceUnit,
+              annotation,
+            ),
+          );
+        }
+      }
+    }
+  }
   return IrClass(
     type,
     fields,
@@ -349,6 +388,8 @@ IrClass lowerClass(
     implementations: implementations,
     constructors: constructors,
     weakFields: weakFields,
+    referencePayload: referencePayload,
+    listStorage: listStorage,
     ephemerons: {
       for (final MapEntry(:key, :value) in ephemeronNames.entries)
         key: fields.singleWhere((field) => field.name == value),

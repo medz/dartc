@@ -23,26 +23,22 @@ final class RuntimeDeclarations(
   /// Reads trusted annotations while their owning analysis session is open.
   factory resolve(
     CheckedLibraries input,
-    FunctionTarget Function(ExecutableElement, ResolvedUnitResult, ast.AstNode)
-    targetFor,
+    Iterable<ResolvedLibraryResult> libraries,
+    FunctionTarget? Function(ExecutableElement) targetFor,
   ) {
-    final visitor = _RuntimeDeclarations(input, targetFor);
+    final visitor = _RuntimeDeclarations(input, libraries, targetFor);
     return .new(visitor.entries, visitor.primitives, visitor.nonAllocating);
   }
 }
 
 final class _RuntimeDeclarations(
   final CheckedLibraries input,
-  final FunctionTarget Function(
-    ExecutableElement,
-    ResolvedUnitResult,
-    ast.AstNode,
-  )
-  targetFor,
+  Iterable<ResolvedLibraryResult> libraries,
+  final FunctionTarget? Function(ExecutableElement) targetFor,
 ) extends RecursiveAstVisitor<void> {
   this {
     if (input.runtimeContracts == null) return;
-    for (final library in input.libraries) {
+    for (final library in libraries) {
       for (final source in library.units) {
         if (!input.runtimeSources.contains(source.uri)) continue;
         unit = source;
@@ -78,7 +74,8 @@ final class _RuntimeDeclarations(
     final isPrimitive = type.element == source.getClass('Primitive');
     final noAllocation = type.element == source.getClass('NonAllocating');
     if (!isEntry && !isPrimitive && !noAllocation) return;
-    final target = targetFor(element, unit, node);
+    final target = targetFor(element);
+    if (target == null) return;
     if (noAllocation) {
       nonAllocating.add(target);
       return;

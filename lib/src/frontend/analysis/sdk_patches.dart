@@ -58,7 +58,13 @@ final class SdkPatches(final OverlayResourceProvider files) {
         );
       }
       _official.addAll([core, ...parts]);
-      _apply(library('core'), [core, ...parts, '$runtime/core.dart']);
+      _apply(library('core'), [
+        core,
+        ...parts,
+        '$runtime/core.dart',
+        '$runtime/list.dart',
+        '$runtime/string.dart',
+      ]);
       final internal = patches('_internal')
           .singleWhere((path) => path.endsWith('/internal_patch.dart'));
       _official.add(internal);
@@ -79,7 +85,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
       final collection = patches('collection')
           .singleWhere((path) => path.endsWith('/collection_patch.dart'));
       _official.add(collection);
-      _apply(library('collection'), [collection]);
+      _apply(library('collection'), [collection, '$runtime/collection.dart']);
       _apply(library('_vm'), ['$runtime/vm.dart']);
     }
 
@@ -138,6 +144,21 @@ final class SdkPatches(final OverlayResourceProvider files) {
       ...implementations,
     ];
     final units = {for (final path in paths) path: _parse(path)};
+    final replacements = {
+      for (final path in implementations.where((p) => !_official.contains(p)))
+        for (final declaration
+            in units[path]!.declarations.whereType<ClassDeclaration>())
+          if (_patched(declaration))
+            for (final member in declaration.body.members.where(_patched))
+              if (switch (member) {
+                ConstructorDeclaration(:final externalKeyword) ||
+                MethodDeclaration(
+                  :final externalKeyword,
+                ) => externalKeyword == null,
+                _ => false,
+              })
+                (declaration.namePart.typeName.lexeme, _memberKey(member)),
+    };
     final originals = <String, (String, ClassDeclaration)>{};
     final functions = <(String, String?), (String, FunctionDeclaration)>{};
     for (final MapEntry(key: path, value: syntax) in units.entries) {
@@ -185,6 +206,10 @@ final class SdkPatches(final OverlayResourceProvider files) {
         _ => null,
       };
       if (external == null) {
+        if (declaration is MethodDeclaration &&
+            declaration.body is EmptyFunctionBody) {
+          return;
+        }
         throw FormatException(
           'Expected external SDK declaration: $path:${declaration.offset}',
         );
@@ -257,17 +282,18 @@ final class SdkPatches(final OverlayResourceProvider files) {
               modifiers.map((token) => '${token.lexeme} ').join(),
             );
             for (final member in declaration.body.members.where(_patched)) {
+              // Target bodies replace VM-specific bodies while retaining the SDK contract.
+              if (_official.contains(path) &&
+                  replacements.contains((
+                    declaration.namePart.typeName.lexeme,
+                    _memberKey(member),
+                  ))) {
+                edit(path, member.offset, member.end, '');
+                continue;
+              }
               final target = owner.body.members
                   .where(
-                    (candidate) => switch ((candidate, member)) {
-                      (ConstructorDeclaration a, ConstructorDeclaration b) =>
-                        a.name?.lexeme == b.name?.lexeme,
-                      (MethodDeclaration a, MethodDeclaration b) =>
-                        a.name.lexeme == b.name.lexeme &&
-                            a.propertyKeyword?.lexeme ==
-                                b.propertyKeyword?.lexeme,
-                      _ => false,
-                    },
+                    (candidate) => _memberKey(candidate) == _memberKey(member),
                   )
                   .singleOrNull;
               if (target == null) {
@@ -361,6 +387,15 @@ final class SdkPatches(final OverlayResourceProvider files) {
 
 bool _patched(AnnotatedNode node) =>
     node.metadata.any((annotation) => annotation.name.name == 'patch');
+
+(String?, String)? _memberKey(ClassMember member) => switch (member) {
+  ConstructorDeclaration(:final name) => (name?.lexeme, 'constructor'),
+  MethodDeclaration(:final name, :final propertyKeyword) => (
+    name.lexeme,
+    propertyKeyword?.lexeme ?? 'method',
+  ),
+  _ => null,
+};
 
 void _checkPrivate(AnnotatedNode node, String path) {
   final names = switch (node) {

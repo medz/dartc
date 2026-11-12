@@ -507,6 +507,14 @@ final class SelectorChain(
           )
         : context.bindings.target(member, context.unit, node);
     if (member.library.isDartCore &&
+        member is GetterElement &&
+        member.baseElement ==
+            member.library.typeProvider.objectElement.getGetter(
+              '_identityHashCode',
+            )) {
+      return context.normal(context.emit(ObjectHashCode(known, direct: true)));
+    }
+    if (member.library.isDartCore &&
         (!direct || target.library.toString() == 'dart:core') &&
         member is GetterElement &&
         member.name == 'hashCode' &&

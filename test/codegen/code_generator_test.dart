@@ -13,7 +13,7 @@ import 'fixtures/aliases.dart';
 void main() {
   setUpAll(prepareRuntime);
   test(
-    'string construction prepares Lists used only by generated bodies',
+    'string construction includes its ordinary Dart List dependencies',
     () async {
       final lowered = await prepareRuntime(
         'test/compiler/fixtures/strings.dart',
@@ -28,7 +28,7 @@ void main() {
             .expand((f) => f.blocks)
             .expand((b) => b.instructions)
             .whereType<NewCollection>(),
-        isEmpty,
+        isNotEmpty,
       );
       for (final CodeGenerator generator in [
         Arm64CodeGenerator(const Target(.macos, .arm64)),
@@ -108,17 +108,7 @@ void main() {
           );
           final names = module.symbols.map((symbol) => symbol.name);
           expect(names, contains(required));
-          for (final name in [
-            if (required != 'filled') 'filled',
-            'empty',
-            'add',
-            if (required != '[]') '[]',
-            '[]=',
-            '_reserve',
-            'length',
-            'elementAt',
-            'iterator',
-          ]) {
+          for (final name in ['addAll', 'sublist', 'iterator']) {
             expect(names, isNot(contains(name)), reason: name);
           }
         }

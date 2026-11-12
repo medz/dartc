@@ -32,6 +32,11 @@ Value? _operatorReceiver(FunctionContext context, ast.Expression expression) {
 
 Value? _lower(FunctionContext context, ast.Expression expression) {
   final unit = context.unit;
+  if (expression is ast.StringLiteral) {
+    context.bindings.requireSdkClass(
+      (expression.staticType! as dart.InterfaceType).element,
+    );
+  }
   switch (expression) {
     case ast.AwaitExpression(expression: final operand):
       final value = lowerExpression(context, operand);

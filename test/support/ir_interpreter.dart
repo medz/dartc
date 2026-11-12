@@ -1787,7 +1787,8 @@ final class IrInterpreter(
 
     void execute(Instruction op) {
       switch (op) {
-        case NativeView() ||
+        case NewPayload() ||
+            NativeView() ||
             NativeAddress() ||
             NativeSize() ||
             NativeFieldOffset() ||

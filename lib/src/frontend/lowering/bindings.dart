@@ -93,6 +93,10 @@ final class Bindings({
   /// Constructed SDK classes, with superclasses preceding their children.
   final sdkClasses = <InterfaceElement>[];
 
+  /// Returns an already-bound declaration without scheduling more lowering.
+  FunctionTarget? boundTarget(ExecutableElement element) =>
+      _targets[element.baseElement];
+
   /// Includes a constructed SDK class and the bodies it inherits.
   void requireSdkClass(InterfaceElement element) {
     if (!element.library.isInSdk ||
@@ -196,6 +200,7 @@ final class Bindings({
   final _constants = <VariableElement, Constant>{};
 
   final _libraries = <LibraryElement, ResolvedLibraryResult>{};
+  Iterable<ResolvedLibraryResult> get libraries => _libraries.values;
   final _implementationPlans =
       <InterfaceElement, Map<MemberSelector, FunctionTarget>>{};
   // Eligibility for later nSM replacement, including direct wrappers over nSM.
@@ -231,7 +236,16 @@ final class Bindings({
             final value = constants.annotation(unit, annotation);
             if (value?.type case dart.InterfaceType(element: final contract)
                 when contract.library.uri == runtimeContracts &&
-                    contract.name == 'ConstantMapStorage') {
+                    (contract ==
+                            contract.library.getClass('ReferencePayload') ||
+                        contract ==
+                            contract.library.getClass('ConstantListStorage'))) {
+              requireSdkClass(element);
+            }
+            if (value?.type case dart.InterfaceType(element: final contract)
+                when contract.library.uri == runtimeContracts &&
+                    contract ==
+                        contract.library.getClass('ConstantMapStorage')) {
               _constantMapStorage = (
                 element,
                 element.getField(value!.getField('keys')!.toStringValue()!)!,
@@ -1301,7 +1315,10 @@ final class Bindings({
       if (value.toIntValue() case final i?) return .integer(i);
       if (value.toBoolValue() case final b?) return .boolean(b);
       if (value.toDoubleValue() case final d?) return .floating(d);
-      if (value.toStringValue() case final s?) return .string(s);
+      if (value.toStringValue() case final s?) {
+        requireSdkClass((value.type as dart.InterfaceType).element);
+        return .string(s);
+      }
       if (value.toSymbolValue() case final name?) {
         // ConstantSafety has already rejected dependencies on private literals.
         // Analyzer does not retain their defining library in toSymbolValue().

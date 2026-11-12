@@ -17,7 +17,7 @@ void requireListSupport(
   void Function(InterfaceElement) requireClass,
 ) {
   final core = library.typeProvider.objectElement.library;
-  for (final name in ['IndexError', 'RangeError', 'UnsupportedError']) {
+  for (final name in ['List', 'IndexError', 'RangeError', 'UnsupportedError']) {
     requireClass(core.getClass(name)!);
   }
   final collection = core.fragments
@@ -32,6 +32,7 @@ void requireMapSupport(
   void Function(InterfaceElement) requireClass,
 ) {
   final core = library.typeProvider.objectElement.library;
+  requireClass(core.getClass('Map')!);
   requireClass(core.getClass('ConcurrentModificationError')!);
   requireClass(core.getClass('Iterable')!);
   final collection = core.fragments
@@ -180,51 +181,7 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
       return (target, entry) =>
           entry.emit(ObjectHashCode(entry.parameters.single, direct: true));
     }
-    if (element == element.library.getClass('Map')!.unnamedConstructor) {
-      requireMapSupport(element.library, requireClass);
-      return (target, entry) =>
-          entry.emit(NewCollection(target.returnType as ClassType));
-    }
-    final list = element.library.getClass('List')!;
-    if (element == list.getNamedConstructor('of') ||
-        element == list.getNamedConstructor('from')) {
-      requireListSupport(element.library, requireClass);
-      return (target, entry) => entry.emit(
-        ListFrom(
-          target.returnType as ClassType,
-          entry.parameters[0],
-          entry.parameters[1],
-        ),
-      );
-    }
-    if (element == list.getNamedConstructor('filled') ||
-        element == list.getNamedConstructor('empty')) {
-      requireListSupport(element.library, requireClass);
-      return (target, entry) => entry.emit(
-        element == list.getNamedConstructor('empty')
-            ? NewCollection(
-                target.returnType as ClassType,
-                growable: entry.parameters.single,
-              )
-            : ListFilled(
-                target.returnType as ClassType,
-                entry.parameters[0],
-                entry.parameters[1],
-                entry.parameters[2],
-              ),
-      );
-    }
     final string = element.library.getClass('String')!;
-    if (element == string.getNamedConstructor('fromCharCodes')) {
-      requireListSupport(element.library, requireClass);
-      return (target, entry) => entry.emit(
-        StringFromCharCodes(
-          entry.parameters[0],
-          entry.parameters[1],
-          entry.parameters[2],
-        ),
-      );
-    }
     if (element == string.getGetter('codeUnits')) {
       final units = _internal(element.library).getClass('CodeUnits')!;
       requireClass(units);
@@ -232,43 +189,9 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
         Construct(bind(units.unnamedConstructor!), entry.parameters),
       );
     }
-    if (element == string.getNamedConstructor('fromCharCode')) {
-      requireClass(element.library.getClass('RangeError')!);
-      return (target, entry) =>
-          entry.emit(StringFromCharCode(entry.parameters.single));
-    }
-    if (element == string.getMethod('[]')) {
-      requireClass(element.library.getClass('IndexError')!);
-      requireClass(element.library.getClass('RangeError')!);
-      return (target, entry) => entry.emit(
-        StringFromCharCode(
-          entry.emit(
-            StringCodeUnitAt(entry.parameters[0], entry.parameters[1]),
-          ),
-        ),
-      );
-    }
-    if (element == string.getMethod('+')) {
-      return (target, entry) =>
-          entry.emit(StringConcat(entry.parameters[0], entry.parameters[1]));
-    }
-    if (element == string.getMethod('==')) {
-      return (target, entry) =>
-          entry.emit(Equals(entry.parameters[0], entry.parameters[1]));
-    }
-    if (element == string.getGetter('hashCode')) {
-      return (target, entry) =>
-          entry.emit(ObjectHashCode(entry.parameters.single));
-    }
     if (element == string.getGetter('length')) {
       return (target, entry) =>
           entry.emit(StringLength(entry.parameters.single));
-    }
-    if (element == string.getMethod('codeUnitAt')) {
-      requireClass(element.library.getClass('IndexError')!);
-      return (target, entry) => entry.emit(
-        StringCodeUnitAt(entry.parameters[0], entry.parameters[1]),
-      );
     }
   }
   return null;

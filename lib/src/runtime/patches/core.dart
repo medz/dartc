@@ -6,6 +6,12 @@ import '../contracts.dart' as runtime;
 import '../allocator.dart' as allocator;
 import '../finalization.dart' as finalization;
 
+@patch
+class Map<K, V> {
+  @patch
+  factory Map() => collection.LinkedHashMap<K, V>();
+}
+
 @runtime.ConstantMapStorage('_keys', '_values')
 final class const _ConstantMap<K, V>(final List<K> _keys, final List<V> _values)
     extends collection.MapBase<K, V> {

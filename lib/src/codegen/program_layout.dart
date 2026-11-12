@@ -17,7 +17,6 @@ import 'package:dartc/abi.dart' show NativeLayout;
 import 'pointer_parameters.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
-import 'map_storage.dart';
 
 enum TypeTestKind() {
   constantTrue,
@@ -37,7 +36,6 @@ final class ProgramLayout(
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
   ListStorage? listStorage,
-  MapStorage? mapStorage,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
@@ -49,8 +47,7 @@ final class ProgramLayout(
       : NativeStorage(nativeLayout);
   final pointerParameters = PointerParameters(functions);
   final strings = stringStorage ?? StringStorage();
-  final lists = listStorage ?? ListStorage();
-  final maps = mapStorage ?? MapStorage();
+  final lists = listStorage ?? ListStorage(classes);
   late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
@@ -60,12 +57,6 @@ final class ProgramLayout(
   this {
     _classes[FfiTypes.pointer] = pointers.declaration;
     _classes[ValueType.string] = strings.declaration;
-    for (final declaration in lists.classes) {
-      _classes[declaration.type] = declaration;
-    }
-    for (final declaration in maps.classes) {
-      _classes[declaration.type] = declaration;
-    }
     for (final declaration in types.classes) {
       _classes[declaration.type] = declaration;
     }
@@ -74,6 +65,12 @@ final class ProgramLayout(
       _classes[declaration.type] = declaration;
     }
   }
+
+  FunctionTarget get mapFactory =>
+      _classes[CoreTypes.map]?.constructors['new'] ??
+      (throw ArgumentError(
+        'Map construction requires the checked SDK factory.',
+      ));
 
   TypeTestKind typeTest(ValueType source, ValueType tested) {
     if (FfiTypes.isPointer(source)) source = FfiTypes.pointerRuntimeType;
@@ -176,7 +173,7 @@ final class ProgramLayout(
             field,
       ],
       this,
-      tracesPayload: declaration == lists.buffer || declaration == maps.buffer,
+      tracesPayload: definition.referencePayload,
       weakFields: {
         if (declaration.superclass case final parent?)
           ...storageOf(parent).weakFields,

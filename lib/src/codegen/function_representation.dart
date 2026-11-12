@@ -371,16 +371,10 @@ final class FunctionRepresentation(
           _operands[instruction] = block.parameters;
           continue;
         }
-        if (layouts.maps.callFor(instruction) case final target?) {
-          invocations[instruction] = target;
-          _operands[instruction] = [
-            _reify(
-              layouts.maps.type.instantiate(
-                (instruction.type as ClassType).typeArguments,
-              ),
-              body,
-            ),
-          ];
+        if (instruction case NewCollection(:final collectionType)
+            when collectionType.declaration == CoreTypes.map) {
+          invocations[instruction] = layouts.mapFactory;
+          _operands[instruction] = [_reify(collectionType, body)];
           body.add(instruction);
           continue;
         }
@@ -401,10 +395,19 @@ final class FunctionRepresentation(
             _reify(
               instruction is CollectionSpread
                   ? element
-                  : layouts.lists.type.instantiate([element]),
+                  : CoreTypes.listOf(element),
               body,
             ),
           ];
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case NewPayload(
+          type: final ClassType type,
+          :final bytes,
+        )) {
+          invocations[instruction] = heap.allocatePayload(type);
+          _operands[instruction] = [bytes];
           body.add(instruction);
           continue;
         }
@@ -892,12 +895,16 @@ final class FunctionRepresentation(
             continue;
           }
           if (instruction is Equals || instruction is ObjectHashCode) {
-            targets[ValueType.string] = (
-              target: instruction is Equals
-                  ? layouts.strings.equality
-                  : layouts.strings.hash,
-              closure: null,
-            );
+            if (!ValueType.function.accepts(receiver.type) &&
+                layouts.typeTest(receiver.type, ValueType.string) !=
+                    .constantFalse) {
+              targets[ValueType.string] = (
+                target: instruction is Equals
+                    ? layouts.strings.equality
+                    : layouts.strings.hash,
+                closure: null,
+              );
+            }
             for (final type in [
               ValueType.integer,
               ValueType.floating,

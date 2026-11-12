@@ -12,12 +12,14 @@ import 'fixtures/generic_defaults.dart' as sdk;
 
 void main() {
   late IrProgram program;
+  late Uri library;
   late FunctionType structuralMethod;
   late bool structuralDefaultAbsent;
   setUpAll(() async {
     await AnalysisSession([
       'test/frontend/lowering/fixtures/generic_defaults.dart',
     ]).use((input) async {
+      library = input.libraries.single.element.uri;
       final unit = input.libraries.single.units.single;
       final declaration = unit.unit.declarations
           .whereType<ast.FunctionDeclaration>()
@@ -33,13 +35,14 @@ void main() {
   });
 
   FunctionTarget target(String name) => program.functions
-      .singleWhere((function) => function.target.name == name)
+      .singleWhere(
+        (function) =>
+            function.target.library == library && function.target.name == name,
+      )
       .target;
   FunctionType signature(String name) => target(name).signature;
   FunctionConstant constructor(String name) {
-    final function = program.functions.singleWhere(
-      (function) => function.target.name == name,
-    );
+    final function = program.implementationOf(target(name))! as IrFunction;
     return (function.blocks.single.end as Return).value! as FunctionConstant;
   }
 

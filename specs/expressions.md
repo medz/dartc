@@ -87,7 +87,7 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 `List.of` 与 `List.from` 支持直接及构造器函数值调用、默认可增长和显式固定长度结果。of 的 Iterable 参数按目标元素类型整体检查，from 逐项检查；保留迭代顺序、用户迭代器异常和 finally。新列表拥有独立的元素槽，元素对象仍共享引用；固定长度副本允许索引写入。依据为 [List.of](https://api.dart.dev/stable/3.13.7/dart-core/List/List.of.html)与 [List.from](https://api.dart.dev/stable/3.13.7/dart-core/List/List.from.html)。
 
-`sublist` 支持省略或显式 null 的 end、空范围和边界错误。内置 List、const/固定长度列表与 String.codeUnits 的切片返回独立的可增长 List，保留实际元素类型和共享对象；用户重写和方法值使用选中实现的默认参数。列表模式中的命名 rest 同样复制相应元素。依据为 [List.sublist](https://api.dart.dev/stable/3.13.7/dart-core/List/sublist.html)，验证见[源码对照](../test/frontend/lowering/list_copies_test.dart)与[原生 List 用例](../test/compiler/lists_test.dart)。
+`sublist` 支持省略或显式 null 的 end、空范围和边界错误。内置 List、const/固定长度列表与 String.codeUnits 的切片返回独立的可增长 List，保留实际元素类型和共享对象；用户重写和方法值使用选中实现的默认参数。列表模式中的命名 rest 同样复制相应元素。依据为 [List.sublist](https://api.dart.dev/stable/3.13.7/dart-core/List/sublist.html)，验证见[SDK 与原生 List 对照](../test/compiler/lists_test.dart)。
 
 其他 List 构造器和完整集合 API、Set 存储及 typed_data 的原生实现仍有缺口；上表的 IR 范围不等于这些行为已经原生执行。
 

@@ -111,6 +111,22 @@ void main() {
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );
+        for (final (type, constructor, source) in [
+          ('List', 'empty', 'list.dart'),
+          ('String', 'fromCharCode', 'string.dart'),
+          ('Map', 'new', 'core.dart'),
+        ]) {
+          final member = core.element
+              .getClass(type)!
+              .constructors
+              .singleWhere((c) => c.name == constructor);
+          expect(member.fragments, hasLength(2));
+          final body = core.getFragmentDeclaration(member.fragments.last)!;
+          expect(
+            patches.origins[body.resolvedUnit!.uri]!.path,
+            endsWith('/runtime/patches/$source'),
+          );
+        }
         final expando = core.element.getClass('Expando')!;
         expect(expando.fragments, hasLength(2));
         expect(

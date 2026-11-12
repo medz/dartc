@@ -1,3 +1,4 @@
+import 'core_types.dart';
 import 'function.dart';
 import 'signature.dart';
 import 'type.dart';
@@ -14,6 +15,21 @@ final class IrClass(
   Iterable<MemberSelector> unsupportedForwarders = const [],
   Iterable<InstanceField> weakFields = const [],
   Map<InstanceField, InstanceField> ephemerons = const {},
+
+  /// Whether variable payload words contain references; requires Object as the
+  /// direct superclass and no fixed fields.
+  final bool referencePayload = false,
+
+  /// Storage for a concrete class with one type parameter implementing `List<E>`.
+  /// The fields are length, a traced non-generic buffer, and mutability; spread
+  /// takes `List<T>` and `Iterable<Object?>` and returns void.
+  final ({
+    InstanceField length,
+    InstanceField data,
+    InstanceField mutability,
+    FunctionTarget spread,
+  })?
+  listStorage,
 }) {
   /// Declared fields in initialization order, excluding inherited storage.
   final List<InstanceField> fields = .unmodifiable(fields);
@@ -82,6 +98,40 @@ final class IrClass(
   }
 
   this {
+    if (referencePayload &&
+        (this.fields.isNotEmpty || type.superclass != ValueType.object)) {
+      throw ArgumentError(
+        'Reference payload storage must directly extend Object without fields.',
+      );
+    }
+    if (listStorage case final storage?) {
+      final element = type.typeParameters.singleOrNull;
+      final parameter = storage.spread.typeParameters.singleOrNull;
+      if (type.isAbstract ||
+          element == null ||
+          CoreTypes.view(type, CoreTypes.list) != CoreTypes.listOf(element) ||
+          {storage.length, storage.data, storage.mutability}.length != 3 ||
+          ![
+            storage.length,
+            storage.data,
+            storage.mutability,
+          ].every(this.fields.contains) ||
+          storage.length.type != ValueType.integer ||
+          storage.mutability.type != ValueType.integer ||
+          storage.data.type is! ClassType ||
+          storage.data.type.freeTypeParameters.isNotEmpty ||
+          storage.spread.kind != FunctionKind.function ||
+          parameter == null ||
+          storage.spread.returnType != ValueType.voidType ||
+          storage.spread.signature.optionalPositional != 0 ||
+          storage.spread.signature.namedParameters.isNotEmpty ||
+          storage.spread.parameterTypes.length != 2 ||
+          storage.spread.parameterTypes[0] != CoreTypes.listOf(parameter) ||
+          storage.spread.parameterTypes[1] !=
+              CoreTypes.iterableOf(ValueType.object.nullable)) {
+        throw ArgumentError('Invalid List storage contract.');
+      }
+    }
     if (!identical(type, type.declaration)) {
       throw ArgumentError('A class definition requires its declaration.');
     }

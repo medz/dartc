@@ -39,7 +39,8 @@ final class Lowering({final bool enableAssertions = false}) {
       bindings.registerLibrary(library);
     }
     Future<void> registerSdkSources(int from) async {
-      for (final element in bindings.sdkClasses.skip(from)) {
+      for (var i = from; i < bindings.sdkClasses.length; i++) {
+        final element = bindings.sdkClasses[i];
         if (bindings.sourceOf(element) == null) {
           bindings.registerLibrary(await input.resolveLibrary(element.library));
         }
@@ -212,7 +213,11 @@ final class Lowering({final bool enableAssertions = false}) {
       imports: Map<FunctionTarget, NativeReference>.unmodifiable(
         native.imports,
       ),
-      runtime: RuntimeDeclarations.resolve(input, bindings.target),
+      runtime: RuntimeDeclarations.resolve(
+        input,
+        bindings.libraries,
+        bindings.boundTarget,
+      ),
     );
   }
 }

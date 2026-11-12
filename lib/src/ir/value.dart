@@ -578,6 +578,7 @@ sealed class Instruction(super.type) extends Value {
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() ||
+    NewPayload() ||
     NativeView() => const {.allocates},
     Identical() ||
     Equals() ||
@@ -662,6 +663,21 @@ final class PointerAddress(final Value pointer) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => [pointer];
+}
+
+/// Allocates zeroed inline storage for a runtime class or built-in String.
+final class NewPayload(ClassType type, final Value bytes) extends Instruction {
+  this : super(type) {
+    if (type.isAbstract && type != ValueType.string ||
+        type.freeTypeParameters.isNotEmpty ||
+        bytes.type != .integer) {
+      throw ArgumentError(
+        'Expected concrete payload storage and a byte count.',
+      );
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [bytes];
 }
 
 /// A typed native view retaining the owner of its backing storage.

@@ -77,7 +77,8 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
         bindRuntime(lowered),
       );
     });
-    final (:program, :exports, :imports, :entryPoint, runtime: _) = lowered;
+    final (program: _, :exports, :imports, :entryPoint, runtime: _) = lowered;
+    final program = runtime.program;
     if (output is ExecutableOutput && entryPoint == null) {
       throw ArgumentError('The first input library has no main function.');
     }

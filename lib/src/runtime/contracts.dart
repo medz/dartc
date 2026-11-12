@@ -29,6 +29,9 @@ enum MemoryOperation() {
   writeBytes,
   clock,
   sleep,
+  allocatePayload,
+  readReference,
+  writeReference,
 }
 
 /// Excludes this reference slot from strong tracing.
@@ -39,3 +42,14 @@ final class const EphemeronKey(final String valueField);
 
 /// Identifies the immutable map implementation and its parallel constant lists.
 final class const ConstantMapStorage(final String keys, final String values);
+
+/// Identifies List storage for constant materialization and literal spreading.
+final class const ConstantListStorage(
+  final String length,
+  final String data,
+  final String mutability,
+  final String spread,
+);
+
+/// Marks variable payload words as managed references.
+final class const ReferencePayload();

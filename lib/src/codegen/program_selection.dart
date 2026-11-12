@@ -114,7 +114,6 @@ final class ProgramSelection(
       ...?layouts.native?.functions,
       ...members.functions,
       ...layouts.closures.functions,
-      ...layouts.strings.functions,
       ...arithmetic.functions,
       ...globals.functions,
       ...instances.functions,
@@ -185,8 +184,6 @@ final class ProgramSelection(
         ...arithmetic.classes,
         ...layouts.closures.classes,
         layouts.strings.declaration,
-        ...layouts.lists.classes,
-        ...layouts.maps.classes,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
           layouts.pointers.declaration,
@@ -201,11 +198,7 @@ final class ProgramSelection(
         ])
           IrExternal(target),
         // Source bodies were verified already; this boundary owns generated bodies.
-        for (final declaration in [
-          layouts.strings.declaration,
-          ...layouts.lists.classes,
-          ...layouts.maps.classes,
-        ])
+        for (final declaration in [layouts.strings.declaration])
           for (final target in {
             ...declaration.members.values,
             ...declaration.implementations.values,

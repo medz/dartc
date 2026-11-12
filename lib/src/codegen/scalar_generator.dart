@@ -31,7 +31,6 @@ import 'instance_storage.dart';
 import 'closure_storage.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
-import 'map_storage.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -49,7 +48,21 @@ base class ScalarCodeGenerator<R extends Object>(
     ({FunctionTarget function, String symbol})? entryPoint,
     HeapRuntime? runtime,
   }) {
-    if (runtime != null) {
+    final selected = definitions.toSet();
+    if (selected.isEmpty ||
+        !selected.containsAll([...exports.keys, ...imports.keys]) ||
+        exports.keys.any(imports.containsKey)) {
+      throw ArgumentError(
+        'Expected distinct exports and imports in definitions.',
+      );
+    }
+    for (final missing
+        in program.reachableFrom(selected).difference(selected)) {
+      throw ArgumentError(
+        'Missing ${missing.kind.isVirtual ? 'member' : 'call'} definition: ${missing.name}',
+      );
+    }
+    if (runtime != null && !identical(program, runtime.program)) {
       final classes = {for (final c in program.classes) c.type: c};
       for (final declaration in runtime.program.classes) {
         final existing = classes[declaration.type];
@@ -97,29 +110,12 @@ base class ScalarCodeGenerator<R extends Object>(
         }.values,
       );
     }
-    final selected = definitions.toSet();
-    if (selected.isEmpty ||
-        !selected.containsAll([...exports.keys, ...imports.keys]) ||
-        exports.keys.any(imports.containsKey)) {
-      throw ArgumentError(
-        'Expected distinct exports and imports in definitions.',
-      );
-    }
-    for (final declaration in selected) {
-      for (final callee
-          in program.implementationOf(declaration)?.callees ??
-              const <FunctionTarget>[]) {
-        if (!selected.contains(callee.implementation)) {
-          throw ArgumentError('Missing call definition: ${callee.name}');
-        }
-      }
-    }
     final bindings = NativeBindings(program, imports, exports);
     program = bindings.program;
     imports = bindings.imports;
     exports = bindings.exports;
     selected.addAll(bindings.definitions);
-    selected.addAll(program.reachableFrom(bindings.definitions));
+    selected.addAll(program.reachableFrom(selected));
     final sourceProgram = program;
     final sourceDefinitions = {...selected};
     late final ProgramSelection resolved;
@@ -151,34 +147,10 @@ base class ScalarCodeGenerator<R extends Object>(
       final bodies = sourceDefinitions
           .map(sourceProgram.implementationOf)
           .whereType<IrFunction>();
-      final indexErrorType = program.classes
-          .where(
-            (c) =>
-                c.type.library == Uri.parse('dart:core') &&
-                c.type.name == 'IndexError',
-          )
-          .firstOrNull
-          ?.type;
       final strings = StringStorage(
         source: program.classes
             .where((c) => c.type == ValueType.string)
             .firstOrNull,
-        allocate: heap.allocatePayload,
-        rangeError: constructor(
-          program.classes
-              .where(
-                (c) =>
-                    c.type.library == Uri.parse('dart:core') &&
-                    c.type.name == 'RangeError',
-              )
-              .firstOrNull
-              ?.type,
-          'range',
-        ),
-        indexError: indexErrorType == null
-            ? null
-            : constructor(indexErrorType, 'withLength'),
-        argumentError: constructor(.argumentError, 'value'),
       );
       final arithmetic = NumericOperations(
         argumentError: constructor(.argumentError),
@@ -189,52 +161,7 @@ base class ScalarCodeGenerator<R extends Object>(
           (value) => (value.type as ClassType).declaration == CoreTypes.list,
         ),
       );
-      final concurrentModificationError = constructor(
-        program.classes
-            .where(
-              (c) =>
-                  c.type.library == Uri.parse('dart:core') &&
-                  c.type.name == 'ConcurrentModificationError',
-            )
-            .firstOrNull
-            ?.type,
-      );
-      final lists = ListStorage(
-        listBase: program.classes
-            .where(
-              (c) =>
-                  c.type.library == Uri.parse('dart:collection') &&
-                  c.type.name == 'ListBase',
-            )
-            .firstOrNull
-            ?.type,
-        hasConstants: constantLists,
-        allocate: heap.allocatePayload,
-        indexError: strings.indexError,
-        rangeError: strings.rangeError,
-        unsupportedError: constructor(.unsupportedError),
-        concurrentModificationError: concurrentModificationError,
-      );
-      final maps = MapStorage(
-        linkedHashMap: program.classes
-            .where(
-              (c) =>
-                  c.type.library == Uri.parse('dart:collection') &&
-                  c.type.name == 'LinkedHashMap',
-            )
-            .firstOrNull
-            ?.type,
-        mapBase: program.classes
-            .where(
-              (c) =>
-                  c.type.library == Uri.parse('dart:collection') &&
-                  c.type.name == 'MapBase',
-            )
-            .firstOrNull
-            ?.type,
-        allocate: heap.allocatePayload,
-        concurrentModificationError: concurrentModificationError,
-      );
+      final lists = ListStorage(program.classes);
       final globals = GlobalStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
@@ -253,49 +180,31 @@ base class ScalarCodeGenerator<R extends Object>(
           };
           for (final operation in operations) {
             arithmetic.callFor(operation);
-            strings.callFor(operation);
           }
         }
       }
       final helpers = [
         ...arithmetic.functions,
-        ...strings.functions,
         ...globals.functions,
         ...instances.functions,
       ];
-      lists.prepare([...bodies, ...helpers]);
-      maps.prepare([...bodies, ...helpers, ...lists.functions]);
-      if (helpers.isNotEmpty || !lists.isEmpty || !maps.isEmpty) {
+      if (helpers.isNotEmpty || constantLists) {
         final expanded = IrProgram(
           [
             for (final declaration in sourceProgram.classes)
-              if (declaration.type == ValueType.string &&
-                  strings.functions.isNotEmpty)
+              if (declaration.type == ValueType.string)
                 strings.declaration
               else
                 declaration,
-            if (strings.functions.isNotEmpty &&
-                !sourceProgram.classes.any((c) => c.type == ValueType.string))
-              strings.declaration,
             if (!globals.isEmpty) globals.declaration,
-            ...lists.classes,
-            ...maps.classes,
             for (final declaration in arithmetic.classes)
               if (!sourceProgram.classes.any((c) => c.type == declaration.type))
                 declaration,
           ],
-          [
-            ...sourceProgram.functions,
-            ...helpers,
-            ...lists.functions,
-            ...maps.functions,
-          ],
+          [...sourceProgram.functions, ...helpers],
           globals: sourceProgram.globals,
           externals: [
             ...sourceProgram.externals,
-            for (final target in strings.allocations) IrExternal(target),
-            for (final target in lists.allocations) IrExternal(target),
-            for (final target in maps.allocations) IrExternal(target),
             if (!globals.isEmpty) IrExternal(globals.address),
           ],
         );
@@ -303,8 +212,6 @@ base class ScalarCodeGenerator<R extends Object>(
           [
             ...sourceDefinitions,
             for (final function in helpers) function.target,
-            ...lists.entryPoints,
-            ...maps.entryPoints,
           ],
           instantiatedTypes: [if (constantLists) lists.type],
         );
@@ -348,7 +255,6 @@ base class ScalarCodeGenerator<R extends Object>(
         closureStorage: closures,
         stringStorage: strings,
         listStorage: lists,
-        mapStorage: maps,
         referencedClasses: selected.expand(
           (target) =>
               program.implementationOf(target)?.referencedClasses ?? const [],
@@ -387,7 +293,12 @@ base class ScalarCodeGenerator<R extends Object>(
         }
       }
       if (missing.isNotEmpty) {
-        sourceDefinitions.addAll(sourceProgram.reachableFrom(missing));
+        sourceDefinitions.addAll(
+          sourceProgram.reachableFrom(
+            [...sourceDefinitions, ...missing],
+            instantiatedTypes: [if (constantLists) lists.type],
+          ),
+        );
         continue;
       }
       resolved = selection;

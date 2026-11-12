@@ -121,6 +121,7 @@ void writeFunction(
     FunctionCall() =>
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
+    NewPayload() => 'payload ${op.type.dartName} ${value(op.bytes)}',
     NativeView() =>
       'nativeView ${op.type.dartName} ${op.address == null ? "new" : value(op.address!)} copy=${op.copy} owner=${value(op.owner)}',
     NativeAddress() => 'nativeAddress ${value(op.view)}',
