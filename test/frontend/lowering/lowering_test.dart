@@ -685,15 +685,26 @@ void main() {
   });
 
   test('different libraries can bind functions with the same name', () async {
-    final IrProgram(functions: [client, left, right]) = await _lower([
+    final program = await _lower([
       'package/entry.dart',
       'dependency/lib/left.dart',
       'dependency/lib/right.dart',
     ]);
+    final client = program.functions.singleWhere(
+      (f) => f.target.name == 'both',
+    );
+    final declarations = [
+      for (final library in [
+        'package:demo/left.dart',
+        'package:demo/right.dart',
+      ])
+        program.functions.singleWhere(
+          (f) => f.target.library == Uri.parse(library) && f.target.name == 'f',
+        ),
+    ];
     final calls = client.entry.instructions.whereType<DirectCall>();
-    expect(calls.map((c) => c.target), [same(left.target), same(right.target)]);
-    expect(left.target.library, Uri.parse('package:demo/left.dart'));
-    expect(right.target.library, Uri.parse('package:demo/right.dart'));
+    expect(calls.map((c) => c.target), declarations.map((f) => same(f.target)));
+    expect(IrInterpreter(program, {}).run(client, []), 6);
     await expectLater(
       _lower(['package/entry.dart', 'package/entry.dart']),
       throwsArgumentError,

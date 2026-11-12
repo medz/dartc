@@ -10,7 +10,7 @@ environment:
   sdk: ^3.14.0
 
 dependencies:
-  # Resolved metadata uses the isolated analyzer compatibility adapter.
+  # Exact versions: compiler adapters use non-public analyzer APIs.
   _fe_analyzer_shared: 111.0.0
   analyzer: 14.7.0
   archive: ^4.6.0
