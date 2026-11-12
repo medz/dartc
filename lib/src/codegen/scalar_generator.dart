@@ -415,12 +415,7 @@ base class ScalarCodeGenerator<R extends Object>(
       ...primitives,
       if (capture) traces.capture,
     ]);
-    final cleanup = FunctionTarget(
-      Uri.parse('dartc:globals'),
-      'release',
-      .voidType,
-      [],
-    );
+    final cleanup = FunctionTarget(null, 'release', .voidType, []);
     if (persistent && entryPoint == null) selected.add(cleanup);
     final indices = {
       for (final (i, declaration) in selected.indexed) declaration: i,

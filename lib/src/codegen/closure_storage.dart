@@ -8,8 +8,7 @@ final class ClosureStorage(
   Iterable<FunctionTarget> boundMethods = const [],
   FunctionTarget? lateFailure,
 }) {
-  static final _uri = Uri.parse('dartc:closures');
-  final _base = ClassType(_uri, 'Closure');
+  final _base = ClassType(null, 'Closure');
   late final tag = InstanceField(_base, 'target', .integer);
   final closures = <FunctionTarget, ClosureShape>{};
   final constants = <Object, ClosureShape>{};
@@ -33,7 +32,7 @@ final class ClosureStorage(
     final instantiations = <FunctionType>{};
     void includeCell(ValueType type) {
       if (type is! CellType || _cells.containsKey(type)) return;
-      final owner = ClassType(_uri, 'Cell${_cells.length}');
+      final owner = ClassType(null, 'Cell${_cells.length}');
       final value = InstanceField(owner, 'value', _stored(type.content));
       final bound = type.isLate
           ? InstanceField(owner, 'bound', .boolean)
@@ -117,7 +116,7 @@ final class ClosureStorage(
           signature.result as ClassType,
         );
         final bridge = FunctionTarget(
-          _uri,
+          null,
           'constructor${constants.length}',
           signature.result,
           signature.parameters,
@@ -181,7 +180,7 @@ final class ClosureStorage(
         continue;
       }
       final index = all.length;
-      final owner = ClassType(_uri, 'Closure$index', superclass: _base);
+      final owner = ClassType(null, 'Closure$index', superclass: _base);
       final origin = InstanceField(owner, 'origin', .object, isFinal: true);
       final arguments = InstanceField(
         owner,
@@ -218,7 +217,7 @@ final class ClosureStorage(
     List<ValueType> identityArguments = const [],
   }) {
     final index = closures.length + constants.length + methods.length;
-    final owner = ClassType(_uri, 'Closure$index', superclass: _base);
+    final owner = ClassType(null, 'Closure$index', superclass: _base);
     final captures = [
       if (target.kind.isVirtual)
         InstanceField(owner, 'receiver', .object, isFinal: true),
@@ -321,7 +320,7 @@ final class ClosureStorage(
 
   FunctionTarget _initialize(ClassType owner, List<InstanceField> fields) {
     final target = FunctionTarget(
-      _uri,
+      null,
       'new',
       .voidType,
       fields.map((field) => field.type),
@@ -350,7 +349,7 @@ final class ClosureStorage(
       );
     }
     final target = FunctionTarget(
-      _uri,
+      null,
       '${thunk.owner.name}.initialize',
       result,
       [thunk.type],

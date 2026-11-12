@@ -197,9 +197,9 @@ void main() {
     () {
       final bodies = fixture.program.functions.where(
         (f) =>
-            f.target.library.scheme != 'dart' &&
-            f.target.privateSelectorLibrary != null &&
-            f.target.privateSelectorLibrary != f.target.library,
+            f.target.library?.scheme != 'dart' &&
+            f.target.privateSelectorScope != null &&
+            f.target.privateSelectorScope != f.target.library,
       );
       expect(bodies, isNotEmpty);
       for (final body in bodies) {
@@ -218,10 +218,10 @@ void main() {
         ]);
         expect(call.target.signature.optionalSlots, isEmpty);
         expect(call.inputs.last, same(invocation));
-        expect(invocation.selector.privateLibrary, body.target.library);
+        expect(invocation.selector.privateScope, body.target.library);
         expect(
-          invocation.selector.privateLibrary,
-          isNot(body.target.selector.privateLibrary),
+          invocation.selector.privateScope,
+          isNot(body.target.selector.privateScope),
         );
         expect(invocation.selector.name, body.target.selector.name);
         expect(invocation.selector.kind, body.target.selector.kind);
@@ -259,7 +259,7 @@ void main() {
         .toList();
     expect(both, hasLength(3));
     expect(
-      both.map((f) => f.target.selector.privateLibrary).toSet(),
+      both.map((f) => f.target.selector.privateScope).toSet(),
       hasLength(3),
     );
   });

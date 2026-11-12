@@ -95,7 +95,7 @@ void main() {
   test('extension bodies use direct targets, not nominal receiver objects', () {
     expect(
       fixture.program.classes
-          .where((c) => c.type.library.scheme != 'dart')
+          .where((c) => c.type.library?.scheme != 'dart')
           .map((c) => c.type.name)
           .toSet(),
       {'LexicalHost', 'LexicalChild', 'LexicalEnum'},

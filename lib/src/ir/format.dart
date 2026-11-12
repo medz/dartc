@@ -25,11 +25,11 @@ void writeFunction(
       .setter || .staticSetter => 'set ',
       _ => '',
     };
-    final provenance = t.privateSelectorLibrary;
+    final provenance = t.privateSelectorScope;
     final suffix = provenance != null && provenance != t.library
         ? ' [private $provenance]'
         : '';
-    return '${t.library}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}$suffix';
+    return '${t.library ?? '<generated>'}::${t.owner == null ? '' : '${(ownerType ?? t.owner!).dartName}.'}$prefix${t.name}$suffix';
   }
 
   String global(GlobalVariable slot) =>
@@ -144,11 +144,11 @@ void writeFunction(
       'dispatch ${value(op.receiver)} ${symbol(op.member)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     DynamicDispatch() =>
       'dynamicDispatch ${value(op.receiver)} ${op.selector.kind.name} '
-          '${op.selector.privateLibrary == null ? "" : "${op.selector.privateLibrary}::"}'
+          '${op.selector.privateScope == null ? "" : "${op.selector.privateScope}::"}'
           '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     MakeInvocation() =>
       'makeInvocation ${op.selector.kind.name} '
-          '${op.selector.privateLibrary == null ? "" : "${op.selector.privateLibrary}::"}'
+          '${op.selector.privateScope == null ? "" : "${op.selector.privateScope}::"}'
           '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     Construct() =>
       'new ${symbol(op.initializer, op.instantiatedType)}(${op.inputs.map(value).join(', ')})',

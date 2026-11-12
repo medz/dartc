@@ -10,18 +10,18 @@ void main() {
       'test/frontend/lowering/fixtures/externals.dart',
     ]).use((input) async => (await Lowering().lower(input)).program);
     expect(
-      program.externals.where((f) => f.target.library.scheme != 'dart'),
+      program.externals.where((f) => f.target.library?.scheme != 'dart'),
       hasLength(11),
     );
     expect(
       program.functions
-          .where((f) => f.target.library.scheme != 'dart')
+          .where((f) => f.target.library?.scheme != 'dart')
           .map((f) => f.target.name),
       ['use'],
     );
     expect(program.globals.where((g) => g.library.scheme != 'dart'), isEmpty);
     final api = program.classes.singleWhere(
-      (c) => c.type.library.scheme != 'dart',
+      (c) => c.type.library?.scheme != 'dart',
     );
     expect(api.fields, isEmpty);
     expect(api.constructors.keys, unorderedEquals(['new', 'named']));
@@ -38,7 +38,7 @@ void main() {
       sum.defaults[1]!.structuralKey,
       const Constant.integer(2).structuralKey,
     );
-    final library = sum.target.library;
+    final library = sum.target.library!;
     final runner = IrInterpreter(program, {
       (library, 'identity'): (int value) => value,
     });

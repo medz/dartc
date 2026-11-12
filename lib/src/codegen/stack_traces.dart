@@ -12,8 +12,7 @@ import 'function_emitter.dart';
 
 /// Captures managed call frames as an ordinary, GC-traced object chain.
 final class StackTraces(final FrameLookup frames) {
-  static final _uri = Uri.parse('dartc:stack');
-  final type = ClassType(_uri, 'Trace', interfaces: [ValueType.stackTrace]);
+  final type = ClassType(null, 'Trace', interfaces: [ValueType.stackTrace]);
   late final pc = InstanceField(type, 'pc', .integer, isFinal: true);
   late final caller = InstanceField(
     type,
@@ -22,15 +21,15 @@ final class StackTraces(final FrameLookup frames) {
     isFinal: true,
   );
   late final initializer = FunctionTarget(
-    _uri,
+    null,
     'Trace',
     .voidType,
     [.integer, type.nullable],
     owner: type,
     kind: .initializer,
   );
-  late final capture = FunctionTarget(_uri, 'capture', type, []);
-  late final _walk = FunctionTarget(_uri, 'captureFrames', type, [
+  late final capture = FunctionTarget(null, 'capture', type, []);
+  late final _walk = FunctionTarget(null, 'captureFrames', type, [
     .integer,
     .integer,
     .integer,

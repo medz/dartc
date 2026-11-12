@@ -87,18 +87,24 @@ enum FunctionKind() {
       isVirtual || this == initializer || this == fieldInitializer;
 }
 
-/// A dispatch name including its operation and, for a private name, its library.
+/// A dispatch name scoped by a source library or a generated declaring class.
 typedef MemberSelector = ({
   FunctionKind kind,
   String name,
-  Uri? privateLibrary,
+  Object? privateScope,
 });
 
 /// Validates the operation and library identity of an instance selector.
 void checkMemberSelector(MemberSelector selector) {
   if (!selector.kind.isVirtual ||
       selector.name.isEmpty ||
-      selector.name.startsWith('_') != (selector.privateLibrary != null)) {
+      selector.name.startsWith('_') != (selector.privateScope != null) ||
+      switch (selector.privateScope) {
+        null => false,
+        Uri uri => !uri.isAbsolute,
+        ClassType type => type.library != null || type != type.declaration,
+        _ => true,
+      }) {
     throw ArgumentError('Invalid member selector.');
   }
 }
@@ -107,10 +113,10 @@ void checkMemberSelector(MemberSelector selector) {
 ///
 /// Use the same target object for a function's definition and all its calls.
 final class FunctionTarget(
-  /// The URI of the library that declares the function.
-  final Uri library,
+  /// The declaring source library, or null for a generated definition.
+  final Uri? library,
 
-  /// The declared name within [library].
+  /// The source name, or a diagnostic label for a generated definition.
   final String name,
 
   /// The static type of the result.
@@ -123,8 +129,8 @@ final class FunctionTarget(
   /// The entry and return protocol of the body.
   final FunctionKind kind = .function,
 
-  /// The originating library of a private virtual selector, if different from ownership.
-  final Uri? privateSelectorLibrary,
+  /// The originating private scope, when inherited from a different owner.
+  final Object? privateSelectorScope,
 
   /// The number of trailing positional parameters that may be omitted.
   int optionalPositional = 0,
@@ -242,8 +248,8 @@ final class FunctionTarget(
     name: kind == .method && name == '-' && signature.parameters.isEmpty
         ? 'unary-'
         : name,
-    privateLibrary: name.startsWith('_')
-        ? privateSelectorLibrary ?? library
+    privateScope: name.startsWith('_')
+        ? privateSelectorScope ?? library ?? owner
         : null,
   );
 
@@ -291,11 +297,15 @@ final class FunctionTarget(
           if (type.requiresCovariantCheck(ownerParameters)) i,
     });
 
-    if (privateSelectorLibrary != null &&
+    if (privateSelectorScope != null &&
         (!kind.isVirtual || !name.startsWith('_'))) {
       throw ArgumentError(
         'Private selector provenance requires a private virtual member.',
       );
+    }
+    if (kind.isVirtual) checkMemberSelector(selector);
+    if (library != null && !library!.isAbsolute) {
+      throw ArgumentError('Expected a resolved source library URI.');
     }
     if (owner != null &&
             (owner!.library != library ||
@@ -305,7 +315,8 @@ final class FunctionTarget(
       throw ArgumentError('Invalid callable owner.');
     }
     if (kind == .closure) {
-      if (enclosing?.library != library ||
+      if (enclosing == null ||
+          enclosing!.library != library ||
           owner != null ||
           sourceOffset == null ||
           sourceOffset! < 0) {

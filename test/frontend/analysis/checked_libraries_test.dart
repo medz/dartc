@@ -34,7 +34,7 @@ void main() {
             f.target.library == runtime.element.uri &&
             f.target.name == 'slotSize',
       );
-      expect(body.target.library.scheme, 'file');
+      expect(body.target.library?.scheme, 'file');
       expect(body.callees, isEmpty);
       await session.close();
       expect(() => checked.resources, throwsStateError);

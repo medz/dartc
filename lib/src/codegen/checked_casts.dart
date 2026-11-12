@@ -5,10 +5,9 @@ import 'type_values.dart';
 
 /// Generates checked conversions using ordinary type tests and exception edges.
 final class CheckedCasts() {
-  static final _uri = Uri.parse('dartc:checks');
-  final _error = ClassType(_uri, '_TypeError', superclass: ValueType.typeError);
+  final _error = ClassType(null, '_TypeError', superclass: ValueType.typeError);
   late final _initializer = FunctionTarget(
-    _uri,
+    null,
     '_TypeError',
     .voidType,
     [],
@@ -24,7 +23,7 @@ final class CheckedCasts() {
 
   FunctionTarget bounds(ProgramLayout layouts) {
     if (_bounds case final body?) return body.target;
-    final target = FunctionTarget(_uri, 'bound', .voidType, [
+    final target = FunctionTarget(null, 'bound', .voidType, [
       TypeValues.type,
       TypeValues.type,
     ]);
@@ -92,7 +91,7 @@ final class CheckedCasts() {
         final source = operand.type.substitute(environment),
             result = instruction.type.substitute(environment);
         final kind = layouts.typeTest(source, nullOnly ? .object : result);
-        final target = FunctionTarget(_uri, 'check${_checks.length}', result, [
+        final target = FunctionTarget(null, 'check${_checks.length}', result, [
           source,
         ], typeParameters: environment.values);
         final entry = Block(target.parameterTypes), failed = Block();

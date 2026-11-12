@@ -210,6 +210,7 @@ final class ProgramSelection(
                 defaults: members.program.implementationOf(target)!.defaults,
               ),
         if (!globals.isEmpty) IrExternal(globals.address),
+        if (capture) IrExternal(traces.capture),
       ],
     );
     return {};

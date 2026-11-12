@@ -5,7 +5,7 @@ import '../support/ir_interpreter.dart';
 
 final _library = Uri.parse('memory:dynamic-runtime');
 MemberSelector _selector(String name, [FunctionKind kind = .method]) =>
-    (name: name, kind: kind, privateLibrary: null);
+    (name: name, kind: kind, privateScope: null);
 
 Object? _run(
   Value Function(Block) build, {

@@ -65,7 +65,7 @@ final class NativeBindings(
     ValueType rawType(ValueType type) =>
         FfiTypes.isPointer(type) ? .integer : type;
     final raw = FunctionTarget(
-      Uri.parse('dartc:native-bindings'),
+      null,
       'native${_functions.length}',
       rawType(dart.returnType),
       dart.parameterTypes.map(rawType),

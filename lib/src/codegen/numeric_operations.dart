@@ -7,7 +7,6 @@ final class NumericOperations({
 }) {
   final IrCallable? _argumentError = argumentError;
   final IrCallable? _unsupportedError = unsupportedError;
-  static final _uri = Uri.parse('dartc:numeric');
   final _functions = <IntOperator, IrFunction>{};
   final _binaries = <(NumericOperator, ValueType, ValueType), IrFunction>{};
   final _unary = <bool, IrFunction>{};
@@ -101,7 +100,7 @@ final class NumericOperations({
 
   IrFunction _unaryOperation(bool toDouble) => _unary.putIfAbsent(toDouble, () {
     final target = FunctionTarget(
-      _uri,
+      null,
       toDouble ? 'toDouble' : 'negate',
       toDouble ? .floating : .number,
       [.number],
@@ -151,7 +150,7 @@ final class NumericOperations({
     }
     return _binaries.putIfAbsent((operator, leftType, rightType), () {
       final target = FunctionTarget(
-        _uri,
+        null,
         '${operator.name}.${leftType.dartName}.${rightType.dartName}',
         operator.result(leftType, rightType),
         [leftType, rightType],
@@ -211,7 +210,7 @@ final class NumericOperations({
 
   IrFunction _function(IntOperator operator) =>
       _functions.putIfAbsent(operator, () {
-        final target = FunctionTarget(_uri, operator.name, .integer, [
+        final target = FunctionTarget(null, operator.name, .integer, [
           .integer,
           .integer,
         ]);
@@ -355,7 +354,7 @@ final class NumericOperations({
     bool floating,
   ) => _conversions.putIfAbsent((rounding, floating), () {
     final target = FunctionTarget(
-      _uri,
+      null,
       '${rounding.name}${floating ? 'Double' : 'Num'}',
       .integer,
       [floating ? .floating : .number],
@@ -472,7 +471,7 @@ final class NumericOperations({
   IrFunction _finiteConversion(IntegerRounding rounding) =>
       _finiteConversions.putIfAbsent(rounding, () {
         final target = FunctionTarget(
-          _uri,
+          null,
           '${rounding.name}Finite',
           .integer,
           [.floating],
@@ -564,7 +563,7 @@ final class NumericOperations({
   IrFunction _doubleRounding(IntegerRounding rounding, bool floating) =>
       _doubleRoundings.putIfAbsent((rounding, floating), () {
         final target = FunctionTarget(
-          _uri,
+          null,
           '${rounding.name}ToDouble${floating ? 'Double' : 'Num'}',
           .floating,
           [floating ? .floating : .number],

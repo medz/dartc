@@ -15,15 +15,14 @@ enum TypeKind() {
 
 /// Generates reified type structures and their normalization through ordinary IR.
 final class TypeValues() {
-  static final _uri = Uri.parse('dartc:types');
   static final type = ClassType(
-    _uri,
+    null,
     '_Type',
     interfaces: [ValueType.typeType],
   );
-  static final list = ClassType(_uri, '_TypeArguments');
-  static final functionShape = ClassType(_uri, '_FunctionShape');
-  static final namedParameter = ClassType(_uri, '_NamedParameter');
+  static final list = ClassType(null, '_TypeArguments');
+  static final functionShape = ClassType(null, '_FunctionShape');
+  static final namedParameter = ClassType(null, '_NamedParameter');
   static final signature = InstanceField(
     type,
     'signature',
@@ -95,7 +94,7 @@ final class TypeValues() {
   static final head = InstanceField(list, 'head', type, isFinal: true);
   static final tail = InstanceField(list, 'tail', list.nullable, isFinal: true);
   static final _init = FunctionTarget(
-    _uri,
+    null,
     '_Type',
     .voidType,
     [.integer, .integer, .boolean, list.nullable, functionShape.nullable],
@@ -103,26 +102,26 @@ final class TypeValues() {
     kind: .initializer,
   );
   static final listInit = FunctionTarget(
-    _uri,
+    null,
     '_TypeArguments',
     .voidType,
     [type, list.nullable],
     owner: list,
     kind: .initializer,
   );
-  final _nullable = FunctionTarget(_uri, 'nullableType', type, [type]);
-  final _futureOr = FunctionTarget(_uri, 'futureOrType', type, [type]);
-  final _parameter = FunctionTarget(_uri, 'boundParameter', type, [type, type]);
-  final _equal = FunctionTarget(_uri, 'typeEquals', .boolean, [
+  final _nullable = FunctionTarget(null, 'nullableType', type, [type]);
+  final _futureOr = FunctionTarget(null, 'futureOrType', type, [type]);
+  final _parameter = FunctionTarget(null, 'boundParameter', type, [type, type]);
+  final _equal = FunctionTarget(null, 'typeEquals', .boolean, [
     type,
     .object.nullable,
   ]);
-  final _equalArguments = FunctionTarget(_uri, 'typeArgumentsEqual', .boolean, [
+  final _equalArguments = FunctionTarget(null, 'typeArgumentsEqual', .boolean, [
     list.nullable,
     list.nullable,
   ]);
-  final _hash = FunctionTarget(_uri, 'typeHash', .integer, [type]);
-  final _hashArguments = FunctionTarget(_uri, 'typeArgumentsHash', .integer, [
+  final _hash = FunctionTarget(null, 'typeHash', .integer, [type]);
+  final _hashArguments = FunctionTarget(null, 'typeArgumentsHash', .integer, [
     list.nullable,
   ]);
   final _shapes = <Object, int>{};
@@ -375,7 +374,7 @@ final class TypeValues() {
     ValueType template,
   ) => _templates.putIfAbsent(template, () {
     final parameters = _variablesIn(template);
-    final target = FunctionTarget(_uri, 'reify${_templates.length}', type, [
+    final target = FunctionTarget(null, 'reify${_templates.length}', type, [
       for (final _ in parameters) type,
     ]);
     final entry = Block(target.parameterTypes);

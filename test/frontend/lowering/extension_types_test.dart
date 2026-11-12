@@ -61,11 +61,11 @@ void main() {
     'extension types do not allocate nominal storage or virtual members',
     () {
       expect(
-        fixture.program.classes.where((c) => c.type.library.scheme != 'dart'),
+        fixture.program.classes.where((c) => c.type.library?.scheme != 'dart'),
         isEmpty,
       );
       final operations = fixture.program.functions
-          .where((f) => f.target.library.scheme != 'dart')
+          .where((f) => f.target.library?.scheme != 'dart')
           .expand((f) => f.blocks)
           .expand((b) => b.instructions);
       expect(operations.whereType<Construct>(), isEmpty);

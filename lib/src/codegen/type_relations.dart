@@ -7,8 +7,7 @@ final class TypeRelations(
   final TypeValues values,
   Iterable<ClassType> declarations,
 ) {
-  static final _uri = Uri.parse('dartc:type-relations');
-  static final _scope = ClassType(_uri, '_TypeScope');
+  static final _scope = ClassType(null, '_TypeScope');
   static final _scopeId = InstanceField(_scope, 'id', .integer, isFinal: true);
   static final _count = InstanceField(_scope, 'count', .integer, isFinal: true);
   static final _total = InstanceField(_scope, 'total', .integer, isFinal: true);
@@ -30,7 +29,7 @@ final class TypeRelations(
     _scope.nullable,
     isFinal: true,
   );
-  static final _active = ClassType(_uri, '_BoundCheck');
+  static final _active = ClassType(null, '_BoundCheck');
   static final _owner = InstanceField(
     _active,
     'owner',
@@ -57,7 +56,7 @@ final class TypeRelations(
     isFinal: true,
   );
   static final _scopeInit = FunctionTarget(
-    _uri,
+    null,
     '_TypeScope',
     .voidType,
     [
@@ -72,7 +71,7 @@ final class TypeRelations(
     kind: .initializer,
   );
   static final _activeInit = FunctionTarget(
-    _uri,
+    null,
     '_BoundCheck',
     .voidType,
     [.integer, .integer, TypeValues.type, .integer, _active.nullable],
@@ -85,63 +84,63 @@ final class TypeRelations(
     _active.nullable,
     .integer,
   ];
-  final _entry = FunctionTarget(_uri, 'isSubtype', .boolean, [
+  final _entry = FunctionTarget(null, 'isSubtype', .boolean, [
     TypeValues.type,
     TypeValues.type,
   ]);
-  final _subtype = FunctionTarget(_uri, 'subtype', .boolean, [
+  final _subtype = FunctionTarget(null, 'subtype', .boolean, [
     TypeValues.type,
     TypeValues.type,
     ..._contextTypes,
   ]);
-  final _arguments = FunctionTarget(_uri, 'typeArguments', .boolean, [
+  final _arguments = FunctionTarget(null, 'typeArguments', .boolean, [
     TypeValues.list.nullable,
     TypeValues.list.nullable,
     ..._contextTypes,
   ]);
-  final _nominal = FunctionTarget(_uri, 'supertype', .boolean, [
+  final _nominal = FunctionTarget(null, 'supertype', .boolean, [
     TypeValues.type,
     TypeValues.type,
     ..._contextTypes,
   ]);
-  final _function = FunctionTarget(_uri, 'functionSubtype', .boolean, [
+  final _function = FunctionTarget(null, 'functionSubtype', .boolean, [
     TypeValues.type,
     TypeValues.type,
     ..._contextTypes,
   ]);
-  final _bound = FunctionTarget(_uri, 'parameterBound', .boolean, [
+  final _bound = FunctionTarget(null, 'parameterBound', .boolean, [
     TypeValues.type,
     TypeValues.type,
     ..._contextTypes,
   ]);
-  final _findScope = FunctionTarget(_uri, 'parameterScope', _scope, [
+  final _findScope = FunctionTarget(null, 'parameterScope', _scope, [
     _scope.nullable,
     .integer,
   ]);
-  final _bindingOwner = FunctionTarget(_uri, 'bindingOwner', _scope, [_scope]);
-  final _scopeValue = FunctionTarget(_uri, 'scopeId', .integer, [
+  final _bindingOwner = FunctionTarget(null, 'bindingOwner', _scope, [_scope]);
+  final _scopeValue = FunctionTarget(null, 'scopeId', .integer, [
     _scope.nullable,
   ]);
-  final _scopeSize = FunctionTarget(_uri, 'scopeSize', .integer, [
+  final _scopeSize = FunctionTarget(null, 'scopeSize', .integer, [
     _scope.nullable,
   ]);
-  final _at = FunctionTarget(_uri, 'typeAt', TypeValues.type, [
+  final _at = FunctionTarget(null, 'typeAt', TypeValues.type, [
     TypeValues.list.nullable,
     .integer,
   ]);
   final _findName = FunctionTarget(
-    _uri,
+    null,
     'parameterNamed',
     TypeValues.namedParameter.nullable,
     [TypeValues.namedParameter.nullable, .integer],
   );
-  final _shift = FunctionTarget(_uri, 'shiftType', TypeValues.type, [
+  final _shift = FunctionTarget(null, 'shiftType', TypeValues.type, [
     TypeValues.type,
     .integer,
     .integer,
   ]);
   final _shiftParts = FunctionTarget(
-    _uri,
+    null,
     'shiftParts',
     TypeValues.list.nullable,
     [TypeValues.list.nullable, .integer, .integer],
@@ -203,7 +202,7 @@ final class TypeRelations(
   /// Projects a closed instance type onto its declaring superclass or interface.
   FunctionTarget viewOf(ClassType owner) => _views.putIfAbsent(owner, () {
     final target = FunctionTarget(
-      _uri,
+      null,
       'view${_views.length}',
       TypeValues.type.nullable,
       [TypeValues.type],

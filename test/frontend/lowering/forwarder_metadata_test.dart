@@ -124,7 +124,7 @@ class UnknownParent extends ImportedParent {}
         contains((
           kind: FunctionKind.method,
           name: '_f',
-          privateLibrary: File('${directory.path}/imported.dart').uri,
+          privateScope: File('${directory.path}/imported.dart').uri,
         )),
       );
       final unknown = program.classes.singleWhere(
@@ -132,7 +132,7 @@ class UnknownParent extends ImportedParent {}
       );
       expect(
         unknown.unsupportedForwarders,
-        contains((kind: FunctionKind.method, name: 'f', privateLibrary: null)),
+        contains((kind: FunctionKind.method, name: 'f', privateScope: null)),
       );
     },
   );

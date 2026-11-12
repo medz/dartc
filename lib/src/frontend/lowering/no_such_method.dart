@@ -13,15 +13,14 @@ IrFunction lowerNoSuchMethodForwarder(
   final signature = target.signature;
   final selector = target.selector;
   final foreignPrivate =
-      selector.privateLibrary != null &&
-      selector.privateLibrary != target.library;
+      selector.privateScope != null && selector.privateScope != target.library;
   final invocation = entry.emit(
     MakeInvocation(
       foreignPrivate
           ? (
               kind: selector.kind,
               name: selector.name,
-              privateLibrary: target.library,
+              privateScope: target.library,
             )
           : selector,
       arguments.take(signature.positionalCount),

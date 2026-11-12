@@ -67,8 +67,6 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
       ],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
-      final library =
-          input.resources['dartc/src/runtime/allocator.dart']!.element.uri;
       return (
         lowered,
         [
@@ -76,10 +74,10 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
             if (!input.resources.containsValue(library))
               for (final unit in library.units) File(unit.path).absolute.uri,
         ],
-        bindRuntime(lowered.program, input, library),
+        bindRuntime(lowered),
       );
     });
-    final (:program, :exports, :imports, :entryPoint) = lowered;
+    final (:program, :exports, :imports, :entryPoint, runtime: _) = lowered;
     if (output is ExecutableOutput && entryPoint == null) {
       throw ArgumentError('The first input library has no main function.');
     }

@@ -15,11 +15,7 @@ Future<LoweringResult> prepareRuntime([String? source]) async {
     resources: ['dartc/src/runtime/allocator.dart'],
   ).use((input) async {
     final result = await Lowering().lower(input);
-    heapRuntime = bindRuntime(
-      result.program,
-      input,
-      input.resources['dartc/src/runtime/allocator.dart']!.element.uri,
-    );
+    heapRuntime = bindRuntime(result);
     return result;
   });
 }

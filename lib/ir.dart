@@ -10,9 +10,16 @@
 /// graph using its Dart signature and defaults. Inspect [Instruction.effects]
 /// for possible storage access, allocation, calls and exceptions.
 ///
+/// Generated [FunctionTarget] and [ClassType] definitions have a null library;
+/// their names are labels, and references must use the original definition.
+/// Source definitions retain their library URI. Private member selectors use
+/// that URI or the declaring generated class as their scope.
+///
 /// @docImport 'src/ir/block.dart';
 /// @docImport 'src/ir/function.dart';
 /// @docImport 'src/ir/program.dart';
+/// @docImport 'src/ir/signature.dart';
+/// @docImport 'src/ir/type.dart';
 /// @docImport 'src/ir/value.dart';
 library;
 

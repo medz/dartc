@@ -75,7 +75,7 @@ class Replacement extends Base implements Contract, Other {}
           bindings.registerLibrary(library);
         }
         final forwarder = bindings.forwarders(element).single;
-        expect(forwarder.selector.privateLibrary, imported.uri);
+        expect(forwarder.selector.privateScope, imported.uri);
         expect(forwarder.library, entry.uri);
         expect(forwarder.signature.parameters, everyElement(ValueType.number));
         final z = forwarder.signature.named['z']!.slot;

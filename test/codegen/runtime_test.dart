@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/codegen.dart';
+import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
@@ -9,7 +10,8 @@ import 'package:test/test.dart';
 import '../support/runtime.dart';
 
 void main() {
-  setUpAll(prepareRuntime);
+  late LoweringResult lowered;
+  setUpAll(() async => lowered = await prepareRuntime());
   final uri = Uri.parse('memory:runtime-contract');
   final entry = FunctionTarget(uri, 'entry', .integer, []);
 
@@ -40,6 +42,13 @@ void main() {
   }
 
   test('runtime entries must implement their machine boundary signatures', () {
+    for (final target in [
+      ...lowered.runtime.entries.values,
+      ...lowered.runtime.primitives.keys,
+      ...lowered.runtime.nonAllocating,
+    ]) {
+      expect(lowered.program.implementationOf(target)?.target, same(target));
+    }
     final record = heapRuntime.program.classes.singleWhere(
       (c) => c.type.name == 'FinalizationRecord',
     );

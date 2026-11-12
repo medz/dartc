@@ -278,7 +278,8 @@ final class IrProgram(
 
   /// Writes declared storage and the control-flow graph of each body to [output].
   void writeTo(StringSink output) {
-    String label(ClassType type) => '${type.library}::${type.dartName}';
+    String label(ClassType type) =>
+        '${type.library ?? '<generated>'}::${type.dartName}';
     for (final declaration in classes) {
       final type = declaration.type;
       final parent = type.superclass;
@@ -321,7 +322,7 @@ final class IrProgram(
     for (final external in externals) {
       final t = external.target;
       output.writeln(
-        'external ${t.kind.name} ${t.library}::'
+        'external ${t.kind.name} ${t.library ?? '<generated>'}::'
         '${t.owner == null ? '' : '${t.owner!.name}.'}${t.name}: ${t.signature.dartName}',
       );
     }
@@ -331,24 +332,28 @@ final class IrProgram(
   }
 
   this {
-    final owners = <(Uri, String), ClassType>{};
+    (Object, String) className(ClassType type) =>
+        (type.library ?? type.declaration, type.name);
+    final owners = <(Object, String), ClassType>{};
     for (final c in this.classes) {
-      if (owners.containsKey((c.type.library, c.type.name))) {
+      if (owners.containsKey(className(c.type))) {
         throw ArgumentError(
           'Repeated class: ${c.type.library}::${c.type.name}',
         );
       }
-      owners[(c.type.library, c.type.name)] = c.type;
+      owners[className(c.type)] = c.type;
     }
-    (Uri, ClassType?, FunctionKind, String, Uri?) nameOf(FunctionTarget t) => (
-      t.library,
+    (Object, ClassType?, FunctionKind, String, Object?) nameOf(
+      FunctionTarget t,
+    ) => (
+      t.library ?? t,
       t.owner,
       t.kind,
       t.kind.isVirtual ? t.selector.name : t.name,
-      t.kind.isVirtual ? t.selector.privateLibrary : null,
+      t.kind.isVirtual ? t.selector.privateScope : null,
     );
     final names =
-        <(Uri, ClassType?, FunctionKind, String, Uri?), FunctionTarget>{};
+        <(Object, ClassType?, FunctionKind, String, Object?), FunctionTarget>{};
     if (_implementations.length !=
         this.functions.length + this.externals.length) {
       throw ArgumentError('Repeated callable implementation.');
@@ -371,7 +376,7 @@ final class IrProgram(
         throw ArgumentError('Repeated global declaration.');
       }
       final owner = global.owner;
-      if (owner != null && owners[(owner.library, owner.name)] != owner) {
+      if (owner != null && owners[className(owner)] != owner) {
         throw ArgumentError('Global belongs to an undeclared class.');
       }
       if (global.initializer case final initializer?
@@ -393,7 +398,7 @@ final class IrProgram(
       final t = f.target, owner = t.owner;
       if (owner != null &&
           (t.kind.hasReceiver || t.kind == .factory) &&
-          owners[(owner.library, owner.name)] != owner) {
+          owners[className(owner)] != owner) {
         throw ArgumentError('Body belongs to an undeclared class.');
       }
       if (t.enclosing case final outer?) {
@@ -425,14 +430,20 @@ final class IrProgram(
     }
 
     IrClass? definitionOf(ClassType type) {
-      final identity = owners.putIfAbsent((
-        type.library,
-        type.name,
-      ), () => type.declaration);
+      final identity = owners.putIfAbsent(
+        className(type),
+        () => type.declaration,
+      );
       if (!identical(identity, type.declaration)) {
         throw ArgumentError('Conflicting class identity for ${type.name}.');
       }
-      return _definitions[identity];
+      final definition = _definitions[identity];
+      if (type.library == null && definition == null) {
+        throw ArgumentError(
+          'Missing generated class definition: ${type.name}.',
+        );
+      }
+      return definition;
     }
 
     void checkType(ValueType type, Set<TypeParameterType> scope) {
@@ -454,6 +465,14 @@ final class IrProgram(
 
     void checkTarget(FunctionTarget target) {
       checkSignature(target);
+      if (target.library == null &&
+          implementationOf(target) == null &&
+          !target.isAbstract &&
+          target.redirect == null) {
+        throw ArgumentError(
+          'Missing generated callable definition: ${target.name}.',
+        );
+      }
       final owner = target.owner;
       final c = owner == null ? null : definitionOf(owner);
       final known = switch (target.kind) {

@@ -692,7 +692,7 @@ final class FunctionRepresentation(
                                         Equals() => (
                                           kind: .method,
                                           name: '==',
-                                          privateLibrary: null,
+                                          privateScope: null,
                                         ),
                                         _ =>
                                           instruction.implicitMember!.selector,

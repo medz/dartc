@@ -43,7 +43,7 @@ void main() {
           [],
           owner: owner,
           kind: kind,
-          privateSelectorLibrary: _foreign,
+          privateSelectorScope: _foreign,
         ),
         throwsArgumentError,
       );
@@ -62,7 +62,7 @@ void main() {
           parameters,
           owner: owner,
           kind: kind,
-          privateSelectorLibrary: _foreign,
+          privateSelectorScope: _foreign,
         ),
         throwsArgumentError,
       );
@@ -73,11 +73,11 @@ void main() {
         parameters,
         owner: owner,
         kind: kind,
-        privateSelectorLibrary: _foreign,
+        privateSelectorScope: _foreign,
       );
       expect(target.library, _library);
       expect(target.owner, owner);
-      expect(target.selector.privateLibrary, _foreign);
+      expect(target.selector.privateScope, _foreign);
     }
     expect(
       () => FunctionTarget(
@@ -87,7 +87,7 @@ void main() {
         [],
         owner: owner,
         kind: .method,
-        privateSelectorLibrary: _library,
+        privateSelectorScope: _library,
       ),
       throwsArgumentError,
     );
@@ -104,7 +104,7 @@ void main() {
           [],
           owner: owner,
           kind: .method,
-          privateSelectorLibrary: provenance,
+          privateSelectorScope: provenance,
         ),
     ];
     final definition = IrClass(owner, [], members: targets);
@@ -145,7 +145,7 @@ void main() {
       [],
       owner: owner,
       kind: .method,
-      privateSelectorLibrary: _foreign,
+      privateSelectorScope: _foreign,
     );
     expect(
       () => IrClass(owner, [], members: [...targets, duplicate]),
@@ -171,7 +171,7 @@ void main() {
       [],
       owner: owner,
       kind: .method,
-      privateSelectorLibrary: _library,
+      privateSelectorScope: _library,
     );
     final explicitOutput = StringBuffer();
     _body(explicitOwn, 0).writeTo(explicitOutput);
@@ -189,7 +189,7 @@ void main() {
   const missing = (
     kind: FunctionKind.method,
     name: 'missing',
-    privateLibrary: null,
+    privateScope: null,
   );
 
   test('virtual Object.noSuchMethod falls back only after proven absence', () {

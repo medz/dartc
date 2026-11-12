@@ -7,6 +7,68 @@ final _uri = Uri.parse('memory:references');
 const _one = Constant.integer(1);
 
 void main() {
+  test('generated definitions use identity rather than source names', () {
+    final left = ClassType(null, 'State'), right = ClassType(null, 'State');
+    FunctionTarget read(ClassType owner) => FunctionTarget(
+      null,
+      '_read',
+      .integer,
+      [],
+      owner: owner,
+      kind: .method,
+    );
+    final first = read(left), second = read(right);
+    final a = FunctionTarget(null, 'helper', .integer, []);
+    final b = FunctionTarget(null, 'helper', .integer, []);
+    IrFunction body(FunctionTarget target) => IrFunction(target, [
+      Block(target.parameterTypes)..finish(const Return(_one)),
+    ]);
+    final program = IrProgram(
+      [
+        IrClass(left, [], members: [first]),
+        IrClass(right, [], members: [second]),
+      ],
+      [body(first), body(second), body(a), body(b)],
+    );
+    expect(left.library, isNull);
+    expect(ValueType.object.library, Uri.parse('dart:core'));
+    expect(first.selector.privateScope, same(left));
+    expect(program.lookupMember(right, first.selector).target, isNull);
+    expect(program.lookupMember(left, first.selector).target, same(first));
+    expect(() => MakeInvocation(first.selector, []), throwsArgumentError);
+    expect(program.implementationOf(a)!.target, same(a));
+    expect(program.implementationOf(b)!.target, same(b));
+    final text = StringBuffer();
+    program.writeTo(text);
+    expect('$text', contains('<generated>::State'));
+    expect('$text', isNot(contains('null::')));
+
+    IrFunction caller(FunctionTarget callee) {
+      final block = Block();
+      block.finish(Return(block.emit(DirectCall(callee, []))));
+      return IrFunction(FunctionTarget(_uri, 'call', .integer, []), [block]);
+    }
+
+    // A label is not an import or a replacement for the original declaration.
+    expect(() => IrProgram([], [caller(a)]), throwsArgumentError);
+    expect(() => IrProgram([], [body(a), caller(b)]), throwsArgumentError);
+    expect(() => IrProgram([], [body(a), caller(a)]), returnsNormally);
+    expect(
+      () => IrProgram(
+        [],
+        [],
+        externals: [
+          IrExternal(FunctionTarget(_uri, 'take', .voidType, [left])),
+        ],
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => IrProgram([IrClass(left, []), IrClass(left, [])], []),
+      throwsArgumentError,
+    );
+  });
+
   test('nested constants, iterator calls and addAll retain dependencies', () {
     final inner = SequenceConstant(CoreTypes.listOf(.integer), [_one]);
     final outer = SequenceConstant(CoreTypes.listOf(inner.type), [inner]);
@@ -475,7 +537,7 @@ void main() {
         program.lookupMember(a, (
           kind: .method,
           name: 'f',
-          privateLibrary: null,
+          privateScope: null,
         )).unmodeledBoundary,
         isNull,
       );

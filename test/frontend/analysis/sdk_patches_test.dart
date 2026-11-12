@@ -96,6 +96,18 @@ void main() {
             endsWith('/ffi_patch.dart'),
           );
         }
+        final collection = libraries.singleWhere(
+          (library) => library.element.uri == Uri.parse('dart:collection'),
+        );
+        for (final name in ['_HashMap', '_HashSet', '_CustomHashMap']) {
+          final source = collection.getFragmentDeclaration(
+            collection.element.getClass(name)!.firstFragment,
+          )!;
+          expect(
+            patches.origins[source.resolvedUnit!.uri]!.path,
+            endsWith('/vm_shared/lib/collection_patch.dart'),
+          );
+        }
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );

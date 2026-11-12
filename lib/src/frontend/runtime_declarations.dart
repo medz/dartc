@@ -8,20 +8,43 @@ import 'package:dartc/runtime/contracts.dart';
 
 import 'analysis/session.dart';
 
-/// Resolves trusted runtime annotations against checked declaration identities.
+/// Runtime contracts bound to the same definitions as ordinary Dart calls.
 final class RuntimeDeclarations(
-  final IrProgram program,
+  Map<RuntimeRole, FunctionTarget> entries,
+  Map<FunctionTarget, MemoryOperation> primitives,
+  Iterable<FunctionTarget> nonAllocating,
+) {
+  final Map<RuntimeRole, FunctionTarget> entries = .unmodifiable(entries);
+  final Map<FunctionTarget, MemoryOperation> primitives = .unmodifiable(
+    primitives,
+  );
+  final List<FunctionTarget> nonAllocating = .unmodifiable(nonAllocating);
+
+  /// Reads trusted annotations while their owning analysis session is open.
+  factory resolve(
+    CheckedLibraries input,
+    FunctionTarget Function(ExecutableElement, ResolvedUnitResult, ast.AstNode)
+    targetFor,
+  ) {
+    final visitor = _RuntimeDeclarations(input, targetFor);
+    return .new(visitor.entries, visitor.primitives, visitor.nonAllocating);
+  }
+}
+
+final class _RuntimeDeclarations(
   final CheckedLibraries input,
-  final Uri contracts,
+  final FunctionTarget Function(
+    ExecutableElement,
+    ResolvedUnitResult,
+    ast.AstNode,
+  )
+  targetFor,
 ) extends RecursiveAstVisitor<void> {
   this {
+    if (input.runtimeContracts == null) return;
     for (final library in input.libraries) {
-      if (!library.element.uri.toString().startsWith(
-        contracts.resolve('.').toString(),
-      )) {
-        continue;
-      }
       for (final source in library.units) {
+        if (!input.runtimeSources.contains(source.uri)) continue;
         unit = source;
         source.unit.accept(this);
       }
@@ -45,7 +68,7 @@ final class RuntimeDeclarations(
     if (element is! ExecutableElement) return;
     final value = input.annotationValue(unit, node);
     if (value?.type case dart.InterfaceType(:final element)
-        when element.library.uri != contracts) {
+        when element.library.uri != input.runtimeContracts) {
       return;
     }
     final type = value?.type;
@@ -55,25 +78,7 @@ final class RuntimeDeclarations(
     final isPrimitive = type.element == source.getClass('Primitive');
     final noAllocation = type.element == source.getClass('NonAllocating');
     if (!isEntry && !isPrimitive && !noAllocation) return;
-    final owner = element.enclosingElement;
-    final kind = switch (element) {
-      GetterElement(isStatic: false) => FunctionKind.getter,
-      GetterElement() => FunctionKind.staticGetter,
-      SetterElement(isStatic: false) => FunctionKind.setter,
-      SetterElement() => FunctionKind.staticSetter,
-      MethodElement(isStatic: false) => FunctionKind.method,
-      _ => FunctionKind.function,
-    };
-    final target = [...program.functions, ...program.externals]
-        .singleWhere(
-          (body) =>
-              body.target.library == element.library.uri &&
-              body.target.name == element.name &&
-              body.target.kind == kind &&
-              body.target.owner?.name ==
-                  (owner is InterfaceElement ? owner.name : null),
-        )
-        .target;
+    final target = targetFor(element, unit, node);
     if (noAllocation) {
       nonAllocating.add(target);
       return;

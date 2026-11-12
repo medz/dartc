@@ -627,7 +627,7 @@ final class IrInterpreter(
   }
 
   static MemberSelector _selector(String name, [FunctionKind kind = .method]) =>
-      (kind: kind, name: name, privateLibrary: null);
+      (kind: kind, name: name, privateScope: null);
 
   _Instance _invocationSymbol(String name, [Uri? library]) =>
       _Instance(CoreTypes.symbolStorage, this)
@@ -660,7 +660,10 @@ final class IrInterpreter(
     // shares Object? empty constants; public accessor factories use Object.
     return _Instance(CoreTypes.invocationStorage, this)
       ..fields.addAll({
-        CoreTypes.invocationMemberName: symbol(name, selector.privateLibrary),
+        CoreTypes.invocationMemberName: symbol(
+          name,
+          selector.privateScope as Uri?,
+        ),
         CoreTypes.invocationTypeArguments: types.isEmpty
             ? _emptyList(.typeType)
             : _CollectionValue(
@@ -792,7 +795,7 @@ final class IrInterpreter(
               ? FunctionKind.getter
               : FunctionKind.method,
           name: selector.name,
-          privateLibrary: selector.privateLibrary,
+          privateScope: selector.privateScope,
         );
         final other = program.lookupMember(receiver.type, alternate);
         if (other.target case final target?) {
@@ -815,7 +818,7 @@ final class IrInterpreter(
       }
       // Invocation's deliberately modeled SDK storage and default getters.
       if ((selector.kind == .getter || selector.kind == .method) &&
-          selector.privateLibrary == null) {
+          selector.privateScope == null) {
         final target = FunctionTarget(
           CoreTypes.invocation.library,
           selector.name,
@@ -852,7 +855,7 @@ final class IrInterpreter(
       }
     }
     if (selector.kind == .method &&
-        selector.privateLibrary == null &&
+        selector.privateScope == null &&
         (const {'hashCode', 'runtimeType'}.contains(selector.name) ||
             (receiver is _CollectionValue || receiver is String) &&
                 const {
@@ -916,7 +919,7 @@ final class IrInterpreter(
       return _asyncMember(receiver!, selector, positional, named, types);
     }
 
-    if (selector.privateLibrary != null) return _noDynamicBridge;
+    if (selector.privateScope != null) return _noDynamicBridge;
     final name = selector.name;
     Object? invoke(int count, Object? Function() body) {
       if (positional.length != count || named.isNotEmpty || types.isNotEmpty) {
@@ -927,7 +930,7 @@ final class IrInterpreter(
 
     if (name == 'toString' &&
         receiver is _Instance &&
-        receiver.type.library.scheme == 'dart' &&
+        receiver.type.library?.scheme == 'dart' &&
         receiver.type != CoreTypes.symbolStorage) {
       throw UnsupportedError('Unmodeled SDK toString receiver');
     }
@@ -1174,7 +1177,7 @@ final class IrInterpreter(
     Map<String, Object?> named,
     List<ValueType> types,
   ) {
-    if (selector.privateLibrary != null) {
+    if (selector.privateScope != null) {
       throw _AsyncUnsupported('Private async member');
     }
     if (receiver is _GuestStreamIterator) {

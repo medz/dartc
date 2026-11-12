@@ -903,10 +903,11 @@ final class const ClassType._(
   final List<TypeParameterType> typeParameters,
   final List<ValueType>? _arguments,
   final ClassType? _declaration,
-  final _ClassHierarchy? _hierarchy,
-) extends ValueType {
+  final _ClassHierarchy? _hierarchy, {
+  final bool _isCore = false,
+}) extends ValueType {
   new(
-    Uri library,
+    Uri? library,
     String name, {
     ClassType superclass = ValueType.object,
     Iterable<ClassType> interfaces = const [],
@@ -935,11 +936,12 @@ final class const ClassType._(
         null,
         null,
         null,
+        isCore: true,
       );
 
   /// Creates a declaration whose hierarchy can be initialized before verification.
   new declare(
-    Uri library,
+    Uri? library,
     String name, {
     Iterable<TypeParameterType> typeParameters = const [],
     bool isAbstract = false,
@@ -981,7 +983,9 @@ final class const ClassType._(
 
   /// The applied arguments, or the declaration's own type parameters.
   List<ValueType> get typeArguments => _arguments ?? typeParameters;
-  Uri get library => _library ?? _coreLibrary;
+
+  /// The source library, or null for a generated declaration.
+  Uri? get library => _isCore ? _coreLibrary : _library;
   ClassType get declaration => _declaration ?? this;
   Map<TypeParameterType, ValueType> get typeEnvironment => {
     for (final (i, parameter) in typeParameters.indexed)

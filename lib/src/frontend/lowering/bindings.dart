@@ -281,7 +281,7 @@ final class Bindings({
             member.formalParameters.isEmpty
         ? 'unary-'
         : member.name!,
-    privateLibrary: member.name!.startsWith('_')
+    privateScope: member.name!.startsWith('_')
         ? privateLibrary ?? member.library.uri
         : null,
   );
@@ -701,7 +701,7 @@ final class Bindings({
       signature.parameters,
       owner: owner,
       kind: _memberSelector(selected).kind,
-      privateSelectorLibrary: privateLibrary,
+      privateSelectorScope: privateLibrary,
       typeParameters: signature.typeParameters,
       optionalPositional: signature.optionalPositional,
       namedParameters: signature.namedParameters,
@@ -737,8 +737,8 @@ final class Bindings({
   ) {
     final object = destination.library.typeProvider.objectElement;
     final foreignPrivate =
-        forwarder.selector.privateLibrary != null &&
-        forwarder.selector.privateLibrary != forwarder.library;
+        forwarder.selector.privateScope != null &&
+        forwarder.selector.privateScope != forwarder.library;
     return target(
       foreignPrivate
           ? object.library
@@ -1808,7 +1808,7 @@ final class Bindings({
           owner: application,
           kind: source.kind,
           typeParameters: signature.typeParameters,
-          privateSelectorLibrary: source.selector.privateLibrary,
+          privateSelectorScope: source.selector.privateScope,
           optionalPositional: signature.optionalPositional,
           namedParameters: signature.namedParameters,
           covariantParameters: {...declarationFlags, ...classFlags},

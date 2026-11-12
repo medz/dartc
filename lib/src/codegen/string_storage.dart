@@ -54,7 +54,7 @@ final class StringStorage({
     String name,
     ValueType result,
     List<ValueType> parameters,
-  ) => FunctionTarget(Uri.parse('dartc:strings'), name, result, parameters);
+  ) => FunctionTarget(null, name, result, parameters);
   Constant _int(int value) => Constant.integer(value);
   Value _op(Block block, IntOperator op, Value left, Value right) =>
       block.emit(IntBinary(op, left, right));

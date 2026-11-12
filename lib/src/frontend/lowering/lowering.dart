@@ -4,6 +4,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 
 import '../analysis/session.dart';
+import '../runtime_declarations.dart';
 
 import 'bindings.dart';
 import 'class_declaration.dart';
@@ -211,6 +212,7 @@ final class Lowering({final bool enableAssertions = false}) {
       imports: Map<FunctionTarget, NativeReference>.unmodifiable(
         native.imports,
       ),
+      runtime: RuntimeDeclarations.resolve(input, bindings.target),
     );
   }
 }
@@ -225,4 +227,5 @@ typedef LoweringResult = ({
   FunctionTarget? entryPoint,
   Map<FunctionTarget, NativeExport> exports,
   Map<FunctionTarget, NativeReference> imports,
+  RuntimeDeclarations runtime,
 });

@@ -78,7 +78,7 @@ void main() {
     ]) {
       expect(operation.implicitMember, (
         receiver: map.type,
-        selector: (kind: kind, name: name, privateLibrary: null),
+        selector: (kind: kind, name: name, privateScope: null),
       ));
       expect(
         operation.effects,

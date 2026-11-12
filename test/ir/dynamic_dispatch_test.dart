@@ -8,8 +8,8 @@ const _one = Constant.integer(1);
 MemberSelector _selector(
   String name, {
   FunctionKind kind = .method,
-  Uri? privateLibrary,
-}) => (kind: kind, name: name, privateLibrary: privateLibrary);
+  Uri? privateScope,
+}) => (kind: kind, name: name, privateScope: privateScope);
 
 IrFunction _body(FunctionTarget target) =>
     IrFunction(target, [Block(target.parameterTypes)..finish(Return(_one))]);
@@ -77,7 +77,7 @@ void main() {
       _selector('run', kind: .function),
       _selector('run', kind: .staticGetter),
       _selector('_run'),
-      _selector('run', privateLibrary: _library),
+      _selector('run', privateScope: _library),
     ]) {
       expect(
         () => DynamicDispatch(_receiver, selector, []),
@@ -99,7 +99,7 @@ void main() {
     expect(
       () => DynamicDispatch(
         _receiver,
-        _selector('_run', privateLibrary: _library),
+        _selector('_run', privateScope: _library),
         [],
       ),
       returnsNormally,
@@ -159,7 +159,7 @@ void main() {
       block.emit(
         DynamicDispatch(
           _receiver,
-          _selector('_run', privateLibrary: _library),
+          _selector('_run', privateScope: _library),
           [_one],
           {'z': _one, 'a': _receiver},
           [ValueType.string],

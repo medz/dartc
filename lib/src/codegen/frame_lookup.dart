@@ -4,12 +4,10 @@ import 'package:dartc/ir.dart';
 
 /// Generates return-PC lookup for captured stack traces.
 final class FrameLookup() {
-  final target = FunctionTarget(
-    Uri.parse('dartc:stack'),
-    'findFrame',
+  final target = FunctionTarget(null, 'findFrame', .integer, [
     .integer,
-    [.integer, .integer],
-  );
+    .integer,
+  ]);
   late final IrFunction function = _body();
 
   IrFunction _body() {

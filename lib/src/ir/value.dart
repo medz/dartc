@@ -413,59 +413,59 @@ sealed class Instruction(super.type) extends Value {
       switch (this) {
         GetIterator(:final iterable) => (
           receiver: iterable.type,
-          selector: (kind: .getter, name: 'iterator', privateLibrary: null),
+          selector: (kind: .getter, name: 'iterator', privateScope: null),
         ),
         IteratorMoveNext(:final iterator) => (
           receiver: iterator.type,
-          selector: (kind: .method, name: 'moveNext', privateLibrary: null),
+          selector: (kind: .method, name: 'moveNext', privateScope: null),
         ),
         IteratorCurrent(:final iterator) => (
           receiver: iterator.type,
-          selector: (kind: .getter, name: 'current', privateLibrary: null),
+          selector: (kind: .getter, name: 'current', privateScope: null),
         ),
         CollectionLength(:final collection) => (
           receiver: collection.type,
-          selector: (kind: .getter, name: 'length', privateLibrary: null),
+          selector: (kind: .getter, name: 'length', privateScope: null),
         ),
         CollectionGet(:final collection) => (
           receiver: collection.type,
-          selector: (kind: .method, name: '[]', privateLibrary: null),
+          selector: (kind: .method, name: '[]', privateScope: null),
         ),
         ListSet(:final collection) => (
           receiver: collection.type,
-          selector: (kind: .method, name: '[]=', privateLibrary: null),
+          selector: (kind: .method, name: '[]=', privateScope: null),
         ),
         MapPut(:final map) => (
           receiver: map.type,
-          selector: (kind: .method, name: '[]=', privateLibrary: null),
+          selector: (kind: .method, name: '[]=', privateScope: null),
         ),
         MapContainsKey(:final map) => (
           receiver: map.type,
-          selector: (kind: .method, name: 'containsKey', privateLibrary: null),
+          selector: (kind: .method, name: 'containsKey', privateScope: null),
         ),
         MapEntries(:final map) => (
           receiver: map.type,
-          selector: (kind: .getter, name: 'entries', privateLibrary: null),
+          selector: (kind: .getter, name: 'entries', privateScope: null),
         ),
         ListSublist(:final list) => (
           receiver: list.type,
-          selector: (kind: .method, name: 'sublist', privateLibrary: null),
+          selector: (kind: .method, name: 'sublist', privateScope: null),
         ),
         CollectionAdd(:final collection) => (
           receiver: collection.type,
-          selector: (kind: .method, name: 'add', privateLibrary: null),
+          selector: (kind: .method, name: 'add', privateScope: null),
         ),
         CollectionSpread(:final collection, isMethodCall: true) => (
           receiver: collection.type,
-          selector: (kind: .method, name: 'addAll', privateLibrary: null),
+          selector: (kind: .method, name: 'addAll', privateScope: null),
         ),
         ObjectRuntimeType(:final operand, direct: false) => (
           receiver: operand.type,
-          selector: (kind: .getter, name: 'runtimeType', privateLibrary: null),
+          selector: (kind: .getter, name: 'runtimeType', privateScope: null),
         ),
         ObjectHashCode(:final operand, direct: false) => (
           receiver: operand.type,
-          selector: (kind: .getter, name: 'hashCode', privateLibrary: null),
+          selector: (kind: .getter, name: 'hashCode', privateScope: null),
         ),
         Equals(:final left, :final right, mayCallUserCode: true)
             when left is! TypeConstant &&
@@ -474,7 +474,7 @@ sealed class Instruction(super.type) extends Value {
                 right.type != .nullType =>
           (
             receiver: left.type,
-            selector: (kind: .method, name: '==', privateLibrary: null),
+            selector: (kind: .method, name: '==', privateScope: null),
           ),
         _ => null,
       };
@@ -1218,6 +1218,11 @@ void _checkInvocationArguments(
   List<ValueType> typeArguments,
 ) {
   checkMemberSelector(selector);
+  if (selector.privateScope is ClassType) {
+    throw ArgumentError(
+      'A generated private member has no Dart invocation name.',
+    );
+  }
   if (named.keys.any((name) => name.isEmpty) ||
       [
         ...positional,

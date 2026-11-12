@@ -20,7 +20,6 @@ final class ListStorage({
   final FunctionTarget Function(ClassType)? allocate,
   final bool hasConstants = false,
 }) {
-  static final _uri = Uri.parse('dartc:lists');
   final element = TypeParameterType('E')
     ..initializeBound(.object.nullable)
     ..initializeDefaultType(.dynamicType);
@@ -28,13 +27,13 @@ final class ListStorage({
     ..initializeBound(.object.nullable)
     ..initializeDefaultType(.dynamicType);
   late final _spread = FunctionTarget(
-    _uri,
+    null,
     'spread',
     .voidType,
     [CoreTypes.listOf(_spreadElement), CoreTypes.iterableOf(.object.nullable)],
     typeParameters: [_spreadElement],
   );
-  final buffer = ClassType(_uri, '_ListData');
+  final buffer = ClassType(null, '_ListData');
   late final ClassType type;
   late final InstanceField length, data, mutability;
   late final FunctionTarget initializer, empty, filled, from, reserve;
@@ -43,7 +42,7 @@ final class ListStorage({
   FunctionTarget? _allocation;
 
   this {
-    type = ClassType.declare(_uri, '_List', typeParameters: [element]);
+    type = ClassType.declare(null, '_List', typeParameters: [element]);
     type.initializeHierarchy(
       superclass: listBase?.instantiate([element]) ?? ValueType.object,
       interfaces: [CoreTypes.listOf(element)],
@@ -110,7 +109,7 @@ final class ListStorage({
     ValueType result,
     List<ValueType> parameters,
     FunctionKind kind,
-  ) => FunctionTarget(_uri, name, result, parameters, owner: type, kind: kind);
+  ) => FunctionTarget(null, name, result, parameters, owner: type, kind: kind);
   Constant _int(int value) => Constant.integer(value);
   Value _op(Block block, IntOperator op, Value left, Value right) =>
       block.emit(IntBinary(op, left, right));
@@ -182,7 +181,7 @@ final class ListStorage({
   }
 
   IrFunction? _member(MemberSelector selector) {
-    if (selector.privateLibrary != null && selector.privateLibrary != _uri) {
+    if (selector.privateScope != null && selector.privateScope != type) {
       return null;
     }
     final key = (selector.kind, selector.name);
@@ -219,7 +218,7 @@ final class ListStorage({
     return IrFunction(getter, [entry]);
   }
 
-  late final _newBuffer = FunctionTarget(_uri, 'buffer', buffer, [.integer]);
+  late final _newBuffer = FunctionTarget(null, 'buffer', buffer, [.integer]);
   IrFunction _bufferBody() {
     _allocation =
         allocate?.call(buffer) ??

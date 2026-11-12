@@ -23,7 +23,7 @@ void main() {
       program.classes.singleWhere((c) => c.type.name == name);
 
   MemberSelector method(String name, [Uri? library]) =>
-      (kind: .method, name: name, privateLibrary: library);
+      (kind: .method, name: name, privateScope: library);
 
   test(
     'emits ordinary typed method, accessor, callable and private bodies',
@@ -34,8 +34,8 @@ void main() {
         forwarded.members.keys.toSet(),
         containsAll({
           method('method'),
-          (kind: FunctionKind.getter, name: 'property', privateLibrary: null),
-          (kind: FunctionKind.setter, name: 'property', privateLibrary: null),
+          (kind: FunctionKind.getter, name: 'property', privateScope: null),
+          (kind: FunctionKind.setter, name: 'property', privateScope: null),
           method('call'),
           method('_private', forwarded.type.library),
         }),
@@ -127,13 +127,13 @@ void main() {
         cls.members.keys,
         containsAll({
           method('_method', uri),
-          (kind: FunctionKind.getter, name: '_property', privateLibrary: uri),
-          (kind: FunctionKind.setter, name: '_property', privateLibrary: uri),
+          (kind: FunctionKind.getter, name: '_property', privateScope: uri),
+          (kind: FunctionKind.setter, name: '_property', privateScope: uri),
         }),
       );
       final lookup = program.lookupMember(cls.type, method('_method', uri));
       expect(lookup.target, same(cls.members[method('_method', uri)]));
-      expect(lookup.target!.privateSelectorLibrary, uri);
+      expect(lookup.target!.privateSelectorScope, uri);
       expect(lookup.unsupportedForwarder, isFalse);
       expect(
         program
@@ -168,7 +168,7 @@ void main() {
       program.lookupMember(cls.type, (
         kind: FunctionKind.getter,
         name: 'iterator',
-        privateLibrary: null,
+        privateScope: null,
       )).target,
       isNotNull,
     );
@@ -176,7 +176,7 @@ void main() {
       program.lookupMember(cls.type, (
         kind: FunctionKind.getter,
         name: 'length',
-        privateLibrary: null,
+        privateScope: null,
       )).target,
       isNotNull,
     );

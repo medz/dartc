@@ -36,12 +36,7 @@ final class InstanceStorage(
         'Native late storage requires the SDK dart:_internal LateError constructor.',
       );
     }
-    final target = FunctionTarget(
-      Uri.parse('dartc:instance-storage'),
-      'fail',
-      .never,
-      [.string],
-    );
+    final target = FunctionTarget(null, 'fail', .never, [.string]);
     final entry = Block(target.parameterTypes);
     entry.finish(
       Throw(entry.emit(Construct(lateError.target, entry.parameters))),

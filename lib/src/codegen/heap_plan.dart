@@ -19,12 +19,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
   final _boxes = <ValueType, FunctionTarget>{};
   final _initializers = <FunctionTarget, FunctionTarget>{};
   final _payloads = <ClassType, FunctionTarget>{};
-  static final _invalid = FunctionTarget(
-    Uri.parse('dartc:memory'),
-    'invalid',
-    .never,
-    [],
-  );
+  static final _invalid = FunctionTarget(null, 'invalid', .never, []);
 
   FunctionTarget get invalid =>
       runtime?.primitives.entries
@@ -50,12 +45,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
       _factories.values.map((entry) => entry.initializer).nonNulls;
 
   FunctionTarget box(ValueType type) => _boxes.putIfAbsent(type, () {
-    final target = FunctionTarget(
-      Uri.parse('dartc:heap'),
-      'box${_boxes.length}',
-      .object,
-      [type],
-    );
+    final target = FunctionTarget(null, 'box${_boxes.length}', .object, [type]);
     _factories[target] = (initializer: null, type: type as ClassType);
     return target;
   });
@@ -64,7 +54,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
   FunctionTarget allocatePayload(ClassType type) =>
       _payloads.putIfAbsent(type, () {
         final target = FunctionTarget(
-          Uri.parse('dartc:heap'),
+          null,
           'payload${_payloads.length}',
           type,
           [.integer],
@@ -285,7 +275,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     ProgramLayout layouts,
   ) => _initializers.putIfAbsent(initializer, () {
     final target = FunctionTarget(
-      Uri.parse('dartc:heap'),
+      null,
       'construct${_initializers.length}',
       .object,
       [

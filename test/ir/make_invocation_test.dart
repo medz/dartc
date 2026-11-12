@@ -10,7 +10,7 @@ MemberSelector _selector(
   String name, [
   FunctionKind kind = .method,
   Uri? library,
-]) => (name: name, kind: kind, privateLibrary: library);
+]) => (name: name, kind: kind, privateScope: library);
 
 Value _get(Block b, Value invocation, String name) =>
     b.emit(DynamicDispatch(invocation, _selector(name, .getter), []));

@@ -12,8 +12,7 @@ import 'program_layout.dart';
 /// Generates lazy bindings in a stable, module-owned root-holder object.
 final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
   final IrCallable? _lateError = lateError;
-  static final _uri = Uri.parse('dartc:globals');
-  final _type = ClassType(_uri, 'Root');
+  final _type = ClassType(null, 'Root');
   final _getters = <GlobalVariable, IrFunction>{};
   final _setters = <GlobalVariable, IrFunction>{};
   final _fields = <GlobalVariable, (InstanceField, InstanceField)>{};
@@ -21,7 +20,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
   late final IrClass declaration;
 
   /// The internal primitive returning the immortal root-holder object.
-  late final FunctionTarget address = .new(_uri, 'address', _type, []);
+  late final FunctionTarget address = .new(null, 'address', _type, []);
 
   this {
     final globals = {for (final function in input) ...function.globals};
@@ -99,7 +98,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
   }
 
   IrFunction _getter(GlobalVariable global, int index, FunctionTarget setter) {
-    final target = FunctionTarget(_uri, 'get.$index', global.type, []);
+    final target = FunctionTarget(null, 'get.$index', global.type, []);
     final entry = Block();
     final base = entry.emit(DirectCall(address, []));
     final (valueField, boundField) = _fields[global]!;
@@ -126,7 +125,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
   }
 
   IrFunction _setter(GlobalVariable global, int index) {
-    final target = FunctionTarget(_uri, 'set.$index', .voidType, [global.type]);
+    final target = FunctionTarget(null, 'set.$index', .voidType, [global.type]);
     final entry = Block(target.parameterTypes);
     final blocks = [entry];
     final (valueField, boundField) = _fields[global]!;

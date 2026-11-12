@@ -8,15 +8,14 @@ final class MapStorage({
   final IrCallable? concurrentModificationError,
   final FunctionTarget Function(ClassType)? allocate,
 }) {
-  static final _uri = Uri.parse('dartc:maps');
   final key = TypeParameterType('K')
     ..initializeBound(.object.nullable)
     ..initializeDefaultType(.dynamicType);
   final value = TypeParameterType('V')
     ..initializeBound(.object.nullable)
     ..initializeDefaultType(.dynamicType);
-  final buffer = ClassType(_uri, '_Buckets');
-  final node = ClassType(_uri, '_Entry');
+  final buffer = ClassType(null, '_Buckets');
+  final node = ClassType(null, '_Entry');
   late final ClassType type, view, iterator;
   late final InstanceField buckets, capacity, length, version, first, last;
   late final InstanceField hash, storedKey, storedValue, chain, next, previous;
@@ -33,17 +32,17 @@ final class MapStorage({
   FunctionTarget? _allocation;
 
   this {
-    type = ClassType.declare(_uri, '_Map', typeParameters: [key, value]);
+    type = ClassType.declare(null, '_Map', typeParameters: [key, value]);
     type.initializeHierarchy(
       superclass: mapBase?.instantiate([key, value]) ?? ValueType.object,
       interfaces: [
         linkedHashMap?.instantiate([key, value]) ?? CoreTypes.mapOf(key, value),
       ],
     );
-    view = ClassType.declare(_uri, '_Keys', typeParameters: [key, value]);
+    view = ClassType.declare(null, '_Keys', typeParameters: [key, value]);
     view.initializeHierarchy(superclass: CoreTypes.iterableOf(key));
     iterator = ClassType.declare(
-      _uri,
+      null,
       '_Iterator',
       typeParameters: [key, value],
     );
@@ -159,7 +158,7 @@ final class MapStorage({
     ValueType result,
     List<ValueType> arguments, [
     FunctionKind kind = FunctionKind.method,
-  ]) => FunctionTarget(_uri, name, result, arguments, owner: owner, kind: kind);
+  ]) => FunctionTarget(null, name, result, arguments, owner: owner, kind: kind);
   IrFunction _define(FunctionTarget target, IrFunction Function() build) =>
       _functions.putIfAbsent((target.owner!, target.kind, target.name), build);
   Constant _int(int n) => Constant.integer(n);
@@ -189,7 +188,7 @@ final class MapStorage({
       _store(b, version, map, _op(b, .add, _load(b, version, map), _int(1)));
 
   void _member(ClassType owner, MemberSelector selector) {
-    if (selector.privateLibrary != null && selector.privateLibrary != _uri) {
+    if (selector.privateScope != null && selector.privateScope != owner) {
       return;
     }
     if (_functions.containsKey((owner, selector.kind, selector.name))) return;

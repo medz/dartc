@@ -88,7 +88,7 @@ final class FunctionContext(
         (
           kind: kind,
           name: name,
-          privateLibrary: name.startsWith('_') ? unit.libraryElement.uri : null,
+          privateScope: name.startsWith('_') ? unit.libraryElement.uri : null,
         ),
         positional,
         named,

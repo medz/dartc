@@ -20,7 +20,7 @@ final class MemberCalls(
     required bool hash,
   }) => _builtins.putIfAbsent((type, hash), () {
     final target = FunctionTarget(
-      Uri.parse('dartc:objects'),
+      null,
       '${type.dartName}.${hash ? 'hash' : 'equals'}',
       hash ? .integer : .boolean,
       [type, if (!hash) .object.nullable],

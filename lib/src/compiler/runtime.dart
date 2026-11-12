@@ -8,17 +8,9 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 
 /// Binds the bundled runtime's external memory operations to trusted IR.
-HeapRuntime bindRuntime(
-  IrProgram program,
-  CheckedLibraries input,
-  Uri library,
-) {
-  final annotations = RuntimeDeclarations(
-    program,
-    input,
-    library.resolve('contracts.dart'),
-  );
-  final memory = library.resolve('memory.dart');
+HeapRuntime bindRuntime(LoweringResult lowered) {
+  var program = lowered.program;
+  final annotations = lowered.runtime;
   final bodies = <IrFunction>[];
   final primitives = <FunctionTarget, MemoryPrimitive>{};
   for (final external in program.externals) {
@@ -91,7 +83,7 @@ HeapRuntime bindRuntime(
   final libraries = {
     for (final function in program.functions)
       if (required.contains(function.target)) function.target.library,
-    memory,
+    for (final primitive in annotations.primitives.keys) primitive.library,
   };
   final functions = program.functions
       .where((f) => libraries.contains(f.target.library))

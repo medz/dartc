@@ -128,11 +128,11 @@ void main() { print(read(E<int>(3))); }
   );
   test('generic representation erasure adds no nominal storage', () {
     expect(
-      fixture.program.classes.where((c) => c.type.library.scheme != 'dart'),
+      fixture.program.classes.where((c) => c.type.library?.scheme != 'dart'),
       isEmpty,
     );
     final ops = fixture.program.functions
-        .where((f) => f.target.library.scheme != 'dart')
+        .where((f) => f.target.library?.scheme != 'dart')
         .expand((f) => f.blocks)
         .expand((b) => b.instructions);
     expect(ops.whereType<Construct>(), isEmpty);

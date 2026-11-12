@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Generated IR classes and functions no longer require a library URI. Pass a null library and retain the same definition object for references; `MemberSelector.privateScope` and `FunctionTarget.privateSelectorScope` preserve source-library or generated-class privacy. Missing generated definitions are rejected. `LoweringResult.runtime` carries bound runtime contracts without retaining analyzer state.
+- Use the SDK's Dart `HashMap` implementations for ordinary, identity and custom equality maps, including Zone storage.
+
 Build a standalone development compiler with `dart run tool/build.dart`. Standard-library and private runtime sources are stored as an indexed binary resource in the executable; source builds use the same archive from the package. Programmatic callers supply `Compiler(target, resources: ...)` with a `SourceArchive`. `AnalysisSession(paths, sdk: ...)` selects a `DartSdk`; private sources require an explicit `sourceArchive`.
 
 `AnalysisSession(resources: ...)` selects libraries from the private source archive to check alongside file inputs. `Compiler` compiles the Dart runtime automatically, including initialization, allocation, precise mark and sweep collection and cleanup. The collector owns ordinary Dart objects in separate control storage and reuses empty heap pages. Direct `CodeGenerator.generate` callers generating managed code supply `runtime: HeapRuntime(...)` with a checked program, allocation, release and event entries, and explicit memory services. Functions marked `NonAllocating` are checked after representation selection to reject allocation, exceptions and foreign calls throughout their call graphs.

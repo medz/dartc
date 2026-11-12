@@ -76,7 +76,10 @@ final class SdkPatches(final OverlayResourceProvider files) {
         '$runtime/print.dart',
       ]);
       _apply(library('async'), ['$runtime/async.dart', '$runtime/timer.dart']);
-      _apply(library('collection'), ['$runtime/hash_map.dart']);
+      final collection = patches('collection')
+          .singleWhere((path) => path.endsWith('/collection_patch.dart'));
+      _official.add(collection);
+      _apply(library('collection'), [collection]);
       _apply(library('_vm'), ['$runtime/vm.dart']);
     }
 

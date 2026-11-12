@@ -94,7 +94,7 @@ void main() {
   test('extension interfaces do not create nominal classes', () {
     expect(
       fixture.program.classes
-          .where((c) => c.type.library.scheme != 'dart')
+          .where((c) => c.type.library?.scheme != 'dart')
           .map((c) => c.type.name)
           .toSet(),
       {'Interface', 'Representation', 'Specialized'},
