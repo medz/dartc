@@ -313,11 +313,11 @@ final class Heap(
   void close() {
     if (_phase == .closed) return;
     if (_phase != .running) objects.corruptHeap();
-    roots.close();
-    _phase = .closed;
     try {
       finalization.finishShutdown();
     } finally {
+      roots.close();
+      _phase = .closed;
       var page = _pages;
       _pages = null;
       while (page != null) {

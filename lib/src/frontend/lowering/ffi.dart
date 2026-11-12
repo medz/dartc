@@ -21,6 +21,7 @@ bool isPointerCast(ExecutableElement member) =>
 ClassType? ffiClass(InterfaceElement element) {
   final library = element.library;
   if (library.uri != _library) return null;
+  if (element == library.getClass('Finalizable')) return FfiTypes.finalizable;
   if (element == library.getClass('NativeType')) return FfiTypes.nativeType;
   if (element == library.getClass('AbiSpecificInteger')) {
     return FfiTypes.abiSpecificInteger;
@@ -92,6 +93,7 @@ Value? lowerFfi(
   Value Function(Instruction) emit, {
   ValueType? result,
   FunctionTarget Function(ExecutableElement)? bind,
+  Map<String, Value> named = const {},
 }) {
   final library = member.library;
   if (library.uri != _library) return null;
@@ -101,6 +103,30 @@ Value? lowerFfi(
   LibraryElement typedData() => library.fragments
       .expand((fragment) => fragment.importedLibraries)
       .firstWhere((library) => library.uri == Uri.parse('dart:typed_data'));
+  Value typedView(
+    Value owner,
+    Value address,
+    Value length,
+    Value bytes,
+    ClassType type,
+  ) {
+    final buffer = emit(
+      DirectCall(bind!(typedData().getTopLevelFunction('_nativeBuffer')!), [
+        owner,
+        address,
+        length,
+        bytes,
+      ]),
+    );
+    return emit(
+      InstanceCall(
+        bind(typedData().getClass('ByteBuffer')!.getMethod('as${type.name}')!),
+        buffer,
+        [const Constant.integer(0), length],
+      ),
+    );
+  }
+
   if (bind != null &&
       result is ClassType &&
       (member == library.getClass('Struct')?.getMethod('create') ||
@@ -172,22 +198,7 @@ Value? lowerFfi(
         FfiTypes.describe((receiver.type as ClassType).typeArguments.single),
       ),
     );
-    final buffer = emit(
-      DirectCall(bind(typedData().getTopLevelFunction('_nativeBuffer')!), [
-        receiver,
-        address,
-        emit(IntBinary(.multiply, length, bytes)),
-      ]),
-    );
-    return emit(
-      InstanceCall(
-        bind(
-          typedData().getClass('ByteBuffer')!.getMethod('as${result.name}')!,
-        ),
-        buffer,
-        [const Constant.integer(0), length],
-      ),
-    );
+    return typedView(receiver, address, length, bytes, result);
   }
   if (access.extendedType is dart.InterfaceType &&
       (access.extendedType as dart.InterfaceType).element == array &&
@@ -286,6 +297,32 @@ Value? lowerFfi(
     }
   }
   if (storage == null) return null;
+  if (bind != null &&
+      member == access.getMethod('asTypedList') &&
+      result is ClassType &&
+      result.library == Uri.parse('dart:typed_data')) {
+    final view = typedView(
+      operands.first,
+      emit(PointerAddress(operands.first)),
+      operands[1],
+      Constant.integer(storage.nativeSize),
+      result,
+    );
+    if (named['finalizer'] case final callback?) {
+      emit(
+        DirectCall(
+          bind(library.getTopLevelFunction('_attachPointerFinalizer')!),
+          [
+            callback,
+            view,
+            operands.first,
+            named['token'] ?? const Constant.nullValue(),
+          ],
+        ),
+      );
+    }
+    return view;
+  }
   final nativeStorage = storage;
   Value load(Value address) {
     final value = emit(LoadNative(address, nativeStorage));

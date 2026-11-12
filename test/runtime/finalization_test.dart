@@ -8,7 +8,79 @@ final class Alive(final Set<Object> values) implements Liveness {
   bool isAlive(Object? value) => values.contains(value);
 }
 
+final class References() implements ReferenceVisitor {
+  final values = <Object?>[];
+  @override
+  void visit(Object? value) => values.add(value);
+}
+
 void main() {
+  test(
+    'native records retain registration, account bytes and run before events',
+    () {
+      final queue = FinalizationQueue(), events = <Object?>[];
+      final native = FinalizerHandle(queue, events.add, isNative: true);
+      final dart = FinalizerHandle(queue, events.add), key = Object();
+      final live = Object();
+      final first = queue.attach(native, Object(), 'native', externalSize: 100);
+      final second = queue.attach(
+        native,
+        live,
+        'cancelled',
+        detachKey: key,
+        externalSize: 200,
+      );
+      final event = queue.attach(dart, Object(), 'dart');
+      final references = References();
+      queue.visitPending(references);
+      expect(references.values, containsAll([first, second]));
+      expect(references.values, isNot(contains(event)));
+      expect(queue.externalBytes, 300);
+      queue.stage(Alive({first, second, event, live}));
+      queue.drainNative();
+      expect(events, ['native']);
+      expect(queue.externalBytes, 200);
+      native.detach(key);
+      native.detach(key);
+      expect(queue.externalBytes, 0);
+      EventLoop(queue).run();
+      queue.finishShutdown();
+      expect(events, ['native', 'dart']);
+      expect(() => queue.attach(native, Object(), null), throwsStateError);
+    },
+  );
+
+  test('shutdown delivers native callbacks once, including live targets', () {
+    final queue = FinalizationQueue(), events = <Object?>[];
+    final native = FinalizerHandle(queue, events.add, isNative: true);
+    final first = queue.attach(native, Object(), 'attached', externalSize: 32);
+    final second = queue.attach(native, Object(), 'queued', externalSize: 64);
+    queue.stage(Alive({first, second, first.target!}));
+    queue.finishShutdown();
+    queue.finishShutdown();
+    expect(events, ['attached', 'queued']);
+    expect(queue.externalBytes, 0);
+    expect(first.state, FinalizationState.delivered);
+    expect(second.state, FinalizationState.delivered);
+  });
+
+  test('external allocation sizes are checked before registration', () {
+    final queue = FinalizationQueue();
+    final owner = FinalizerHandle<Object?>(queue, (_) {}, isNative: true);
+    expect(
+      () => queue.attach(owner, Object(), null, externalSize: -1),
+      throwsRangeError,
+    );
+    queue.attach(owner, Object(), null, externalSize: 0x7fffffffffffffff);
+    expect(
+      () => queue.attach(owner, Object(), null, externalSize: 1),
+      throwsRangeError,
+    );
+    expect(queue.externalBytes, 0x7fffffffffffffff);
+    queue.finishShutdown();
+    expect(queue.externalBytes, 0);
+  });
+
   test('microtasks precede events and reentry cannot drain the next event', () {
     final queue = FinalizationQueue(), events = <String>[];
     final loop = EventLoop(queue);

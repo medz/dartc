@@ -365,6 +365,7 @@ FunctionReferences verifyCallable(
             op is! ReadCell &&
             op is! CopyCell &&
             op is! WriteCell &&
+            op is! KeepAlive &&
             op is! MakeClosure) {
           throw StateError('Capture storage used as a Dart value.');
         }

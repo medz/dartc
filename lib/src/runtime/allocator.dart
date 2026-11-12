@@ -19,11 +19,16 @@ final class Allocator(
   final Heap heap = Heap(objects, roots, finalization);
   int _identityHash = 0;
   int _allocatedBytes = 0, _collectionBudget = 65536;
+  int _externalAtCollection = 0;
 
   void _collect() {
     heap.collect();
+    finalization.drainNative();
     _allocatedBytes = 0;
-    final live = heap.liveBytes;
+    _externalAtCollection = finalization.externalBytes;
+    final live = heap.liveBytes > 0x7fffffffffffffff - _externalAtCollection
+        ? 0x7fffffffffffffff
+        : heap.liveBytes + _externalAtCollection;
     _collectionBudget = live > 65536 ? live : 65536;
   }
 
@@ -33,7 +38,10 @@ final class Allocator(
     if (size == 0) return 0;
     var page = heap.availablePage(size);
     var collected = false;
-    if (page == null && _allocatedBytes >= _collectionBudget) {
+    final externalGrowth = finalization.externalBytes > _externalAtCollection
+        ? finalization.externalBytes - _externalAtCollection
+        : 0;
+    if (page == null && _allocatedBytes >= _collectionBudget - externalGrowth) {
       _collect();
       collected = true;
       page = heap.availablePage(size);

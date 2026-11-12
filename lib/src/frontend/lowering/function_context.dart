@@ -246,7 +246,7 @@ final class FunctionContext(
       }
       unsupported(unit, site, 'asFunction Dart function type');
     }
-    if (args.named.isEmpty && memberTypes.isEmpty) {
+    if (memberTypes.isEmpty) {
       final value = lowerFfi(
         application.executable.declaration,
         [receiver, ...args.positional],
@@ -255,6 +255,7 @@ final class FunctionContext(
             .instantiate(application.typeArguments)
             .result,
         bind: (member) => bindings.target(member, unit, site),
+        named: args.named,
       );
       if (value != null) return normal(value);
     }
@@ -371,15 +372,54 @@ final class FunctionContext(
   Jump? get _unwind =>
       handler?.edge([UnwindValue.exception, UnwindValue.stackTrace]);
 
+  List<Value> _finalizables([Iterable<Element>? variables]) => [
+    if (variables == null &&
+        receiver != null &&
+        FfiTypes.includesFinalizable(receiver!.type))
+      receiver!,
+    for (final variable in variables ?? _locals.keys)
+      if (variable is VariableElement &&
+          FfiTypes.includesFinalizable(typeOf(variable.type, unit.unit)))
+        _locals[variable]!,
+  ];
+
+  /// Retains current bindings without reading uninitialized late storage.
+  void retainFinalizables([Iterable<Element>? variables]) {
+    if (current == null) return;
+    for (final value in _finalizables(variables)) {
+      current!.emit(KeepAlive(value));
+    }
+  }
+
+  Jump? _retainingUnwind(List<Value> values) {
+    if (values.isEmpty) return _unwind;
+    final cleanup = addBlock([.object, .stackTrace]);
+    for (final value in values) {
+      cleanup.emit(KeepAlive(value));
+    }
+    cleanup.finish(
+      Throw(
+        cleanup.parameters[0],
+        stackTrace: cleanup.parameters[1],
+        onThrow: _unwind,
+      ),
+    );
+    return Jump(cleanup, [UnwindValue.exception, UnwindValue.stackTrace]);
+  }
+
   /// Emits [operation], capturing the local values at this site if it can throw.
   Value emit(Instruction operation) {
-    if (handler == null || !operation.mayThrow) return current!.emit(operation);
+    if (!operation.mayThrow) return current!.emit(operation);
+    final retained = operation.type == .never
+        ? _finalizables()
+        : const <Value>[];
+    if (handler == null && retained.isEmpty) return current!.emit(operation);
     final next = operation.type == .never ? null : addBlock([operation.type]);
     current!.finish(
       Invoke(
         operation,
         onReturn: next == null ? null : Jump(next, [operation]),
-        onThrow: _unwind!,
+        onThrow: _retainingUnwind(retained)!,
       ),
     );
     current = next;
@@ -396,7 +436,7 @@ final class FunctionContext(
         operand,
         result,
         onResume: next == null ? null : Jump(next, [result]),
-        onThrow: _unwind,
+        onThrow: type == .never ? _retainingUnwind(_finalizables()) : _unwind,
       ),
     );
     current = next;
@@ -405,7 +445,13 @@ final class FunctionContext(
 
   /// Throws to the active handler or caller, preserving [stackTrace] for a rethrow.
   void raise(Value exception, [Value? stackTrace]) {
-    current!.finish(Throw(exception, stackTrace: stackTrace, onThrow: _unwind));
+    current!.finish(
+      Throw(
+        exception,
+        stackTrace: stackTrace,
+        onThrow: _retainingUnwind(_finalizables()),
+      ),
+    );
     current = null;
   }
 
@@ -429,6 +475,7 @@ final class FunctionContext(
     final converted = normal(convert(value, typeOf(variable.type, unit.unit)));
     if (converted == null) return;
     value = converted;
+    retainFinalizables([variable]);
     if (stored.type is CellType) {
       emit(WriteCell(stored, value));
     } else {
@@ -527,6 +574,7 @@ final class FunctionContext(
   void inScope(void Function() lower) {
     final mark = _declared.length, mutableMark = mutableLocals.length;
     lower();
+    retainFinalizables(_declared.skip(mark));
     while (_declared.length > mark) {
       _locals.remove(_declared.removeLast());
     }
@@ -809,6 +857,7 @@ final class JumpTarget._(
 
   /// Transfers the open path, if any, to this target.
   void jump([List<Value> inputs = const []]) {
+    _context.retainFinalizables();
     _context.current?.finish(edge(inputs));
     _context.current = null;
   }

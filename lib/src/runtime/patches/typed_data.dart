@@ -1,6 +1,7 @@
 import 'dart:collection' show ListBase;
 import 'dart:_internal' show FixedLengthListMixin;
 import 'dart:math' show Random;
+import 'dart:ffi' show Finalizable;
 
 import '../../../layout/memory.dart';
 import '../memory.dart';
@@ -155,8 +156,20 @@ TypedData _nativeStorage(TypedData? data, int offset, int size) {
 int _nativeAddress(TypedData data) =>
     (data.buffer as _Buffer)._address + data.offsetInBytes;
 
-ByteBuffer _nativeBuffer(Object owner, int address, int length) =>
-    _Buffer(owner, address, length);
+ByteBuffer _nativeBuffer(
+  Object owner,
+  int address,
+  int length,
+  int elementSize,
+) {
+  RangeError.checkValueInInterval(
+    length,
+    0,
+    0x7fffffffffffffff ~/ elementSize,
+    'length',
+  );
+  return _Buffer(owner, address, length * elementSize);
+}
 
 enum _Element(
   final int bytes, {
@@ -182,7 +195,7 @@ final class _Buffer(
   final int _address,
   final int lengthInBytes, {
   final bool _writable = true,
-}) implements ByteBuffer {
+}) implements ByteBuffer, Finalizable {
   factory allocate(int length) {
     final data = ByteStorage.allocate(length);
     return .new(

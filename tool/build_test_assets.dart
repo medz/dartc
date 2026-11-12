@@ -34,6 +34,7 @@ import '../test/linker/fixtures/addresses.dart';
 import '../test/linker/fixtures/finalizers.dart';
 import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/compiler/fixtures/managed_objects_assets.dart';
+import '../test/compiler/fixtures/native_finalizers_assets.dart';
 import '../test/support/native_assets.dart';
 import '../test/support/runtime.dart';
 
@@ -74,6 +75,7 @@ const _compilerLibraries = {
   'weak_references',
   'expandos',
   'finalizers',
+  'native_finalizers',
   'numeric_boxes',
   'exceptions',
   'type_checks',
@@ -284,6 +286,20 @@ Future<void> main(List<String> args) async {
       'native_floats': 'float',
       'pointer_arithmetic': 'index',
     };
+    if (selected.contains('native_finalizers')) {
+      await shared([
+        nativeFinalizerCallback(target),
+      ], assets.library('compiler/native_finalizer_callback'));
+      final entry = await Compiler(target).compile(
+        ['test/compiler/fixtures/native_finalizers_entry.dart'],
+        output: const .executable(),
+        nativeSymbols: const {
+          'finalizer-test': {'callback': 'finalizer_callback'},
+        },
+        linkInputs: [.object(nativeFinalizerExit(target))],
+      );
+      await entry.write(assets.file('compiler/entry_native_finalizers'));
+    }
     late final data = dataModules(target);
     for (final name in {
       for (final fixture in selected) ?storageNames[fixture],

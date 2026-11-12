@@ -392,20 +392,16 @@ base class ScalarCodeGenerator<R extends Object>(
       final destination = emitter.convention.classify(
         NativeSignature(Void, [Int64]),
       );
-      final frame = emitter.convention.frameLayout(
-        localBytes: 0,
-        localAlignment: 8,
-        savedRegisters: [],
-        outgoingStackBytes: destination.stackBytes,
-      );
+      final context = entry(emitter)!;
+      final frame = context.frame(destination.stackBytes);
       emitter.prologue(frame);
+      context.enter(frame);
       final argument =
           (destination.parameters.single as RegisterArgument<R>).register;
-      emitter.address(
-        argument,
-        (fixup) => contextAddresses.add((code.length, fixup)),
-      );
+      emitter.move(argument, emitter.heapRegister);
       call(emitter.call(), heap.release);
+      safepoint(emitter.position, StackRoots(0, 0, []));
+      context.restoreCaller(frame);
       emitter.epilogue(frame);
       return emitter.finish();
     }

@@ -160,18 +160,6 @@ final class HeapEntry<R extends Object>(
       emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
       emitter.bind(finished);
     }
-    if (persistent) {
-      emitter.loadStack(
-        emitter.failureRegister,
-        frame.localOffset + RuntimeContext.previousEntry,
-      );
-      emitter.storeMemory(
-        emitter.failureRegister,
-        emitter.heapRegister,
-        offset: RuntimeContext.active,
-        bytes: 8,
-      );
-    }
     void releaseHeap() {
       final location =
           emitter.convention
@@ -181,6 +169,7 @@ final class HeapEntry<R extends Object>(
               as RegisterArgument<R>;
       emitter.move(location.register, emitter.heapRegister);
       call(emitter.call(), releaseFunction);
+      safepoint(emitter.position);
     }
 
     if (!persistent || release) {
@@ -192,6 +181,7 @@ final class HeapEntry<R extends Object>(
       releaseHeap();
       emitter.bind(retained);
     }
+    restoreCaller(frame);
     emitter.loadStack(emitter.failureRegister, frame.localOffset + _failure);
     final returned = emitter.label();
     emitter.jumpIfZero(emitter.failureRegister, returned);
@@ -207,5 +197,20 @@ final class HeapEntry<R extends Object>(
     emitter.reportFailure(uncaught, uncaughtMessage.length);
     emitter.bind(returned);
     if (result != null) emitter.loadStack(result, frame.localOffset + _result);
+  }
+
+  /// Unlinks this entry after callbacks and heap release have finished.
+  void restoreCaller(FrameLayout<R> frame) {
+    if (!persistent) return;
+    emitter.loadStack(
+      emitter.failureRegister,
+      frame.localOffset + RuntimeContext.previousEntry,
+    );
+    emitter.storeMemory(
+      emitter.failureRegister,
+      emitter.heapRegister,
+      offset: RuntimeContext.active,
+      bytes: 8,
+    );
   }
 }

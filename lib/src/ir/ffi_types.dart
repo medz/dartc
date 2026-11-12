@@ -3,10 +3,26 @@ import 'dart:ffi' as ffi;
 import 'package:dartc/interop.dart';
 
 import 'type.dart';
+import 'core_types.dart';
 
 /// Canonical Dart FFI declaration identities, independent of pointer layout.
 abstract final class FfiTypes() {
   static final _library = Uri.parse('dart:ffi');
+
+  /// Objects whose lexical variables retain their resources until scope exit.
+  static final finalizable = ClassType(
+    _library,
+    'Finalizable',
+    isAbstract: true,
+  );
+
+  /// Whether a static variable type has the Finalizable lifetime guarantee.
+  static bool includesFinalizable(ValueType type) {
+    type = type.nonNullable;
+    if (type == .never) return false;
+    if (type is FutureOrType) return includesFinalizable(type.argument);
+    return CoreTypes.view(type, finalizable) != null;
+  }
 
   /// The bound of native type arguments.
   static final nativeType = ClassType(_library, 'NativeType', isAbstract: true);

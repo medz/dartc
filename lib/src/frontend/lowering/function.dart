@@ -271,6 +271,7 @@ final class FunctionLowering._(
       value = context.normal(context.convert(value, _bodyReturnType));
       if (value == null) return;
     }
+    context.retainFinalizables();
     if (_finally case final region?) {
       region.returnValue(value);
       return;

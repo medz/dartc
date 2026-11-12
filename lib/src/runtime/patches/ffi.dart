@@ -1,4 +1,59 @@
+import 'dart:_internal' show checkValidWeakTarget;
+
 import '../memory.dart';
+import '../allocator.dart' as allocator;
+import '../finalization.dart' as finalization;
+
+@patch
+class NativeFinalizer {
+  @patch
+  factory NativeFinalizer(Pointer<NativeFinalizerFunction> callback) =>
+      _NativeFinalizer(callback);
+}
+
+final class _NativeFinalizer(Pointer<NativeFinalizerFunction> callback)
+    extends finalization.FinalizerHandle<Pointer<Void>>
+    implements NativeFinalizer {
+  this
+    : super(
+        allocator.events().finalizers,
+        callback.asFunction<void Function(Pointer<Void>)>(isLeaf: true),
+        isNative: true,
+      ) {
+    if (callback.address == 0) throw ArgumentError.value(callback, 'callback');
+  }
+
+  @override
+  void attach(
+    covariant Finalizable value,
+    Pointer<Void> token, {
+    Object? detach,
+    int? externalSize,
+  }) {
+    if (detach != null) checkValidWeakTarget(detach, 'detach');
+    queue.attach(
+      this,
+      value,
+      token,
+      detachKey: detach,
+      externalSize: externalSize ?? 0,
+    );
+  }
+}
+
+void _attachPointerFinalizer(
+  Pointer<NativeFinalizerFunction>? callback,
+  TypedData data,
+  Pointer pointer,
+  Pointer<Void>? token,
+) {
+  if (callback == null) return;
+  NativeFinalizer(callback).attach(
+    data.buffer as Finalizable,
+    token ?? pointer.cast<Void>(),
+    externalSize: data.lengthInBytes,
+  );
+}
 
 @patch
 class Array<T extends NativeType> {
