@@ -19,7 +19,16 @@ import 'type.dart';
 abstract class const Value(
   /// The semantic or compiler storage type, independent of machine locations.
   final ValueType type,
-);
+) {
+  /// The operand type before statically justified upcasts.
+  ValueType get unviewedType {
+    Value value = this;
+    while (value is TypeView) {
+      value = value.operand;
+    }
+    return value.type;
+  }
+}
 
 /// An edge-only result supplied by one Await's successful resumption.
 ///

@@ -810,6 +810,7 @@ final class Bindings({
     final container = element.enclosingElement;
     if (element.library.isDartCore &&
         !element.isStatic &&
+        element.isAbstract &&
         container is InterfaceElement &&
         const {'int', 'double', 'num'}.contains(container.name)) {
       for (final name in switch (container.name) {
@@ -951,7 +952,7 @@ final class Bindings({
       }
       final numeric =
           container is InterfaceElement &&
-          _numericImplementation(container) != null;
+          (owner == ValueType.integer || owner == ValueType.floating);
       if (numeric) _numericClasses.add(owner!);
       if (element.library.isDartCore && container?.name == 'num') {
         _numericClasses.add(ValueType.number);

@@ -828,7 +828,7 @@ final class FunctionRepresentation(
                   for (final entry
                       in (virtual
                               ? members.targetsFor(
-                                  member?.owner ?? receiver.type,
+                                  receiver.unviewedType,
                                   member?.selector ??
                                       switch (instruction) {
                                         Equals() => (

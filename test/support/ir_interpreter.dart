@@ -350,7 +350,16 @@ final class IrInterpreter(
       throw _noSuchMethodError(arguments[0], arguments[1]!);
     }
     if (_isObjectToString(target)) {
-      return (arguments.single as _Instance).defaultString;
+      final receiver = arguments.single;
+      return receiver is _Instance
+          ? receiver.defaultString
+          : _dynamicBridge(
+              receiver,
+              _selector('toString'),
+              const [],
+              const {},
+              const [],
+            );
     }
     if (target == _symbolToString) return arguments.first.toString();
     if (arguments.firstOrNull case final _Instance instance

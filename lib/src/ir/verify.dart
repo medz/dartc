@@ -8,8 +8,9 @@ import 'value.dart';
 typedef FunctionReferences = ({
   Set<FunctionTarget> closures,
   Set<FunctionTarget> callees,
-  Set<FunctionTarget> virtualMembers,
-  Set<({FunctionTarget method, bool direct})> methodTearOffs,
+  Set<({ValueType receiver, FunctionTarget target})> virtualMembers,
+  Set<({ValueType receiver, FunctionTarget method, bool direct})>
+  methodTearOffs,
   Set<({ValueType receiver, MemberSelector selector})> implicitMembers,
   Set<ClassType> instantiatedClasses,
   Set<GlobalVariable> globals,
@@ -32,8 +33,9 @@ FunctionReferences verifyCallable(
 }) {
   Set<FunctionTarget>? closures;
   Set<FunctionTarget>? callees;
-  Set<FunctionTarget>? virtualMembers;
-  Set<({FunctionTarget method, bool direct})>? methodTearOffs;
+  Set<({ValueType receiver, FunctionTarget target})>? virtualMembers;
+  Set<({ValueType receiver, FunctionTarget method, bool direct})>?
+  methodTearOffs;
   Set<({ValueType receiver, MemberSelector selector})>? implicitMembers;
   Set<ClassType>? instantiatedClasses;
   Set<GlobalVariable>? globals;
@@ -51,10 +53,10 @@ FunctionReferences verifyCallable(
       ...checkedTypes,
       ...scope,
       ?target.owner,
-      for (final callee in [...?callees, ...?virtualMembers]) ...[
-        callee.signature,
-        ?callee.owner,
-      ],
+      for (final callee in [
+        ...?callees,
+        for (final member in virtualMembers ?? const {}) member.target,
+      ]) ...[callee.signature, ?callee.owner],
     ]);
     return (
       closures: _snapshot(closures),
@@ -302,9 +304,12 @@ FunctionReferences verifyCallable(
         case LoadLibrary(:final reference) ||
             CheckLibraryLoaded(:final reference):
           (deferredImports ??= {}).add(reference);
-        case InstanceCall(member: final callee) ||
-            BindMethod(method: final callee, direct: false):
-          (virtualMembers ??= {}).add(callee);
+        case InstanceCall(member: final callee, :final receiver) ||
+            BindMethod(method: final callee, :final receiver, direct: false):
+          (virtualMembers ??= {}).add((
+            receiver: receiver.unviewedType,
+            target: callee,
+          ));
         case DirectCall(target: final callee) ||
             BindMethod(method: final callee) ||
             Construct(initializer: final callee):
@@ -318,8 +323,12 @@ FunctionReferences verifyCallable(
           break;
       }
       switch (op) {
-        case BindMethod(:final method, :final direct):
-          (methodTearOffs ??= {}).add((method: method, direct: direct));
+        case BindMethod(:final method, :final direct, :final receiver):
+          (methodTearOffs ??= {}).add((
+            receiver: receiver.unviewedType,
+            method: method,
+            direct: direct,
+          ));
         case NativeView(type: final ClassType type) ||
             NewPayload(type: final ClassType type):
           (instantiatedClasses ??= {}).add(type.declaration);

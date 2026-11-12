@@ -10,7 +10,9 @@ void main() {
 
   test('SDK calls retain declaration identity and available source bodies', () {
     final calls = fixture.program.functions.expand(
-      (function) => function.callees.followedBy(function.virtualMembers),
+      (function) => function.callees.followedBy(
+        function.virtualMembers.map((m) => m.target),
+      ),
     );
     expect(
       calls

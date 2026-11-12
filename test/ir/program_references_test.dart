@@ -148,7 +148,11 @@ void main() {
     constantEntry.finish(
       Return(
         constantEntry.emit(
-          InstanceCall(declaration, ObjectConstant(second, {}), []),
+          InstanceCall(
+            declaration,
+            constantEntry.emit(TypeView(ObjectConstant(second, {}), face)),
+            [],
+          ),
         ),
       ),
     );
@@ -190,7 +194,7 @@ void main() {
       externals: [IrExternal(readUnused)],
     );
     expect(root.callees, {newFirst});
-    expect(root.virtualMembers, {declaration});
+    expect(root.virtualMembers, {(receiver: first, target: declaration)});
     expect(root.instantiatedClasses, {first, ValueType.integer});
     expect(reference.instantiatedClasses, {second});
     expect(reference.functionConstants.single.target, same(factory));
@@ -209,6 +213,10 @@ void main() {
       constantRoot.target,
       readSecond,
     });
+    expect(
+      program.reachableFrom([constantRoot.target], instantiatedTypes: [unused]),
+      {constantRoot.target, readSecond},
+    );
     expect(program.reachableFrom([supplied.target]), {supplied.target});
     expect(
       program.reachableFrom([supplied.target], instantiatedTypes: [first]),

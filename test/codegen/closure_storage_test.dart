@@ -178,7 +178,9 @@ void main() {
       ),
       [receiver],
     );
-    expect(caller.methodTearOffs, {(method: method, direct: true)});
+    expect(caller.methodTearOffs, {
+      (receiver: receiver.parameters.single.type, method: method, direct: true),
+    });
     expect(() => caller.methodTearOffs.clear(), throwsUnsupportedError);
   });
 

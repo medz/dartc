@@ -254,8 +254,8 @@ final class IrProgram(
         }
       }
       for (final member in [
-        for (final target in body.virtualMembers)
-          (receiver: target.owner!, selector: target.selector),
+        for (final member in body.virtualMembers)
+          (receiver: member.receiver, selector: member.target.selector),
         ...body.implicitMembers,
       ]) {
         if (members.add(member)) {
@@ -560,7 +560,9 @@ final class IrProgram(
       }
       if (f.target.owner case final owner?) definitionOf(owner);
       f.referencedClasses.forEach(definitionOf);
-      f.callees.followedBy(f.virtualMembers).forEach(checkTarget);
+      f.callees
+          .followedBy(f.virtualMembers.map((m) => m.target))
+          .forEach(checkTarget);
       for (final field in f.fields) {
         final c = definitionOf(field.owner);
         if (c != null && !c.fields.contains(field)) {

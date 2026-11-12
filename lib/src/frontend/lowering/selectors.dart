@@ -441,7 +441,8 @@ final class SelectorChain(
             member is MethodElement &&
             member.library.isDartCore &&
             member.enclosingElement?.name == 'Object' &&
-            name == 'toString') {
+            name == 'toString' &&
+            (known.type.mayBeNull || known.type.classBound == null)) {
       final invocation = getterArguments ?? arguments;
       final args = context.dynamicArguments(invocation, evaluate);
       if (args == null) return null;

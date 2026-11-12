@@ -57,11 +57,13 @@ final class MemberCalls(
     for (final target in definitions)
       for (final tearOff
           in program.implementationOf(target)?.methodTearOffs ??
-              const <({FunctionTarget method, bool direct})>{})
+              const <
+                ({ValueType receiver, FunctionTarget method, bool direct})
+              >{})
         if (tearOff.direct)
           tearOff.method
         else
-          ...targetsFor(tearOff.method.owner!, tearOff.method.selector).values,
+          ...targetsFor(tearOff.receiver, tearOff.method.selector).values,
   };
 
   Map<ClassType, FunctionTarget> targetsFor(

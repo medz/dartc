@@ -92,7 +92,7 @@ void main() {
     final function = fixture.program.functions.singleWhere(
       (f) => f.target.name == 'subtractDuration',
     );
-    expect(function.virtualMembers.single.owner!.name, 'Duration');
-    expect(function.virtualMembers.single.name, '-');
+    expect(function.virtualMembers.single.target.owner!.name, 'Duration');
+    expect(function.virtualMembers.single.target.name, '-');
   });
 }

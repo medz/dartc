@@ -67,6 +67,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         '$runtime/core.dart',
         '$runtime/list.dart',
         '$runtime/string.dart',
+        '$runtime/integer.dart',
       ]);
       final internal = patches('_internal')
           .singleWhere((path) => path.endsWith('/internal_patch.dart'));

@@ -57,6 +57,12 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 原生 `<<`、`>>`、`>>>` 及其复合赋值保留完整的位移计数。左移按 64 位回绕，算术右移补符号位，逻辑右移补零；计数大于等于 64 时，左移和逻辑右移为 0，算术右移为 0 或 -1。负计数抛出 ArgumentError，操作数只求值一次，忽略结果仍须抛错。错误的 message 保留负计数这个 int，name 与 invalidValue 为 null；这一载荷对应当前固定 SDK 的库行为，不扩大为跨版本语言保证。构造器与属性读取使用 SDK 的普通 Dart 实现，用户重写仍按实际接收者派发。见 [int 的原生整数范围](https://api.dart.dev/dart-core/int-class.html)、[逻辑右移规范](https://github.com/dart-lang/language/blob/main/accepted/2.14/triple-shift-operator/feature-specification.md)和[原生边界验证](../test/compiler/integer_operations_test.dart)。
 
+## 整数文本转换
+
+`int.parse`、`int.tryParse`、`int.toString` 和 `int.toRadixString` 支持原生执行，包括静态及绑定方法值。进制为 2–36，字母数字不区分大小写，允许前导正负号和外围 Unicode 空白；显式进制的结果必须落在有符号 64 位范围内。省略 radix 的正数 `0x`/`0X` 前缀允许完整无符号 64 位值，并按相同位模式解释为有符号 int。无效文本和溢出使 parse 抛出 FormatException、tryParse 返回 null；异常保留原 source。无效进制的非空输入抛出 RangeError。格式化使用小写数字，对最小 int 也满足往返契约。FormatException 的具体消息和错误定位不承诺与 SDK 实现逐字相同。
+
+调用点仍能证明值为 int 时，通过 num/Object 视图调用 toString 使用整数实现；一般动态格式化和 double 格式化仍未接通。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
+
 ## 原生转整数与字符串常量
 
 `abs`、`sign`、`isNaN`、`isInfinite`、`isFinite`、`isNegative`、`compareTo` 和 `clamp` 支持 int、double 及装箱 num，包括直接调用、虚调用和方法提取。保留整数边界、负零、NaN 的排序及无效上下界的 ArgumentError；clamp 返回选中的原值或边界值。装箱 num 的加、减、乘、除、取负和 toDouble 根据实际数值类型执行，支持跨调用、返回及泛型传值。见[原生数值方法验证](../test/compiler/numeric_methods_test.dart)及[固定 SDK num 契约](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/num.dart)。
