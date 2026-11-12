@@ -1,3 +1,0 @@
-analyzer:
-  errors:
-    experiment_not_enabled: ignore
