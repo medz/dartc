@@ -54,6 +54,8 @@ final class SdkPatches(final OverlayResourceProvider files) {
         for (final part in _parse(core).directives.whereType<PartDirective>())
           if (selected.remove(part.uri.stringValue))
             coreUri.resolve(part.uri.stringValue!).toFilePath(),
+        patches('core')
+            .singleWhere((path) => path.endsWith('/bool_patch.dart')),
       ];
       if (selected.isNotEmpty) {
         throw FormatException(

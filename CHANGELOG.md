@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Parse booleans with `bool.parse` and `bool.tryParse`, using the SDK's Dart implementation. Preserve default and explicit ASCII case sensitivity, function values, null results and FormatException source values.
 - Parse integers with `int.parse` and `int.tryParse`, and format them with `toString` and `toRadixString`. Support bases 2–36, signs, surrounding whitespace, signed 64-bit limits and unsigned default hexadecimal literals, including method values. Invalid input and overflow remain catchable.
 - Preserve receiver types in virtual calls and method values when selecting native definitions. IR clients now read `(receiver, target)` entries from `virtualMembers` and `(receiver, method, direct)` entries from `methodTearOffs`; `Value.unviewedType` exposes the type before static upcasts. Integer calls through proven `Object` and `num` views no longer require unrelated floating-point formatting bodies.
 - Use String slicing, searching, replacement callbacks, splitting, padding, repetition, Unicode whitespace trimming and rune iteration in native code. String and custom Pattern implementations preserve empty matches, UTF-16 offsets and callback order; results remain live across collection and native calls. Unicode case conversion and RegExp remain unimplemented.

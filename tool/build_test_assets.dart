@@ -53,6 +53,7 @@ const _compilerLibraries = {
   'numeric_conversions',
   'numeric_methods',
   'integer_text',
+  'boolean_text',
   'scalar_globals',
   'managed_globals',
   'late_fields',
