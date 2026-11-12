@@ -248,6 +248,12 @@ final class SdkPatches(final OverlayResourceProvider files) {
         _ => null,
       };
       if (external == null) {
+        // Internal platform bodies can depend on VM-specific representations.
+        if (ownerUri == Uri.parse('dart:_internal') &&
+            declaration is MethodDeclaration) {
+          edit(path, declaration.body.offset, declaration.body.end, ';');
+          return;
+        }
         if (declaration is MethodDeclaration &&
             declaration.body is EmptyFunctionBody) {
           return;

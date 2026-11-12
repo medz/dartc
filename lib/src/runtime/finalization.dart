@@ -26,7 +26,7 @@ abstract base class FinalizerRegistration(
 /// Converts tokens at callback delivery, outside the collector's tracing phase.
 base class FinalizerHandle<T>(
   super.queue,
-  final void Function(T) callback, {
+  final void Function(T) _callback, {
   super.isNative,
 }) extends FinalizerRegistration {
   @override
@@ -34,7 +34,7 @@ base class FinalizerHandle<T>(
       super.attach(value, token, detach: detach);
 
   @override
-  void _invoke(Object? token) => callback(token as T);
+  void _invoke(Object? token) => _callback(token as T);
 }
 
 /// Retains its token, but neither its target nor the collector's registry links.

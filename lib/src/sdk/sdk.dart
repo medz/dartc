@@ -15,14 +15,14 @@ final class DartSdk(final SourceArchive sources) {
   }
 
   /// The fixed standard library version.
-  static const version = '3.13.7';
+  static const version = '3.14.0';
 
   /// The official commit containing the bundled source files.
-  static const sourceRevision = '416e33b0ffaef062a60ec966bb8c82ed2b83f128';
+  static const sourceRevision = 'fa8c1270c374c1346931583a17c3b7f278d3822d';
 
   /// The SHA-256 of sorted file names and their original content digests.
   static const sourceFingerprint =
-      'a054ede359302c352757ea57878e5e4033c6c955a9d4e2da3ec02c4087dc8b8e';
+      '8ad9594aa0ffc4f7e0ea85f1877db1f4cab76aeecacf868e7afbcd6c90f95f28';
 
   /// Loads the fixed sources shipped in this Dart package.
   ///

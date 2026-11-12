@@ -3,6 +3,8 @@ import 'package:dartc/ir.dart';
 /// Builds checked numeric operations with ordinary control flow and exceptions.
 final class NumericOperations({
   IrCallable? argumentError,
+  final FunctionTarget? floatingRemainder,
+  final FunctionTarget? floatingModulo,
   IrCallable? unsupportedError,
 }) {
   final IrCallable? _argumentError = argumentError;
@@ -26,6 +28,12 @@ final class NumericOperations({
       .followedBy(_doubleRoundings.values);
 
   FunctionTarget? callFor(Instruction instruction) {
+    if (instruction
+        case NumericBinary(:final operator, :final left, :final right)
+        when left.type == .floating && right.type == .floating) {
+      if (operator == .modulo) return floatingModulo;
+      if (operator == .remainder) return floatingRemainder;
+    }
     if (_nativeOperations.contains(instruction)) return null;
     if (instruction
         case IntBinary(
@@ -62,6 +70,8 @@ final class NumericOperations({
     if (instruction
         case NumericBinary(:final operator, :final left, :final right)
         when operator == .truncateDivide ||
+            (operator == .modulo || operator == .remainder) &&
+                left.type != right.type ||
             !_unboxed(left.type) ||
             !_unboxed(right.type)) {
       return _binary(operator, left.type, right.type).target;
@@ -161,8 +171,16 @@ final class NumericOperations({
         final result = entry.emit(
           NumericBinary(
             operator == .truncateDivide ? .divide : operator,
-            left,
-            right,
+            (operator == .modulo || operator == .remainder) &&
+                    left.type == .integer &&
+                    right.type == .floating
+                ? entry.emit(NumericToDouble(left))
+                : left,
+            (operator == .modulo || operator == .remainder) &&
+                    right.type == .integer &&
+                    left.type == .floating
+                ? entry.emit(NumericToDouble(right))
+                : right,
           ),
         );
         entry.finish(

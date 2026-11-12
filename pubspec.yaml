@@ -7,7 +7,7 @@ executables:
   dartc:
 
 environment:
-  sdk: ^3.13.7
+  sdk: ^3.14.0
 
 dependencies:
   # Resolved metadata uses the isolated analyzer compatibility adapter.

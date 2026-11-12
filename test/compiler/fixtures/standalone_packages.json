@@ -5,7 +5,7 @@
       "name": "dartc",
       "rootUri": "../dependency",
       "packageUri": "lib/",
-      "languageVersion": "3.13"
+      "languageVersion": "3.14"
     }
   ]
 }

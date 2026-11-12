@@ -80,8 +80,8 @@ void main() {
         ValueType.object.nullable,
         ValueType.object.nullable,
         ValueType.floating,
-        TypeValues.type,
-        TypeValues.type,
+        TypeMetadata.type,
+        TypeMetadata.type,
       ]);
       final program = IrProgram([
         ...storage.classes,
@@ -151,14 +151,14 @@ void main() {
     final storage = ClosureStorage([body(method)], boundMethods: [method]);
     final shape = storage.methods[method]!;
     expect(shape.target, same(method));
-    expect(shape.captures.single.type, ValueType.object);
+    expect(shape.captures.single.type, ValueType.object.nullable);
     expect(shape.parameters, [t]);
     expect(shape.typeArguments, [u]);
     expect(shape.signature, method.reifiedSignature);
     expect(shape.initializer!.signature.parameters, [
       ValueType.integer,
-      ValueType.object,
-      TypeValues.type,
+      ValueType.object.nullable,
+      TypeMetadata.type,
     ]);
     IrProgram([...storage.classes, ...TypeValues().classes], storage.functions);
 

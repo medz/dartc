@@ -164,3 +164,5 @@ export 'src/ir/value.dart'
         Value;
 
 export 'src/ir/core_types.dart' show CoreTypes;
+
+export 'src/ir/type_metadata.dart';

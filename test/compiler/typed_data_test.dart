@@ -59,7 +59,7 @@ void main() {
   test(
     'typed concatenation, aliased conversions and floating bit patterns',
     () {
-      for (var mode = 0; mode < 4; mode++) {
+      for (var mode = 0; mode < 6; mode++) {
         expect(native.collections(mode), isTrue, reason: 'case $mode');
       }
     },

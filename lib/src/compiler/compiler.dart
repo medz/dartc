@@ -63,6 +63,8 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
       sourceArchive: archive,
       resources: const [
         'dartc/src/runtime/allocator.dart',
+        'dartc/src/runtime/dispatch.dart',
+        'dartc/src/runtime/numbers.dart',
         'dartc/src/runtime/console.dart',
       ],
     ).use((input) async {

@@ -280,7 +280,7 @@ dart test -P unit
 
 Native tests require prepared assets; follow the testing guide for the relevant platform and feature.
 
-Build a standalone development compiler with Dart SDK 3.13.7:
+Build a standalone development compiler with Dart SDK 3.14.0:
 
 ```sh
 dart run tool/build.dart

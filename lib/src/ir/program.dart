@@ -203,7 +203,8 @@ final class IrProgram(
   ///
   /// Virtual calls select implementations on classes constructed by reachable
   /// bodies, constructor tear-offs, constants or [instantiatedTypes] supplied by
-  /// the caller. Dynamic invocation is not included. Redirecting factories select
+  /// the caller. Dynamic selectors retain methods, accessors and noSuchMethod.
+  /// Redirecting factories select
   /// their effective body. Direct targets with missing bodies remain in the set.
   Set<FunctionTarget> reachableFrom(
     Iterable<FunctionTarget> roots, {

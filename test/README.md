@@ -49,7 +49,7 @@ For example, execute Linux ARM64 tests using assets built on the current machine
 dart run tool/build_test_assets.dart linux-arm64
 docker run --rm --platform linux/arm64 \
   -e TEST_TARGET=linux-arm64 -v "$PWD:/src:ro" \
-  --tmpfs /work:exec -w /work dart:3.13.7-sdk sh -eu -c '
+  --tmpfs /work:exec -w /work dart:3.14.0-sdk sh -eu -c '
     cp -R /src/lib /src/bin /src/test /src/tool /work/
     cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /src/LICENSE /work/
     mkdir -p build/test

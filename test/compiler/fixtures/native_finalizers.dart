@@ -31,6 +31,9 @@ void churn() {
 @Export<Void Function(Pointer<NativeFinalizerFunction>)>()
 void configure(Pointer<NativeFinalizerFunction> callback) {
   owner = NativeFinalizer(callback);
+  if (owner!.callback != callback) {
+    throw StateError('Finalizer callback changed');
+  }
   savedCallback = callback;
   retained = null;
   resources = null;

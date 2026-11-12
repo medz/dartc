@@ -1,3 +1,4 @@
+import 'type_metadata.dart';
 import 'block.dart';
 import 'core_types.dart';
 import 'ffi_types.dart';
@@ -107,7 +108,10 @@ FunctionReferences verifyCallable(
     if (value.type == ValueType.string) {
       (instantiatedClasses ??= {}).add(ValueType.string);
     }
-    if (value is TypeConstant) checkTypeScope(value.representedType);
+    if (value is TypeConstant) {
+      checkTypeScope(value.representedType);
+      (instantiatedClasses ??= {}).addAll(TypeMetadata.fields.keys);
+    }
     if (value is SequenceConstant) {
       (sequenceConstants ??= {}).add(value);
     }
@@ -303,9 +307,42 @@ FunctionReferences verifyCallable(
         (implicitMembers ??= {}).add(member);
       }
       switch (op) {
+        case ReifyType() || ObjectRuntimeType():
+          (instantiatedClasses ??= {}).addAll(TypeMetadata.fields.keys);
         case LoadLibrary(:final reference) ||
             CheckLibraryLoaded(:final reference):
           (deferredImports ??= {}).add(reference);
+        case MakeInvocation():
+          (instantiatedClasses ??= {}).add(CoreTypes.symbolStorage);
+        case DynamicDispatch(:final receiver, :final selector):
+          (instantiatedClasses ??= {}).add(CoreTypes.symbolStorage);
+          (instantiatedClasses ??= {}).add(ValueType.nullClass);
+          for (final selected in [
+            selector,
+            if (selector.kind == .getter)
+              (
+                kind: FunctionKind.method,
+                name: selector.name,
+                privateScope: selector.privateScope,
+              ),
+            if (selector.kind == .method)
+              (
+                kind: FunctionKind.getter,
+                name: selector.name,
+                privateScope: selector.privateScope,
+              ),
+            (
+              kind: FunctionKind.method,
+              name: 'noSuchMethod',
+              privateScope: null,
+            ),
+            (kind: FunctionKind.method, name: 'call', privateScope: null),
+          ]) {
+            (implicitMembers ??= {}).add((
+              receiver: receiver.unviewedType,
+              selector: selected,
+            ));
+          }
         case InstanceCall(member: final callee, :final receiver) ||
             BindMethod(method: final callee, :final receiver, direct: false):
           (virtualMembers ??= {}).add((

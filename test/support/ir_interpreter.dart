@@ -361,7 +361,12 @@ final class IrInterpreter(
               const [],
             );
     }
-    if (target == _symbolToString) return arguments.first.toString();
+    if (target.owner == CoreTypes.symbolStorage &&
+        target.kind == .method &&
+        target.name == 'toString') {
+      return arguments.first.toString();
+    }
+
     if (arguments.firstOrNull case final _Instance instance
         when _isSymbolMember(target) &&
             CoreTypes.symbol.accepts(instance.type)) {
@@ -372,7 +377,13 @@ final class IrInterpreter(
     if (target.library.toString() == 'dart:async') {
       throw _AsyncUnsupported('Unmodeled async entry ${target.name}');
     }
-    return imports[(target.library, target.name)]!(arguments.single as int);
+    final imported = imports[(target.library, target.name)];
+    if (imported == null) {
+      throw UnsupportedError(
+        'Fixture external: ${target.owner?.name}.${target.name}',
+      );
+    }
+    return imported(arguments.single as int);
   }
 
   _Instance _construct(
@@ -597,7 +608,7 @@ final class IrInterpreter(
         : _enter(target, [
             if (target.kind == .closure) fn.genericOrigin ?? fn,
             ...fn.captures,
-            ?fn.receiver,
+            if (target.kind.hasReceiver) fn.receiver,
             ...arguments,
           ], environment);
   }
@@ -608,12 +619,7 @@ final class IrInterpreter(
     Map<String, Object?> named,
     List<ValueType> types,
   ) =>
-      positional.length >= signature.requiredPositional &&
-      positional.length <= signature.positionalCount &&
-      named.keys.every(signature.named.containsKey) &&
-      signature.named.entries.every(
-        (e) => !e.value.required || named.containsKey(e.key),
-      ) &&
+      signature.acceptsShape(positional.length, named.keys) &&
       (types.isEmpty || types.length == signature.typeParameters.length);
 
   Object? _dynamicFunction(
@@ -1024,6 +1030,7 @@ final class IrInterpreter(
         if (receiver != null &&
             receiver is! _Instance &&
             receiver is! _TypeValue &&
+            receiver is! _CollectionValue &&
             receiver is! _RecordValue &&
             receiver is! num &&
             receiver is! bool &&

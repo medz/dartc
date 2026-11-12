@@ -830,15 +830,22 @@ final class FunctionType._(
     }
   }
 
+  /// Whether supplied argument positions and names fit this signature.
+  bool acceptsShape(int positional, Iterable<String> supplied) =>
+      positional >= requiredPositional &&
+      positional <= positionalCount &&
+      supplied.every(named.containsKey) &&
+      named.entries.every(
+        (entry) => !entry.value.required || supplied.contains(entry.key),
+      );
+
   /// Places supplied arguments in declaration order and fills omitted slots.
   List<T> bind<T>(
     List<T> positional,
     Map<String, T> supplied,
     T Function(int) omitted,
   ) {
-    if (positional.length < requiredPositional ||
-        positional.length > positionalCount ||
-        supplied.keys.any((name) => !named.containsKey(name))) {
+    if (!acceptsShape(positional.length, supplied.keys)) {
       throw ArgumentError('Arguments do not match $dartName.');
     }
     final values = <T>[...positional];
@@ -848,8 +855,6 @@ final class FunctionType._(
     for (final MapEntry(:key, value: p) in named.entries) {
       if (supplied.containsKey(key)) {
         values.add(supplied[key] as T);
-      } else if (p.required) {
-        throw ArgumentError('Missing required argument $key.');
       } else {
         values.add(omitted(p.slot));
       }

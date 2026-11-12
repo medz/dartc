@@ -51,7 +51,9 @@ macOS ARM64 的 Dart SDK 3.13.7 JIT/AOT 对泛型函数界限存在规范化差�
 
 内建 Type 的 hashCode 与规范化结构相等一致，包括词法类型实参、嵌套类型和仅绑定参数名称不同的泛型函数类型。经 Object 视图读取、移动回收及重复组合类型后，相等 Type 的哈希保持相同；用户 Type 的相等和 hashCode 重写仍按普通成员派发。见[Type 哈希验证](../test/compiler/function_instantiation_test.dart)和[用户成员验证](../test/compiler/object_members_test.dart)。
 
-跨模块 Type 规范身份、内建 Type 的 toString 和 dynamic 成员派发仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
+Type 文本保留类名、实际类型实参、可空性、FutureOr、record 字段及函数参数形状；泛型函数的绑定参数以 X0、X1 等规范名称显示，函数文本采用 Dart 类型声明写法。Type.toString 的完整字符串不属于跨实现的固定格式；见[类型文本验证](../test/compiler/object_text_test.dart)与 [Type.toString 契约](https://api.dart.dev/stable/3.14.0/dart-core/Type/toString.html)。
+
+跨模块 Type 规范身份仍未接通。泛型函数不能直接作为 FFI 导出；原生入口须通过普通 Dart 函数提供明确的 FFI 签名。
 
 ## analyzer 元数据边界
 

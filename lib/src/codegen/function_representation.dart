@@ -2,10 +2,12 @@ import 'dart:ffi' show Uint8;
 
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/runtime/contracts.dart' show TypeKind;
 
 import 'program_layout.dart';
 import 'checked_casts.dart';
 import 'type_values.dart';
+import 'closure_storage.dart';
 import 'member_calls.dart';
 import 'heap_plan.dart';
 import 'cell_initialization.dart';
@@ -66,13 +68,13 @@ final class FunctionRepresentation(
   List<Value> _ownerArguments(Value actual, ClassType owner, List<Value> into) {
     final view = DirectCall(layouts.relations.viewOf(owner), [actual]);
     final checked = NullCheck(view);
-    var parts = LoadField(TypeValues.parts, checked);
+    var parts = LoadField(TypeMetadata.parts, checked);
     into.addAll([view, checked, parts]);
     final arguments = <Value>[];
     for (final _ in owner.typeParameters) {
       final node = NullCheck(parts);
-      final head = LoadField(TypeValues.head, node);
-      final tail = LoadField(TypeValues.tail, node);
+      final head = LoadField(TypeMetadata.head, node);
+      final tail = LoadField(TypeMetadata.tail, node);
       into.addAll([node, head, tail]);
       arguments.add(head);
       parts = tail;
@@ -357,7 +359,7 @@ final class FunctionRepresentation(
         };
         if (instruction case ObjectClassName(:final operand)) {
           final type = layouts.types.runtimeTypeOf(operand, body);
-          final name = _load(TypeValues.className, type, body);
+          final name = _load(TypeMetadata.className, type, body);
           aliases.add(instruction);
           _operands[instruction] = [name];
           body.add(instruction);
@@ -786,7 +788,28 @@ final class FunctionRepresentation(
           body.add(instruction);
           continue;
         }
+        if (instruction is MakeInvocation) {
+          final factory =
+              heap.runtime?.invocation ??
+              (throw UnsupportedError('Invocation runtime unavailable'));
+          invocations[instruction] = members.invocationFor(
+            instruction,
+            factory,
+          );
+          _operands[instruction] = [
+            for (final input in instruction.inputs)
+              convert(input, .dynamicType, body),
+            for (final type in instruction.typeArguments) _reify(type, body),
+          ];
+          body.add(instruction);
+          continue;
+        }
         final invocation = switch (instruction) {
+          DynamicDispatch(:final receiver, :final typeArguments) => (
+            null,
+            receiver,
+            typeArguments,
+          ),
           InstantiateFunction(:final function, :final typeArguments) => (
             null,
             function,
@@ -830,9 +853,11 @@ final class FunctionRepresentation(
         };
         if (invocation != null) {
           final (member, receiver, typeArguments) = invocation;
+          final dynamicCall = instruction is DynamicDispatch
+              ? instruction
+              : null;
           final functionValue =
               instruction is FunctionCall || instruction is InstantiateFunction;
-          final binding = instruction is BindMethod;
           final builtin =
               instruction is Equals ||
               instruction is ObjectRuntimeType ||
@@ -840,7 +865,20 @@ final class FunctionRepresentation(
           final virtual =
               instruction is! DirectCall &&
               !(instruction is BindMethod && instruction.direct);
-          final targets = functionValue
+          final targets = dynamicCall != null
+              ? {
+                  for (final entry
+                      in members.dynamicTargets(dynamicCall).entries)
+                    entry.key: (
+                      target: entry.value,
+                      closure: null as ClosureShape?,
+                    ),
+                  if (dynamicCall.selector.name == 'call' &&
+                      dynamicCall.selector.kind != .setter)
+                    for (final closure in layouts.closures.all)
+                      closure.type: (target: closure.target, closure: closure),
+                }
+              : functionValue
               ? {
                   for (final closure in layouts.closures.targetsFor(
                     receiver.type as FunctionType,
@@ -879,7 +917,7 @@ final class FunctionRepresentation(
                 ValueType.boolean,
                 ValueType.string,
                 ValueType.typeType,
-                TypeValues.type,
+                TypeMetadata.type,
                 ValueType.function,
                 FfiTypes.pointerRuntimeType,
               ].any(receiver.type.accepts);
@@ -904,12 +942,12 @@ final class FunctionRepresentation(
             continue;
           }
           if (instruction is Equals) {
-            targets[TypeValues.type] = (
+            targets[TypeMetadata.type] = (
               target: layouts.types.equality,
               closure: null,
             );
           } else if (instruction is ObjectHashCode) {
-            targets[TypeValues.type] = (
+            targets[TypeMetadata.type] = (
               target: layouts.types.hash,
               closure: null,
             );
@@ -945,12 +983,17 @@ final class FunctionRepresentation(
             }
           }
           final actual = layouts.types.runtimeTypeOf(receiver, body);
-          final shape = targets.isEmpty
+          final dynamicKind = dynamicCall == null
+              ? null
+              : _load(TypeMetadata.kind, actual, body);
+          final shape = dynamicCall != null
+              ? null
+              : targets.isEmpty
               ? null
               : functionValue
               ? _load(layouts.closures.tag, receiver, body)
               : virtual
-              ? LoadField(TypeValues.shape, actual)
+              ? LoadField(TypeMetadata.shape, actual)
               : null;
           if (shape != null && !functionValue) body.add(shape);
           final types = [for (final type in typeArguments) _reify(type, body)];
@@ -959,6 +1002,39 @@ final class FunctionRepresentation(
           final missing = Block();
           blocks.add(missing);
           switch (instruction) {
+            case DynamicDispatch():
+              final missingBody = <Value>[];
+              instructions[missing] = missingBody;
+              final names = dynamicCall!.named.keys.toList()..sort();
+              final operation = MakeInvocation(
+                dynamicCall.selector,
+                dynamicCall.positional,
+                {for (final name in names) name: dynamicCall.named[name]!},
+                dynamicCall.typeArguments,
+              );
+              final factory =
+                  heap.runtime?.invocation ??
+                  (throw UnsupportedError('Invocation runtime unavailable'));
+              invocations[operation] = members.invocationFor(
+                operation,
+                factory,
+              );
+              _operands[operation] = [
+                for (final input in operation.inputs)
+                  convert(input, .dynamicType, missingBody),
+                ...types,
+              ];
+              var failed = appendTo(missing, operation, handler);
+              final arguments = <Value>[];
+              final failure = DirectCall(heap.runtime!.dispatchFailure!, [
+                convert(receiver, .object.nullable, arguments),
+                operation,
+              ]);
+              for (final argument in arguments) {
+                failed = appendTo(failed, argument, handler);
+              }
+              failed = appendTo(failed, failure, handler);
+              ends[failed] = Jump(join!, [failure]);
             case ObjectRuntimeType():
               instructions[missing] = [];
               ends[missing] = Jump(join!, [actual]);
@@ -983,7 +1059,7 @@ final class FunctionRepresentation(
           if (instruction is Equals || instruction is ObjectHashCode) {
             builtinEntry = addBlock();
             final selected = addBlock();
-            final kind = LoadField(TypeValues.kind, actual);
+            final kind = LoadField(TypeMetadata.kind, actual);
             final test = Equals(
               kind,
               Constant.integer(TypeKind.function.index),
@@ -1000,7 +1076,7 @@ final class FunctionRepresentation(
             final nominal = Block();
             blocks.add(nominal);
             instructions[nominal] = [];
-            final kind = LoadField(TypeValues.kind, actual);
+            final kind = LoadField(TypeMetadata.kind, actual);
             final test = Equals(kind, Constant.integer(TypeKind.nominal.index));
             body.addAll([kind, test]);
             ends[next] = Branch(test, Jump(nominal), Jump(builtinEntry));
@@ -1020,6 +1096,89 @@ final class FunctionRepresentation(
           for (final MapEntry(key: type, value: (:target, :closure))
               in targets.entries) {
             var current = next;
+            final dynamicClosure = dynamicCall != null && closure != null;
+            final functionValue = dynamicCall == null
+                ? instruction is FunctionCall ||
+                      instruction is InstantiateFunction
+                : dynamicClosure;
+            final binding = dynamicCall == null
+                ? instruction is BindMethod
+                : dynamicCall.selector.kind == .getter &&
+                      (dynamicClosure || target.kind == .method);
+            if (dynamicCall != null) {
+              final selected = addBlock(), otherwise = addBlock();
+              final kind = dynamicClosure
+                  ? TypeKind.function
+                  : type == ValueType.nullClass
+                  ? TypeKind.nullType
+                  : TypeKind.nominal;
+              final kindTest = Equals(
+                dynamicKind!,
+                Constant.integer(kind.index),
+              );
+              instructions[next]!.add(kindTest);
+              final checkShape = kind == TypeKind.nullType
+                  ? selected
+                  : addBlock();
+              ends[next] = Branch(kindTest, Jump(checkShape), Jump(otherwise));
+              if (kind != TypeKind.nullType) {
+                final shapeBody = instructions[checkShape]!;
+                final key = dynamicClosure
+                    ? _load(layouts.closures.tag, receiver, shapeBody)
+                    : _load(TypeMetadata.shape, actual, shapeBody);
+                final test = Equals(
+                  key,
+                  Constant.integer(
+                    dynamicClosure
+                        ? closure.tag
+                        : layouts.types.id(type.declaration),
+                  ),
+                );
+                shapeBody.add(test);
+                ends[checkShape] = Branch(
+                  test,
+                  Jump(selected),
+                  Jump(otherwise),
+                );
+              }
+              next = otherwise;
+              current = selected;
+              if (binding && dynamicClosure) {
+                ends[current] = Jump(join!, [receiver]);
+                continue;
+              }
+              if (dynamicCall.selector.kind == .method &&
+                  target.kind == .getter) {
+                final bridge = members.getterCall(target, dynamicCall);
+                final call = DynamicDispatch(
+                  receiver,
+                  dynamicCall.selector,
+                  dynamicCall.positional,
+                  dynamicCall.named,
+                  typeArguments,
+                );
+                invocations[call] = bridge;
+                _operands[call] = [
+                  for (final input in call.inputs)
+                    convert(input, .dynamicType, instructions[current]!),
+                  ...types,
+                ];
+                current = appendTo(current, call, handler);
+                ends[current] = Jump(join!, [call]);
+                continue;
+              }
+              final signature = closure?.signature ?? target.signature;
+              if (!binding &&
+                  (!signature.acceptsShape(
+                        dynamicCall.positional.length,
+                        dynamicCall.named.keys,
+                      ) ||
+                      types.isNotEmpty &&
+                          types.length != signature.typeParameters.length)) {
+                ends[current] = Jump(missing);
+                continue;
+              }
+            }
             if (shape != null) {
               final selected = Block(), otherwise = Block();
               blocks.addAll([selected, otherwise]);
@@ -1058,8 +1217,8 @@ final class FunctionRepresentation(
               functionTypes = [];
               for (final _ in storage!.signature.typeParameters) {
                 final node = NullCheck(arguments);
-                final value = LoadField(TypeValues.head, node);
-                final next = LoadField(TypeValues.tail, node);
+                final value = LoadField(TypeMetadata.head, node);
+                final next = LoadField(TypeMetadata.tail, node);
                 setup.addAll([node, value, next]);
                 arguments = next;
                 functionTypes.add(value);
@@ -1081,7 +1240,7 @@ final class FunctionRepresentation(
             final environment = {
               for (final (i, parameter) in parameters.indexed)
                 parameter: classTypes[i],
-              if (!binding)
+              if (!binding && functionTypes.isNotEmpty)
                 for (final (i, parameter)
                     in (storage?.signature.typeParameters ??
                             target.typeParameters)
@@ -1102,26 +1261,56 @@ final class FunctionRepresentation(
               return call;
             }
 
-            if (instruction case BindMethod(
-              :final method,
-              :final direct,
-              :final ownerType,
-            )) {
+            if (dynamicCall != null &&
+                !binding &&
+                functionTypes.isEmpty &&
+                specialization == null) {
+              final signature = storage?.signature ?? target.signature;
+              functionTypes = [
+                for (final type in signature.defaultTypeArguments) reify(type),
+              ];
+              for (final (i, parameter) in signature.typeParameters.indexed) {
+                environment[parameter] = functionTypes[i];
+              }
+            }
+            if (binding) {
               final shape = layouts.closures.methods[target]!;
-              final actualType = reify(shape.signature);
-              final bound = BindMethod(
-                method,
-                receiver,
-                direct: direct,
-                ownerType: ownerType,
-              );
+              Value capturedReceiver = receiver;
+              if (dynamicCall != null) {
+                final owner = target.owner!;
+                final ownerView = owner.instantiate([
+                  for (final _ in owner.typeParameters) ValueType.dynamicType,
+                ]);
+                final cast = TypeCast(
+                  receiver,
+                  type == ValueType.nullClass ? ValueType.nullType : ownerView,
+                );
+                final checked = casts.targetFor(cast, layouts);
+                _operands[cast] = [
+                  receiver,
+                  for (final parameter in checked.parameters)
+                    environment[parameter]!,
+                ];
+                append(cast);
+                capturedReceiver = cast;
+              }
+              final bound = switch (instruction) {
+                BindMethod(:final method, :final direct, :final ownerType) =>
+                  BindMethod(
+                    method,
+                    capturedReceiver,
+                    direct: direct,
+                    ownerType: ownerType,
+                  ),
+                _ => BindMethod(target, capturedReceiver, direct: true),
+              };
               invocations[bound] = heap.constructorFor(
                 shape.initializer!,
                 layouts,
               );
               final captures = <Value>[];
               final captured = convert(
-                receiver,
+                capturedReceiver,
                 shape.captures.single.type,
                 captures,
               );
@@ -1130,9 +1319,13 @@ final class FunctionRepresentation(
                 Constant.integer(shape.tag),
                 captured,
                 ...classTypes,
-                actualType,
+                reify(shape.signature),
               ];
               append(bound);
+              if (dynamicCall != null) {
+                ends[current] = Jump(join!, [bound]);
+                continue;
+              }
               final widened = TypeView(bound, .object);
               append(widened);
               final check = TypeCast(widened, instruction.type);
@@ -1150,7 +1343,9 @@ final class FunctionRepresentation(
             }
 
             final invocationTypes = closure == null
-                ? types
+                ? dynamicCall == null
+                      ? types
+                      : functionTypes
                 : [for (final type in closure.typeArguments) reify(type)];
             for (final (i, parameter) in target.typeParameters.indexed) {
               environment[parameter] = invocationTypes[i];
@@ -1179,7 +1374,7 @@ final class FunctionRepresentation(
                 );
                 _operands[node] = [
                   ...node.inputs,
-                  layouts.types.constant(TypeValues.list),
+                  layouts.types.constant(TypeMetadata.list),
                 ];
                 append(node);
                 arguments = node;
@@ -1200,6 +1395,7 @@ final class FunctionRepresentation(
               continue;
             }
             final inputs = switch (instruction) {
+              DynamicDispatch(:final positional, :final named) ||
               InstanceCall(:final positional, :final named) ||
               FunctionCall(
                 :final positional,
@@ -1269,6 +1465,18 @@ final class FunctionRepresentation(
               arguments.add(check);
             }
             final call = switch (instruction) {
+              DynamicDispatch(
+                :final selector,
+                :final positional,
+                :final named,
+              ) =>
+                DynamicDispatch(
+                  receiver,
+                  selector,
+                  positional,
+                  named,
+                  typeArguments,
+                ),
               FunctionCall(:final function, :final positional, :final named) =>
                 FunctionCall(function, positional, named, typeArguments),
               InstanceCall(:final positional, :final named, :final ownerType) =>
@@ -1631,7 +1839,7 @@ final class FunctionRepresentation(
           DirectCall(:final target) => layouts.entryTypes(target),
           Construct(:final initializer) => [
             ...initializer.signature.parameters,
-            TypeValues.type,
+            TypeMetadata.type,
           ],
           NewCell(:final initial, type: final CellType type)
               when initial != null =>
@@ -1674,6 +1882,16 @@ final class FunctionRepresentation(
         }
         body.add(instruction);
       }
+      if (sourceBlock.end case ExhaustivenessFailure(:final onThrow)) {
+        final target =
+            heap.runtime?.exhaustivenessFailure ??
+            (throw UnsupportedError('Exhaustive switch runtime unavailable'));
+        final call = DirectCall(target, []);
+        body.add(call);
+        ends[block] = onThrow == null
+            ? Unreachable(call)
+            : Invoke(call, onReturn: null, onThrow: edge(onThrow));
+      }
       ends[block] ??= switch (sourceBlock.end) {
         Return(:final value) => Return(
           convert(
@@ -1700,9 +1918,6 @@ final class FunctionRepresentation(
           convert(exception, .object, body),
           stackTrace: traceFor(stackTrace, body),
           onThrow: onThrow == null ? null : edge(onThrow),
-        ),
-        ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(
-          onThrow == null ? null : edge(onThrow),
         ),
         final end => end,
       };

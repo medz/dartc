@@ -16,7 +16,9 @@ void main() {
     () async {
       final result = await AnalysisSession(['${directory}legacy_switch.dart'])
           .use(Lowering().lower);
-      final function = result.program.functions.single;
+      final function = result.program.functions.singleWhere(
+        (f) => f.target.name == 'legacy',
+      );
       final runner = IrInterpreter(result.program, {});
       expect(runner.run(function, [true]), 1);
       expect(runner.run(function, [false]), 2);
@@ -64,6 +66,7 @@ void main() {
     'guarded',
     'unrelated_error',
     'nested',
+    'promotion',
   ]) {
     test('rejects $fixture before allowing consumption', () async {
       await expectLater(

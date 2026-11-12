@@ -63,6 +63,11 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
   }
   if (element.library.isDartCore) {
     final owner = element.enclosingElement;
+    if (element == element.library.getClass('int')!.getMethod('~')) {
+      return (target, entry) => entry.emit(
+        IntBinary(.bitXor, entry.parameters.single, const Constant.integer(-1)),
+      );
+    }
     if (element is ConstructorElement &&
         element.name == 'fromEnvironment' &&
         [
@@ -73,7 +78,9 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
       // No compilation environment entries are configured for native output.
       return (target, entry) => entry.parameters[1];
     }
-    if (element.isExternal && owner == element.library.getClass('Object')) {
+    if (element.isExternal &&
+        (owner == element.library.getClass('Object') ||
+            owner == element.library.getClass('Null'))) {
       switch (element.name) {
         case '==':
           return (target, entry) =>
@@ -94,8 +101,6 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
         '_sub' => NumericOperator.subtract,
         '_mul' => NumericOperator.multiply,
         '_div' => NumericOperator.divide,
-        '_modulo' => NumericOperator.modulo,
-        '_remainder' => NumericOperator.remainder,
         '_greaterThan' => NumericOperator.greaterThan,
         _ => null,
       };
@@ -122,6 +127,17 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
         );
       }
       switch (element.name) {
+        case '_greaterThanFromInteger':
+          return (target, entry) => entry.emit(
+            NumericBinary(
+              .greaterThan,
+              entry.parameters[1],
+              entry.parameters[0],
+            ),
+          );
+        case '-':
+          return (target, entry) =>
+              entry.emit(NumericNegate(entry.parameters.single));
         case 'fromInteger':
           return (target, entry) =>
               entry.emit(NumericToDouble(entry.parameters.single));

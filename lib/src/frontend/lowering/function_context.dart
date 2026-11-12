@@ -81,21 +81,27 @@ final class FunctionContext(
     List<Value> positional, [
     Map<String, Value> named = const {},
     List<ValueType> typeArguments = const [],
-  ]) => normal(
-    emit(
-      DynamicDispatch(
-        receiver,
-        (
-          kind: kind,
-          name: name,
-          privateScope: name.startsWith('_') ? unit.libraryElement.uri : null,
+  ]) {
+    final core = unit.libraryElement.typeProvider.objectElement.library;
+    for (final name in ['Object', 'Null', 'Invocation', 'NoSuchMethodError']) {
+      bindings.requireClass(core.getClass(name)!);
+    }
+    return normal(
+      emit(
+        DynamicDispatch(
+          receiver,
+          (
+            kind: kind,
+            name: name,
+            privateScope: name.startsWith('_') ? unit.libraryElement.uri : null,
+          ),
+          positional,
+          named,
+          typeArguments,
         ),
-        positional,
-        named,
-        typeArguments,
       ),
-    ),
-  );
+    );
+  }
 
   /// Applies a resolved function instantiation without erasing its signature.
   Value instantiateFunction(

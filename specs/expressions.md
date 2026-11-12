@@ -45,7 +45,7 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普通用户对象保留重写、异常和副作用；继承 Object 默认实现时使用身份相等与稳定身份哈希。null 的相等比较不调用用户运算符。int、double、bool 和 null 的内置行为不因装箱改变；数值相等保留整数精度及 NaN 规则，相等的 int/double 与正负零具有相同哈希。见[宽类型与数值边界验证](../test/compiler/bound_methods_test.dart)。函数与 Type 的规则分别见[函数值](functions.md)和[类型值](types.md)。
 
-原生字符串按内容比较和哈希；record 结构比较、dynamic 成员派发仍待接通。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
+原生字符串按内容比较和哈希；record 原生表示与结构比较仍待接通。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
 
 `identityHashCode` 支持普通调用，不调用用户重写的 hashCode。已支持的非 record 对象保持与 identical 相容的稳定哈希，数值与布尔值不因重复装箱改变结果，null 也可作为参数。见[原生身份哈希验证](../test/compiler/expandos_test.dart)。
 
@@ -65,7 +65,7 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 `int.parse`、`int.tryParse`、`int.toString` 和 `int.toRadixString` 支持原生执行，包括静态及绑定方法值。进制为 2–36，字母数字不区分大小写，允许前导正负号和外围 Unicode 空白；显式进制的结果必须落在有符号 64 位范围内。省略 radix 的正数 `0x`/`0X` 前缀允许完整无符号 64 位值，并按相同位模式解释为有符号 int。无效文本和溢出使 parse 抛出 FormatException、tryParse 返回 null；异常保留原 source。无效进制的非空输入抛出 RangeError。格式化使用小写数字，对最小 int 也满足往返契约。FormatException 的具体消息和错误定位不承诺与 SDK 实现逐字相同。
 
-int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。double 支持 toString、toStringAsFixed、toStringAsExponential 和 toStringAsPrecision，保留负零、非有限值、二进制浮点的十进制舍入及精度范围检查；可提取为绑定方法值。通用 dynamic 成员派发仍待接通。见[原生文本对照](../test/compiler/object_text_test.dart)。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
+int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。double 支持 toString、toStringAsFixed、toStringAsExponential 和 toStringAsPrecision，保留负零、非有限值、二进制浮点的十进制舍入及精度范围检查；可提取为绑定方法值。已接通同一封闭程序内的 dynamic 成员派发、getter 返回函数的调用、方法提取、签名和类型检查及 noSuchMethod；缺失成员与不匹配签名保留 Invocation 和求值顺序。见[原生文本对照](../test/compiler/object_text_test.dart)。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
 
 ## 原生转整数与字符串常量
 
@@ -77,7 +77,7 @@ int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。d
 
 原生字符串常量保留 UTF-16 码元和规范身份，可在普通参数、字段与错误载荷中传递。空串、非 BMP 字符及孤立代理项不会被重新编码或规范化；见[常量数据验证](../test/codegen/object_values_test.dart)。支持 `String.length` 和 `codeUnitAt(index)` 的直接调用、泛型接收者和方法值；长度按 UTF-16 码元计数，读取保留零码元、代理项和非 BMP 字符的两个码元。`index < 0` 或 `index >= length` 时，在访问载荷前抛出 RangeError；未使用结果也保留边界检查、求值和 catch/finally 顺序。见 [`length` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/length.html)、[`codeUnitAt` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/codeUnitAt.html)、[IR 契约](../test/ir/strings_test.dart)和[原生读取验证](../test/compiler/strings_test.dart)。
 
-`String.fromCharCode` 支持直接调用和构造器值；0 到 0xffff（含单独代理项）生成一个码元，0x10000 到 0x10ffff 生成代理对，范围外抛出 RangeError。`[]` 从 `codeUnitAt` 结果构造单码元字符串，越界保留接收者、下标的求值及清理顺序。`+` 按顺序连接全部码元，空串与孤立代理项不改变内容；动态字符串经过回收、绑定方法及跨入口全局保存后仍可读取。`==`、`!=` 和 hashCode 按内容处理，包括 Object 视图；相等字符串的哈希相同，不要求与 SDK 的具体哈希值一致。见 [`fromCharCode`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCode.html)、[`[]`](https://api.dart.dev/stable/3.13.7/dart-core/String/operator_get.html)及[构造、拼接与回收验证](../test/compiler/strings_test.dart)。插值的一般值格式化、编码、Unicode 大小写转换和 RegExp 尚未接通。异常格式化和 Error.stackTrace getter 也尚未接通。
+`String.fromCharCode` 支持直接调用和构造器值；0 到 0xffff（含单独代理项）生成一个码元，0x10000 到 0x10ffff 生成代理对，范围外抛出 RangeError。`[]` 从 `codeUnitAt` 结果构造单码元字符串，越界保留接收者、下标的求值及清理顺序。`+` 按顺序连接全部码元，空串与孤立代理项不改变内容；动态字符串经过回收、绑定方法及跨入口全局保存后仍可读取。`==`、`!=` 和 hashCode 按内容处理，包括 Object 视图；相等字符串的哈希相同，不要求与 SDK 的具体哈希值一致。见 [`fromCharCode`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCode.html)、[`[]`](https://api.dart.dev/stable/3.13.7/dart-core/String/operator_get.html)及[构造、拼接与回收验证](../test/compiler/strings_test.dart)。插值使用已支持接收者的普通 toString；编码、Unicode 大小写转换、RegExp 和 Error.stackTrace getter 尚未接通。
 
 `String.fromCharCodes` 支持 Iterable<int>、构造器值和可选 start/end。范围要求 `0 <= start <= end`；输入不足时截短，跳过的元素不读 current，空区间不获取迭代器。16 位值保留为码元，较大合法码点分解为代理对；无效码点抛出 ArgumentError。自定义迭代器的 getter、moveNext、current、异常与 finally 保留求值顺序。`String.codeUnits` 返回不可修改的 List<int>，支持长度、索引、迭代及跨回收/入口保存，修改方法仍执行其参数检查后拒绝写入。依据为 [`fromCharCodes`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCodes.html)和[固定 SDK String 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/string.dart)。[原生验证](../test/compiler/strings_test.dart)也覆盖从借用的 Int64 指针输入到有容量上限的 UTF-16 输出，以及调用方释放输入后字符串仍存活。
 

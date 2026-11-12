@@ -205,6 +205,7 @@ final class Bindings({
   final _classElements = <ClassType, InterfaceElement>{};
   final _parameters = <TypeParameterElement, TypeParameterType>{};
   final _boundParameters = <TypeParameterElement>{};
+  final _typeMetadata = <InterfaceElement, ClassType>{};
   final _fields = <(FieldElement, ClassType), InstanceField>{};
   final _globals = <VariableElement, GlobalVariable>{};
   final _defaults = <FunctionTarget, Map<int, Constant>>{};
@@ -941,7 +942,11 @@ final class Bindings({
           (declaration) => target(declaration, unit, site),
         );
     final function = FunctionTarget(
-      enclosing?.library ?? element.library.uri,
+      enclosing != null
+          ? enclosing.library
+          : TypeMetadata.fields.containsKey(owner)
+          ? owner!.library
+          : element.library.uri,
       element.name ?? '<anonymous>',
       kind == .initializer
           ? .voidType
@@ -1104,6 +1109,9 @@ final class Bindings({
       source,
       receiver,
     );
+    if (_needsLowering(element.library) && !element.isExternal) {
+      dependencyFunctions.add(element);
+    }
     if (element case ConstructorElement(redirectedConstructor: final redirect?)
         when element.isFactory) {
       final destination = target(redirect, unit, site);
@@ -1277,12 +1285,27 @@ final class Bindings({
     final fieldOwner = owner;
     return _fields.putIfAbsent((element, fieldOwner), () {
       final owner = fieldOwner;
+      if (TypeMetadata.fields[owner] case final fields?) {
+        final field = fields
+            .where((field) => field.name == element.name)
+            .single;
+        if (field.type != valueType(element.type, unit, site) ||
+            field.isFinal != element.isFinal) {
+          unsupported(unit, site, 'Type metadata field contract');
+        }
+        return field;
+      }
       if (owner == CoreTypes.enumeration) {
         return switch (element.name) {
           'index' => CoreTypes.enumIndex,
           '_name' => CoreTypes.enumName,
           _ => unsupported(unit, site, 'Enum field ${element.name}'),
         };
+      }
+      if (owner == CoreTypes.symbolStorage) {
+        return element.name == '_name'
+            ? CoreTypes.symbolName
+            : CoreTypes.symbolPrivateLibrary;
       }
       if (owner == CoreTypes.mapEntry) {
         return element.name == 'key'
@@ -1374,6 +1397,12 @@ final class Bindings({
         return .string(s);
       }
       if (value.toSymbolValue() case final name?) {
+        final internal = origin.typeProvider.objectElement.library.fragments
+            .expand((fragment) => fragment.importedLibraries)
+            .firstWhere(
+              (library) => library.uri == Uri.parse('dart:_internal'),
+            );
+        requireClass(internal.getClass('Symbol')!);
         // ConstantSafety has already rejected dependencies on private literals.
         // Analyzer does not retain their defining library in toSymbolValue().
         return ObjectConstant(CoreTypes.symbolStorage, {
@@ -1764,6 +1793,30 @@ final class Bindings({
     ResolvedUnitResult unit,
     ast.AstNode site,
   ) {
+    if (_typeMetadata[element] case final metadata?) return metadata;
+    if (runtimeSources.contains(element.library.uri)) {
+      for (final annotation in element.metadata.annotations) {
+        final value = annotation.computeConstantValue();
+        if (value?.type case dart.InterfaceType(element: final contract)
+            when contract.library.uri == runtimeContracts &&
+                contract == contract.library.getClass('TypeStorage')) {
+          final index = value!.getField('kind')!.toIntValue()!;
+          final types = [
+            TypeMetadata.type,
+            TypeMetadata.list,
+            TypeMetadata.functionShape,
+            TypeMetadata.namedParameter,
+          ];
+          if (index < 0 || index >= types.length) {
+            unsupported(unit, site, 'Type metadata storage kind');
+          }
+          final metadata = types[index];
+          _typeMetadata[element] = metadata;
+          requireClass(element);
+          return metadata;
+        }
+      }
+    }
     final ffi = ffiClass(element);
     if (element.library.isDartCore || ffi != null) {
       final builtin =
@@ -1805,12 +1858,21 @@ final class Bindings({
             _ => null,
           };
       if (builtin != null) {
+        if (builtin == CoreTypes.symbol) {
+          final internal = element.library.fragments
+              .expand((fragment) => fragment.importedLibraries)
+              .firstWhere(
+                (library) => library.uri == Uri.parse('dart:_internal'),
+              );
+          requireClass(internal.getClass('Symbol')!);
+        }
         if (ffi == FfiTypes.pointer ||
             builtin == ValueType.number ||
             builtin == ValueType.integer ||
             builtin == ValueType.floating ||
             builtin == ValueType.boolean ||
-            builtin == ValueType.string) {
+            builtin == ValueType.string ||
+            builtin == ValueType.typeType) {
           requireClass(element);
         }
         for (final (i, parameter) in element.typeParameters.indexed) {
@@ -1832,6 +1894,7 @@ final class Bindings({
     }
     if (element.library.uri.toString() == 'dart:_internal' &&
         element.name == 'Symbol') {
+      requireClass(element);
       return CoreTypes.symbolStorage;
     }
     final previous = _classes[element];

@@ -25,15 +25,31 @@ final class ObjectText() {
         int Function(int, Pointer<Uint16>, int)
       >('collectionBuffer');
 
-  String collection(int mode) {
-    final count = _collection(mode, _output, 2048);
-    if (count < 0) throw StateError('Test output too long');
-    return String.fromCharCodes(_output.asTypedList(count));
-  }
+  late final _type = _library
+      .lookupFunction<
+        Int32 Function(Int32, Pointer<Uint16>, IntPtr),
+        int Function(int, Pointer<Uint16>, int)
+      >('typeBuffer');
+
+  late final _dispatch = _library
+      .lookupFunction<
+        Int32 Function(Int32, Pointer<Uint16>, IntPtr),
+        int Function(int, Pointer<Uint16>, int)
+      >('dispatchBuffer');
+
+  String dispatchText(int mode) => _read(_dispatch(mode, _output, 2048));
+
+  String typeText(int mode) => _read(_type(mode, _output, 2048));
+
+  String collection(int mode) => _read(_collection(mode, _output, 2048));
 
   String format(double value, int mode, int digits) {
     final count = _format(value, mode, digits, _output, 2048);
     if (count == -1) throw RangeError('Native precision');
+    return _read(count);
+  }
+
+  String _read(int count) {
     if (count < 0) throw StateError('Test output too long');
     return String.fromCharCodes(_output.asTypedList(count));
   }

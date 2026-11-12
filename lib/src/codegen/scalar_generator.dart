@@ -154,6 +154,8 @@ base class ScalarCodeGenerator<R extends Object>(
             .firstOrNull,
       );
       final arithmetic = NumericOperations(
+        floatingRemainder: runtime?.floatingRemainder,
+        floatingModulo: runtime?.floatingModulo,
         argumentError: constructor(.argumentError),
         unsupportedError: constructor(.unsupportedError),
       );

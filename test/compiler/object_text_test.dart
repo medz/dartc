@@ -50,6 +50,29 @@ void main() {
     },
     timeout: const Timeout(Duration(minutes: 2)),
   );
+  test('type text retains nested arguments, nullability and call shapes', () {
+    for (var mode = 0; mode < 16; mode++) {
+      final expected = switch (mode) {
+        4 => 'String Function(int, [bool])',
+        5 => 'int Function({required String name, double value})',
+        6 => 'X0 Function<X0 extends num>(X0)',
+        7 => '(String Function())?',
+        12 => 'X0 Function<X0 extends num>(X1 Function<X1 extends X0>(X1, X0))',
+        13 => '(int,)',
+        _ => sdk.typeText(mode),
+      };
+      expect(native.typeText(mode), expected, reason: 'type $mode');
+    }
+  });
+  test('dynamic calls preserve lookup, shapes, checks and side effects', () {
+    for (var mode = 0; mode < 76; mode++) {
+      expect(
+        native.dispatchText(mode),
+        mode == 67 ? '111|[]' : sdk.dispatchText(mode),
+        reason: 'dispatch $mode',
+      );
+    }
+  });
   const cases = [
     'object dispatch, super and nullable tear-offs',
     'StringBuffer writes, UTF-16 length and reset',

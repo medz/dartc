@@ -9,7 +9,6 @@ import 'package:dartc/layout.dart';
 
 import 'function_emitter.dart';
 import 'program_layout.dart';
-import 'type_values.dart';
 import 'heap_runtime.dart';
 
 /// Generates allocation wrappers with precise roots and optional initialization.
@@ -287,7 +286,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
           layouts.representation(parameter) == .reference
               ? ValueType.object.nullable
               : parameter,
-        TypeValues.type,
+        TypeMetadata.type,
       ],
     );
     _factories[target] = (initializer: initializer, type: initializer.owner!);

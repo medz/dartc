@@ -19,6 +19,11 @@ final class HeapRuntime(
   required final FunctionTarget runEvents,
   required final FunctionTarget eventAccess,
   required final FunctionTarget copyBytes,
+  final FunctionTarget? invocation,
+  final FunctionTarget? dispatchFailure,
+  final FunctionTarget? exhaustivenessFailure,
+  final FunctionTarget? floatingRemainder,
+  final FunctionTarget? floatingModulo,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
 }) {
@@ -37,6 +42,29 @@ final class HeapRuntime(
       (runEvents, FunctionType(.voidType, [.integer])),
       (eventAccess, FunctionType(eventAccess.returnType, [])),
       (copyBytes, FunctionType(.voidType, [.integer, .integer, .integer])),
+      if (invocation case final target?)
+        (
+          target,
+          FunctionType(CoreTypes.invocation, [
+            CoreTypes.symbol,
+            .integer,
+            CoreTypes.listOf(.typeType),
+            CoreTypes.listOf(.object.nullable),
+            CoreTypes.mapOf(CoreTypes.symbol, .object.nullable),
+          ]),
+        ),
+      if (dispatchFailure case final target?)
+        (
+          target,
+          FunctionType(.object.nullable, [
+            .object.nullable,
+            CoreTypes.invocation,
+          ]),
+        ),
+      if (exhaustivenessFailure case final target?)
+        (target, FunctionType(.never, [])),
+      for (final target in [floatingRemainder, floatingModulo].nonNulls)
+        (target, FunctionType(.floating, [.floating, .floating])),
     ]) {
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||

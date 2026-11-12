@@ -1,7 +1,5 @@
 import 'package:dartc/ir.dart';
 
-import 'type_values.dart';
-
 /// Assigns function-value storage, call entries and shared capture layouts.
 final class ClosureStorage(
   Iterable<IrCallable> selectedBodies, {
@@ -185,7 +183,7 @@ final class ClosureStorage(
       final arguments = InstanceField(
         owner,
         'arguments',
-        TypeValues.list,
+        TypeMetadata.list,
         isFinal: true,
       );
       final initializer = _initialize(owner, [tag, origin, arguments]);
@@ -239,7 +237,7 @@ final class ClosureStorage(
     }
     final environment = [
       for (var i = 0; i < parameters.length; i++)
-        InstanceField(owner, 'type$i', TypeValues.type, isFinal: true),
+        InstanceField(owner, 'type$i', TypeMetadata.type, isFinal: true),
     ];
     final fields = [...captures, ...environment];
     final initializer = target.kind == .closure || target.kind.isVirtual

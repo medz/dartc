@@ -11,8 +11,9 @@ class NativeFinalizer {
       _NativeFinalizer(callback);
 }
 
-final class _NativeFinalizer(Pointer<NativeFinalizerFunction> callback)
-    extends finalization.FinalizerHandle<Pointer<Void>>
+final class _NativeFinalizer(
+  @override final Pointer<NativeFinalizerFunction> callback,
+) extends finalization.FinalizerHandle<Pointer<Void>>
     implements NativeFinalizer {
   this
     : super(

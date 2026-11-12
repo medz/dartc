@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/runtime/contracts.dart' show TypeKind;
 
 import 'type_values.dart';
 
@@ -14,7 +15,7 @@ final class TypeRelations(
   static final _bounds = InstanceField(
     _scope,
     'bounds',
-    TypeValues.list.nullable,
+    TypeMetadata.list.nullable,
     isFinal: true,
   );
   static final _outer = InstanceField(
@@ -40,7 +41,7 @@ final class TypeRelations(
   static final _target = InstanceField(
     _active,
     'target',
-    TypeValues.type,
+    TypeMetadata.type,
     isFinal: true,
   );
   static final _targetScope = InstanceField(
@@ -63,7 +64,7 @@ final class TypeRelations(
       .integer,
       .integer,
       .integer,
-      TypeValues.list.nullable,
+      TypeMetadata.list.nullable,
       _scope.nullable,
       _scope.nullable,
     ],
@@ -74,7 +75,7 @@ final class TypeRelations(
     null,
     '_BoundCheck',
     .voidType,
-    [.integer, .integer, TypeValues.type, .integer, _active.nullable],
+    [.integer, .integer, TypeMetadata.type, .integer, _active.nullable],
     owner: _active,
     kind: .initializer,
   );
@@ -85,32 +86,32 @@ final class TypeRelations(
     .integer,
   ];
   final _entry = FunctionTarget(null, 'isSubtype', .boolean, [
-    TypeValues.type,
-    TypeValues.type,
+    TypeMetadata.type,
+    TypeMetadata.type,
   ]);
   final _subtype = FunctionTarget(null, 'subtype', .boolean, [
-    TypeValues.type,
-    TypeValues.type,
+    TypeMetadata.type,
+    TypeMetadata.type,
     ..._contextTypes,
   ]);
   final _arguments = FunctionTarget(null, 'typeArguments', .boolean, [
-    TypeValues.list.nullable,
-    TypeValues.list.nullable,
+    TypeMetadata.list.nullable,
+    TypeMetadata.list.nullable,
     ..._contextTypes,
   ]);
   final _nominal = FunctionTarget(null, 'supertype', .boolean, [
-    TypeValues.type,
-    TypeValues.type,
+    TypeMetadata.type,
+    TypeMetadata.type,
     ..._contextTypes,
   ]);
   final _function = FunctionTarget(null, 'functionSubtype', .boolean, [
-    TypeValues.type,
-    TypeValues.type,
+    TypeMetadata.type,
+    TypeMetadata.type,
     ..._contextTypes,
   ]);
   final _bound = FunctionTarget(null, 'parameterBound', .boolean, [
-    TypeValues.type,
-    TypeValues.type,
+    TypeMetadata.type,
+    TypeMetadata.type,
     ..._contextTypes,
   ]);
   final _findScope = FunctionTarget(null, 'parameterScope', _scope, [
@@ -124,26 +125,26 @@ final class TypeRelations(
   final _scopeSize = FunctionTarget(null, 'scopeSize', .integer, [
     _scope.nullable,
   ]);
-  final _at = FunctionTarget(null, 'typeAt', TypeValues.type, [
-    TypeValues.list.nullable,
+  final _at = FunctionTarget(null, 'typeAt', TypeMetadata.type, [
+    TypeMetadata.list.nullable,
     .integer,
   ]);
   final _findName = FunctionTarget(
     null,
     'parameterNamed',
-    TypeValues.namedParameter.nullable,
-    [TypeValues.namedParameter.nullable, .integer],
+    TypeMetadata.namedParameter.nullable,
+    [TypeMetadata.namedParameter.nullable, .integer],
   );
-  final _shift = FunctionTarget(null, 'shiftType', TypeValues.type, [
-    TypeValues.type,
+  final _shift = FunctionTarget(null, 'shiftType', TypeMetadata.type, [
+    TypeMetadata.type,
     .integer,
     .integer,
   ]);
   final _shiftParts = FunctionTarget(
     null,
     'shiftParts',
-    TypeValues.list.nullable,
-    [TypeValues.list.nullable, .integer, .integer],
+    TypeMetadata.list.nullable,
+    [TypeMetadata.list.nullable, .integer, .integer],
   );
   final _declarations = <ClassType>{};
   final _views = <ClassType, IrFunction>{};
@@ -204,8 +205,8 @@ final class TypeRelations(
     final target = FunctionTarget(
       null,
       'view${_views.length}',
-      TypeValues.type.nullable,
-      [TypeValues.type],
+      TypeMetadata.type.nullable,
+      [TypeMetadata.type],
     );
     final entry = Block(target.parameterTypes), nominal = Block();
     final missing = Block()..finish(Return(const Constant.nullValue()));
@@ -213,12 +214,12 @@ final class TypeRelations(
     final actual = entry.parameters.single;
     _equal(
       entry,
-      _load(entry, TypeValues.kind, actual),
+      _load(entry, TypeMetadata.kind, actual),
       _int(TypeKind.nominal.index),
       nominal,
       missing,
     );
-    final shape = _load(nominal, TypeValues.shape, actual);
+    final shape = _load(nominal, TypeMetadata.shape, actual);
     var current = nominal;
     for (final declaration in _declarations) {
       final view = declaration.asInstanceOf(owner);
@@ -288,7 +289,7 @@ final class TypeRelations(
   Value _relate(Block block, Value left, Value right, List<Value> context) =>
       _call(block, _subtype, [left, right, ...context]);
   Value _part(Block block, Value value, Value index) =>
-      _call(block, _at, [_load(block, TypeValues.parts, value), index]);
+      _call(block, _at, [_load(block, TypeMetadata.parts, value), index]);
   Value _future(Block block, Value argument) => values.construct(
     block,
     .nominal,
@@ -334,8 +335,8 @@ final class TypeRelations(
     }
 
     final [left, right, ...context] = entry.parameters;
-    final a = _load(entry, TypeValues.kind, left),
-        b = _load(entry, TypeValues.kind, right);
+    final a = _load(entry, TypeMetadata.kind, left),
+        b = _load(entry, TypeMetadata.kind, right);
     var current = entry;
     for (final top in [TypeKind.dynamicType, TypeKind.voidType]) {
       final next = block();
@@ -347,14 +348,14 @@ final class TypeRelations(
     final base = values.first(optionalTop, right);
     _equal(
       optionalTop,
-      _load(optionalTop, TypeValues.kind, base),
+      _load(optionalTop, TypeMetadata.kind, base),
       _int(TypeKind.nominal.index),
       optionalShape,
       source,
     );
     _equal(
       optionalShape,
-      _load(optionalShape, TypeValues.shape, base),
+      _load(optionalShape, TypeMetadata.shape, base),
       _int(values.id(ValueType.object)),
       yes,
       source,
@@ -370,7 +371,9 @@ final class TypeRelations(
     }
     final nullSource = block(), sourceUnion = block();
     _equal(current, a, _int(TypeKind.nullType.index), nullSource, sourceUnion);
-    nullSource.finish(Return(_load(nullSource, TypeValues.allowsNull, right)));
+    nullSource.finish(
+      Return(_load(nullSource, TypeMetadata.allowsNull, right)),
+    );
     current = sourceUnion;
     for (final kind in [TypeKind.nullable, TypeKind.futureOr]) {
       final split = block(), second = block(), next = block();
@@ -412,11 +415,11 @@ final class TypeRelations(
     _equal(variable, b, _int(TypeKind.parameter.index), otherVariable, expand);
     final leftScope = _call(otherVariable, _findScope, [
       context[0],
-      _load(otherVariable, TypeValues.shape, left),
+      _load(otherVariable, TypeMetadata.shape, left),
     ]);
     final rightScope = _call(otherVariable, _findScope, [
       context[1],
-      _load(otherVariable, TypeValues.shape, right),
+      _load(otherVariable, TypeMetadata.shape, right),
     ]);
     final leftSlot = _parameterSlot(otherVariable, left, context[0], leftScope);
     final rightSlot = _parameterSlot(
@@ -455,7 +458,7 @@ final class TypeRelations(
     );
     _equal(
       targetNominal,
-      _load(targetNominal, TypeValues.shape, right),
+      _load(targetNominal, TypeMetadata.shape, right),
       _int(values.id(ValueType.object)),
       yes,
       structural,
@@ -475,7 +478,7 @@ final class TypeRelations(
       _equal(parentKind, b, _int(TypeKind.nominal.index), parentShape, no);
       _equal(
         parentShape,
-        _load(parentShape, TypeValues.shape, right),
+        _load(parentShape, TypeMetadata.shape, right),
         _int(values.id(parent)),
         yes,
         no,
@@ -488,16 +491,16 @@ final class TypeRelations(
         final fields = block();
         _equal(
           sameKind,
-          _load(sameKind, TypeValues.shape, left),
-          _load(sameKind, TypeValues.shape, right),
+          _load(sameKind, TypeMetadata.shape, left),
+          _load(sameKind, TypeMetadata.shape, right),
           fields,
           no,
         );
         fields.finish(
           Return(
             _call(fields, _arguments, [
-              _load(fields, TypeValues.parts, left),
-              _load(fields, TypeValues.parts, right),
+              _load(fields, TypeMetadata.parts, left),
+              _load(fields, TypeMetadata.parts, right),
               ...context,
             ]),
           ),
@@ -513,16 +516,16 @@ final class TypeRelations(
     _equal(nominalRight, b, _int(TypeKind.nominal.index), shapes, no);
     _equal(
       shapes,
-      _load(shapes, TypeValues.shape, left),
-      _load(shapes, TypeValues.shape, right),
+      _load(shapes, TypeMetadata.shape, left),
+      _load(shapes, TypeMetadata.shape, right),
       sameClass,
       inherited,
     );
     sameClass.finish(
       Return(
         _call(sameClass, _arguments, [
-          _load(sameClass, TypeValues.parts, left),
-          _load(sameClass, TypeValues.parts, right),
+          _load(sameClass, TypeMetadata.parts, left),
+          _load(sameClass, TypeMetadata.parts, right),
           ...context,
         ]),
       ),
@@ -535,7 +538,7 @@ final class TypeRelations(
 
   IrFunction _argumentsBody() {
     final entry = Block(_arguments.parameterTypes),
-        loop = Block([TypeValues.list.nullable, TypeValues.list.nullable]);
+        loop = Block([TypeMetadata.list.nullable, TypeMetadata.list.nullable]);
     final leftPart = Block(), compare = Block(), next = Block(), end = Block();
     final no = Block()..finish(Return(const Constant.boolean(false)));
     final [left, right, ...context] = entry.parameters;
@@ -548,8 +551,8 @@ final class TypeRelations(
       compare,
       _relate(
         compare,
-        _load(compare, TypeValues.head, first),
-        _load(compare, TypeValues.head, second),
+        _load(compare, TypeMetadata.head, first),
+        _load(compare, TypeMetadata.head, second),
         context,
       ),
       next,
@@ -557,8 +560,8 @@ final class TypeRelations(
     );
     next.finish(
       Jump(loop, [
-        _load(next, TypeValues.tail, first),
-        _load(next, TypeValues.tail, second),
+        _load(next, TypeMetadata.tail, first),
+        _load(next, TypeMetadata.tail, second),
       ]),
     );
     end.finish(Return(end.emit(Equals(b, const Constant.nullValue()))));
@@ -578,7 +581,7 @@ final class TypeRelations(
         no = Block()..finish(Return(const Constant.boolean(false)));
     final yes = Block()..finish(Return(const Constant.boolean(true)));
     final [left, right, ...context] = entry.parameters;
-    final shape = _load(entry, TypeValues.shape, left),
+    final shape = _load(entry, TypeMetadata.shape, left),
         blocks = [entry, yes, no];
     var current = entry;
     for (final declaration in _declarations) {
@@ -622,7 +625,7 @@ final class TypeRelations(
     return _op(
       block,
       .subtract,
-      _load(block, TypeValues.shape, parameter),
+      _load(block, TypeMetadata.shape, parameter),
       _op(block, .subtract, total, _load(block, _total, owner)),
     );
   }
@@ -657,17 +660,17 @@ final class TypeRelations(
 
   IrFunction _atBody() {
     final entry = Block(_at.parameterTypes),
-        loop = Block([TypeValues.list.nullable, .integer]),
+        loop = Block([TypeMetadata.list.nullable, .integer]),
         next = Block(),
         done = Block();
     entry.finish(Jump(loop, entry.parameters));
     final [values, index] = loop.parameters;
     final item = _present(loop, values);
     _equal(loop, index, _int(0), done, next);
-    done.finish(Return(_load(done, TypeValues.head, item)));
+    done.finish(Return(_load(done, TypeMetadata.head, item)));
     next.finish(
       Jump(loop, [
-        _load(next, TypeValues.tail, item),
+        _load(next, TypeMetadata.tail, item),
         _op(next, .subtract, index, _int(1)),
       ]),
     );
@@ -676,15 +679,15 @@ final class TypeRelations(
 
   IrFunction _findNameBody() {
     final entry = Block(_findName.parameterTypes),
-        loop = Block([TypeValues.namedParameter.nullable]);
+        loop = Block([TypeMetadata.namedParameter.nullable]);
     final test = Block(), next = Block(), done = Block();
     final [names, name] = entry.parameters;
     entry.finish(Jump(loop, [names]));
     final candidate = loop.parameters.single;
     _equal(loop, candidate, const Constant.nullValue(), done, test);
     final item = _present(test, candidate);
-    _equal(test, _load(test, TypeValues.name, item), name, done, next);
-    next.finish(Jump(loop, [_load(next, TypeValues.nextName, item)]));
+    _equal(test, _load(test, TypeMetadata.name, item), name, done, next);
+    next.finish(Jump(loop, [_load(next, TypeMetadata.nextName, item)]));
     done.finish(Return(candidate));
     return IrFunction(_findName, [entry, loop, test, next, done]);
   }
@@ -714,7 +717,7 @@ final class TypeRelations(
         entry.parameters;
     final scope = _call(entry, _findScope, [
       sourceScope,
-      _load(entry, TypeValues.shape, left),
+      _load(entry, TypeMetadata.shape, left),
     ]);
     final slot = _parameterSlot(entry, left, sourceScope, scope);
     final canonical = _call(entry, _bindingOwner, [scope]);
@@ -777,9 +780,9 @@ final class TypeRelations(
     final yes = Block()..finish(Return(const Constant.boolean(true)));
     final [left, right, sourceScope, targetScope, active, level] =
         entry.parameters;
-    final a = _present(entry, _load(entry, TypeValues.signature, left));
-    final b = _present(entry, _load(entry, TypeValues.signature, right));
-    final count = _load(entry, TypeValues.binderCount, a);
+    final a = _present(entry, _load(entry, TypeMetadata.signature, left));
+    final b = _present(entry, _load(entry, TypeMetadata.signature, right));
+    final count = _load(entry, TypeMetadata.binderCount, a);
     final required = Block(),
         positional = Block(),
         scopes = Block(),
@@ -794,35 +797,41 @@ final class TypeRelations(
         argument = Block(),
         nextArgument = Block();
     final named = Block(),
-        names = Block([TypeValues.namedParameter.nullable]),
+        names = Block([TypeMetadata.namedParameter.nullable]),
         find = Block(),
         compare = Block(),
         nextName = Block();
     final mandatory = Block(),
-        mandatoryNames = Block([TypeValues.namedParameter.nullable]),
+        mandatoryNames = Block([TypeMetadata.namedParameter.nullable]),
         mandatoryTest = Block();
     final mandatoryFind = Block(),
         mandatoryCheck = Block(),
         mandatoryNext = Block();
-    _equal(entry, count, _load(entry, TypeValues.binderCount, b), required, no);
+    _equal(
+      entry,
+      count,
+      _load(entry, TypeMetadata.binderCount, b),
+      required,
+      no,
+    );
     _branch(
       required,
       _op(
         required,
         .lessOrEqual,
-        _load(required, TypeValues.requiredCount, a),
-        _load(required, TypeValues.requiredCount, b),
+        _load(required, TypeMetadata.requiredCount, a),
+        _load(required, TypeMetadata.requiredCount, b),
       ),
       positional,
       no,
     );
-    final supplied = _load(positional, TypeValues.positionalCount, b);
+    final supplied = _load(positional, TypeMetadata.positionalCount, b);
     _branch(
       positional,
       _op(
         positional,
         .greaterOrEqual,
-        _load(positional, TypeValues.positionalCount, a),
+        _load(positional, TypeMetadata.positionalCount, a),
         supplied,
       ),
       scopes,
@@ -842,7 +851,7 @@ final class TypeRelations(
         identifier,
         count,
         _op(bind, .add, _call(bind, _scopeSize, [sourceScope]), count),
-        _load(bind, TypeValues.parts, left),
+        _load(bind, TypeMetadata.parts, left),
         sourceScope,
         const Constant.nullValue(),
       ]),
@@ -919,13 +928,13 @@ final class TypeRelations(
     nextArgument.finish(
       Jump(arguments, [_op(nextArgument, .add, argumentIndex, _int(1))]),
     );
-    mandatory.finish(Jump(names, [_load(mandatory, TypeValues.named, b)]));
+    mandatory.finish(Jump(names, [_load(mandatory, TypeMetadata.named, b)]));
     final targetName = names.parameters.single;
     _equal(names, targetName, const Constant.nullValue(), mandatoryNext, find);
     final name = _present(find, targetName);
     final found = _call(find, _findName, [
-      _load(find, TypeValues.named, a),
-      _load(find, TypeValues.name, name),
+      _load(find, TypeMetadata.named, a),
+      _load(find, TypeMetadata.name, name),
     ]);
     _equal(find, found, const Constant.nullValue(), no, compare);
     final sourceName = _present(compare, found);
@@ -933,16 +942,18 @@ final class TypeRelations(
       compare,
       _relate(
         compare,
-        _part(compare, right, _load(compare, TypeValues.nameSlot, name)),
-        _part(compare, left, _load(compare, TypeValues.nameSlot, sourceName)),
+        _part(compare, right, _load(compare, TypeMetadata.nameSlot, name)),
+        _part(compare, left, _load(compare, TypeMetadata.nameSlot, sourceName)),
         reversed,
       ),
       nextName,
       no,
     );
-    nextName.finish(Jump(names, [_load(nextName, TypeValues.nextName, name)]));
+    nextName.finish(
+      Jump(names, [_load(nextName, TypeMetadata.nextName, name)]),
+    );
     mandatoryNext.finish(
-      Jump(mandatoryNames, [_load(mandatoryNext, TypeValues.named, a)]),
+      Jump(mandatoryNames, [_load(mandatoryNext, TypeMetadata.named, a)]),
     );
     final candidate = mandatoryNames.parameters.single;
     _equal(
@@ -956,13 +967,13 @@ final class TypeRelations(
     final advance = Block();
     _branch(
       mandatoryTest,
-      _load(mandatoryTest, TypeValues.requiredName, requiredName),
+      _load(mandatoryTest, TypeMetadata.requiredName, requiredName),
       mandatoryFind,
       advance,
     );
     final requiredTarget = _call(mandatoryFind, _findName, [
-      _load(mandatoryFind, TypeValues.named, b),
-      _load(mandatoryFind, TypeValues.name, requiredName),
+      _load(mandatoryFind, TypeMetadata.named, b),
+      _load(mandatoryFind, TypeMetadata.name, requiredName),
     ]);
     _equal(
       mandatoryFind,
@@ -975,14 +986,16 @@ final class TypeRelations(
       mandatoryCheck,
       _load(
         mandatoryCheck,
-        TypeValues.requiredName,
+        TypeMetadata.requiredName,
         _present(mandatoryCheck, requiredTarget),
       ),
       advance,
       no,
     );
     advance.finish(
-      Jump(mandatoryNames, [_load(advance, TypeValues.nextName, requiredName)]),
+      Jump(mandatoryNames, [
+        _load(advance, TypeMetadata.nextName, requiredName),
+      ]),
     );
     return IrFunction(_function, [
       entry,
@@ -1023,8 +1036,8 @@ final class TypeRelations(
         unchanged = Block();
     final shape = Block(), function = Block(), children = Block([.integer]);
     final [value, amount, cutoff] = entry.parameters;
-    final kind = _load(entry, TypeValues.kind, value),
-        index = _load(entry, TypeValues.shape, value);
+    final kind = _load(entry, TypeMetadata.kind, value),
+        index = _load(entry, TypeMetadata.shape, value);
     _equal(entry, kind, _int(TypeKind.parameter.index), parameter, shape);
     _branch(
       parameter,
@@ -1054,7 +1067,7 @@ final class TypeRelations(
     );
     final signature = _present(
       function,
-      _load(function, TypeValues.signature, value),
+      _load(function, TypeMetadata.signature, value),
     );
     function.finish(
       Jump(children, [
@@ -1062,12 +1075,12 @@ final class TypeRelations(
           function,
           .add,
           cutoff,
-          _load(function, TypeValues.binderCount, signature),
+          _load(function, TypeMetadata.binderCount, signature),
         ),
       ]),
     );
     final parts = _call(children, _shiftParts, [
-      _load(children, TypeValues.parts, value),
+      _load(children, TypeMetadata.parts, value),
       amount,
       children.parameters.single,
     ]);
@@ -1077,10 +1090,10 @@ final class TypeRelations(
           children,
           kind,
           index,
-          _load(children, TypeValues.allowsNull, value),
+          _load(children, TypeMetadata.allowsNull, value),
           parts,
-          _load(children, TypeValues.signature, value),
-          label: _load(children, TypeValues.className, value),
+          _load(children, TypeMetadata.signature, value),
+          label: _load(children, TypeMetadata.className, value),
         ),
       ),
     );
@@ -1104,12 +1117,12 @@ final class TypeRelations(
     empty.finish(Return(const Constant.nullValue()));
     final item = _present(copy, list);
     final head = _call(copy, _shift, [
-      _load(copy, TypeValues.head, item),
+      _load(copy, TypeMetadata.head, item),
       amount,
       cutoff,
     ]);
     final tail = _call(copy, _shiftParts, [
-      _load(copy, TypeValues.tail, item),
+      _load(copy, TypeMetadata.tail, item),
       amount,
       cutoff,
     ]);

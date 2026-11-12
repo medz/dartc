@@ -21,6 +21,8 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     final args = block.parameters;
     final Value? value;
     switch (operation) {
+      case .typeView:
+        value = block.emit(TypeCast(args.single, TypeMetadata.type));
       case .className:
         value = block.emit(ObjectClassName(args.single));
       case .map:
@@ -103,6 +105,12 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
   }
   return HeapRuntime(
     program,
+    invocation: annotations.entries[RuntimeRole.invocation],
+    dispatchFailure: annotations.entries[RuntimeRole.dispatchFailure],
+    exhaustivenessFailure:
+        annotations.entries[RuntimeRole.exhaustivenessFailure],
+    floatingRemainder: annotations.entries[RuntimeRole.floatingRemainder],
+    floatingModulo: annotations.entries[RuntimeRole.floatingModulo],
     allocate: allocate,
     release: release,
     runEvents: runEvents,

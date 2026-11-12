@@ -1,7 +1,6 @@
 import 'package:dartc/ir.dart';
 
 import 'program_layout.dart';
-import 'type_values.dart';
 
 /// Generates checked conversions using ordinary type tests and exception edges.
 final class CheckedCasts() {
@@ -24,8 +23,8 @@ final class CheckedCasts() {
   FunctionTarget bounds(ProgramLayout layouts) {
     if (_bounds case final body?) return body.target;
     final target = FunctionTarget(null, 'bound', .voidType, [
-      TypeValues.type,
-      TypeValues.type,
+      TypeMetadata.type,
+      TypeMetadata.type,
     ]);
     final entry = Block(target.parameterTypes),
         done = Block(),

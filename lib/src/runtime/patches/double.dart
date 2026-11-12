@@ -1,4 +1,5 @@
 import '../decimal.dart';
+import '../numbers.dart';
 
 @patch
 class double {
@@ -21,4 +22,12 @@ class _BigIntImpl {
 
   @patch
   static _DivRemResult get _cachedDivRemResult => _divisionResult;
+}
+
+@patch
+class _Double {
+  @patch
+  double _modulo(double other) => floatingModulo(this, other);
+  @patch
+  double _remainder(double other) => floatingRemainder(this, other);
 }

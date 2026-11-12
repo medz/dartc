@@ -197,6 +197,24 @@ bool typedCollections(int mode) {
         return true;
       }
       return false;
+    case 4:
+      final bytes = Uint8List.fromList([1, 2, 3, 4]);
+      final view = Uint8List.sublistView(bytes, 1);
+      return bytes.rangeEquals(1, 4, view) &&
+          !bytes.rangeEquals(0, 3, view) &&
+          bytes.rangeEquals(4, 4, view, 3) &&
+          ByteData.sublistView(bytes)
+              .rangeEquals(1, 4, ByteData.sublistView(view));
+    case 5:
+      final values = Int64List.fromList([-1, 0, 9223372036854775807]);
+      final copy = Int64List.fromList(values);
+      if (!values.rangeEquals(0, 3, copy)) return false;
+      try {
+        values.rangeEquals(0, 3, copy, 1);
+      } on RangeError {
+        return true;
+      }
+      return false;
     default:
       final bytes = ByteData(8);
       bytes.setFloat64(0, -0.0);

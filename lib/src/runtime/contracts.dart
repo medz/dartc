@@ -10,6 +10,11 @@ enum RuntimeRole() {
   runEvents,
   events,
   copyBytes,
+  invocation,
+  dispatchFailure,
+  exhaustivenessFailure,
+  floatingRemainder,
+  floatingModulo,
 }
 
 /// Binds an external declaration to one trusted machine operation.
@@ -38,6 +43,7 @@ enum MemoryOperation() {
   float32Bits,
   float64Bits,
   className,
+  typeView,
 }
 
 /// Excludes this reference slot from strong tracing.
@@ -61,3 +67,20 @@ final class const ConstantListStorage(
 
 /// Marks variable payload words as managed references.
 final class const ReferencePayload();
+
+/// Reified type shapes shared with native metadata.
+enum TypeKind() {
+  nominal,
+  nullable,
+  futureOr,
+  function,
+  record,
+  parameter,
+  dynamicType,
+  voidType,
+  never,
+  nullType,
+}
+
+/// Binds a Dart class to its compiler-generated type metadata.
+final class const TypeStorage(final int kind);

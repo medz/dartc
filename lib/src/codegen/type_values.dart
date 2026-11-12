@@ -1,104 +1,8 @@
 import 'package:dartc/ir.dart';
-
-enum TypeKind() {
-  nominal,
-  nullable,
-  futureOr,
-  function,
-  record,
-  parameter,
-  dynamicType,
-  voidType,
-  never,
-  nullType,
-}
+import 'package:dartc/runtime/contracts.dart' show TypeKind;
 
 /// Generates reified type structures and their normalization through ordinary IR.
 final class TypeValues() {
-  static final type = ClassType(
-    null,
-    '_Type',
-    interfaces: [ValueType.typeType],
-  );
-  static final list = ClassType(null, '_TypeArguments');
-  static final functionShape = ClassType(null, '_FunctionShape');
-  static final namedParameter = ClassType(null, '_NamedParameter');
-  static final signature = InstanceField(
-    type,
-    'signature',
-    functionShape.nullable,
-    isFinal: true,
-  );
-  static final binderCount = InstanceField(
-    functionShape,
-    'binders',
-    .integer,
-    isFinal: true,
-  );
-  static final positionalCount = InstanceField(
-    functionShape,
-    'positional',
-    .integer,
-    isFinal: true,
-  );
-  static final requiredCount = InstanceField(
-    functionShape,
-    'required',
-    .integer,
-    isFinal: true,
-  );
-  static final named = InstanceField(
-    functionShape,
-    'named',
-    namedParameter.nullable,
-    isFinal: true,
-  );
-  static final name = InstanceField(
-    namedParameter,
-    'name',
-    .integer,
-    isFinal: true,
-  );
-  static final nameSlot = InstanceField(
-    namedParameter,
-    'slot',
-    .integer,
-    isFinal: true,
-  );
-  static final requiredName = InstanceField(
-    namedParameter,
-    'required',
-    .boolean,
-    isFinal: true,
-  );
-  static final nextName = InstanceField(
-    namedParameter,
-    'next',
-    namedParameter.nullable,
-    isFinal: true,
-  );
-  static final kind = InstanceField(type, 'kind', .integer, isFinal: true);
-  static final shape = InstanceField(type, 'shape', .integer, isFinal: true);
-  static final className = InstanceField(
-    type,
-    'className',
-    .string,
-    isFinal: true,
-  );
-  static final allowsNull = InstanceField(
-    type,
-    'allowsNull',
-    .boolean,
-    isFinal: true,
-  );
-  static final parts = InstanceField(
-    type,
-    'parts',
-    list.nullable,
-    isFinal: true,
-  );
-  static final head = InstanceField(list, 'head', type, isFinal: true);
-  static final tail = InstanceField(list, 'tail', list.nullable, isFinal: true);
   static final _init = FunctionTarget(
     null,
     '_Type',
@@ -107,35 +11,42 @@ final class TypeValues() {
       .integer,
       .integer,
       .boolean,
-      list.nullable,
-      functionShape.nullable,
+      TypeMetadata.list.nullable,
+      TypeMetadata.functionShape.nullable,
       .string,
     ],
-    owner: type,
+    owner: TypeMetadata.type,
     kind: .initializer,
   );
   static final listInit = FunctionTarget(
     null,
     '_TypeArguments',
     .voidType,
-    [type, list.nullable],
-    owner: list,
+    [TypeMetadata.type, TypeMetadata.list.nullable],
+    owner: TypeMetadata.list,
     kind: .initializer,
   );
-  final _nullable = FunctionTarget(null, 'nullableType', type, [type]);
-  final _futureOr = FunctionTarget(null, 'futureOrType', type, [type]);
-  final _parameter = FunctionTarget(null, 'boundParameter', type, [type, type]);
+  final _nullable = FunctionTarget(null, 'nullableType', TypeMetadata.type, [
+    TypeMetadata.type,
+  ]);
+  final _futureOr = FunctionTarget(null, 'futureOrType', TypeMetadata.type, [
+    TypeMetadata.type,
+  ]);
+  final _parameter = FunctionTarget(null, 'boundParameter', TypeMetadata.type, [
+    TypeMetadata.type,
+    TypeMetadata.type,
+  ]);
   final _equal = FunctionTarget(null, 'typeEquals', .boolean, [
-    type,
+    TypeMetadata.type,
     .object.nullable,
   ]);
   final _equalArguments = FunctionTarget(null, 'typeArgumentsEqual', .boolean, [
-    list.nullable,
-    list.nullable,
+    TypeMetadata.list.nullable,
+    TypeMetadata.list.nullable,
   ]);
-  final _hash = FunctionTarget(null, 'typeHash', .integer, [type]);
+  final _hash = FunctionTarget(null, 'typeHash', .integer, [TypeMetadata.type]);
   final _hashArguments = FunctionTarget(null, 'typeArgumentsHash', .integer, [
-    list.nullable,
+    TypeMetadata.list.nullable,
   ]);
   final _shapes = <Object, int>{};
   final _templates =
@@ -146,21 +57,34 @@ final class TypeValues() {
   final _functions = <FunctionTarget, IrFunction>{};
 
   List<IrClass> get classes => [
-    IrClass(functionShape, [
-      binderCount,
-      positionalCount,
-      requiredCount,
-      named,
+    IrClass(TypeMetadata.functionShape, [
+      TypeMetadata.binderCount,
+      TypeMetadata.positionalCount,
+      TypeMetadata.requiredCount,
+      TypeMetadata.named,
     ]),
-    IrClass(namedParameter, [name, nameSlot, requiredName, nextName]),
+    IrClass(TypeMetadata.namedParameter, [
+      TypeMetadata.name,
+      TypeMetadata.nameSlot,
+      TypeMetadata.requiredName,
+      TypeMetadata.nextName,
+      TypeMetadata.nameText,
+    ]),
     IrClass(
-      type,
-      [kind, shape, allowsNull, parts, signature, className],
+      TypeMetadata.type,
+      [
+        TypeMetadata.kind,
+        TypeMetadata.shape,
+        TypeMetadata.allowsNull,
+        TypeMetadata.parts,
+        TypeMetadata.signature,
+        TypeMetadata.className,
+      ],
       constructors: [if (_functions.containsKey(_init)) _init],
     ),
     IrClass(
-      list,
-      [head, tail],
+      TypeMetadata.list,
+      [TypeMetadata.head, TypeMetadata.tail],
       constructors: [if (_functions.containsKey(listInit)) listInit],
     ),
   ];
@@ -214,8 +138,10 @@ final class TypeValues() {
   Constant argumentConstants(Iterable<ValueType> arguments) =>
       arguments.toList().reversed.fold<Constant>(
         const Constant.nullValue(),
-        (next, value) =>
-            ObjectConstant(list, {head: constant(value), tail: next}),
+        (next, value) => ObjectConstant(TypeMetadata.list, {
+          TypeMetadata.head: constant(value),
+          TypeMetadata.tail: next,
+        }),
       );
 
   ObjectConstant constant(ValueType value) =>
@@ -232,6 +158,7 @@ final class TypeValues() {
       shape,
       parts,
       function: value is FunctionType ? value : null,
+      record: value is RecordType ? value : null,
     );
   }
 
@@ -240,26 +167,34 @@ final class TypeValues() {
     int shape,
     List<ObjectConstant> children, {
     FunctionType? function,
+    RecordType? record,
   }) {
     Constant parts = const Constant.nullValue();
     for (final child in children.reversed) {
-      parts = ObjectConstant(list, {head: child, tail: parts});
+      parts = ObjectConstant(TypeMetadata.list, {
+        TypeMetadata.head: child,
+        TypeMetadata.tail: parts,
+      });
     }
-    return ObjectConstant(type, {
-      className: Constant.string(_label(kind, shape)),
-      TypeValues.kind: Constant.integer(kind.index),
-      TypeValues.shape: Constant.integer(shape),
-      allowsNull: Constant.boolean(
+    return ObjectConstant(TypeMetadata.type, {
+      TypeMetadata.className: Constant.string(_label(kind, shape)),
+      TypeMetadata.kind: Constant.integer(kind.index),
+      TypeMetadata.shape: Constant.integer(shape),
+      TypeMetadata.allowsNull: Constant.boolean(
         kind == .nullable ||
             kind == .nullType ||
             kind == .dynamicType ||
             kind == .voidType ||
             kind == .futureOr &&
-                (children.single.fields[allowsNull]! as ScalarConstant).value ==
+                (children.single.fields[TypeMetadata.allowsNull]!
+                            as ScalarConstant)
+                        .value ==
                     true,
       ),
-      TypeValues.parts: parts,
-      signature: function == null
+      TypeMetadata.parts: parts,
+      TypeMetadata.signature: record != null
+          ? _recordSignature(record)
+          : function == null
           ? const Constant.nullValue()
           : _signature(function),
     });
@@ -269,20 +204,41 @@ final class TypeValues() {
     final names = value.named.keys.toList()..sort();
     Constant entries = const Constant.nullValue();
     for (final (index, key) in names.indexed.toList().reversed) {
-      entries = ObjectConstant(namedParameter, {
-        name: Constant.integer(id(key)),
-        nameSlot: Constant.integer(
+      entries = ObjectConstant(TypeMetadata.namedParameter, {
+        TypeMetadata.name: Constant.integer(id(key)),
+        TypeMetadata.nameText: Constant.string(key),
+        TypeMetadata.nameSlot: Constant.integer(
           value.typeParameters.length + 1 + value.positionalCount + index,
         ),
-        requiredName: Constant.boolean(value.named[key]!.required),
-        nextName: entries,
+        TypeMetadata.requiredName: Constant.boolean(value.named[key]!.required),
+        TypeMetadata.nextName: entries,
       });
     }
-    return ObjectConstant(functionShape, {
-      binderCount: Constant.integer(value.typeParameters.length),
-      positionalCount: Constant.integer(value.positionalCount),
-      requiredCount: Constant.integer(value.requiredPositional),
-      named: entries,
+    return ObjectConstant(TypeMetadata.functionShape, {
+      TypeMetadata.binderCount: Constant.integer(value.typeParameters.length),
+      TypeMetadata.positionalCount: Constant.integer(value.positionalCount),
+      TypeMetadata.requiredCount: Constant.integer(value.requiredPositional),
+      TypeMetadata.named: entries,
+    });
+  }
+
+  ObjectConstant _recordSignature(RecordType value) {
+    Constant entries = const Constant.nullValue();
+    for (final entry
+        in value.slots.entries.skip(value.positionalCount).toList().reversed) {
+      entries = ObjectConstant(TypeMetadata.namedParameter, {
+        TypeMetadata.name: Constant.integer(id(entry.key)),
+        TypeMetadata.nameText: Constant.string(entry.key),
+        TypeMetadata.nameSlot: Constant.integer(entry.value),
+        TypeMetadata.requiredName: const Constant.boolean(false),
+        TypeMetadata.nextName: entries,
+      });
+    }
+    return ObjectConstant(TypeMetadata.functionShape, {
+      TypeMetadata.binderCount: const Constant.integer(0),
+      TypeMetadata.positionalCount: Constant.integer(value.positionalCount),
+      TypeMetadata.requiredCount: Constant.integer(value.positionalCount),
+      TypeMetadata.named: entries,
     });
   }
 
@@ -394,9 +350,12 @@ final class TypeValues() {
     ValueType template,
   ) => _templates.putIfAbsent(template, () {
     final parameters = _variablesIn(template);
-    final target = FunctionTarget(null, 'reify${_templates.length}', type, [
-      for (final _ in parameters) type,
-    ]);
+    final target = FunctionTarget(
+      null,
+      'reify${_templates.length}',
+      TypeMetadata.type,
+      [for (final _ in parameters) TypeMetadata.type],
+    );
     final entry = Block(target.parameterTypes);
     final environment = {
       for (final (i, parameter) in parameters.indexed)
@@ -444,7 +403,11 @@ final class TypeValues() {
         kind,
         shape,
         parts,
-        signature: value is FunctionType ? _signature(value) : null,
+        signature: value is FunctionType
+            ? _signature(value)
+            : value is RecordType
+            ? _recordSignature(value)
+            : null,
       );
     }
 
@@ -460,7 +423,7 @@ final class TypeValues() {
       Branch(
         entry.emit(
           Equals(
-            entry.emit(LoadField(TypeValues.kind, bound)),
+            entry.emit(LoadField(TypeMetadata.kind, bound)),
             Constant.integer(TypeKind.never.index),
           ),
         ),
@@ -510,7 +473,7 @@ final class TypeValues() {
   Construct cons(Value value, Value next) {
     _functions.putIfAbsent(
       listInit,
-      () => _initializer(listInit, [head, tail]),
+      () => _initializer(listInit, [TypeMetadata.head, TypeMetadata.tail]),
     );
     return Construct(listInit, [value, next]);
   }
@@ -527,12 +490,12 @@ final class TypeValues() {
     _functions.putIfAbsent(
       _init,
       () => _initializer(_init, [
-        TypeValues.kind,
-        TypeValues.shape,
-        TypeValues.allowsNull,
-        TypeValues.parts,
-        TypeValues.signature,
-        TypeValues.className,
+        TypeMetadata.kind,
+        TypeMetadata.shape,
+        TypeMetadata.allowsNull,
+        TypeMetadata.parts,
+        TypeMetadata.signature,
+        TypeMetadata.className,
       ]),
     );
     return block.emit(
@@ -549,8 +512,8 @@ final class TypeValues() {
 
   Value first(Block block, Value value) => block.emit(
     LoadField(
-      head,
-      block.emit(NullCheck(block.emit(LoadField(TypeValues.parts, value)))),
+      TypeMetadata.head,
+      block.emit(NullCheck(block.emit(LoadField(TypeMetadata.parts, value)))),
     ),
   );
 
@@ -562,7 +525,7 @@ final class TypeValues() {
     final value = entry.parameters.single;
     entry.finish(
       Branch(
-        entry.emit(LoadField(allowsNull, value)),
+        entry.emit(LoadField(TypeMetadata.allowsNull, value)),
         Jump(done),
         Jump(bottom),
       ),
@@ -573,7 +536,7 @@ final class TypeValues() {
       Branch(
         bottom.emit(
           Equals(
-            bottom.emit(LoadField(TypeValues.kind, value)),
+            bottom.emit(LoadField(TypeMetadata.kind, value)),
             Constant.integer(TypeKind.never.index),
           ),
         ),
@@ -590,7 +553,7 @@ final class TypeValues() {
         voidType = Block(),
         nullable = Block();
     final unwrap = Block(),
-        nominal = Block([type]),
+        nominal = Block([TypeMetadata.type]),
         object = Block(),
         bottom = Block(),
         nullType = Block();
@@ -599,7 +562,7 @@ final class TypeValues() {
         make = Block(),
         done = Block();
     final value = entry.parameters.single;
-    final kind = entry.emit(LoadField(TypeValues.kind, value));
+    final kind = entry.emit(LoadField(TypeMetadata.kind, value));
     void check(Block b, Value a, int tag, Block yes, Block no) => b.finish(
       Branch(b.emit(Equals(a, Constant.integer(tag))), Jump(yes), Jump(no)),
     );
@@ -616,14 +579,14 @@ final class TypeValues() {
     final base = nominal.parameters.single;
     check(
       nominal,
-      nominal.emit(LoadField(TypeValues.kind, base)),
+      nominal.emit(LoadField(TypeMetadata.kind, base)),
       TypeKind.nominal.index,
       object,
       bottom,
     );
     check(
       object,
-      object.emit(LoadField(TypeValues.shape, base)),
+      object.emit(LoadField(TypeMetadata.shape, base)),
       id(ValueType.object),
       done,
       bottom,
@@ -646,7 +609,7 @@ final class TypeValues() {
       Return(
         construct(make, .futureOr, 0, [
           value,
-        ], allowsNull: make.emit(LoadField(allowsNull, value))),
+        ], allowsNull: make.emit(LoadField(TypeMetadata.allowsNull, value))),
       ),
     );
     done.finish(Return(value));
@@ -685,11 +648,13 @@ final class TypeValues() {
     final value = entry.parameters.single;
     final seed = _mixHash(
       entry,
-      entry.emit(LoadField(kind, value)),
-      entry.emit(LoadField(shape, value)),
+      entry.emit(LoadField(TypeMetadata.kind, value)),
+      entry.emit(LoadField(TypeMetadata.shape, value)),
     );
     final partsHash = entry.emit(
-      DirectCall(_hashArguments, [entry.emit(LoadField(parts, value))]),
+      DirectCall(_hashArguments, [
+        entry.emit(LoadField(TypeMetadata.parts, value)),
+      ]),
     );
     entry.finish(Return(_mixHash(entry, seed, partsHash)));
     return IrFunction(_hash, [entry]);
@@ -697,41 +662,43 @@ final class TypeValues() {
 
   IrFunction _argumentHashBody() {
     final entry = Block(_hashArguments.parameterTypes);
-    final loop = Block([list.nullable, .integer]),
-        step = Block([list]),
+    final loop = Block([TypeMetadata.list.nullable, .integer]),
+        step = Block([TypeMetadata.list]),
         done = Block();
     entry.finish(
       Jump(loop, [entry.parameters.single, const Constant.integer(0)]),
     );
     final [values, seed] = loop.parameters;
-    final test = loop.emit(TypeTest(values, list));
+    final test = loop.emit(TypeTest(values, TypeMetadata.list));
     loop.finish(Branch(test, Jump(step, [test.refinement(true)!]), Jump(done)));
     final node = step.parameters.single;
     final value = step.emit(
-      DirectCall(_hash, [step.emit(LoadField(head, node))]),
+      DirectCall(_hash, [step.emit(LoadField(TypeMetadata.head, node))]),
     );
     final hash = _mixHash(step, seed, value);
-    step.finish(Jump(loop, [step.emit(LoadField(tail, node)), hash]));
+    step.finish(
+      Jump(loop, [step.emit(LoadField(TypeMetadata.tail, node)), hash]),
+    );
     done.finish(Return(seed));
     return IrFunction(_hashArguments, [entry, loop, step, done]);
   }
 
   IrFunction _equalityBody() {
     final entry = Block(_equal.parameterTypes),
-        kind = Block([type]),
+        kind = Block([TypeMetadata.type]),
         shape = Block(),
         parts = Block();
     final no = Block();
     final [left, other] = entry.parameters;
-    final test = entry.emit(TypeTest(other, type));
+    final test = entry.emit(TypeTest(other, TypeMetadata.type));
     entry.finish(Branch(test, Jump(kind, [test.refinement(true)!]), Jump(no)));
     final right = kind.parameters.single;
     kind.finish(
       Branch(
         kind.emit(
           Equals(
-            kind.emit(LoadField(TypeValues.kind, left)),
-            kind.emit(LoadField(TypeValues.kind, right)),
+            kind.emit(LoadField(TypeMetadata.kind, left)),
+            kind.emit(LoadField(TypeMetadata.kind, right)),
           ),
         ),
         Jump(shape),
@@ -742,8 +709,8 @@ final class TypeValues() {
       Branch(
         shape.emit(
           Equals(
-            shape.emit(LoadField(TypeValues.shape, left)),
-            shape.emit(LoadField(TypeValues.shape, right)),
+            shape.emit(LoadField(TypeMetadata.shape, left)),
+            shape.emit(LoadField(TypeMetadata.shape, right)),
           ),
         ),
         Jump(parts),
@@ -754,8 +721,8 @@ final class TypeValues() {
       Return(
         parts.emit(
           DirectCall(_equalArguments, [
-            parts.emit(LoadField(TypeValues.parts, left)),
-            parts.emit(LoadField(TypeValues.parts, right)),
+            parts.emit(LoadField(TypeMetadata.parts, left)),
+            parts.emit(LoadField(TypeMetadata.parts, right)),
           ]),
         ),
       ),
@@ -766,34 +733,35 @@ final class TypeValues() {
 
   IrFunction _argumentEqualityBody() {
     final entry = Block(_equalArguments.parameterTypes);
-    final loop = Block(_equalArguments.parameterTypes), second = Block([list]);
+    final loop = Block(_equalArguments.parameterTypes),
+        second = Block([TypeMetadata.list]);
     entry.finish(Jump(loop, entry.parameters));
-    final compare = Block([list]),
+    final compare = Block([TypeMetadata.list]),
         next = Block(),
         end = Block(),
         yes = Block(),
         no = Block();
     final [a, b] = loop.parameters;
-    final first = loop.emit(TypeTest(a, list));
+    final first = loop.emit(TypeTest(a, TypeMetadata.list));
     loop.finish(
       Branch(first, Jump(second, [first.refinement(true)!]), Jump(end)),
     );
-    final exists = second.emit(TypeTest(b, list));
+    final exists = second.emit(TypeTest(b, TypeMetadata.list));
     second.finish(
       Branch(exists, Jump(compare, [exists.refinement(true)!]), Jump(no)),
     );
     final aPart = second.parameters.single, bPart = compare.parameters.single;
     final equal = compare.emit(
       DirectCall(_equal, [
-        compare.emit(LoadField(head, aPart)),
-        compare.emit(LoadField(head, bPart)),
+        compare.emit(LoadField(TypeMetadata.head, aPart)),
+        compare.emit(LoadField(TypeMetadata.head, bPart)),
       ]),
     );
     compare.finish(Branch(equal, Jump(next), Jump(no)));
     next.finish(
       Jump(loop, [
-        next.emit(LoadField(tail, aPart)),
-        next.emit(LoadField(tail, bPart)),
+        next.emit(LoadField(TypeMetadata.tail, aPart)),
+        next.emit(LoadField(TypeMetadata.tail, bPart)),
       ]),
     );
     end.finish(
@@ -820,7 +788,7 @@ final class TypeValues() {
 
 /// The concrete metadata representation produced by a built-in runtimeType read.
 final class TypeReference(final ObjectRuntimeType operand) extends Value {
-  this : super(TypeValues.type) {
+  this : super(TypeMetadata.type) {
     if (!operand.direct) {
       throw ArgumentError('A built-in type read is required.');
     }

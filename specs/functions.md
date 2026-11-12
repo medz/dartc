@@ -45,7 +45,7 @@
 
 原生闭包支持捕获 `late` 和 `late final`，包括未绑定存储、惰性初始化闭包及其词法泛型环境。初始化器在第一次读取时执行；逃逸闭包在创建者返回后及同模块后续原生入口中保留绑定。见[局部 late 原生验证](../test/compiler/late_locals_test.dart)。
 
-此范围不包含 dynamic/noSuchMethod 调用、dynamic 成员读取及 FFI 回调；上表的 IR 支持不表示这些路径均可原生执行。
+原生 dynamic 支持上述同步函数值、callable object、泛型默认值、显式类型实参、方法提取、getter/setter 和 noSuchMethod。无效调用先核对实参形状，再执行默认类型、界限和参数检查；getter 调用保留两种语法的求值顺序。见[原生动态调用对照](../test/compiler/object_text_test.dart)。FFI 回调、record 存储及异步函数的原生执行仍是缺口。
 
 ## 异步参考执行器范围
 

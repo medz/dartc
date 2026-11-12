@@ -5,6 +5,7 @@ import 'dart:collection' as collection;
 import '../contracts.dart' as runtime;
 import '../allocator.dart' as allocator;
 import '../finalization.dart' as finalization;
+import '../type_info.dart' as metadata;
 
 @patch
 class Map<K, V> {
@@ -67,6 +68,10 @@ final class _Finalizer<T>(void Function(T) callback)
 class Object {
   external int get _identityHashCode;
 
+  @patch
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw NoSuchMethodError.withInvocation(this, invocation);
+
   @runtime.Primitive(.className)
   external String get _className;
 
@@ -126,4 +131,27 @@ class _WeakProperty {
   get value => _value;
   @patch
   set value(v) => _value = v;
+}
+
+@patch
+class Type {
+  @patch
+  String toString() => metadata.TypeInfo.of(this).toString();
+}
+
+@patch
+class NoSuchMethodError {
+  @patch
+  factory NoSuchMethodError.withInvocation(
+    Object? receiver,
+    Invocation invocation,
+  ) => _MissingMethod(receiver, invocation);
+}
+
+final class _MissingMethod(final Object? receiver, final Invocation invocation)
+    extends Error
+    implements NoSuchMethodError {
+  @override
+  String toString() =>
+      'NoSuchMethodError: ${invocation.memberName} on $receiver';
 }

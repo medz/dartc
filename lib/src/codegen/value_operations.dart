@@ -1,11 +1,11 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/runtime/contracts.dart' show TypeKind;
 
 import 'double_bits.dart';
 import 'program_layout.dart';
 import 'reference_equality.dart';
 import 'selected_graph.dart';
 import 'storage_access.dart';
-import 'type_values.dart';
 
 /// Builds comparisons and hashes from runtime value identities.
 final class ValueOperations(
@@ -28,7 +28,7 @@ final class ValueOperations(
     final done = graph.addBlock([
       .integer,
       .object.nullable,
-      TypeValues.list.nullable,
+      TypeMetadata.list.nullable,
     ]);
     for (final shape in layouts.closures.all) {
       final selected = graph.addBlock(), next = graph.addBlock();
@@ -249,7 +249,7 @@ final class ValueOperations(
     for (final value in [left, right]) {
       final body = graph.instructions[current]!;
       final type = layouts.types.runtimeTypeOf(value, body);
-      final kind = LoadField(TypeValues.kind, type);
+      final kind = LoadField(TypeMetadata.kind, type);
       final test = Equals(kind, Constant.integer(TypeKind.function.index));
       body.addAll([kind, test]);
       final next = graph.addBlock();

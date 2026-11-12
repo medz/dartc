@@ -26,7 +26,7 @@
 
 `finally` 保留返回表达式的求值顺序；清理正常结束时继续原完成方式，清理自身的返回或抛错会替换待处理结果。见[源码与 SDK 对照](../test/compiler/exceptions_test.dart)及[身份、轨迹与回收验证](../test/codegen/exceptions_native_test.dart)。
 
-dynamic 抛出值先检查为非空 Object；null 产生 TypeError，其他已支持的值保持原异常身份。见[动态抛出对照](../test/compiler/type_checks_test.dart)。依赖运行时类型参数的 `on T`、断言与穷尽性错误构造、可捕获分配失败、异步展开仍是缺口。异常不能越过原生入口展开外部栈；未捕获异常释放入口资源、输出错误提示并以 255 退出，尚不格式化异常对象和栈轨迹。
+dynamic 抛出值先检查为非空 Object；null 产生 TypeError，其他已支持的值保持原异常身份。见[动态抛出对照](../test/compiler/type_checks_test.dart)。穷尽 switch 意外落空时抛出 Error，沿正常异常边展开。依赖运行时类型参数的 `on T`、断言、可捕获分配失败、异步展开仍是缺口。异常不能越过原生入口展开外部栈；未捕获异常释放入口资源、输出错误提示并以 255 退出，尚不格式化异常对象和栈轨迹。
 
 ## 规范依据
 

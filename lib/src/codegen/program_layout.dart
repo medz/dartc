@@ -58,11 +58,11 @@ final class ProgramLayout(
     _classes[FfiTypes.pointer] = pointers.declaration;
     _classes[ValueType.string] = strings.declaration;
     for (final declaration in types.classes) {
-      _classes[declaration.type] = declaration;
+      _classes.putIfAbsent(declaration.type, () => declaration);
     }
     relations = TypeRelations(types, [..._classes.keys, ...referencedClasses]);
     for (final declaration in relations.classes) {
-      _classes[declaration.type] = declaration;
+      _classes.putIfAbsent(declaration.type, () => declaration);
     }
   }
 
@@ -110,8 +110,8 @@ final class ProgramLayout(
     for (final (i, type) in target.parameterTypes.indexed)
       pointerParameters.contains(target, i) ? .integer : type,
     if (target.kind == .factory && target.owner!.typeParameters.isNotEmpty)
-      TypeValues.type,
-    for (final _ in target.typeParameters) TypeValues.type,
+      TypeMetadata.type,
+    for (final _ in target.typeParameters) TypeMetadata.type,
   ];
 
   /// Checks transfers before a machine word loses its semantic type.
