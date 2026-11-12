@@ -68,6 +68,7 @@ const _compilerLibraries = {
   'native_function_pointers',
   'native_imports',
   'native_aggregates',
+  'typed_data',
   'managed_objects',
   'heap_runtime',
   'weak_references',

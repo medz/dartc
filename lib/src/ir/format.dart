@@ -125,6 +125,7 @@ void writeFunction(
     NativeView() =>
       'nativeView ${op.type.dartName} ${op.address == null ? "new" : value(op.address!)} copy=${op.copy} owner=${value(op.owner)}',
     NativeAddress() => 'nativeAddress ${value(op.view)}',
+    FloatBitCast() => 'floatBits${op.width} ${value(op.operand)}',
     NativeSize() => 'nativeSize ${op.nativeType}',
     NativeFieldOffset() => 'nativeFieldOffset ${op.owner} ${op.index}',
     CopyNative() =>

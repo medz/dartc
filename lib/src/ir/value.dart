@@ -586,6 +586,7 @@ sealed class Instruction(super.type) extends Value {
     NumericBinary() ||
     NumericNegate() ||
     NumericToDouble() ||
+    FloatBitCast() ||
     NumericRoundToDouble() ||
     NumericToInt() ||
     NumericSquareRoot() ||
@@ -1865,6 +1866,22 @@ final class NumericToDouble(final Value operand) extends Instruction {
     }
   }
 
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// Reinterprets an integer as IEEE floating bits, or extracts a double's bits.
+///
+/// A 32-bit conversion widens binary32 to Dart double on reads and rounds to
+/// binary32 on writes. Integer inputs use their low [width] bits.
+final class FloatBitCast(final Value operand, {final int width = 64})
+    extends Instruction {
+  this : super(operand.type == .integer ? .floating : .integer) {
+    if (operand.type != .integer && operand.type != .floating ||
+        width != 32 && width != 64) {
+      throw ArgumentError('Expected int/double and an IEEE width of 32 or 64.');
+    }
+  }
   @override
   Iterable<Value> get inputs => [operand];
 }

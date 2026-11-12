@@ -85,6 +85,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         '$runtime/print.dart',
       ]);
       _apply(library('async'), ['$runtime/async.dart', '$runtime/timer.dart']);
+      _apply(library('typed_data'), ['$runtime/typed_data.dart']);
       final collection = patches('collection')
           .singleWhere((path) => path.endsWith('/collection_patch.dart'));
       _official.add(collection);
@@ -106,6 +107,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         '_internal',
         'async',
         'collection',
+        'typed_data',
         '_vm',
       ],
     ]) {
@@ -403,7 +405,8 @@ bool _patched(AnnotatedNode node) =>
 
 void _checkPrivate(AnnotatedNode node, String path) {
   final names = switch (node) {
-    ClassDeclaration(:final namePart) => [namePart.typeName.lexeme],
+    ClassDeclaration(:final namePart) ||
+    EnumDeclaration(:final namePart) => [namePart.typeName.lexeme],
     FunctionDeclaration(:final name) ||
     MethodDeclaration(:final name) => [name.lexeme],
     TopLevelVariableDeclaration(:final variables) ||

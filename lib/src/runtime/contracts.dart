@@ -33,6 +33,10 @@ enum MemoryOperation() {
   readReference,
   writeReference,
   keepAlive,
+  float32FromBits,
+  float64FromBits,
+  float32Bits,
+  float64Bits,
 }
 
 /// Excludes this reference slot from strong tracing.

@@ -56,6 +56,8 @@ void _copyArray(Array<NativeType> target, Array<NativeType> source) {
 int _arrayAddress(Array<NativeType> value, int index) =>
     value._addressAt(index);
 
+int _arrayLength(Array<NativeType> value) => value._shape.first;
+
 void _arrayStore<T extends NativeType>(
   Array<Array<T>> target,
   int index,

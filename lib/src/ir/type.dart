@@ -2,6 +2,28 @@ import 'package:dartc/interop.dart';
 
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
+  /// A nominal upper bound for selecting possible instance receivers.
+  ///
+  /// Type arguments remain unresolved; this only excludes unrelated classes.
+  ClassType? get classBound {
+    ValueType type = this;
+    final seen = <TypeParameterType>{};
+    while (true) {
+      switch (type.nonNullable) {
+        case ClassType bound:
+          return bound;
+        case final TypeParameterType parameter ||
+            NonNullableTypeParameterType(:final parameter):
+          if (!seen.add(parameter)) return null;
+          type = parameter.bound;
+        case PromotedTypeParameterType(:final bound):
+          type = bound;
+        default:
+          return null;
+      }
+    }
+  }
+
   /// Normalizes a source type for runtime equality and constant identity.
   ///
   /// Preserves declaration identity and default type metadata. Function

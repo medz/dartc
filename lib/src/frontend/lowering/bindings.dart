@@ -104,7 +104,9 @@ final class Bindings({
         sdkClasses.contains(element)) {
       return;
     }
-    if (element.supertype case final parent?) requireSdkClass(parent.element);
+    if (element.supertype case final parent? when element is! EnumElement) {
+      requireSdkClass(parent.element);
+    }
     for (final mixin in element.mixins) {
       requireSdkClass(mixin.element);
     }

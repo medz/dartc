@@ -58,6 +58,10 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       case .keepAlive:
         block.emit(KeepAlive(args.single));
         value = null;
+      case .float32FromBits || .float32Bits:
+        value = block.emit(FloatBitCast(args.single, width: 32));
+      case .float64FromBits || .float64Bits:
+        value = block.emit(FloatBitCast(args.single));
       case .write:
         block.emit(StoreNative(args.first, .new(Int64), args.last));
         value = null;

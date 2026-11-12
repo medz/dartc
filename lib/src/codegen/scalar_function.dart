@@ -482,6 +482,29 @@ final class ScalarFunction<R extends Object>(
             emitter.convertFloatToDouble(destination, destination);
           }
           allocation.define(instruction, destination);
+        } else if (instruction case FloatBitCast(
+          :final operand,
+          :final width,
+        )) {
+          final source = allocation.read(operand);
+          allocation.release(operand);
+          final toFloat = instruction.type == .floating;
+          final destination = allocation.allocate(
+            toFloat ? .floating : .general,
+          );
+          if (!toFloat && width == 32) {
+            final temporary = allocation.allocate(.floating, except: [source]);
+            emitter.convertDoubleToFloat(temporary, source);
+            emitter.move(destination, temporary);
+            emitter.extendInteger(destination, bytes: 4, signed: false);
+            allocation.releaseTemporary(temporary);
+          } else {
+            emitter.move(destination, source);
+            if (toFloat && width == 32) {
+              emitter.convertFloatToDouble(destination, destination);
+            }
+          }
+          allocation.define(instruction, destination);
         } else if (instruction case NumericToInt(:final operand)) {
           final source = allocation.read(operand);
           allocation.release(operand);

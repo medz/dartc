@@ -59,6 +59,7 @@ Future<void> withImplementations(
               'dart:async',
               'dart:collection',
               'dart:ffi',
+              'dart:typed_data',
             }.contains(imported.uri.toString()) &&
             !pending.contains(imported)) {
           pending.add(imported);

@@ -2269,6 +2269,23 @@ final class IrInterpreter(
           values[op] = -(read(operand) as num);
         case NumericToDouble(:final operand):
           values[op] = (read(operand) as num).toDouble();
+        case FloatBitCast(:final operand, :final width):
+          final bytes = ByteData(8);
+          if (operand.type == .integer) {
+            if (width == 32) {
+              bytes.setInt32(0, read(operand) as int);
+              values[op] = bytes.getFloat32(0);
+            } else {
+              bytes.setInt64(0, read(operand) as int);
+              values[op] = bytes.getFloat64(0);
+            }
+          } else if (width == 32) {
+            bytes.setFloat32(0, read(operand) as double);
+            values[op] = bytes.getUint32(0);
+          } else {
+            bytes.setFloat64(0, read(operand) as double);
+            values[op] = bytes.getInt64(0);
+          }
         case NumericRoundToDouble(:final operand, :final rounding):
           final number = read(operand) as num;
           values[op] = switch (rounding) {

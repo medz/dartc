@@ -134,6 +134,7 @@ export 'src/ir/value.dart'
         NumericOperator,
         NumericNegate,
         NumericToDouble,
+        FloatBitCast,
         NumericToInt,
         NumericRoundToDouble,
         IntegerRounding,

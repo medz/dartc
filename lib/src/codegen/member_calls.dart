@@ -85,7 +85,7 @@ final class MemberCalls(
               type == ValueType.boolean)) {
         continue;
       }
-      if (receiver.nonNullable case final ClassType owner
+      if (receiver.classBound case final owner?
           when type.asInstanceOf(owner.declaration) == null) {
         continue;
       }

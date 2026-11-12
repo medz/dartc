@@ -437,7 +437,11 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
                   }
                   final value = lowerExpression(context, expression);
                   if (value == null) return false;
-                  parts.add(value);
+                  parts.add(
+                    value is ScalarConstant
+                        ? Constant.string(value.value.toString())
+                        : value,
+                  );
               }
             }
           case ast.SimpleStringLiteral(:final value):
@@ -630,17 +634,12 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         }
         if (callee == callee.library.getClass('Struct')?.getMethod('create') ||
             callee == callee.library.getClass('Union')?.getMethod('create')) {
-          if (args.positional.isNotEmpty || args.named.isNotEmpty) {
-            unsupported(
-              unit,
-              expression,
-              'TypedData-backed native compound creation',
-            );
-          }
-          return context.emit(
-            NativeView(
-              context.typeOf(expression.staticType!, expression) as ClassType,
-            ),
+          return lowerFfi(
+            callee,
+            args.positional,
+            context.emit,
+            result: context.typeOf(expression.staticType!, expression),
+            bind: (member) => context.bindings.target(member, unit, expression),
           );
         }
       }

@@ -224,7 +224,7 @@ final class IrProgram(
       ClassType type,
       ({ValueType receiver, MemberSelector selector}) member,
     ) {
-      if (member.receiver.nonNullable case final ClassType owner
+      if (member.receiver.classBound case final owner?
           when type.asInstanceOf(owner.declaration) == null) {
         return;
       }

@@ -251,6 +251,9 @@ final class FunctionContext(
         application.executable.declaration,
         [receiver, ...args.positional],
         emit,
+        result: application.executable.target.signature
+            .instantiate(application.typeArguments)
+            .result,
         bind: (member) => bindings.target(member, unit, site),
       );
       if (value != null) return normal(value);

@@ -98,6 +98,35 @@ Value? lowerFfi(
   Value scalar(Value value, ValueType type) =>
       value.type == type ? value : emit(TypeView(value, type));
   member = member.baseElement;
+  LibraryElement typedData() => library.fragments
+      .expand((fragment) => fragment.importedLibraries)
+      .firstWhere((library) => library.uri == Uri.parse('dart:typed_data'));
+  if (bind != null &&
+      result is ClassType &&
+      (member == library.getClass('Struct')?.getMethod('create') ||
+          member == library.getClass('Union')?.getMethod('create'))) {
+    if (operands.isEmpty || operands.first == const Constant.nullValue()) {
+      return emit(NativeView(result));
+    }
+    final owner = emit(
+      DirectCall(bind(typedData().getTopLevelFunction('_nativeStorage')!), [
+        operands.first,
+        operands.length > 1 ? operands[1] : const Constant.integer(0),
+        emit(NativeSize(result.nativeType!)),
+      ]),
+    );
+    return emit(
+      NativeView(
+        result,
+        owner: owner,
+        address: emit(
+          DirectCall(bind(typedData().getTopLevelFunction('_nativeAddress')!), [
+            owner,
+          ]),
+        ),
+      ),
+    );
+  }
   final pointer = library.getClass('Pointer')!;
   if (isPointerCast(member) && result is ClassType) {
     return emit(
@@ -120,6 +149,46 @@ Value? lowerFfi(
   final access = member.enclosingElement;
   if (access is! ExtensionElement) return null;
   final array = library.getClass('Array');
+  if (bind != null &&
+      member == access.getGetter('elements') &&
+      access.extendedType is dart.InterfaceType &&
+      (access.extendedType as dart.InterfaceType).element == array &&
+      result is ClassType &&
+      result.library == Uri.parse('dart:typed_data')) {
+    final receiver = operands.single;
+    final length = emit(
+      DirectCall(bind(library.getTopLevelFunction('_arrayLength')!), [
+        receiver,
+      ]),
+    );
+    final address = emit(
+      DirectCall(bind(library.getTopLevelFunction('_arrayAddress')!), [
+        receiver,
+        const Constant.integer(0),
+      ]),
+    );
+    final bytes = emit(
+      NativeSize(
+        FfiTypes.describe((receiver.type as ClassType).typeArguments.single),
+      ),
+    );
+    final buffer = emit(
+      DirectCall(bind(typedData().getTopLevelFunction('_nativeBuffer')!), [
+        receiver,
+        address,
+        emit(IntBinary(.multiply, length, bytes)),
+      ]),
+    );
+    return emit(
+      InstanceCall(
+        bind(
+          typedData().getClass('ByteBuffer')!.getMethod('as${result.name}')!,
+        ),
+        buffer,
+        [const Constant.integer(0), length],
+      ),
+    );
+  }
   if (access.extendedType is dart.InterfaceType &&
       (access.extendedType as dart.InterfaceType).element == array &&
       bind != null &&
@@ -294,6 +363,17 @@ Value? Function(FunctionTarget, Block)? nativeFieldBody(
       .toList();
   final index = fields.indexOf(field);
   if (index < 0) return null;
+  final storage = native.fields[index].type;
+  FunctionTarget? arrayConstructor, copyArray;
+  if (storage is NativeArrayType) {
+    final library = (field.type as dart.InterfaceType).element.library;
+    arrayConstructor = bind(
+      library.getClass('Array')!.getNamedConstructor('_view')!,
+    );
+    if (element is SetterElement) {
+      copyArray = bind(library.getTopLevelFunction('_copyArray')!);
+    }
+  }
   return (target, block) {
     final receiver = block.parameters.first;
     final address = block.emit(
@@ -303,12 +383,7 @@ Value? Function(FunctionTarget, Block)? nativeFieldBody(
         block.emit(NativeFieldOffset(native, index)),
       ),
     );
-    final storage = native.fields[index].type;
     if (storage is NativeArrayType) {
-      final library = (field.type as dart.InterfaceType).element.library;
-      final constructor = bind(
-        library.getClass('Array')!.getNamedConstructor('_view')!,
-      );
       Value arrayView(ClassType type) {
         final dimensions = <Constant>[];
         NativeTypeRef dimension = storage;
@@ -317,7 +392,7 @@ Value? Function(FunctionTarget, Block)? nativeFieldBody(
           dimension = dimension.element;
         }
         return block.emit(
-          Construct(constructor, [
+          Construct(arrayConstructor!, [
             receiver,
             address,
             SequenceConstant(CoreTypes.listOf(.integer), dimensions),
@@ -331,12 +406,7 @@ Value? Function(FunctionTarget, Block)? nativeFieldBody(
       }
       final value = block.parameters.last;
       final view = arrayView(value.type as ClassType);
-      return block.emit(
-        DirectCall(bind(library.getTopLevelFunction('_copyArray')!), [
-          view,
-          value,
-        ]),
-      );
+      return block.emit(DirectCall(copyArray!, [view, value]));
     }
     final result = element is GetterElement
         ? _load(address, storage, target.returnType, receiver, block.emit)

@@ -1,7 +1,22 @@
 import 'contracts.dart';
 
+/// Zero-filled managed byte storage, with no traced payload slots.
+final class ByteStorage() {
+  @Primitive(.allocatePayload)
+  external static ByteStorage allocate(int length);
+}
+
 /// Trusted machine capabilities; callers own bounds, alignment and lifetimes.
 abstract final class Memory() {
+  @Primitive(.float32FromBits)
+  external static double float32FromBits(int bits);
+  @Primitive(.float64FromBits)
+  external static double float64FromBits(int bits);
+  @Primitive(.float32Bits)
+  external static int float32Bits(double value);
+  @Primitive(.float64Bits)
+  external static int float64Bits(double value);
+
   /// Keeps [value] reachable until this point, including through native calls.
   @Primitive(.keepAlive)
   external static void keepAlive(Object? value);

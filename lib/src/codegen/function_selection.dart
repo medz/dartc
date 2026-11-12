@@ -196,6 +196,10 @@ final class FunctionSelection<R>(
             if (type != .floating) {
               throw UnsupportedError('Native numeric negation: $type');
             }
+          case FloatBitCast(:final type, :final width):
+            if (type == .integer && width == 32 && _floatingTemporaries == 0) {
+              _floatingTemporaries = 1;
+            }
           case NumericToDouble(:final operand) ||
               NumericToInt(:final operand) ||
               NumericRoundToDouble(:final operand) ||
@@ -325,7 +329,9 @@ final class FunctionSelection<R>(
             _binary(instruction, encoding, left, right);
           default:
             throw UnsupportedError(
-              'Native operation: ${instruction.runtimeType}',
+              'Native operation: ${instruction.runtimeType} in '
+              '${body.function.target.owner?.dartName ?? body.function.target.library}.'
+              '${body.function.target.name}',
             );
         }
       }

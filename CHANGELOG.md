@@ -1,9 +1,10 @@
 ## Unreleased
 
 - Read and write fixed inline FFI arrays, including nested arrays, native pointers and struct/union elements. Array views retain their backing storage through collection; indexed accesses check bounds, and array assignments copy into the destination storage.
+- Use scalar typed lists and ByteData with shared buffer views, endian-aware access, overlapping copies and read-only views. Struct/Union constructors accept TypedData with element offsets; scalar Array.elements views share their native storage. SIMD lists still require implementations.
 
 - Compile List, ordered Map and UTF-16 String implementations from Dart source alongside user code. Direct IR clients now supply checked SDK bodies for these operations; `IrClass` describes traced variable payloads and constant List storage, and `NewPayload` allocates that storage.
-- Pass FFI structs and unions by value through exports, imports and native function pointers. Support packed and nested fields, owned storage and typed native states on macOS ARM64 and Linux ARM64/x86-64. C headers include referenced aggregate definitions. Add `Bool`, `IntPtr` and `UintPtr` scalar bindings. Inline-array source access and TypedData-backed constructors remain unsupported.
+- Pass FFI structs and unions by value through exports, imports and native function pointers. Support packed and nested fields, owned storage and typed native states on macOS ARM64 and Linux ARM64/x86-64. C headers include referenced aggregate definitions. Add `Bool`, `IntPtr` and `UintPtr` scalar bindings.
 - Keep local logical-or pattern variables in their own closure scope. SDK static methods are lowered when referenced.
 
 - Generated IR classes and functions no longer require a library URI. Pass a null library and retain the same definition object for references; `MemberSelector.privateScope` and `FunctionTarget.privateSelectorScope` preserve source-library or generated-class privacy. Missing generated definitions are rejected. `LoweringResult.runtime` carries bound runtime contracts without retaining analyzer state.
