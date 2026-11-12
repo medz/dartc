@@ -76,6 +76,24 @@ final class NativeAggregates() {
         )
       >('stackPoint');
   final _process = DynamicLibrary.process();
+  late final arrays = _library
+      .lookupFunction<
+        Arrays Function(Arrays, Int32),
+        Arrays Function(Arrays, int)
+      >('updateArrays');
+  late final arrayBounds = _library
+      .lookupFunction<Int32 Function(Arrays, Int32), int Function(Arrays, int)>(
+        'arrayBounds',
+      );
+  late final copyArrays = _library
+      .lookupFunction<
+        Arrays Function(Arrays, Arrays),
+        Arrays Function(Arrays, Arrays)
+      >('copyArrays');
+  late final copyArrayPrefix = _library
+      .lookupFunction<Arrays Function(Arrays), Arrays Function(Arrays)>(
+        'copyArrayPrefix',
+      );
   late final _allocate = _process
       .lookupFunction<
         Pointer<Void> Function(IntPtr),

@@ -885,7 +885,11 @@ final class Bindings({
         : (parameters: const <int>{}, bounds: const <int>{});
     final classFlags = classCovariance.parameters;
     final intrinsic =
-        nativeFieldBody(element, owner) ??
+        nativeFieldBody(
+          element,
+          owner,
+          (declaration) => target(declaration, unit, site),
+        ) ??
         intrinsicFor(
           element,
           requireSdkClass,

@@ -2,6 +2,10 @@ import 'contracts.dart';
 
 /// Trusted machine capabilities; callers own bounds, alignment and lifetimes.
 abstract final class Memory() {
+  /// Keeps [value] reachable until this point, including through native calls.
+  @Primitive(.keepAlive)
+  external static void keepAlive(Object? value);
+
   /// Reads a managed slot; [offset] is a byte offset including the object header.
   @Primitive(.readReference)
   external static Object? readReference(Object object, int offset);

@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Read and write fixed inline FFI arrays, including nested arrays, native pointers and struct/union elements. Array views retain their backing storage through collection; indexed accesses check bounds, and array assignments copy into the destination storage.
+
 - Compile List, ordered Map and UTF-16 String implementations from Dart source alongside user code. Direct IR clients now supply checked SDK bodies for these operations; `IrClass` describes traced variable payloads and constant List storage, and `NewPayload` allocates that storage.
 - Pass FFI structs and unions by value through exports, imports and native function pointers. Support packed and nested fields, owned storage and typed native states on macOS ARM64 and Linux ARM64/x86-64. C headers include referenced aggregate definitions. Add `Bool`, `IntPtr` and `UintPtr` scalar bindings. Inline-array source access and TypedData-backed constructors remain unsupported.
 - Keep local logical-or pattern variables in their own closure scope. SDK static methods are lowered when referenced.

@@ -152,3 +152,58 @@ Point stackPoint(
   point.y += last;
   return point;
 }
+
+final class Arrays extends Struct {
+  @Array(3)
+  external Array<Int16> integers;
+  @Array(2, 3)
+  external Array<Array<Double>> matrix;
+  @Array(2)
+  external Array<Point> points;
+  @Array(2)
+  external Array<Pointer<Int64>> pointers;
+  @Array(3)
+  external Array<Bool> flags;
+  @Array(4)
+  external Array<Int16> longer;
+}
+
+@Export<Arrays Function(Arrays, Int32)>()
+Arrays updateArrays(Arrays value, int index) {
+  final row = value.matrix[1];
+  final point = value.points[1];
+  for (var i = 0; i < 20000; i++) {
+    Struct.create<Point>();
+  }
+  row[index] += 0.5;
+  value.matrix[0] = row;
+  value.integers[index] += 32768;
+  point.x += row[index];
+  value.flags[index] = !value.flags[index];
+  value.pointers[1] = value.pointers[0];
+  return value;
+}
+
+@Export<Int32 Function(Arrays, Int32)>()
+int arrayBounds(Arrays value, int index) {
+  try {
+    value.integers[index] = 17;
+    return value.integers[index];
+  } on RangeError {
+    return -1;
+  }
+}
+
+@Export<Arrays Function(Arrays, Arrays)>()
+Arrays copyArrays(Arrays destination, Arrays source) {
+  destination.integers = source.integers;
+  destination.matrix = source.matrix;
+  source.integers[0] = 99;
+  return destination;
+}
+
+@Export<Arrays Function(Arrays)>()
+Arrays copyArrayPrefix(Arrays value) {
+  value.integers = value.longer;
+  return value;
+}

@@ -32,6 +32,7 @@ enum MemoryOperation() {
   allocatePayload,
   readReference,
   writeReference,
+  keepAlive,
 }
 
 /// Excludes this reference slot from strong tracing.

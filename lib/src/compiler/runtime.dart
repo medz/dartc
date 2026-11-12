@@ -55,6 +55,9 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       case .writeReference:
         block.emit(StoreObjectReference(args[0], args[1], args[2]));
         value = null;
+      case .keepAlive:
+        block.emit(KeepAlive(args.single));
+        value = null;
       case .write:
         block.emit(StoreNative(args.first, .new(Int64), args.last));
         value = null;

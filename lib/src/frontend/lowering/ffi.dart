@@ -91,6 +91,7 @@ Value? lowerFfi(
   List<Value> operands,
   Value Function(Instruction) emit, {
   ValueType? result,
+  FunctionTarget Function(ExecutableElement)? bind,
 }) {
   final library = member.library;
   if (library.uri != _library) return null;
@@ -118,6 +119,46 @@ Value? lowerFfi(
   }
   final access = member.enclosingElement;
   if (access is! ExtensionElement) return null;
+  final array = library.getClass('Array');
+  if (access.extendedType is dart.InterfaceType &&
+      (access.extendedType as dart.InterfaceType).element == array &&
+      bind != null &&
+      (member.name == '[]' || member.name == '[]=')) {
+    final receiver = operands.first;
+    final element = (receiver.type as ClassType).typeArguments.single;
+    if (access == library.getExtension('ArrayArray')) {
+      final callee = bind(
+        library.getTopLevelFunction(
+          member.name == '[]' ? '_arraySlice' : '_arrayStore',
+        )!,
+      );
+      return emit(
+        DirectCall(
+          callee,
+          operands,
+          typeArguments: [(element as ClassType).typeArguments.single],
+        ),
+      );
+    }
+    final address = emit(
+      DirectCall(
+        bind(library.getTopLevelFunction('_arrayAddress')!),
+        operands.take(2),
+      ),
+    );
+    final storage = FfiTypes.describe(element);
+    final value = member.name == '[]'
+        ? _load(
+            address,
+            storage,
+            FfiTypes.dartValueType(element),
+            receiver,
+            emit,
+          )
+        : _store(address, storage, operands.last, emit);
+    emit(KeepAlive(receiver));
+    return value;
+  }
   if (access == library.getExtension('StructPointer') ||
       access == library.getExtension('UnionPointer')) {
     final pointerType = operands.first.type as ClassType;
@@ -240,6 +281,7 @@ Value? lowerFfi(
 Value? Function(FunctionTarget, Block)? nativeFieldBody(
   ExecutableElement element,
   ClassType? owner,
+  FunctionTarget Function(ExecutableElement) bind,
 ) {
   if (element is! PropertyAccessorElement ||
       owner?.nativeType is! NativeCompoundType) {
@@ -262,48 +304,88 @@ Value? Function(FunctionTarget, Block)? nativeFieldBody(
       ),
     );
     final storage = native.fields[index].type;
-    Value result;
-    if (element is GetterElement) {
-      result = switch (storage) {
-        NativeScalarType() => block.emit(LoadNative(address, storage)),
-        NativePointerType() => block.emit(
-          PointerFromAddress(
-            block.emit(LoadNative(address, NativeScalarType(ffi.Uint64))),
-            target.returnType as ClassType,
-          ),
-        ),
-        NativeCompoundType() => block.emit(
-          NativeView(
-            target.returnType as ClassType,
-            address: address,
-            owner: receiver,
-          ),
-        ),
-        _ => throw UnsupportedError(
-          'Native array access requires a shaped view.',
-        ),
-      };
-    } else {
-      final value = block.parameters.last;
-      result = switch (storage) {
-        NativeScalarType() => block.emit(StoreNative(address, storage, value)),
-        NativePointerType() => block.emit(
-          StoreNative(
+    if (storage is NativeArrayType) {
+      final library = (field.type as dart.InterfaceType).element.library;
+      final constructor = bind(
+        library.getClass('Array')!.getNamedConstructor('_view')!,
+      );
+      Value arrayView(ClassType type) {
+        final dimensions = <Constant>[];
+        NativeTypeRef dimension = storage;
+        while (dimension is NativeArrayType) {
+          dimensions.add(Constant.integer(dimension.length));
+          dimension = dimension.element;
+        }
+        return block.emit(
+          Construct(constructor, [
+            receiver,
             address,
-            NativeScalarType(ffi.Uint64),
-            block.emit(PointerAddress(value)),
-          ),
-        ),
-        NativeCompoundType() => block.emit(
-          CopyNative(address, block.emit(NativeAddress(value)), storage),
-        ),
-        _ => throw UnsupportedError(
-          'Native array assignment requires a shaped view.',
-        ),
-      };
-      block.emit(KeepAlive(value));
+            SequenceConstant(CoreTypes.listOf(.integer), dimensions),
+            block.emit(NativeSize(storage.element)),
+          ], instantiatedType: type),
+        );
+      }
+
+      if (element is GetterElement) {
+        return arrayView(target.returnType as ClassType);
+      }
+      final value = block.parameters.last;
+      final view = arrayView(value.type as ClassType);
+      return block.emit(
+        DirectCall(bind(library.getTopLevelFunction('_copyArray')!), [
+          view,
+          value,
+        ]),
+      );
     }
+    final result = element is GetterElement
+        ? _load(address, storage, target.returnType, receiver, block.emit)
+        : _store(address, storage, block.parameters.last, block.emit);
     block.emit(KeepAlive(receiver));
     return result;
   };
+}
+
+Value _load(
+  Value address,
+  NativeTypeRef storage,
+  ValueType type,
+  Value owner,
+  Value Function(Instruction) emit,
+) => switch (storage) {
+  NativeScalarType() => emit(LoadNative(address, storage)),
+  NativePointerType() => emit(
+    PointerFromAddress(
+      emit(LoadNative(address, NativeScalarType(ffi.Uint64))),
+      type as ClassType,
+    ),
+  ),
+  NativeCompoundType() => emit(
+    NativeView(type as ClassType, address: address, owner: owner),
+  ),
+  _ => throw UnsupportedError('Native element storage: $storage'),
+};
+
+Value _store(
+  Value address,
+  NativeTypeRef storage,
+  Value value,
+  Value Function(Instruction) emit,
+) {
+  final result = switch (storage) {
+    NativeScalarType() => emit(StoreNative(address, storage, value)),
+    NativePointerType() => emit(
+      StoreNative(
+        address,
+        NativeScalarType(ffi.Uint64),
+        emit(PointerAddress(value)),
+      ),
+    ),
+    NativeCompoundType() => emit(
+      CopyNative(address, emit(NativeAddress(value)), storage),
+    ),
+    _ => throw UnsupportedError('Native element storage: $storage'),
+  };
+  emit(KeepAlive(value));
+  return result;
 }

@@ -31,9 +31,12 @@ final class SdkPatches(final OverlayResourceProvider files) {
       ],
       _ => const [],
     };
+    final ffi = patches('ffi')
+        .singleWhere((path) => path.endsWith('/ffi_patch.dart'));
+    _official.add(ffi);
     _apply(
       library('ffi'),
-      [patches('ffi').singleWhere((path) => path.endsWith('/ffi_patch.dart'))],
+      [ffi, if (runtime != null) '$runtime/ffi.dart'],
       classes: const {'_ArraySize'},
     );
     if (runtime != null) {
@@ -241,6 +244,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
       edit(path, 0, 0, "part of '$ownerUri';\n");
       for (final declaration in syntax.declarations) {
         if (classes != null &&
+            _official.contains(path) &&
             (declaration is! ClassDeclaration ||
                 !classes.contains(declaration.namePart.typeName.lexeme))) {
           edit(path, declaration.offset, declaration.end, '');
@@ -406,7 +410,7 @@ void _checkPrivate(AnnotatedNode node, String path) {
     FieldDeclaration(
       fields: final variables,
     ) => variables.variables.map((variable) => variable.name.lexeme),
-    ConstructorDeclaration() => ['new'],
+    ConstructorDeclaration(:final name) => [name?.lexeme ?? 'new'],
     _ => throw FormatException(
       'Unsupported SDK declaration: $path:${node.offset}',
     ),

@@ -114,4 +114,39 @@ void main() {
       expect((result.x, result.y), (28.25, 8.5));
     },
   );
+  test('inline arrays retain shape, owners and by-value isolation', () {
+    final input = Struct.create<Arrays>();
+    input.integers[1] = 7;
+    input.matrix[1][1] = 2.75;
+    input.points[1].x = 10;
+    input.pointers[0] = Pointer<Int64>.fromAddress(0x1234);
+    final result = native.arrays(input, 1);
+    expect(result.integers[1], -32761);
+    expect(result.matrix[0][1], 3.25);
+    expect(result.matrix[1][1], 3.25);
+    expect(result.points[1].x, 13.25);
+    expect(result.flags[1], isTrue);
+    expect(result.pointers[1].address, 0x1234);
+    expect(input.integers[1], 7);
+    expect(input.matrix[0][1], 0);
+    expect(input.points[1].x, 10);
+    final copied = native.copyArrays(Struct.create<Arrays>(), input);
+    expect(copied.integers[1], 7);
+    expect(copied.matrix[1][1], 2.75);
+    for (var i = 0; i < 4; i++) {
+      input.longer[i] = 10 + i;
+    }
+    final prefix = native.copyArrayPrefix(input);
+    final sdk = copyArrayPrefix(input);
+    for (var i = 0; i < 3; i++) {
+      expect(prefix.integers[i], 10 + i);
+      expect(prefix.integers[i], sdk.integers[i]);
+    }
+  });
+  test('inline arrays reject negative and past-end indices', () {
+    final input = Struct.create<Arrays>();
+    expect(native.arrayBounds(input, -1), -1);
+    expect(native.arrayBounds(input, 3), -1);
+    expect(native.arrayBounds(input, 2), 17);
+  });
 }

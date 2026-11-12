@@ -247,10 +247,12 @@ final class FunctionContext(
       unsupported(unit, site, 'asFunction Dart function type');
     }
     if (args.named.isEmpty && memberTypes.isEmpty) {
-      final value = lowerFfi(application.executable.declaration, [
-        receiver,
-        ...args.positional,
-      ], emit);
+      final value = lowerFfi(
+        application.executable.declaration,
+        [receiver, ...args.positional],
+        emit,
+        bind: (member) => bindings.target(member, unit, site),
+      );
       if (value != null) return normal(value);
     }
     final callee = application.executable.target;
