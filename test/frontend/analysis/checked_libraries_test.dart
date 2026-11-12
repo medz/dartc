@@ -8,7 +8,7 @@ void main() {
     await expectLater(
       AnalysisSession(
         [path],
-        resources: ['dartc/src/runtime/allocator.dart'],
+        resources: ['sdk/runtime/allocator.dart'],
       ).use((_) {}),
       throwsArgumentError,
     );
@@ -18,11 +18,11 @@ void main() {
     () async {
       final session = AnalysisSession(
         [path],
-        sourceArchive: await SourceArchive.load(),
-        resources: ['dartc/src/runtime/allocator.dart'],
+        sources: await SdkSources.load(),
+        resources: ['sdk/runtime/allocator.dart'],
       );
       final checked = await session.resolve();
-      final runtime = checked.resources['dartc/src/runtime/allocator.dart']!;
+      final runtime = checked.resources['sdk/runtime/allocator.dart']!;
       expect(runtime.session, same(checked.libraries.first.session));
       expect(
         runtime.element.typeProvider.intType.element,

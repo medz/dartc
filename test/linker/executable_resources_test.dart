@@ -16,11 +16,12 @@ void main() {
   test('packaged executable contains the exact source archive', () {
     final file = NativeAssets(Target.host()).file('compiler/dartc');
     final resources = ExecutableResources(file);
-    final expected = File('lib/src/sdk/sources.zip').readAsBytesSync();
+    final expected = SourceArchive.encode(SourceDirectory(Directory.current));
     final bytes = resources.read();
     expect(sha256.convert(bytes), sha256.convert(expected));
     expect(
-      DartSdk(SourceArchive(bytes)).sources.contains('sdk/lib/core/core.dart'),
+      DartSdk(SourceArchive(bytes)).sources
+          .contains('sdk/std/lib/core/core.dart'),
       isTrue,
     );
     expect(

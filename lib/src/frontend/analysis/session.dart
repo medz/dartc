@@ -22,16 +22,16 @@ import 'sdk_patches.dart';
 /// [sdk] supplies fixed source resources; when omitted, the dartc package's
 /// resources are used. No installed SDK is discovered.
 /// Additional source-resource libraries join the same checked batch and package
-/// context; [CheckedLibraries.resources] retains their archive identities.
+/// context; [CheckedLibraries.resources] retains their resource identities.
 final class AnalysisSession(
   Iterable<String> paths, {
   final bool includeDependencies = false,
   final DartSdk? sdk,
 
   /// Additional private sources, separate from the standard library selection.
-  final SourceArchive? sourceArchive,
+  final SdkSources? sources,
 
-  /// Archive paths of libraries to check alongside the file inputs.
+  /// Resource paths of libraries to check alongside the file inputs.
   Iterable<String> resources = const [],
 }) {
   final List<String> _paths = .unmodifiable(paths);
@@ -96,26 +96,26 @@ final class AnalysisSession(
     if (inputs.length != _paths.length) {
       throw ArgumentError('Duplicate input library.');
     }
-    final sources = sdk ?? await DartSdk.load();
+    final standardLibrary = sdk ?? await DartSdk.load();
     final root = path.join(
       path.rootPrefix(inputs.firstOrNull ?? path.current),
       '__dartc__',
     );
     for (final name in _resources) {
-      if (sourceArchive?.contains(name) != true) {
+      if (sources?.contains(name) != true) {
         throw ArgumentError('Source resource unavailable: $name');
       }
       inputs.add(path.join(root, name));
     }
     final files = OverlayResourceProvider(
-      SourceFiles(sources.sources, root, extraSources: sourceArchive),
+      SourceFiles(standardLibrary.sources, root, extraSources: sources),
     );
-    final sdkPath = path.join(root, 'sdk');
+    final sdkPath = path.join(root, 'sdk/std');
     final patches = SdkPatches(files);
     patches.install(
       sdkPath,
-      sourceArchive?.contains('dartc/src/runtime/patches/core.dart') == true
-          ? path.join(root, 'dartc/src/runtime/patches')
+      sources?.contains('sdk/patches/core.dart') == true
+          ? path.join(root, 'sdk/patches')
           : null,
     );
     final options = path.join(
@@ -147,7 +147,7 @@ final class AnalysisSession(
         final name = path
             .relative(queue[i], from: root)
             .replaceAll(path.separator, '/');
-        if (sourceArchive?.contains(name) == true) resources[name] = result;
+        if (sources?.contains(name) == true) resources[name] = result;
       }
       if (includeDependencies) {
         for (final dependency in [
@@ -163,15 +163,15 @@ final class AnalysisSession(
       }
     }
     final runtimeSources = {
-      for (final name in sourceArchive?.paths ?? const <String>[])
-        if (name.startsWith('dartc/src/runtime/'))
+      for (final name in sources?.paths ?? const <String>[])
+        if (name.startsWith('sdk/runtime/') || name.startsWith('sdk/patches/'))
           path.toUri(path.join(root, name)),
     };
     return CheckedLibraries._(
       libraries,
       resources,
-      sourceArchive?.contains('dartc/src/runtime/contracts.dart') == true
-          ? path.toUri(path.join(root, 'dartc/src/runtime/contracts.dart'))
+      sources?.contains('lib/runtime/contracts.dart') == true
+          ? path.toUri(path.join(root, 'lib/runtime/contracts.dart'))
           : null,
       {
         ...runtimeSources,
@@ -209,7 +209,7 @@ final class CheckedLibraries._(
     return _libraries;
   }
 
-  /// Checked source-resource libraries, keyed by their archive paths.
+  /// Checked source-resource libraries, keyed by their resource paths.
   Map<String, ResolvedLibraryResult> get resources {
     _checkOpen();
     return _resources;

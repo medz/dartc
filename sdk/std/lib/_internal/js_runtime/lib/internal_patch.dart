@@ -1,0 +1,107 @@
+// Copyright (c) 2013, the Dart project authors.  Please see the AUTHORS file
+// for details. All rights reserved. Use of this source code is governed by a
+// BSD-style license that can be found in the LICENSE file.
+
+import 'dart:core' hide Symbol;
+import 'dart:core' as core show Symbol;
+import 'dart:_js_primitives' show printString;
+import 'dart:_internal' show patch;
+import 'dart:_interceptors' show JSArray;
+import 'dart:_foreign_helper'
+    show JS, JS_GET_FLAG, createJsSentinel, isJsSentinel;
+import 'dart:typed_data' show Uint8List;
+import 'dart:isolate' show Isolate;
+
+/// No-op in dart2js.
+///
+/// Only used in DDC for hot restart correctness.
+@pragma('dart2js:tryInline')
+int? getHotRestartGeneration() => null;
+
+/// No-op in dart2js.
+///
+/// Only used in DDC for hot restart correctness.
+@pragma('dart2js:tryInline')
+bool isCurrentHotRestartGeneration(int _) => true;
+
+@patch
+class Symbol {
+  @patch
+  const Symbol(String name) : this._name = name;
+
+  @patch
+  int get hashCode {
+    int? hash = JS('int|Null', '#._hashCode', this);
+    if (hash != null) return hash;
+    const arbitraryPrime = 664597;
+    hash = 0x1fffffff & (arbitraryPrime * _name.hashCode);
+    JS('', '#._hashCode = #', this, hash);
+    return hash;
+  }
+
+  @patch
+  String toString() => 'Symbol("${computeUnmangledName(this)}")';
+
+  @patch
+  static String computeUnmangledName(Symbol symbol) {
+    final mangledName = Symbol.getName(symbol);
+    // The name will only be mangled if the symbol is private.
+    if (!mangledName.startsWith('_')) return mangledName;
+    final index = mangledName.indexOf('@');
+    if (index == -1) return mangledName;
+    return mangledName.substring(0, index);
+  }
+}
+
+@patch
+void printToConsole(String line) {
+  printString('$line');
+}
+
+@patch
+List<T> makeListFixedLength<T>(List<T> growableList) {
+  return JSArray.markFixedList(growableList);
+}
+
+@patch
+List<T> makeFixedListUnmodifiable<T>(List<T> fixedLengthList) {
+  return JSArray.markUnmodifiableList(fixedLengthList);
+}
+
+@patch
+@pragma('dart2js:noInline')
+Object? extractTypeArguments<T>(T instance, Function extract) {
+  // This function is recognized and replaced with calls to js_runtime.
+
+  // This call to [extract] is required to model that the function is called and
+  // the returned value flows to the result of extractTypeArguments.
+  return extract();
+}
+
+@patch
+@pragma('dart2js:tryInline')
+T createSentinel<T>() => createJsSentinel<T>();
+
+@patch
+@pragma('dart2js:tryInline')
+bool isSentinel(dynamic value) => isJsSentinel(value);
+
+@patch
+@pragma('dart2js:tryInline')
+T unsafeCast<T>(dynamic v) => v;
+
+@patch
+Future<Object?> loadDynamicModule({Uri? uri, Uint8List? bytes}) =>
+    throw 'Unsupported operation';
+
+final List<Object> _toStringVisiting = [];
+@patch
+List<Object> get toStringVisiting => _toStringVisiting;
+
+void Function(String)? _printToZone = null;
+@patch
+void Function(String)? get printToZone => _printToZone;
+@patch
+set printToZone(void Function(String)? value) {
+  _printToZone = value;
+}

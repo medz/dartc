@@ -1,4 +1,5 @@
-import 'package:dartc/src/runtime/heap.dart';
+import '../../sdk/runtime/heap.dart';
+
 import 'package:test/test.dart';
 
 import 'fixtures/heap_model.dart';

@@ -287,7 +287,7 @@ dart run tool/build.dart
 ./build/dartc --help
 ```
 
-The build includes the package's fixed source resources. To regenerate those resources from the pinned official SDK sources, run `dart run tool/build_sources.dart`; only this resource preparation step may download the fixed source revision.
+Development and Dart package execution read `sdk/std`, `sdk/runtime` and `sdk/patches` directly. The build automatically packages these sources and their shared contracts into the executable; generated archives are not stored in Git. The official standard library is included at a fixed commit, so building and using dartc require no SDK source download. See the [SDK source layout](sdk/README.md) for source ownership and programmatic use.
 
 ---
 

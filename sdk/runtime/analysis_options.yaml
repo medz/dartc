@@ -1,0 +1,6 @@
+include: ../../analysis_options.yaml
+
+linter:
+  rules:
+    # These sources also compile without the user's dartc package dependency.
+    avoid_relative_lib_imports: false

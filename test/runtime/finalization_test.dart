@@ -1,6 +1,7 @@
-import 'package:dartc/src/runtime/event_loop.dart';
-import 'package:dartc/src/runtime/finalization.dart';
-import 'package:dartc/src/runtime/heap.dart';
+import '../../sdk/runtime/event_loop.dart';
+import '../../sdk/runtime/finalization.dart';
+import '../../sdk/runtime/heap.dart';
+
 import 'package:test/test.dart';
 
 final class Alive(final Set<Object> values) implements Liveness {

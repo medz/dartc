@@ -62,6 +62,26 @@ void main() {
         environment: {'PATH': ''},
       );
       expect(run.exitCode, 0, reason: '${run.stdout}${run.stderr}');
+      final apiOutput = File.fromUri(work.uri.resolve('api-program'));
+      final api = await Process.run(
+        assets.file('compiler/compiler-client').absolute.path,
+        [
+          assets.file('compiler/sources.zip').absolute.path,
+          '${work.path}/program.dart',
+          apiOutput.path,
+        ],
+        workingDirectory: work.path,
+        includeParentEnvironment: false,
+        environment: {'PATH': ''},
+      );
+      expect(api.exitCode, 0, reason: '${api.stdout}${api.stderr}');
+      final apiRun = await Process.run(
+        apiOutput.path,
+        [],
+        includeParentEnvironment: false,
+        environment: {'PATH': ''},
+      );
+      expect(apiRun.exitCode, 0, reason: '${apiRun.stdout}${apiRun.stderr}');
     },
   );
 }

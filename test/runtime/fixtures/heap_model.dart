@@ -1,4 +1,4 @@
-import 'package:dartc/src/runtime/heap.dart';
+import '../../../sdk/runtime/heap.dart';
 
 enum WeakKind() {
   none,

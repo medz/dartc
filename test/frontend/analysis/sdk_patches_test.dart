@@ -16,8 +16,8 @@ Future<void> withImplementations(
   void Function(List<ResolvedLibraryResult>, SdkPatches) check, {
   String Function(String)? change,
 }) async {
-  final archive = await SourceArchive.load();
-  const root = '/__dartc__', runtime = '$root/dartc/src/runtime/patches';
+  final archive = await SdkSources.load();
+  const root = '/__dartc__', runtime = '$root/sdk/patches';
   final files = OverlayResourceProvider(
     SourceFiles(archive, root, extraSources: archive),
   );
@@ -29,12 +29,12 @@ Future<void> withImplementations(
       modificationStamp: 0,
     );
   }
-  final patches = SdkPatches(files)..install('$root/sdk', runtime);
+  final patches = SdkPatches(files)..install('$root/sdk/std', runtime);
   final input = File('test/compiler/fixtures/expandos.dart').absolute.path;
   final contexts = AnalysisContextCollectionImpl(
     includedPaths: [input],
     resourceProvider: files,
-    sdkPath: '$root/sdk',
+    sdkPath: '$root/sdk/std',
   );
   try {
     final session = contexts.contextFor(input).currentSession;
@@ -125,7 +125,7 @@ void main() {
           final body = core.getFragmentDeclaration(member.fragments.last)!;
           expect(
             patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith('/runtime/patches/$source'),
+            endsWith('/patches/$source'),
           );
         }
         final expando = core.element.getClass('Expando')!;

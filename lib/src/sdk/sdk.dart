@@ -1,13 +1,14 @@
 import 'dart:convert';
 
-import 'source_archive.dart';
+import 'sdk_sources.dart';
 
-/// The fixed official SDK libraries within a source archive.
-final class DartSdk(final SourceArchive sources) {
+/// The fixed official SDK libraries in compiler source resources.
+final class DartSdk(final SdkSources sources) {
   this {
-    if (sources.fingerprint('sdk/') != sourceFingerprint ||
-        utf8.decode(sources.read('sdk/version')).trim() != version ||
-        utf8.decode(sources.read('sdk/revision')).trim() != sourceRevision) {
+    if (sources.fingerprint('sdk/std/') != sourceFingerprint ||
+        utf8.decode(sources.read('sdk/std/version')).trim() != version ||
+        utf8.decode(sources.read('sdk/std/revision')).trim() !=
+            sourceRevision) {
       throw const FormatException(
         'SDK sources do not match the fixed revision.',
       );
@@ -26,7 +27,7 @@ final class DartSdk(final SourceArchive sources) {
 
   /// Loads the fixed sources shipped in this Dart package.
   ///
-  /// AOT library consumers can instead pass their own [SourceArchive] to
+  /// AOT library consumers can instead pass their own [SdkSources] to
   /// [DartSdk.new]. Missing or corrupt resources fail without SDK discovery.
-  static Future<DartSdk> load() async => DartSdk(await SourceArchive.load());
+  static Future<DartSdk> load() async => DartSdk(await SdkSources.load());
 }

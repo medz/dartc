@@ -22,7 +22,7 @@ import 'permissions.dart';
 ///
 /// [resources] supplies fixed resources for embedded library use. When omitted,
 /// sources are loaded from the dartc package; AOT callers must supply resources.
-final class Compiler(final Target target, {final SourceArchive? resources}) {
+final class Compiler(final Target target, {final SdkSources? resources}) {
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
   /// All non-SDK dependencies are checked before selecting native definitions.
@@ -51,7 +51,7 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
         'Link inputs require shared library or executable output.',
       );
     }
-    final archive = resources ?? await SourceArchive.load();
+    final sourceFiles = resources ?? await SdkSources.load();
     final (
       lowered,
       sources,
@@ -59,13 +59,13 @@ final class Compiler(final Target target, {final SourceArchive? resources}) {
     ) = await AnalysisSession(
       paths,
       includeDependencies: true,
-      sdk: DartSdk(archive),
-      sourceArchive: archive,
+      sdk: DartSdk(sourceFiles),
+      sources: sourceFiles,
       resources: const [
-        'dartc/src/runtime/allocator.dart',
-        'dartc/src/runtime/dispatch.dart',
-        'dartc/src/runtime/numbers.dart',
-        'dartc/src/runtime/console.dart',
+        'sdk/runtime/allocator.dart',
+        'sdk/runtime/dispatch.dart',
+        'sdk/runtime/numbers.dart',
+        'sdk/runtime/console.dart',
       ],
     ).use((input) async {
       final lowered = await Lowering().lower(input);

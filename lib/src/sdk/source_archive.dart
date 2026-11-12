@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
+
+import 'sdk_sources.dart';
 
 /// An immutable, indexed ZIP of source files with checked content digests.
 ///
@@ -13,23 +13,34 @@ import 'package:crypto/crypto.dart';
 /// A supplied archive checksum validates compressed input before indexing.
 /// Archives may contain up to 8192 files, 32 MiB compressed, 64 MiB expanded,
 /// and 8 MiB per file. Invalid archives throw [FormatException].
-final class SourceArchive(Uint8List bytes, {String? digest}) {
-  /// Loads the resources distributed with this Dart package.
-  ///
-  /// AOT consumers must supply an archive when package resources are unavailable.
-  static Future<SourceArchive> load() => _bundled;
-
-  static final _bundled = _load();
-  static Future<SourceArchive> _load() async {
-    final uri = await Isolate.resolvePackageUri(
-      Uri.parse('package:dartc/src/sdk/sources.zip'),
+final class SourceArchive(Uint8List bytes, {String? digest})
+    extends SdkSources {
+  /// Encodes current source contents into a reproducible distribution archive.
+  static Uint8List encode(SdkSources sources) {
+    final files = {for (final path in sources.paths) path: sources.read(path)};
+    final names = files.keys.toList()..sort();
+    final manifest = utf8.encode(
+      jsonEncode({
+        'format': 1,
+        'files': {
+          for (final name in names)
+            name: sha256.convert(files[name]!).toString(),
+        },
+      }),
     );
-    if (uri == null || uri.scheme != 'file') {
-      throw const FormatException(
-        'Bundled resources are unavailable; provide a SourceArchive.',
+    final archive = Archive();
+    for (final name in ['manifest.json', ...names]) {
+      archive.add(
+        ArchiveFile.bytes(
+            name,
+            name == 'manifest.json' ? manifest : files[name]!,
+          )
+          ..mode = 0x81a4
+          ..lastModTime = 0
+          ..lastModDosTime = 0x00210000,
       );
     }
-    return SourceArchive(await File.fromUri(uri).readAsBytes());
+    return ZipEncoder().encodeBytes(archive, level: 6);
   }
 
   final _files = <String, (ZipFileHeader, String)>{};
@@ -106,15 +117,19 @@ final class SourceArchive(Uint8List bytes, {String? digest}) {
   }
 
   /// File paths relative to the archive root, using `/` separators.
+  @override
   Iterable<String> get paths => _files.keys;
 
   /// Whether [path] names a source file.
+  @override
   bool contains(String path) => _files.containsKey(path);
 
   /// The uncompressed byte length, or `null` for a missing file.
+  @override
   int? length(String path) => _files[path]?.$1.uncompressedSize;
 
   /// Reads and checks [path], throwing [FormatException] if absent or damaged.
+  @override
   Uint8List read(String path) {
     final entry = _files[path];
     if (entry == null) throw FormatException('Missing source file: $path');
@@ -133,6 +148,7 @@ final class SourceArchive(Uint8List bytes, {String? digest}) {
   ///
   /// Paths in this digest are relative to [prefix]. File contents are checked
   /// against their declared digests when read.
+  @override
   String fingerprint(String prefix) {
     final records = [
       for (final MapEntry(:key, :value) in _files.entries)

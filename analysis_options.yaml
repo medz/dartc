@@ -5,7 +5,8 @@ analyzer:
     - build/**
     - .worktrees/**
     # Checked in their owning SDK libraries by sdk_patches_test.dart and compilation.
-    - lib/src/runtime/patches/**
+    - sdk/patches/**
+    - sdk/std/**
 
 linter:
   rules:

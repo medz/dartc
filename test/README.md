@@ -37,9 +37,9 @@ dart run tool/build_test_assets.dart macos-arm64 --fixture=pointers
 dart test test/compiler/pointers_test.dart
 ```
 
-Prepare CLI and SDK integration assets separately with `dart run tool/build_compiler_test_assets.dart`. This compiles and packages the real `bin/dartc.dart` executable, builds a fixed Dart FFI client with the development SDK, and prepares a standalone input with explicit package dependencies and an archive for the SDK build-input tests. Fixture builds do not rebuild these assets. The builder reads the bundled SDK data and needs no source download. Acquisition tests serve their prepared archive over loopback, checking content integrity, invalid archives and interrupted preparation.
+Prepare CLI and SDK integration assets separately with `dart run tool/build_compiler_test_assets.dart`. This compiles and packages the real `bin/dartc.dart` executable, builds fixed Dart FFI and Compiler API clients with the development SDK, and prepares standalone inputs with explicit package dependencies. Fixture builds do not rebuild these assets. The builder reads `sdk/` and shared contracts directly and packages their current contents without downloading sources. SDK unit tests check directory edits, archive integrity, traversal and symbolic links.
 
-The standalone test invokes the prepared dartc executable with an empty `PATH` and no inherited environment, then uses the prepared FFI client to execute its library output. It also compiles and launches a standalone executable. This compilation is the behavior under test. For full environment isolation, copy only those executables and the prepared input to a container without an SDK, checkout or source caches and run with `--network none`.
+The standalone test invokes the prepared dartc executable with an empty `PATH` and no inherited environment, then uses the prepared FFI client to execute its library output. It also compiles and launches a standalone executable through both the CLI and an AOT Compiler API client supplied with the packaged resources. This compilation is the behavior under test. For full environment isolation, copy only those executables and the prepared input to a container without an SDK, checkout or source caches and run with `--network none`.
 
 Build assets before tests. A missing asset is an error, never a request to compile from a test setup. Rebuild when its source, compiler, dependency or target configuration changes. The same batch of target assets can be copied into matching execution environments; do not rebuild all targets in every container. Host compiler checks still compile source in that host.
 
@@ -50,7 +50,7 @@ dart run tool/build_test_assets.dart linux-arm64
 docker run --rm --platform linux/arm64 \
   -e TEST_TARGET=linux-arm64 -v "$PWD:/src:ro" \
   --tmpfs /work:exec -w /work dart:3.14.0-sdk sh -eu -c '
-    cp -R /src/lib /src/bin /src/test /src/tool /work/
+    cp -R /src/lib /src/sdk /src/bin /src/test /src/tool /work/
     cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /src/LICENSE /work/
     mkdir -p build/test
     cp -R /src/build/test/$TEST_TARGET build/test/

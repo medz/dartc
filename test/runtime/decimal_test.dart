@@ -1,7 +1,8 @@
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:dartc/src/runtime/decimal.dart';
+import '../../sdk/runtime/decimal.dart';
+
 import 'package:test/test.dart';
 
 void main() {

@@ -5,20 +5,18 @@ import 'package:analyzer/file_system/file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:dartc/sdk.dart';
 
-/// Mounts immutable compiler sources alongside the user's physical files.
+/// Mounts compiler sources alongside the user's physical files.
 final class SourceFiles(
-  final SourceArchive sources,
+  final SdkSources sources,
   final String root, {
-  final SourceArchive? extraSources,
+  final SdkSources? extraSources,
 }) implements ResourceProvider {
-  Iterable<String> get _paths => sources.paths
-      .where((path) => path.startsWith('sdk/'))
-      .followedBy(
-        extraSources?.paths.where((path) => !path.startsWith('sdk/')) ??
-            const [],
-      );
-  SourceArchive? _archive(String name) =>
-      name.startsWith('sdk/') ? sources : extraSources;
+  final _paths = [
+    ...sources.paths.where((path) => path.startsWith('sdk/std/')),
+    ...?extraSources?.paths.where((path) => !path.startsWith('sdk/std/')),
+  ];
+  SdkSources? _sources(String name) =>
+      name.startsWith('sdk/std/') ? sources : extraSources;
   final _physical = PhysicalResourceProvider.INSTANCE;
   @override
   final pathContext = PhysicalResourceProvider.INSTANCE.pathContext;
@@ -90,7 +88,7 @@ final class _SourceFile(super.provider, super.path)
     implements File {
   @override
   bool get exists =>
-      provider._archive(provider._name(path))?.contains(provider._name(path)) ==
+      provider._sources(provider._name(path))?.contains(provider._name(path)) ==
       true;
   @override
   int get modificationStamp {
@@ -102,14 +100,14 @@ final class _SourceFile(super.provider, super.path)
 
   @override
   int get lengthSync =>
-      provider._archive(provider._name(path))?.length(provider._name(path)) ??
+      provider._sources(provider._name(path))?.length(provider._name(path)) ??
       (throw PathNotFoundException(path, 'Source file does not exist.'));
   @override
   Uint8List readAsBytesSync() {
     if (!exists) {
       throw PathNotFoundException(path, 'Source file does not exist.');
     }
-    return provider._archive(provider._name(path))!.read(provider._name(path));
+    return provider._sources(provider._name(path))!.read(provider._name(path));
   }
 
   @override

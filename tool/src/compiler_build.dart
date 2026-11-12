@@ -6,7 +6,7 @@ import 'package:dartc/sdk.dart';
 
 /// Builds and packages the compiler without generating Dart source files.
 Future<void> buildCompiler(File destination) async {
-  final resources = await File('lib/src/sdk/sources.zip').readAsBytes();
+  final resources = SourceArchive.encode(await SdkSources.load());
   final sources = SourceArchive(resources);
   DartSdk(sources);
   for (final name in sources.paths) {

@@ -48,9 +48,9 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
         throw FormatException('Missing -o output path.\n$_usage');
       }
       const digest = String.fromEnvironment('dartc.resources');
-      final SourceArchive resources;
+      final SdkSources resources;
       if (digest.isEmpty) {
-        resources = await SourceArchive.load();
+        resources = await SdkSources.load();
       } else {
         final bytes = ExecutableResources(File(Platform.resolvedExecutable))
             .read();
