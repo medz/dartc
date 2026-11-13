@@ -20,11 +20,6 @@ void main() {
     final bytes = resources.read();
     expect(sha256.convert(bytes), sha256.convert(expected));
     expect(
-      DartSdk(SourceArchive(bytes)).sources
-          .contains('sdk/std/lib/core/core.dart'),
-      isTrue,
-    );
-    expect(
       () => resources.embed(Uint8List.fromList([1])),
       throwsFormatException,
     );

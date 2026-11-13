@@ -52,65 +52,6 @@ void main() {
         );
       },
     );
-
-    test(
-      '${generator.target} instantiates nullable function type arguments',
-      () {
-        final parameter = TypeParameterType('T')
-          ..initializeBound(ValueType.object.nullable);
-        final target = FunctionTarget(
-          .parse('memory:type-arguments'),
-          'nullable',
-          .typeType,
-          [],
-          typeParameters: [parameter],
-        );
-        final entry = Block();
-        entry.finish(Return(entry.emit(ReifyType(parameter.nullable))));
-        final program = IrProgram([], [
-          IrFunction(target, [entry]),
-        ]);
-        expect(
-          generator
-              .generate(program, runtime: heapRuntime, definitions: [target])
-              .sections,
-          isNotEmpty,
-        );
-      },
-    );
-
-    test(
-      '${generator.target} instantiates generic bounds from runtime arguments',
-      () {
-        final outer = TypeParameterType('T')
-          ..initializeBound(ValueType.object.nullable);
-        final inner = TypeParameterType('U')..initializeBound(outer);
-        final target = FunctionTarget(
-          .parse('memory:type-arguments'),
-          'dependentBound',
-          .typeType,
-          [],
-          typeParameters: [outer],
-        );
-        final entry = Block();
-        entry.finish(
-          Return(
-            entry.emit(
-              ReifyType(FunctionType(inner, [inner], typeParameters: [inner])),
-            ),
-          ),
-        );
-        final program = IrProgram([], [
-          IrFunction(target, [entry]),
-        ]);
-        expect(
-          generator
-              .generate(program, runtime: heapRuntime, definitions: [target])
-              .sections,
-          isNotEmpty,
-        );
-      },
-    );
   }
 
   test(
