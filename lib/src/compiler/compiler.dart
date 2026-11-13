@@ -9,6 +9,7 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/runtime/contracts.dart' show RuntimeRole;
 import 'package:dartc/linker.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/object/elf.dart';
@@ -30,7 +31,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
   /// Analysis resources are closed before code generation. [output] selects
   /// the file kind and, for a shared library, its name. No output files change.
   /// Executables use `main` from the first library's exported namespace;
-  /// parameterless synchronous and async entries are supported.
+  /// synchronous and async entries receive command-line arguments when declared.
   ///
   /// [nativeSymbols] maps exact asset IDs and requested symbols to native names
   /// before platform symbol decoration.
@@ -62,7 +63,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       includeDependencies: true,
       sdk: DartSdk(sourceFiles),
       sources: sourceFiles,
-      resources: const [
+      resources: [
         'sdk/runtime/allocator.dart',
         'sdk/runtime/type_info.dart',
         'sdk/runtime/dispatch.dart',
@@ -70,6 +71,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         'sdk/runtime/console.dart',
         'sdk/runtime/stack_trace.dart',
         'sdk/runtime/executable_memory.dart',
+        if (output is ExecutableOutput) 'sdk/runtime/process.dart',
       ],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
@@ -84,16 +86,48 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       );
     });
     final (program: _, :exports, :imports, :entryPoint, runtime: _) = lowered;
-    final program = runtime.program;
+    var program = runtime.program;
+    var entry = entryPoint;
     if (output is ExecutableOutput && entryPoint == null) {
       throw ArgumentError('The first input library has no main function.');
+    }
+    if (output is ExecutableOutput &&
+        (entryPoint!.parameterTypes.isNotEmpty ||
+            entryPoint.typeParameters.isNotEmpty)) {
+      final body = program.implementationOf(entryPoint);
+      if (body is! IrFunction ||
+          body.bodyKind != .synchronous && body.bodyKind != .asynchronous ||
+          entryPoint.kind != .function) {
+        throw UnsupportedError(
+          'Process main requires a synchronous or async function.',
+        );
+      }
+      final start = lowered.runtime.entries[RuntimeRole.processMain]!;
+      entry = FunctionTarget(null, 'processMain', .voidType, [
+        .integer,
+        .integer,
+      ]);
+      final block = Block(entry.parameterTypes);
+      block.emit(
+        DirectCall(start, [...block.parameters, FunctionConstant(entryPoint)]),
+      );
+      block.finish(const Return());
+      program = IrProgram(
+        program.classes,
+        [
+          ...program.functions,
+          IrFunction(entry, [block]),
+        ],
+        globals: program.globals,
+        externals: program.externals,
+      );
     }
     final CodeGenerator generator = switch (target.architecture) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
     };
     final definitions = program.reachableFrom(
-      [...exports.keys, if (output is ExecutableOutput) entryPoint!],
+      [...exports.keys, if (output is ExecutableOutput) entry!],
       instantiatedTypes: [
         if (exports.values.any(
               (export) => export.signature.parameters.any(
@@ -177,7 +211,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       imports: nativeImports,
       nativeSymbols: addresses,
       entryPoint: output is ExecutableOutput
-          ? (function: entryPoint!, symbol: entrySymbol)
+          ? (function: entry!, symbol: entrySymbol)
           : null,
       runtime: runtime,
     );

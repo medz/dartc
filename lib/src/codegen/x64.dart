@@ -30,6 +30,14 @@ final class _X64Emitter(
   @override
   Uint8List start(void Function() body, FrameLayout<CpuRegister>? frame) {
     final mac = convention.target.operatingSystem == .macos;
+    if (mac) {
+      extendInteger(Register.rdi, bytes: 4, signed: true);
+    } else {
+      assembler
+        ..load(.rdi, .rsp, 0)
+        ..move(.rsi, .rsp)
+        ..addImmediate(.rsi, 8);
+    }
     frame ??= mac
         ? convention.frameLayout(
             localBytes: 0,

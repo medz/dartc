@@ -691,10 +691,12 @@ base class ScalarCodeGenerator<R extends Object>(
           body is! IrFunction ||
           (body.bodyKind != .synchronous && body.bodyKind != .asynchronous) ||
           function.kind != .function ||
-          function.parameterTypes.isNotEmpty ||
+          (function.parameterTypes.isNotEmpty &&
+              function.signature !=
+                  FunctionType(function.returnType, [.integer, .integer])) ||
           function.typeParameters.isNotEmpty) {
         throw UnsupportedError(
-          'Process entry requires a parameterless function.',
+          'Process entry requires no parameters or integer argc/argv parameters.',
         );
       }
       code.add(Uint8List((-code.length) & 15));

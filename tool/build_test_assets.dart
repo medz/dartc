@@ -177,7 +177,18 @@ Future<void> main(List<String> args) async {
     );
 
     if (selected.contains('entry')) {
-      for (final fixture in ['return', 'void', 'status', 'exported', 'math']) {
+      for (final fixture in [
+        'return',
+        'void',
+        'status',
+        'exported',
+        'math',
+        'arguments',
+        'arguments_async',
+        'arguments_optional',
+        'arguments_named',
+        'arguments_generic',
+      ]) {
         final needsBindings =
             fixture == 'status' || fixture == 'exported' || fixture == 'math';
         final result = await Compiler(target).compile(
@@ -191,10 +202,11 @@ Future<void> main(List<String> args) async {
       if (target.operatingSystem == .linux) {
         for (final (name, library) in [
           ('dynamic', 'libc.so.6'),
+          ('arguments_dynamic', 'libc.so.6'),
           ('missing', 'libdartc_missing_dependency.so'),
         ]) {
           final result = await Compiler(target).compile(
-            ['test/compiler/fixtures/entry/return.dart'],
+            ['test/compiler/fixtures/entry/${name == 'arguments_dynamic' ? 'arguments' : 'return'}.dart'],
             output: const .executable(),
             linkInputs: [.sharedLibrary(library)],
           );

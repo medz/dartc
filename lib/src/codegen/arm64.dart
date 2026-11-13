@@ -29,6 +29,13 @@ final class _Arm64Emitter(
 
   @override
   Uint8List start(void Function() body, FrameLayout<CpuRegister>? frame) {
+    if (convention.target.operatingSystem == .macos) {
+      extendInteger(Register.x0, bytes: 4, signed: true);
+    } else {
+      assembler
+        ..load(.x0, .sp, 0)
+        ..addImmediate(.x1, .sp, 8);
+    }
     frame ??= convention.target.operatingSystem == .macos
         ? convention.frameLayout(
             localBytes: 0,

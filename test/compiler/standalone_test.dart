@@ -57,7 +57,7 @@ void main() {
       expect(compile.exitCode, 0, reason: '${compile.stdout}${compile.stderr}');
       final run = await Process.run(
         executable.path,
-        [],
+        ['standalone', '中文🙂'],
         includeParentEnvironment: false,
         environment: {'PATH': ''},
       );
@@ -77,7 +77,7 @@ void main() {
       expect(api.exitCode, 0, reason: '${api.stdout}${api.stderr}');
       final apiRun = await Process.run(
         apiOutput.path,
-        [],
+        ['standalone', '中文🙂'],
         includeParentEnvironment: false,
         environment: {'PATH': ''},
       );

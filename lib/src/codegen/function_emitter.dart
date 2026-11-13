@@ -35,7 +35,7 @@ abstract interface class FunctionEmitter<R>() {
   /// The calling rules for the explicit output platform.
   CallingConvention<R> get convention;
 
-  /// Emits a process entry that calls the Dart body and exits successfully.
+  /// Supplies argc/argv in integer argument registers, runs the body and exits.
   Uint8List start(void Function() body, FrameLayout<R>? frame);
 
   /// The callee-saved register holding this native activation's managed heap.

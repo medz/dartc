@@ -44,8 +44,9 @@ abstract interface class CodeGenerator() {
   /// Language and library support is tracked in the project's specs directory.
   ///
   /// [entryPoint] adds a process entry with the given link symbol. Its function
-  /// must belong to [definitions] and be synchronous and parameterless. The entry
-  /// discards the result, releases the heap and exits successfully. It emits no
+  /// must belong to [definitions], be synchronous or async, and accept either
+  /// no parameters or two integers carrying OS argc and argv. The entry discards
+  /// the result, releases the heap and exits successfully. It emits no
   /// finalizer section; executable linking rejects inputs containing one.
   ObjectModule generate(
     IrProgram program, {

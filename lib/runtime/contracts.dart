@@ -41,6 +41,7 @@ enum RuntimeRole() {
   typeAt,
   copyExecutableMacos,
   copyExecutableLinux,
+  processMain,
 }
 
 /// Binds an external declaration to one trusted machine operation.
