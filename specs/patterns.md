@@ -25,6 +25,12 @@
 
 [集合模式样本](../test/frontend/lowering/fixtures/collection_patterns.dart)、[匹配与守卫样本](../test/frontend/lowering/fixtures/patterns.dart)、[record 解构样本](../test/frontend/lowering/fixtures/destructure.dart)和[SDK 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/patterns.md)。
 
+## 原生执行
+
+[原生模式验证](../test/compiler/patterns_test.dart)复用同一组语义样本，检查列表和 Map 的长度、索引、rest 拷贝、缺失键与 null 区分，以及泛型和动态类型。不可反驳模式的长度或缺键失败抛出 StateError；隐式转换失败抛出 TypeError；解构全部成功后才写入局部变量。
+
+对象模式验证 getter 顺序、虚派发、方法提取、逻辑分支与关系运算缓存。失败守卫对对象的修改保留，同一次匹配沿用已提取值；新的匹配重新读取。异常种类、结果和副作用轨迹均与固定 SDK 对照，赋值原子性等关键行为另有固定预期。
+
 ## 规范依据
 
 [模式特性规范](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md)、[对象模式类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md#type-checking-and-pattern-required-type)。
