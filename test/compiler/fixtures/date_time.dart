@@ -29,7 +29,11 @@ void rangeError(void Function() action, String name, int value, int limit) {
   }
 }
 
-void main() {
+void main(List<String> arguments) {
+  if (arguments.length == 1 && arguments.single == 'duration') {
+    checkDurations();
+    return;
+  }
   final now = DateTime.now();
   final timestamp = DateTime.timestamp();
   print(now.microsecondsSinceEpoch);
@@ -178,4 +182,116 @@ void main() {
     'cached fields survive GC',
   );
   print('date_time:ok');
+}
+
+void checkDurations() {
+  const mixed = Duration(
+    days: 2,
+    hours: -25,
+    minutes: 61,
+    seconds: -60,
+    milliseconds: 1001,
+    microseconds: -1,
+  );
+  const normalized = Duration(days: 1, seconds: 1, microseconds: 999);
+  final construct = Duration.new;
+  final copy = construct(microseconds: mixed.inMicroseconds);
+  check(
+    mixed == normalized && mixed == copy && mixed.hashCode == copy.hashCode,
+    'mixed units and runtime constructor',
+  );
+  check(
+    const Duration(microseconds: -1).inMilliseconds == 0 &&
+        const Duration(microseconds: -1001).inMilliseconds == -1 &&
+        (const Duration(microseconds: -3) ~/ 2).inMicroseconds == -1 &&
+        (const Duration(microseconds: -3) * 0.5).inMicroseconds == -2 &&
+        (const Duration(microseconds: 3) * 0.5).inMicroseconds == 2,
+    'truncation and multiplication rounding',
+  );
+  check(
+    const Duration(microseconds: -1).toString() == '-0:00:00.000001' &&
+        const Duration(hours: 25, minutes: 3, microseconds: 9).toString() ==
+            '25:03:00.000009',
+    'duration formatting',
+  );
+  final keys = <Duration, String>{mixed: 'first', copy: 'replacement'};
+  check(keys.length == 1 && keys[normalized] == 'replacement', 'duration keys');
+  for (final micros in [
+    -0x8000000000000000,
+    -9007199254740993,
+    -86400000001,
+    -3600000001,
+    -60000001,
+    -1000001,
+    -1001,
+    -1,
+    0,
+    1,
+    999,
+    1001,
+    1000001,
+    60000001,
+    3600000001,
+    86400000001,
+    9007199254740993,
+    0x7fffffffffffffff,
+  ]) {
+    final duration = construct(microseconds: micros);
+    final format = duration.toString;
+    final absolute = duration.abs;
+    print(
+      '${format()}|${duration.inDays}/${duration.inHours}/'
+      '${duration.inMinutes}/${duration.inSeconds}/${duration.inMilliseconds}/'
+      '${duration.inMicroseconds}|${duration.isNegative}/'
+      '${absolute().inMicroseconds}/${(-duration).inMicroseconds}',
+    );
+    final compare = duration.compareTo;
+    for (final other in [Duration.zero, mixed, -mixed, duration]) {
+      print(
+        '${(duration + other).inMicroseconds}/'
+        '${(duration - other).inMicroseconds}/'
+        '${compare(other)}/${duration == other}/'
+        '${duration < other}/${duration <= other}/'
+        '${duration > other}/${duration >= other}',
+      );
+    }
+    for (final factor in <num>[0, 1, -1, 2, 0.5, -0.5, 1.25, 1 / 3]) {
+      print((duration * factor).inMicroseconds);
+    }
+    for (final quotient in [1, -1, 2, -2, 1000001]) {
+      print((duration ~/ quotient).inMicroseconds);
+    }
+  }
+  var rejected = 0;
+  for (final factor in [double.nan, double.infinity, double.negativeInfinity]) {
+    try {
+      mixed * factor;
+    } on UnsupportedError {
+      rejected++;
+    }
+  }
+  try {
+    mixed ~/ 0;
+  } on UnsupportedError {
+    rejected++;
+  }
+  final dynamic dynamicConstructor = construct;
+  final dynamic dynamicDuration = mixed;
+  try {
+    dynamicConstructor(seconds: '1');
+  } on TypeError {
+    rejected++;
+  }
+  try {
+    dynamicDuration * '2';
+  } on TypeError {
+    rejected++;
+  }
+  try {
+    dynamicDuration.compareTo(1);
+  } on TypeError {
+    rejected++;
+  }
+  check(rejected == 7, 'invalid duration arithmetic and arguments');
+  print('duration:ok');
 }

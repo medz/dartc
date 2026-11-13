@@ -10,6 +10,29 @@ import 'package:test/test.dart';
 import '../support/native_assets.dart';
 
 void main() {
+  test(
+    'Duration preserves signed units, rounding, formatting and errors',
+    () async {
+      final native = await Process.run(
+        NativeAssets(Target.host())
+            .file('compiler/entry_date_time')
+            .absolute
+            .path,
+        ['duration'],
+        includeParentEnvironment: false,
+        environment: {'PATH': ''},
+      );
+      expect(native.exitCode, 0, reason: '${native.stdout}\n${native.stderr}');
+      expect(native.stderr, isEmpty);
+      final sdk = await Process.run(Platform.resolvedExecutable, [
+        'test/compiler/fixtures/date_time.dart',
+        'duration',
+      ]);
+      expect(sdk.exitCode, 0, reason: '${sdk.stdout}\n${sdk.stderr}');
+      expect(native.stdout, sdk.stdout);
+      expect(native.stdout, endsWith('duration:ok\n'));
+    },
+  );
   for (final zone in [
     'UTC',
     'America/New_York',

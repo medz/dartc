@@ -39,6 +39,8 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 ## 日期时间
 
+Duration 复用[官方 Dart 实现](../sdk/std/lib/core/duration.dart)，保留组合单位、正负时长、整体单位向零截断、乘法舍入、比较/哈希和文本格式化。构造器与方法函数值、动态参数拒绝、除零及非有限乘数的异常见[日期与时长原生验证](../test/compiler/date_time_test.dart)。64 位边界按原生整数规则处理；使用 double 缩放超过 53 位的时长仍可能损失精度，不提供任意精度时长。
+
 DateTime 复用[官方 Dart 日历实现](../sdk/std/lib/_internal/vm_shared/lib/date_patch.dart)，当前时间、时区名称和偏移委托[目标系统接口](../sdk/patches/date_time.dart)。支持 UTC/本地构造、微秒和毫秒时间戳、字段与格式化、时区转换、比较/哈希、Duration 算术及 copyWith；时间点相同不代表 UTC 与本地对象相等。
 
 [原生日期验证](../test/compiler/date_time_test.dart)覆盖负时间戳、范围边界、闰年世纪、字段溢出、扩展年份、构造器/方法提取、动态参数检查和回收后的缓存字段，并在 UTC、纽约、上海及 Lord Howe 时区与 SDK 对照，包含 DST 跳跃、重复时间和半小时时差。系统时钟用调用前后的宿主时间界定；跨 DST 的 Duration 算术仍按实际经过时间计算。本地时区依赖系统时区数据，超出系统查询范围的日期沿用官方等价年份算法。
