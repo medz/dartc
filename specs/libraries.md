@@ -37,6 +37,10 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 动态库在最外层同步 Dart 入口返回前处理待执行事件。重入的 FFI 入口不启动第二个事件循环；持续活动的周期定时器会使这次调用保持运行。卸载库只释放存储，不启动新回调。外部线程和异步宿主驱动入口尚未接通。
 
+## 日期时间
+
+DateTime 的声明与[官方 Dart 日历实现](../sdk/std/lib/_internal/vm_shared/lib/date_patch.dart)已接入同一前端流程。时间戳构造的范围检查、毫秒/微秒单位、时间点比较与 UTC/本地身份区分已有[前端验证](../test/frontend/lowering/date_time_test.dart)。原生系统实时时钟、时区名称和 DST 偏移仍待目标接口接通，日历格式化等原生行为尚未验收；parse/tryParse 还依赖 RegExp。
+
 ## 秒表
 
 Stopwatch 的启停、重置和累计时间复用[核心库正文](../sdk/std/lib/core/stopwatch.dart)，毫秒及微秒换算复用[官方目标实现](../sdk/std/lib/_internal/vm/lib/stopwatch_patch.dart)。目标只提供现有单调时钟及每秒 10^9 个计数单位；单位为纳秒，实际精度由系统时钟决定。

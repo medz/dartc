@@ -202,6 +202,7 @@ void main() {
           ('_Double', 'remainder', '/vm/lib/double.dart'),
           ('_Double', '_remainder', '/sdk/patches/double.dart'),
           ('Stopwatch', '_now', '/sdk/patches/core.dart'),
+          ('DateTime', 'compareTo', '/vm_shared/lib/date_patch.dart'),
         ]) {
           final member = core.element.getClass(type)!.getMethod(method)!;
           final body = core.getFragmentDeclaration(member.fragments.last)!;
