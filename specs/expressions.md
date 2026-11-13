@@ -159,6 +159,12 @@ Latin1Decoder 的整段和分块解码复用 SDK 正文，严格模式拒绝 0..
 
 固定 SDK 3.14.0 的严格模式会跳过空的最后一片；替换模式在末尾还有有效字节时会关闭两次，输出后抛出空断言异常。目标补丁按 [ByteConversionSink.addSlice](../sdk/std/lib/convert/byte_conversion.dart) 的契约补齐关闭，并让替换模式只关闭一次；字节校验、替换算法及正常错误传播保持不变。
 
+## ASCII、HTML 与分行
+
+ASCII 的严格解码和 U+FFFD 替换模式、ASCII/Latin-1 编码直接复用 SDK 正文；编码拒绝范围外的 UTF-16 输入，包括代理项。整段、切片、分块和 Stream 的[原生验证](../test/compiler/text_conversion_test.dart)覆盖完整字节范围、非法字节/字符及空最终切片的单次关闭。
+
+`HtmlEscape` 保留各公开模式和自定义模式的字符集合，转义后保留其余 UTF-16 输入，包括跨切片的代理项。`LineSplitter` 按 CR、LF 或 CRLF 分行，保留空行和未终止的非空尾行；空输入不生成一行，U+2028 不作为分隔符。样本还验证跨空块拆开的 CRLF、惰性切片、Stream 转换、输出和流错误的原始身份，以及多块分行缓存跨回收的存活。
+
 ## 数值比较与 SDK 差异
 
 [`num.==`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_equals.html) 要求 int 与 double 具有相同数值；[`num.<`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_less.html) 按数值大小比较。正负零在这些运算符下相等；NaN 与任何值不等，四种大小关系均为假。整数先舍入成 double 再比较不满足这一契约。例如 `9007199254740993 > 9007199254740992.0` 应为真，两者相等应为假；最大 int 小于 `9223372036854775808.0`。
