@@ -1,5 +1,7 @@
 import 'package:dartc/ir.dart';
 
+import 'type_runtime.dart';
+
 /// Machine services available to checked runtime source.
 enum MemoryPrimitive() {
   map,
@@ -28,6 +30,7 @@ final class HeapRuntime(
   final FunctionTarget? floatingRemainder,
   final FunctionTarget? floatingModulo,
   final AsyncRuntime? async,
+  final TypeRuntime? types,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
 }) {

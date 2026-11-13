@@ -213,7 +213,6 @@ final class ProgramSelection(
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
           layouts.pointers.declaration,
-        ...layouts.relations.classes,
       ],
       support,
       externals: [
@@ -223,17 +222,23 @@ final class ProgramSelection(
         ])
           IrExternal(target),
         // Source bodies were verified already; this boundary owns generated bodies.
-        for (final declaration in [layouts.strings.declaration])
-          for (final target in {
+        for (final target in {
+          for (final declaration in [
+            layouts.strings.declaration,
+            ...layouts.types.classes,
+          ]) ...{
             ...declaration.members.values,
             ...declaration.implementations.values,
             ...declaration.constructors.values,
-          })
-            if (!target.isAbstract)
-              IrExternal(
-                target,
-                defaults: members.program.implementationOf(target)!.defaults,
-              ),
+          },
+          ...?heap.runtime?.types?.entries,
+        })
+          if (!target.isAbstract &&
+              !support.any((body) => body.target == target))
+            IrExternal(
+              target,
+              defaults: members.program.implementationOf(target)!.defaults,
+            ),
         if (!globals.isEmpty) IrExternal(globals.address),
         ...asyncFunctions.entries,
       ],

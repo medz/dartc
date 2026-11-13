@@ -4,6 +4,7 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/runtime/contracts.dart';
 import 'package:dartc/src/compiler/runtime.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -18,6 +19,7 @@ void main() {
 
   HeapRuntime withCritical(FunctionTarget function) => HeapRuntime(
     heapRuntime.program,
+    types: heapRuntime.types,
     allocate: heapRuntime.allocate,
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
@@ -136,13 +138,20 @@ void main() {
   test('trusted cast entries validate signatures without Dart cast checks', () {
     final parameter = TypeParameterType('T')
       ..initializeBound(ValueType.object.nullable);
-    for (final input in [ValueType.dynamicType, ValueType.integer]) {
+    for (final (operation, input, valid)
+        in <(MemoryOperation, ValueType, bool)>[
+          (.uncheckedCast, .dynamicType, true),
+          (.uncheckedCast, .integer, false),
+          (.typeView, .typeType, true),
+          (.typeView, .object, false),
+        ]) {
+      final typeView = operation == .typeView;
       final target = FunctionTarget(
         uri,
         'assertType',
-        parameter,
+        typeView ? TypeMetadata.type : parameter,
         [input],
-        typeParameters: [parameter],
+        typeParameters: typeView ? [] : [parameter],
       );
       final result = (
         program: IrProgram(
@@ -156,10 +165,10 @@ void main() {
         imports: lowered.imports,
         runtime: RuntimeDeclarations(lowered.runtime.entries, {
           ...lowered.runtime.primitives,
-          target: .uncheckedCast,
+          target: operation,
         }, lowered.runtime.nonAllocating),
       );
-      if (input == ValueType.integer) {
+      if (!valid) {
         expect(() => bindRuntime(result), throwsArgumentError);
       } else {
         final body =

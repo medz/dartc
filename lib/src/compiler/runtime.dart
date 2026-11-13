@@ -49,8 +49,15 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
           throw ArgumentError('Invalid unchecked cast signature.');
         }
         value = block.emit(UncheckedCast(args.single, target.returnType));
+      case .typeSupertypes:
+        continue;
       case .typeView:
-        value = block.emit(TypeCast(args.single, TypeMetadata.type));
+        if (target.kind != .function ||
+            target.typeParameters.isNotEmpty ||
+            target.signature != FunctionType(TypeMetadata.type, [.typeType])) {
+          throw ArgumentError('Invalid type view signature.');
+        }
+        value = block.emit(UncheckedCast(args.single, TypeMetadata.type));
       case .className:
         value = block.emit(ObjectClassName(args.single));
       case .map:
@@ -140,6 +147,13 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
   }
   return HeapRuntime(
     program,
+    types: TypeRuntime(
+      program,
+      annotations.entries,
+      annotations.primitives.entries
+          .singleWhere((entry) => entry.value == MemoryOperation.typeSupertypes)
+          .key,
+    ),
     async: switch (annotations.entries) {
       {
         RuntimeRole.asyncCreate: final create,

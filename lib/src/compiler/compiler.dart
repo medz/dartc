@@ -63,6 +63,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       sources: sourceFiles,
       resources: const [
         'sdk/runtime/allocator.dart',
+        'sdk/runtime/type_info.dart',
         'sdk/runtime/dispatch.dart',
         'sdk/runtime/numbers.dart',
         'sdk/runtime/console.dart',

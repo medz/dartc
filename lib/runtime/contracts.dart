@@ -21,6 +21,16 @@ enum RuntimeRole() {
   asyncStart,
   asyncAwait,
   asyncReturn,
+  typeSubtype,
+  typeEquals,
+  typeHash,
+  typeArgumentsEqual,
+  typeArgumentsHash,
+  typeNullable,
+  typeFutureOr,
+  typeParameter,
+  typeShift,
+  typeAt,
 }
 
 /// Binds an external declaration to one trusted machine operation.
@@ -50,6 +60,7 @@ enum MemoryOperation() {
   float64Bits,
   className,
   typeView,
+  typeSupertypes,
   captureStackTrace,
   uncheckedCast,
   instantiateClosure,

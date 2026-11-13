@@ -1,53 +1,16 @@
 import 'package:dartc/ir.dart';
-import 'package:dartc/runtime/contracts.dart' show TypeKind;
+import 'package:dartc/runtime/contracts.dart';
 
-/// Generates reified type structures and their normalization through ordinary IR.
-final class TypeValues() {
-  static final _init = FunctionTarget(
-    null,
-    '_Type',
-    .voidType,
-    [
-      .integer,
-      .integer,
-      .boolean,
-      TypeMetadata.list.nullable,
-      TypeMetadata.functionShape.nullable,
-      .string,
-    ],
-    owner: TypeMetadata.type,
-    kind: .initializer,
-  );
-  static final listInit = FunctionTarget(
-    null,
-    '_TypeArguments',
-    .voidType,
-    [TypeMetadata.type, TypeMetadata.list.nullable],
-    owner: TypeMetadata.list,
-    kind: .initializer,
-  );
-  final _nullable = FunctionTarget(null, 'nullableType', TypeMetadata.type, [
-    TypeMetadata.type,
-  ]);
-  final _futureOr = FunctionTarget(null, 'futureOrType', TypeMetadata.type, [
-    TypeMetadata.type,
-  ]);
-  final _parameter = FunctionTarget(null, 'boundParameter', TypeMetadata.type, [
-    TypeMetadata.type,
-    TypeMetadata.type,
-  ]);
-  final _equal = FunctionTarget(null, 'typeEquals', .boolean, [
-    TypeMetadata.type,
-    .object.nullable,
-  ]);
-  final _equalArguments = FunctionTarget(null, 'typeArgumentsEqual', .boolean, [
-    TypeMetadata.list.nullable,
-    TypeMetadata.list.nullable,
-  ]);
-  final _hash = FunctionTarget(null, 'typeHash', .integer, [TypeMetadata.type]);
-  final _hashArguments = FunctionTarget(null, 'typeArgumentsHash', .integer, [
-    TypeMetadata.list.nullable,
-  ]);
+import 'type_runtime.dart';
+
+/// Materializes static type descriptions and templates using checked Dart entries.
+final class TypeValues([final TypeRuntime? runtime]) {
+  TypeRuntime get _runtime =>
+      runtime ?? (throw UnsupportedError('Type runtime unavailable.'));
+  FunctionTarget get _init => _runtime.initializer(TypeMetadata.type);
+  FunctionTarget get listInit => _runtime.initializer(TypeMetadata.list);
+  FunctionTarget entry(RuntimeRole role) => _runtime.entry(role);
+
   final _shapes = <Object, int>{};
   final _templates =
       <
@@ -57,36 +20,9 @@ final class TypeValues() {
   final _functions = <FunctionTarget, IrFunction>{};
 
   List<IrClass> get classes => [
-    IrClass(TypeMetadata.functionShape, [
-      TypeMetadata.binderCount,
-      TypeMetadata.positionalCount,
-      TypeMetadata.requiredCount,
-      TypeMetadata.named,
-    ]),
-    IrClass(TypeMetadata.namedParameter, [
-      TypeMetadata.name,
-      TypeMetadata.nameSlot,
-      TypeMetadata.requiredName,
-      TypeMetadata.nextName,
-      TypeMetadata.nameText,
-    ]),
-    IrClass(
-      TypeMetadata.type,
-      [
-        TypeMetadata.kind,
-        TypeMetadata.shape,
-        TypeMetadata.allowsNull,
-        TypeMetadata.parts,
-        TypeMetadata.signature,
-        TypeMetadata.className,
-      ],
-      constructors: [if (_functions.containsKey(_init)) _init],
-    ),
-    IrClass(
-      TypeMetadata.list,
-      [TypeMetadata.head, TypeMetadata.tail],
-      constructors: [if (_functions.containsKey(listInit)) listInit],
-    ),
+    for (final entry in TypeMetadata.fields.entries)
+      runtime?.program.classes.where((c) => c.type == entry.key).firstOrNull ??
+          IrClass(entry.key, entry.value),
   ];
 
   Iterable<IrFunction> get functions => _functions.values;
@@ -105,35 +41,10 @@ final class TypeValues() {
     return concrete;
   }
 
-  FunctionTarget get equality {
-    _includeEquality();
-    return _equal;
-  }
-
-  FunctionTarget get argumentEquality {
-    _includeEquality();
-    return _equalArguments;
-  }
-
-  FunctionTarget get hash {
-    _includeHash();
-    return _hash;
-  }
-
-  FunctionTarget get argumentHash {
-    _includeHash();
-    return _hashArguments;
-  }
-
-  void _includeHash() {
-    _functions.putIfAbsent(_hash, _hashBody);
-    _functions.putIfAbsent(_hashArguments, _argumentHashBody);
-  }
-
-  void _includeEquality() {
-    _functions.putIfAbsent(_equal, _equalityBody);
-    _functions.putIfAbsent(_equalArguments, _argumentEqualityBody);
-  }
+  FunctionTarget get equality => entry(.typeEquals);
+  FunctionTarget get argumentEquality => entry(.typeArgumentsEqual);
+  FunctionTarget get hash => entry(.typeHash);
+  FunctionTarget get argumentHash => entry(.typeArgumentsHash);
 
   Constant argumentConstants(Iterable<ValueType> arguments) =>
       arguments.toList().reversed.fold<Constant>(
@@ -383,20 +294,17 @@ final class TypeValues() {
         final node = _node(kind, shape, []);
         if (kind == .parameter && value is TypeParameterType) {
           if (environment[_bound(value, environment.keys)] case final bound?) {
-            _functions.putIfAbsent(_parameter, _parameterBody);
-            return block.emit(DirectCall(_parameter, [node, bound]));
+            return block.emit(DirectCall(entry(.typeParameter), [node, bound]));
           }
         }
         return node;
       }
       final parts = children.map((t) => visit(t, nested)).toList();
       if (kind == .nullable) {
-        _functions.putIfAbsent(_nullable, _nullableBody);
-        return block.emit(DirectCall(_nullable, parts));
+        return block.emit(DirectCall(entry(.typeNullable), parts));
       }
       if (kind == .futureOr) {
-        _functions.putIfAbsent(_futureOr, _futureOrBody);
-        return block.emit(DirectCall(_futureOr, parts));
+        return block.emit(DirectCall(entry(.typeFutureOr), parts));
       }
       return construct(
         block,
@@ -414,376 +322,30 @@ final class TypeValues() {
     return visit(template, const []);
   }
 
-  IrFunction _parameterBody() {
-    final entry = Block(_parameter.parameterTypes),
-        bottom = Block(),
-        unchanged = Block();
-    final [parameter, bound] = entry.parameters;
-    entry.finish(
-      Branch(
-        entry.emit(
-          Equals(
-            entry.emit(LoadField(TypeMetadata.kind, bound)),
-            Constant.integer(TypeKind.never.index),
-          ),
-        ),
-        Jump(bottom),
-        Jump(unchanged),
-      ),
-    );
-    bottom.finish(Return(bound));
-    unchanged.finish(Return(parameter));
-    return IrFunction(_parameter, [entry, bottom, unchanged]);
-  }
-
-  IrFunction _initializer(FunctionTarget target, List<InstanceField> fields) {
-    final entry = Block(target.parameterTypes);
-    for (final (i, field) in fields.indexed) {
-      entry.emit(
-        StoreField(field, entry.parameters.first, entry.parameters[i + 1]),
-      );
-    }
-    entry.finish(const Return());
-    return IrFunction(target, [entry]);
-  }
-
   Value construct(
     Block block,
     TypeKind kind,
     int shape,
     List<Value> children, {
-    Value? allowsNull,
     Value? signature,
   }) {
     Value childrenList = const Constant.nullValue();
     for (final child in children.reversed) {
       childrenList = block.emit(cons(child, childrenList));
     }
-    return node(
-      block,
-      Constant.integer(kind.index),
-      Constant.integer(shape),
-      allowsNull ?? Constant.boolean(kind == .nullable),
-      childrenList,
-      signature ?? const Constant.nullValue(),
-      label: Constant.string(_label(kind, shape)),
-    );
-  }
-
-  Construct cons(Value value, Value next) {
-    _functions.putIfAbsent(
-      listInit,
-      () => _initializer(listInit, [TypeMetadata.head, TypeMetadata.tail]),
-    );
-    return Construct(listInit, [value, next]);
-  }
-
-  Value node(
-    Block block,
-    Value kind,
-    Value shape,
-    Value allowsNull,
-    Value parts,
-    Value signature, {
-    Value? label,
-  }) {
-    _functions.putIfAbsent(
-      _init,
-      () => _initializer(_init, [
-        TypeMetadata.kind,
-        TypeMetadata.shape,
-        TypeMetadata.allowsNull,
-        TypeMetadata.parts,
-        TypeMetadata.signature,
-        TypeMetadata.className,
-      ]),
-    );
     return block.emit(
       Construct(_init, [
-        kind,
-        shape,
-        allowsNull,
-        parts,
-        signature,
-        label ?? Constant.string('Type'),
+        Constant.integer(kind.index),
+        Constant.integer(shape),
+        const Constant.boolean(false),
+        childrenList,
+        signature ?? const Constant.nullValue(),
+        Constant.string(_label(kind, shape)),
       ]),
     );
   }
 
-  Value first(Block block, Value value) => block.emit(
-    LoadField(
-      TypeMetadata.head,
-      block.emit(NullCheck(block.emit(LoadField(TypeMetadata.parts, value)))),
-    ),
-  );
-
-  IrFunction _nullableBody() {
-    final entry = Block(_nullable.parameterTypes),
-        bottom = Block(),
-        make = Block(),
-        done = Block();
-    final value = entry.parameters.single;
-    entry.finish(
-      Branch(
-        entry.emit(LoadField(TypeMetadata.allowsNull, value)),
-        Jump(done),
-        Jump(bottom),
-      ),
-    );
-    done.finish(Return(value));
-    final nullValue = Block()..finish(Return(constant(.nullType)));
-    bottom.finish(
-      Branch(
-        bottom.emit(
-          Equals(
-            bottom.emit(LoadField(TypeMetadata.kind, value)),
-            Constant.integer(TypeKind.never.index),
-          ),
-        ),
-        Jump(nullValue),
-        Jump(make),
-      ),
-    );
-    make.finish(Return(construct(make, .nullable, 0, [value])));
-    return IrFunction(_nullable, [entry, bottom, make, done, nullValue]);
-  }
-
-  IrFunction _futureOrBody() {
-    final entry = Block(_futureOr.parameterTypes),
-        voidType = Block(),
-        nullable = Block();
-    final unwrap = Block(),
-        nominal = Block([TypeMetadata.type]),
-        object = Block(),
-        bottom = Block(),
-        nullType = Block();
-    final future = Block(),
-        optionalFuture = Block(),
-        make = Block(),
-        done = Block();
-    final value = entry.parameters.single;
-    final kind = entry.emit(LoadField(TypeMetadata.kind, value));
-    void check(Block b, Value a, int tag, Block yes, Block no) => b.finish(
-      Branch(b.emit(Equals(a, Constant.integer(tag))), Jump(yes), Jump(no)),
-    );
-    check(entry, kind, TypeKind.dynamicType.index, done, voidType);
-    check(voidType, kind, TypeKind.voidType.index, done, nullable);
-    nullable.finish(
-      Branch(
-        nullable.emit(Equals(kind, Constant.integer(TypeKind.nullable.index))),
-        Jump(unwrap),
-        Jump(nominal, [value]),
-      ),
-    );
-    unwrap.finish(Jump(nominal, [first(unwrap, value)]));
-    final base = nominal.parameters.single;
-    check(
-      nominal,
-      nominal.emit(LoadField(TypeMetadata.kind, base)),
-      TypeKind.nominal.index,
-      object,
-      bottom,
-    );
-    check(
-      object,
-      object.emit(LoadField(TypeMetadata.shape, base)),
-      id(ValueType.object),
-      done,
-      bottom,
-    );
-    check(bottom, kind, TypeKind.never.index, future, nullType);
-    check(nullType, kind, TypeKind.nullType.index, optionalFuture, make);
-    future.finish(
-      Return(construct(future, .nominal, id(ValueType.future), [value])),
-    );
-    final futureValue = construct(
-      optionalFuture,
-      .nominal,
-      id(ValueType.future),
-      [value],
-    );
-    optionalFuture.finish(
-      Return(construct(optionalFuture, .nullable, 0, [futureValue])),
-    );
-    make.finish(
-      Return(
-        construct(make, .futureOr, 0, [
-          value,
-        ], allowsNull: make.emit(LoadField(TypeMetadata.allowsNull, value))),
-      ),
-    );
-    done.finish(Return(value));
-    return IrFunction(_futureOr, [
-      entry,
-      voidType,
-      nullable,
-      unwrap,
-      nominal,
-      object,
-      bottom,
-      nullType,
-      future,
-      optionalFuture,
-      make,
-      done,
-    ]);
-  }
-
-  Value _mixHash(Block block, Value seed, Value value) => block.emit(
-    IntBinary(
-      .bitAnd,
-      block.emit(
-        IntBinary(
-          .add,
-          block.emit(IntBinary(.multiply, seed, const Constant.integer(31))),
-          value,
-        ),
-      ),
-      const Constant.integer(0x3fffffff),
-    ),
-  );
-
-  IrFunction _hashBody() {
-    final entry = Block(_hash.parameterTypes);
-    final value = entry.parameters.single;
-    final seed = _mixHash(
-      entry,
-      entry.emit(LoadField(TypeMetadata.kind, value)),
-      entry.emit(LoadField(TypeMetadata.shape, value)),
-    );
-    final partsHash = entry.emit(
-      DirectCall(_hashArguments, [
-        entry.emit(LoadField(TypeMetadata.parts, value)),
-      ]),
-    );
-    entry.finish(Return(_mixHash(entry, seed, partsHash)));
-    return IrFunction(_hash, [entry]);
-  }
-
-  IrFunction _argumentHashBody() {
-    final entry = Block(_hashArguments.parameterTypes);
-    final loop = Block([TypeMetadata.list.nullable, .integer]),
-        step = Block([TypeMetadata.list]),
-        done = Block();
-    entry.finish(
-      Jump(loop, [entry.parameters.single, const Constant.integer(0)]),
-    );
-    final [values, seed] = loop.parameters;
-    final test = loop.emit(TypeTest(values, TypeMetadata.list));
-    loop.finish(Branch(test, Jump(step, [test.refinement(true)!]), Jump(done)));
-    final node = step.parameters.single;
-    final value = step.emit(
-      DirectCall(_hash, [step.emit(LoadField(TypeMetadata.head, node))]),
-    );
-    final hash = _mixHash(step, seed, value);
-    step.finish(
-      Jump(loop, [step.emit(LoadField(TypeMetadata.tail, node)), hash]),
-    );
-    done.finish(Return(seed));
-    return IrFunction(_hashArguments, [entry, loop, step, done]);
-  }
-
-  IrFunction _equalityBody() {
-    final entry = Block(_equal.parameterTypes),
-        kind = Block([TypeMetadata.type]),
-        shape = Block(),
-        parts = Block();
-    final no = Block();
-    final [left, other] = entry.parameters;
-    final test = entry.emit(TypeTest(other, TypeMetadata.type));
-    entry.finish(Branch(test, Jump(kind, [test.refinement(true)!]), Jump(no)));
-    final right = kind.parameters.single;
-    kind.finish(
-      Branch(
-        kind.emit(
-          Equals(
-            kind.emit(LoadField(TypeMetadata.kind, left)),
-            kind.emit(LoadField(TypeMetadata.kind, right)),
-          ),
-        ),
-        Jump(shape),
-        Jump(no),
-      ),
-    );
-    shape.finish(
-      Branch(
-        shape.emit(
-          Equals(
-            shape.emit(LoadField(TypeMetadata.shape, left)),
-            shape.emit(LoadField(TypeMetadata.shape, right)),
-          ),
-        ),
-        Jump(parts),
-        Jump(no),
-      ),
-    );
-    parts.finish(
-      Return(
-        parts.emit(
-          DirectCall(_equalArguments, [
-            parts.emit(LoadField(TypeMetadata.parts, left)),
-            parts.emit(LoadField(TypeMetadata.parts, right)),
-          ]),
-        ),
-      ),
-    );
-    no.finish(Return(const Constant.boolean(false)));
-    return IrFunction(_equal, [entry, kind, shape, parts, no]);
-  }
-
-  IrFunction _argumentEqualityBody() {
-    final entry = Block(_equalArguments.parameterTypes);
-    final loop = Block(_equalArguments.parameterTypes),
-        second = Block([TypeMetadata.list]);
-    entry.finish(Jump(loop, entry.parameters));
-    final compare = Block([TypeMetadata.list]),
-        next = Block(),
-        end = Block(),
-        yes = Block(),
-        no = Block();
-    final [a, b] = loop.parameters;
-    final first = loop.emit(TypeTest(a, TypeMetadata.list));
-    loop.finish(
-      Branch(first, Jump(second, [first.refinement(true)!]), Jump(end)),
-    );
-    final exists = second.emit(TypeTest(b, TypeMetadata.list));
-    second.finish(
-      Branch(exists, Jump(compare, [exists.refinement(true)!]), Jump(no)),
-    );
-    final aPart = second.parameters.single, bPart = compare.parameters.single;
-    final equal = compare.emit(
-      DirectCall(_equal, [
-        compare.emit(LoadField(TypeMetadata.head, aPart)),
-        compare.emit(LoadField(TypeMetadata.head, bPart)),
-      ]),
-    );
-    compare.finish(Branch(equal, Jump(next), Jump(no)));
-    next.finish(
-      Jump(loop, [
-        next.emit(LoadField(TypeMetadata.tail, aPart)),
-        next.emit(LoadField(TypeMetadata.tail, bPart)),
-      ]),
-    );
-    end.finish(
-      Branch(
-        end.emit(Equals(b, const Constant.nullValue())),
-        Jump(yes),
-        Jump(no),
-      ),
-    );
-    yes.finish(Return(const Constant.boolean(true)));
-    no.finish(Return(const Constant.boolean(false)));
-    return IrFunction(_equalArguments, [
-      entry,
-      loop,
-      second,
-      compare,
-      next,
-      end,
-      yes,
-      no,
-    ]);
-  }
+  Construct cons(Value value, Value next) => Construct(listInit, [value, next]);
 }
 
 /// The concrete metadata representation produced by a built-in runtimeType read.

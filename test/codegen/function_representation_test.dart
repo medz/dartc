@@ -9,9 +9,12 @@ import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/src/codegen/storage_access.dart';
 import 'package:test/test.dart';
 
+import '../support/runtime.dart';
+
 void main() {
   final uri = Uri.parse('memory:representation');
-  final layouts = ProgramLayout([]);
+  setUpAll(prepareRuntime);
+  late final layouts = ProgramLayout([], typeRuntime: heapRuntime.types);
   final members = MemberCalls(IrProgram([], []), {});
 
   test('trusted casts omit checks while retaining scalar boxing', () {

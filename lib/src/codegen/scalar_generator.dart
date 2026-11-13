@@ -165,6 +165,11 @@ base class ScalarCodeGenerator<R extends Object>(
         ),
       );
       final lists = ListStorage(program.classes);
+      // Codegen materializes these instances without source constructor calls.
+      final instantiatedTypes = [
+        ...TypeMetadata.fields.keys,
+        if (constantLists) lists.type,
+      ];
       final records = RecordStorage(
         program.classes,
         bodies.expand((body) => body.recordTypes),
@@ -215,13 +220,10 @@ base class ScalarCodeGenerator<R extends Object>(
             if (!globals.isEmpty) IrExternal(globals.address),
           ],
         );
-        final required = expanded.reachableFrom(
-          [
-            ...sourceDefinitions,
-            for (final function in helpers) function.target,
-          ],
-          instantiatedTypes: [if (constantLists) lists.type],
-        );
+        final required = expanded.reachableFrom([
+          ...sourceDefinitions,
+          for (final function in helpers) function.target,
+        ], instantiatedTypes: instantiatedTypes);
         final discovered = required
             .where(
               (target) =>
@@ -242,7 +244,7 @@ base class ScalarCodeGenerator<R extends Object>(
         program,
         selected,
         records: records,
-        instantiatedTypes: [if (constantLists) lists.type],
+        instantiatedTypes: instantiatedTypes,
       );
       final asynchronous = AsyncFunctions(
         selected.map(program.implementationOf).whereType<IrFunction>(),
@@ -273,6 +275,7 @@ base class ScalarCodeGenerator<R extends Object>(
         stringStorage: strings,
         listStorage: lists,
         recordStorage: records,
+        typeRuntime: runtime?.types,
         referencedClasses: selected.expand(
           (target) =>
               program.implementationOf(target)?.referencedClasses ?? const [],
@@ -298,7 +301,9 @@ base class ScalarCodeGenerator<R extends Object>(
             heap.primitives.contains(declaration)) {
           continue;
         }
-        if (function is! IrFunction) {
+        if (declaration == runtime?.types?.supertypes) {
+          selection.include(layouts.relations.supertypes);
+        } else if (function is! IrFunction) {
           throw ArgumentError(
             'Definition has no body: ${declaration.library}::'
             '${declaration.owner == null ? '' : '${declaration.owner!.dartName}.'}'
@@ -316,10 +321,10 @@ base class ScalarCodeGenerator<R extends Object>(
       }
       if (missing.isNotEmpty) {
         sourceDefinitions.addAll(
-          sourceProgram.reachableFrom(
-            [...sourceDefinitions, ...missing],
-            instantiatedTypes: [if (constantLists) lists.type],
-          ),
+          sourceProgram.reachableFrom([
+            ...sourceDefinitions,
+            ...missing,
+          ], instantiatedTypes: instantiatedTypes),
         );
         continue;
       }

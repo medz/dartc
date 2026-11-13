@@ -6,6 +6,7 @@ import 'package:dartc/layout.dart';
 
 import 'closure_storage.dart';
 import 'type_values.dart';
+import 'type_runtime.dart';
 import 'instance_storage.dart';
 import 'type_relations.dart';
 import 'pointer_storage.dart';
@@ -38,10 +39,11 @@ final class ProgramLayout(
   StringStorage? stringStorage,
   ListStorage? listStorage,
   RecordStorage? recordStorage,
+  TypeRuntime? typeRuntime,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
-  final types = TypeValues();
+  final types = TypeValues(typeRuntime);
   final pointers = PointerStorage();
   final nativeCalls = NativeCalls();
   final NativeStorage? native = nativeLayout == null
@@ -75,9 +77,6 @@ final class ProgramLayout(
       ..._classes.keys,
       ...referencedClasses,
     ], recordStorage: records.declaration?.type);
-    for (final declaration in relations.classes) {
-      _classes.putIfAbsent(declaration.type, () => declaration);
-    }
   }
 
   FunctionTarget collectionFactory(ClassType type) =>
