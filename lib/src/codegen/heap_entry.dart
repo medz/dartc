@@ -12,6 +12,7 @@ import 'function_emitter.dart';
 final class HeapEntry<R extends Object>(
   final FunctionEmitter<R> emitter,
   final FunctionTarget releaseFunction,
+  final FunctionTarget isOutOfMemory,
   final FunctionTarget? runEvents,
   final void Function(Fixup) roots,
   final void Function(Fixup) error,
@@ -25,7 +26,8 @@ final class HeapEntry<R extends Object>(
   static const uncaughtMessage =
       'Unhandled Dart exception at native boundary.\n';
   static const _result = RuntimeContext.size, _failure = _result + 8;
-  static const localBytes = _failure + 8;
+  static const _outOfMemory = _failure + 8;
+  static const localBytes = _outOfMemory + 8;
 
   FrameLayout<R> frame(int outgoingStackBytes, {int extraBytes = 0}) =>
       emitter.convention.frameLayout(
@@ -160,6 +162,22 @@ final class HeapEntry<R extends Object>(
       emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
       emitter.bind(finished);
     }
+    final successful = emitter.label();
+    emitter.loadStack(emitter.failureRegister, frame.localOffset + _failure);
+    emitter.jumpIfZero(emitter.failureRegister, successful);
+    final classification = emitter.convention.classify(
+      NativeSignature(Int64, [Int64]),
+    );
+    final argument = classification.parameters.single as RegisterArgument<R>;
+    emitter.move(argument.register, emitter.exceptionRegister);
+    call(emitter.call(), isOutOfMemory);
+    safepoint(emitter.position);
+    emitter.storeStack(
+      classification.resultRegister!,
+      frame.localOffset + _outOfMemory,
+    );
+    emitter.bind(successful);
+
     void releaseHeap() {
       final location =
           emitter.convention
@@ -189,8 +207,7 @@ final class HeapEntry<R extends Object>(
     final scratch = emitter.allocatableRegisters.firstWhere(
       (r) => emitter.bank(r) == .general && r != emitter.failureRegister,
     );
-    emitter.loadImmediate(scratch, CallStatus.exhausted.index);
-    emitter.comparison(.equal).emit(scratch, emitter.failureRegister, scratch);
+    emitter.loadStack(scratch, frame.localOffset + _outOfMemory);
     emitter.jumpIfZero(scratch, thrown);
     emitter.reportFailure(error, message.length);
     emitter.bind(thrown);

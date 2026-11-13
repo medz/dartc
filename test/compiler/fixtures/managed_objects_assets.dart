@@ -11,12 +11,23 @@ ObjectModule restrictAddressSpace(Target target) {
   }
   final Uint8List code;
   if (target.architecture == .arm64) {
-    final a = arm.Assembler(), done = a.label();
+    final a = arm.Assembler(), read = a.label(), done = a.label();
     a
-      ..addImmediate(.sp, .sp, -16)
-      ..loadImmediate(.x9, 0)
+      ..addImmediate(.sp, .sp, -32)
+      ..store(.x0, .sp, 16)
+      ..loadImmediate(.x0, 9)
+      ..addImmediate(.x1, .sp, 0)
+      ..loadImmediate(.x8, 163)
+      ..supervisorCall(0)
+      ..branchZero(.x0, read)
+      ..loadImmediate(.x0, 72)
+      ..loadImmediate(.x8, 94)
+      ..supervisorCall(0)
+      ..bind(read)
+      ..load(.x9, .sp, 0)
+      ..store(.x9, .sp, 24)
+      ..load(.x9, .sp, 16)
       ..store(.x9, .sp, 0)
-      ..store(.x9, .sp, 8)
       ..loadImmediate(.x0, 9)
       ..addImmediate(.x1, .sp, 0)
       ..loadImmediate(.x8, 164)
@@ -26,16 +37,29 @@ ObjectModule restrictAddressSpace(Target target) {
       ..loadImmediate(.x8, 94)
       ..supervisorCall(0)
       ..bind(done)
-      ..addImmediate(.sp, .sp, 16)
+      ..load(.x0, .sp, 24)
+      ..addImmediate(.sp, .sp, 32)
       ..ret();
     code = a.finish();
   } else {
-    final a = x64.Assembler(), done = a.label();
+    final a = x64.Assembler(), read = a.label(), done = a.label();
     a
-      ..addImmediate(.rsp, -16)
-      ..loadImmediate(.r10, 0)
+      ..addImmediate(.rsp, -32)
+      ..store(.rdi, .rsp, 16)
+      ..loadImmediate(.rdi, 9)
+      ..move(.rsi, .rsp)
+      ..loadImmediate(.rax, 97)
+      ..syscall()
+      ..test(.rax)
+      ..jumpCondition(.equal, read)
+      ..loadImmediate(.rdi, 72)
+      ..loadImmediate(.rax, 231)
+      ..syscall()
+      ..bind(read)
+      ..load(.r10, .rsp, 0)
+      ..store(.r10, .rsp, 24)
+      ..load(.r10, .rsp, 16)
       ..store(.r10, .rsp, 0)
-      ..store(.r10, .rsp, 8)
       ..loadImmediate(.rdi, 9)
       ..move(.rsi, .rsp)
       ..loadImmediate(.rax, 160)
@@ -46,7 +70,8 @@ ObjectModule restrictAddressSpace(Target target) {
       ..loadImmediate(.rax, 231)
       ..syscall()
       ..bind(done)
-      ..addImmediate(.rsp, 16)
+      ..load(.rax, .rsp, 24)
+      ..addImmediate(.rsp, 32)
       ..ret();
     code = a.finish();
   }

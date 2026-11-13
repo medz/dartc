@@ -21,6 +21,7 @@ void main() {
     heapRuntime.program,
     types: heapRuntime.types,
     allocate: heapRuntime.allocate,
+    isOutOfMemory: heapRuntime.isOutOfMemory,
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
     eventAccess: heapRuntime.eventAccess,
@@ -66,6 +67,7 @@ void main() {
       () => HeapRuntime(
         heapRuntime.program,
         allocate: heapRuntime.release,
+        isOutOfMemory: heapRuntime.isOutOfMemory,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,
@@ -81,6 +83,7 @@ void main() {
       () => HeapRuntime(
         heapRuntime.program,
         allocate: heapRuntime.allocate,
+        isOutOfMemory: heapRuntime.isOutOfMemory,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,
@@ -102,6 +105,7 @@ void main() {
       () => HeapRuntime(
         heapRuntime.program,
         allocate: heapRuntime.allocate,
+        isOutOfMemory: heapRuntime.isOutOfMemory,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,

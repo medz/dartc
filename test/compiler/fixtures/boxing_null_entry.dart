@@ -1,11 +1,7 @@
-import 'dart:ffi';
-
 import 'numeric_boxes.dart';
-
-@Native<Void Function()>(assetId: 'heap-test', symbol: 'limit')
-external void restrictMemory();
+import 'managed_failure.dart' show restrictMemory;
 
 void main() {
-  restrictMemory();
+  restrictMemory(0);
   optional(42, 0);
 }

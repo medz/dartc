@@ -675,11 +675,11 @@ final class FunctionContext(
   /// Checks [value] against [type] if its current binding does not establish the type.
   Value cast(Value value, ValueType type) {
     if (type.accepts(value.type)) {
-      return type == value.type ? value : current!.emit(TypeView(value, type));
+      return type == value.type ? value : emit(TypeView(value, type));
     }
     final known = refined(value);
     if (type.accepts(known.type)) {
-      return type == known.type ? known : current!.emit(TypeView(known, type));
+      return type == known.type ? known : emit(TypeView(known, type));
     }
     final cast = emit(TypeCast(known, type));
     if (known.type.accepts(type)) _facts = _Refinement(known, cast, _facts);
@@ -695,7 +695,7 @@ final class FunctionContext(
         (type == .nullType && !known.type.mayBeNull)) {
       return Constant.boolean(negated);
     }
-    return current!.emit(TypeTest(known, type, negated: negated));
+    return emit(TypeTest(known, type, negated: negated));
   }
 
   /// Opens an arm of [condition] and binds the value established by a type test.

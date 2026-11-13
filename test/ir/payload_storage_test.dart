@@ -79,7 +79,7 @@ void main() {
       );
       IrProgram([declaration], [function]);
       expect(function.instantiatedClasses, contains(same(type)));
-      expect(value.effects, {Effect.allocates});
+      expect(value.effects, {Effect.allocates, Effect.mayThrow});
       expect(
         () => IrClass(type, [
           InstanceField(type, 'value', .integer),

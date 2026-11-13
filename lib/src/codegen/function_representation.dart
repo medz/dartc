@@ -116,12 +116,12 @@ final class FunctionRepresentation(
     final nonNull = NonNullValues(function);
     final valueOperations = ValueOperations(this, layouts, heap.invalid);
     checkCellInitialization(function);
-    final operations = [
+    final operations = {
       for (final block in function.blocks) ...[
         ...block.instructions,
         if (block.end case Invoke(:final operation)) operation,
       ],
-    ];
+    };
     // An address-only temporary has no observable object identity.
     final addressOnly = <Value>{
       for (final (i, parameter) in function.entry.parameters.indexed)
@@ -299,6 +299,18 @@ final class FunctionRepresentation(
       return block;
     }
 
+    final unwindConversions = <Value>{};
+    final unwindEdges = <Jump>{
+      for (final block in function.blocks)
+        ...switch (block.end) {
+          Invoke(:final onThrow) => [onThrow],
+          Throw(:final onThrow) ||
+          Await(:final onThrow) ||
+          YieldStream(:final onThrow) ||
+          ExhaustivenessFailure(:final onThrow) => [?onThrow],
+          _ => const <Jump>[],
+        },
+    };
     Jump edge(Jump jump) {
       if (!jump.arguments.indexed.any(
         (item) => needsBox(item.$2, jump.target.parameters[item.$1].type),
@@ -319,6 +331,9 @@ final class FunctionRepresentation(
         for (final (i, value) in block.parameters.indexed)
           convert(value, jump.target.parameters[i].type, body),
       ];
+      if (unwindEdges.contains(jump)) {
+        unwindConversions.addAll(body);
+      }
       // Retain the verified edge's type proof while assigning its physical operands.
       final transfer = Jump(jump.target, jump.arguments);
       edgeArguments[transfer] = arguments;
@@ -343,9 +358,37 @@ final class FunctionRepresentation(
       return next;
     }
 
+    final handlers = <Value, Jump>{};
+    (Block, int, int, Jump)? guarded;
+    void finishGuard() {
+      if (guarded case (
+        final origin,
+        final start,
+        final added,
+        final handler,
+      )) {
+        for (final value in instructions[origin]!.skip(start)) {
+          if (!operations.contains(value) &&
+              !unwindConversions.contains(value)) {
+            handlers[value] = handler;
+          }
+        }
+        for (final next in blocks.skip(added)) {
+          for (final value in instructions[next]!) {
+            if (!operations.contains(value) &&
+                !unwindConversions.contains(value)) {
+              handlers[value] = handler;
+            }
+          }
+        }
+      }
+      guarded = null;
+    }
+
     blocks.addAll(function.blocks);
     sourceBlocks:
     for (final sourceBlock in function.blocks) {
+      finishGuard();
       var block = sourceBlock;
       var body = instructions[block] = <Value>[];
       final source = switch (sourceBlock.end) {
@@ -355,12 +398,16 @@ final class FunctionRepresentation(
         _ => sourceBlock.instructions,
       };
       for (final instruction in source) {
+        finishGuard();
         final handler = switch (sourceBlock.end) {
           Invoke(:final operation, :final onThrow)
               when operation == instruction =>
             onThrow,
           _ => null,
         };
+        if (handler != null) {
+          guarded = (block, body.length, blocks.length, handler);
+        }
         if (instruction case ObjectClassName(:final operand)) {
           final type = layouts.types.runtimeTypeOf(operand, body);
           final name = _load(TypeMetadata.className, type, body);
@@ -2005,6 +2052,10 @@ final class FunctionRepresentation(
         :final stackTrace,
         :final onThrow,
       )) {
+        finishGuard();
+        if (onThrow != null) {
+          guarded = (block, body.length, blocks.length, onThrow);
+        }
         final value = convert(exception, .object, body);
         final trace = traceFor(stackTrace, body);
         if (heap.runtime case final runtime? when trace != null) {
@@ -2064,6 +2115,10 @@ final class FunctionRepresentation(
         );
       }
       if (ends[block] case final Await end) {
+        finishGuard();
+        if (end.onThrow case final handler?) {
+          guarded = (block, body.length, blocks.length, handler);
+        }
         final suspended = Await(
           end.operand,
           end.result,
@@ -2081,6 +2136,29 @@ final class FunctionRepresentation(
       }
       if (block != sourceBlock) block.finish(sourceBlock.end);
     }
+    finishGuard();
     instructions[function.entry]!.insertAll(0, _prologue);
+    // Generated boxing, type preparation and stack capture share their source handler.
+    for (final block in blocks.toList()) {
+      final values = instructions[block]!;
+      if (!values.any(handlers.containsKey)) continue;
+      var end = ends[block]!;
+      if (end case Unreachable(cause: final Instruction cause)
+          when cause.mayThrow && handlers.containsKey(cause)) {
+        end = Invoke(cause, onReturn: null, onThrow: edge(handlers[cause]!));
+      }
+      instructions[block] = [];
+      var current = block;
+      for (final value in values) {
+        current = appendTo(
+          current,
+          value,
+          aliases.contains(value) || end is Invoke && end.operation == value
+              ? null
+              : handlers[value],
+        );
+      }
+      ends[current] = end;
+    }
   }
 }

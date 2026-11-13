@@ -24,7 +24,6 @@ enum RegisterBank() {
 /// The completion status accompanying an internal Dart call's result registers.
 enum CallStatus() {
   returned,
-  exhausted,
   threw,
 }
 

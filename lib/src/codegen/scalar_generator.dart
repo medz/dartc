@@ -394,6 +394,7 @@ base class ScalarCodeGenerator<R extends Object>(
         : HeapEntry(
             emitter,
             heap.release,
+            heap.isOutOfMemory,
             selected.contains(heap.eventAccess) ? heap.runEvents : null,
             (fixup) => rootAddresses.add((code.length, fixup)),
             (fixup) => errorAddresses.add((code.length, fixup)),

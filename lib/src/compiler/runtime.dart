@@ -130,6 +130,7 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     ),
   );
   final allocate = annotations.entries[RuntimeRole.allocate],
+      isOutOfMemory = annotations.entries[RuntimeRole.isOutOfMemory],
       release = annotations.entries[RuntimeRole.release],
       runEvents = annotations.entries[RuntimeRole.runEvents],
       eventAccess = annotations.entries[RuntimeRole.events],
@@ -137,6 +138,7 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       captureStackTrace = annotations.entries[RuntimeRole.captureStackTrace],
       recordError = annotations.entries[RuntimeRole.recordError];
   if (allocate == null ||
+      isOutOfMemory == null ||
       release == null ||
       runEvents == null ||
       eventAccess == null ||
@@ -190,6 +192,7 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     floatingRemainder: annotations.entries[RuntimeRole.floatingRemainder],
     floatingModulo: annotations.entries[RuntimeRole.floatingModulo],
     allocate: allocate,
+    isOutOfMemory: isOutOfMemory,
     release: release,
     runEvents: runEvents,
     eventAccess: eventAccess,

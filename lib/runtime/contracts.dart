@@ -6,6 +6,7 @@ final class const RuntimeEntry(final RuntimeRole role);
 
 enum RuntimeRole() {
   allocate,
+  isOutOfMemory,
   release,
   runEvents,
   events,

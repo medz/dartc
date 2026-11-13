@@ -15,9 +15,13 @@ enum MemoryPrimitive() {
 }
 
 /// Source program and entry contracts used by managed code generation.
+///
+/// [allocate] returns nonzero storage or throws. [isOutOfMemory] classifies an
+/// uncaught allocation error without allocating before the heap is released.
 final class HeapRuntime(
   final IrProgram program, {
   required final FunctionTarget allocate,
+  required final FunctionTarget isOutOfMemory,
   required final FunctionTarget release,
   required final FunctionTarget runEvents,
   required final FunctionTarget eventAccess,
@@ -42,7 +46,10 @@ final class HeapRuntime(
   );
 
   /// Closures that cannot allocate, throw, or call foreign code after selection.
-  final List<FunctionTarget> nonAllocating = .unmodifiable(nonAllocating);
+  final List<FunctionTarget> nonAllocating = .unmodifiable({
+    ...nonAllocating,
+    isOutOfMemory,
+  });
 
   this {
     if (primitives.values
@@ -53,6 +60,7 @@ final class HeapRuntime(
     }
     for (final (target, signature) in [
       (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
+      (isOutOfMemory, FunctionType(.boolean, [.object])),
       (release, FunctionType(.voidType, [.integer])),
       (runEvents, FunctionType(.voidType, [.integer])),
       (eventAccess, FunctionType(eventAccess.returnType, [])),

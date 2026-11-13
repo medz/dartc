@@ -262,12 +262,12 @@ void main() {
     },
   );
 
-  test('oversized element counts cannot wrap into small allocations', () async {
+  test('oversized lists fail through catchable allocation errors', () async {
     final file = NativeAssets(Target.host())
         .file('compiler/entry_lists_overflow');
     final result = await Process.run(file.path, []);
     expect(result.exitCode, 255);
-    expect(result.stdout, isEmpty);
+    expect(result.stdout, 'true:true:true\n' * 2);
     expect(result.stderr, 'Unhandled exception:\nOut of Memory\n');
   });
 }

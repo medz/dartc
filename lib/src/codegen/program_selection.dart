@@ -196,7 +196,7 @@ final class ProgramSelection(
       managed = needsHeap;
     }
     if (managed) {
-      calls.addAll([heap.allocate, heap.release]);
+      calls.addAll([heap.allocate, heap.release, heap.isOutOfMemory]);
       if (calls.contains(heap.eventAccess)) calls.add(heap.runEvents);
     }
     if (capture) calls.add(heap.runtime!.captureStackTrace);

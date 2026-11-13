@@ -39,6 +39,22 @@ void main() {
     skip: !Platform.isLinux,
   );
 
+  test('allocation failure can be caught, cleaned up and retried', () async {
+    final result = await Process.run(
+      NativeAssets(Target.host()).file('compiler/managed_recovery').path,
+      [],
+    );
+    expect(result.exitCode, 0, reason: '${result.stdout}${result.stderr}');
+    expect(
+      result.stdout,
+      'true:true:true:true:true\n'
+      'true:true:true:true:true:true\n'
+      'true:true:true:true:true\n'
+      'true:true:true:true:true\n',
+    );
+    expect(result.stderr, isEmpty);
+  }, skip: !Platform.isLinux);
+
   test('constructors preserve effects, references and floating results', () {
     final native = ManagedObjects();
     addTearDown(native.close);

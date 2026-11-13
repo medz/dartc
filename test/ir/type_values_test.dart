@@ -251,11 +251,11 @@ void main() {
       isNot(TypeConstant(ValueType.object.nullable).structuralKey),
     );
   });
-  test('reification is pure and verifier checks lexical template scope', () {
+  test('reification can throw and verifier checks lexical template scope', () {
     final t = parameter('T');
     final op = ReifyType(CoreTypes.listOf(t));
     expect(op.inputs, isEmpty);
-    expect(op.mayThrow, isFalse);
+    expect(op.mayThrow, isTrue);
     final block = Block();
     block.emit(op);
     block.finish(Return(op));

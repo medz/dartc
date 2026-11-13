@@ -268,7 +268,11 @@ final class FunctionLowering._(
     if (context.current == null) return;
     if (_representationConstructor) value ??= context.receiver;
     if (value != null) {
-      value = context.normal(context.convert(value, _bodyReturnType));
+      value = context.normal(
+        value.type == .integer || value.type == .floating
+            ? context.cast(value, _bodyReturnType)
+            : context.convert(value, _bodyReturnType),
+      );
       if (value == null) return;
     }
     context.retainFinalizables();

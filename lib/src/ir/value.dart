@@ -594,11 +594,17 @@ sealed class Instruction(super.type) extends Value {
     NumericBinary(canThrow: true) => const {.mayThrow},
     NumericToInt(operand: Value(type: final type)) when type != .integer =>
       const {.mayThrow},
+    TypeView(:final operand) || UncheckedCast(:final operand)
+        when (operand.type == .integer || operand.type == .floating) &&
+            type != .integer &&
+            type != .floating =>
+      _allocate,
+    TypeTest(testedType: != ValueType.nullType) => _allocate,
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() ||
     NewPayload() ||
-    NativeView() => const {.allocates},
+    NativeView() => _allocate,
     Identical() ||
     Equals() ||
     IntBinary() ||

@@ -265,24 +265,11 @@ final class ScalarFunction<R extends Object>(
             emitter.jumpIfZero(emitter.failureRegister, returned);
             if (end case Invoke(:final operation, :final onThrow)
                 when operation == instruction) {
-              final propagated = emitter.label();
-              final scratch = emitter.allocatableRegisters.lastWhere(
-                (r) =>
-                    emitter.bank(r) == .general &&
-                    r != emitter.failureRegister &&
-                    r != emitter.exceptionRegister &&
-                    r != emitter.traceRegister,
-              );
-              emitter.loadImmediate(scratch, CallStatus.threw.index);
-              emitter
-                  .comparison(.equal)
-                  .emit(scratch, emitter.failureRegister, scratch);
-              emitter.jumpIfZero(scratch, propagated);
               allocation.saveUnwind();
               edge(onThrow);
-              emitter.bind(propagated);
+            } else {
+              leave();
             }
-            leave();
             emitter.bind(returned);
           }
           if (native != null && native.signature.result.isVoid) {

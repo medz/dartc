@@ -62,6 +62,7 @@ void main() {
     selection.include(IrFunction(division, [divide]));
     expect(selection.close(persistent: true), {
       heapRuntime.allocate,
+      heapRuntime.isOutOfMemory,
       heapRuntime.release,
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,
@@ -74,6 +75,7 @@ void main() {
       ...selection.functions.keys,
       ...selection.primitives,
       heapRuntime.allocate,
+      heapRuntime.isOutOfMemory,
       heapRuntime.release,
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,
@@ -145,6 +147,7 @@ void main() {
     expect(selection.close(persistent: true), {
       constructor,
       heapRuntime.allocate,
+      heapRuntime.isOutOfMemory,
       heapRuntime.release,
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,

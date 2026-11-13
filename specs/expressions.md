@@ -107,7 +107,7 @@ int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。d
 
 支持可变 List 字面量、`List.empty`、`List.filled`、length 读写、索引读写及 add。构造器保留实际元素类型、默认 growable 参数与函数值调用；filled 的所有初始槽引用同一个 fill。固定长度列表允许改写元素，改变长度的操作抛出 UnsupportedError。可增长列表缩短时移除尾部元素，再增长时填入 null；非可空元素类型的列表不能通过 length 增长。依据为 [`List.filled`](https://api.dart.dev/stable/3.13.7/dart-core/List/List.filled.html)、[`List.empty`](https://api.dart.dev/stable/3.13.7/dart-core/List/List.empty.html)和 [`length`](https://api.dart.dev/stable/3.13.7/dart-core/List/length.html)。
 
-协变视图的写入按实际接收者元素类型检查，失败不修改列表；检查先于方法体中的边界与可变性检查。下标访问保持接收者、下标及赋值右侧的求值顺序。超大元素数量不能在转换为存储字节数时回绕；当前分配失败按原生 OOM 路径退出，尚不能作为 Dart 异常捕获。列表及元素经过移动回收、别名、循环引用和全局保存后保持身份与内容。用户实现的 List 保留普通虚调用和方法提取，不使用内置列表布局。见[原生 List 验证](../test/compiler/lists_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
+协变视图的写入按实际接收者元素类型检查，失败不修改列表；检查先于方法体中的边界与可变性检查。下标访问保持接收者、下标及赋值右侧的求值顺序。超大元素数量不能在转换为存储字节数时回绕；超出存储范围或分配失败抛出可捕获的 `OutOfMemoryError`。列表及元素经过移动回收、别名、循环引用和全局保存后保持身份与内容。用户实现的 List 保留普通虚调用和方法提取，不使用内置列表布局。见[原生 List 验证](../test/compiler/lists_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
 
 const List 保留实际元素类型、嵌套内容和规范身份，支持读取及元素参与的已有原生行为；[]=/add/length setter 在写入前拒绝不可变列表，协变参数检查仍先执行。常量与其元素在回收及全局保存后保留身份；不可变、固定长度和可增长列表共用索引读取行为。
 

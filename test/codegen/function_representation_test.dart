@@ -38,7 +38,12 @@ void main() {
         members,
         HeapPlan(),
       );
-      expect(cast.effects, isEmpty);
+      expect(
+        cast.effects,
+        source == ValueType.integer || source == ValueType.floating
+            ? {Effect.allocates, Effect.mayThrow}
+            : isEmpty,
+      );
       expect(checks.functions, isEmpty);
       expect(
         body.boxes.containsKey(cast),
@@ -276,8 +281,9 @@ void main() {
         members,
         HeapPlan(),
       );
-      final invoke = body.ends[entry] as Invoke;
-      expect(invoke.operation, isA<TypeCast>());
+      final invoke = body.ends.values.whereType<Invoke>().singleWhere(
+        (end) => end.operation is TypeCast,
+      );
       expect(invoke.onThrow.target, same(failed));
       expect(body.instructions[entry], isNot(contains(store)));
       expect(body.instructions[invoke.onReturn!.target], [store]);
@@ -526,7 +532,10 @@ void main() {
         members,
         HeapPlan(),
       );
-      final selected = body.ends[entry] as Invoke;
+      final boxed = body.ends[entry] as Invoke;
+      final selected = body.ends[boxed.onReturn!.target] as Invoke;
+      expect(selected.operation, same(call));
+      expect((body.ends[boxed.onThrow.target] as Jump).target, same(failure));
       final normalEdge = selected.onReturn!.target,
           failedEdge = selected.onThrow.target;
       final inputBox = body.instructions[entry]!.first;
@@ -537,13 +546,15 @@ void main() {
         call,
       });
 
-      expect(body.instructions[entry], [inputBox, call]);
+      expect(body.instructions[entry], [inputBox]);
+      expect(boxed.operation, same(inputBox));
+      expect(body.instructions[boxed.onReturn!.target], [call]);
       expect(body.inputsOf(call), [inputBox]);
-      expect(body.successors(entry), [selected.onReturn, selected.onThrow]);
+      expect(body.successors(entry), [boxed.onReturn, boxed.onThrow]);
       expect(selected.onReturn!.arguments, [call]);
       expect(selected.onThrow.arguments, invoke.onThrow.arguments);
       expect(flow.acrossCalls[call], {argument});
-      expect(flow.acrossCalls[normalBox], isEmpty);
+      expect(flow.acrossCalls[normalBox], {argument});
       expect(
         flow.acrossCalls[failedBox],
         failedEdge.parameters.take(2).toSet(),
@@ -554,6 +565,38 @@ void main() {
       expect(call.inputs, [argument]);
     },
   );
+
+  test('boxing locals during unwind does not reenter the handler', () {
+    final target = FunctionTarget(uri, 'ignored', .object, [.integer]);
+    final callee = FunctionTarget(uri, 'callee', .voidType, [.object]);
+    final entry = Block(target.parameterTypes);
+    final done = Block()..finish(const Return(Constant.string('ok')));
+    final failed = Block([.object]);
+    failed.finish(Return(failed.parameters.single));
+    final call = DirectCall(callee, entry.parameters);
+    entry.finish(
+      Invoke(
+        call,
+        onReturn: Jump(done),
+        onThrow: Jump(failed, entry.parameters),
+      ),
+    );
+    final body = FunctionRepresentation(
+      IrFunction(target, [entry, done, failed]),
+      layouts,
+      CheckedCasts(),
+      members,
+      HeapPlan(),
+    );
+    final invoked = body.ends.values.whereType<Invoke>().singleWhere(
+      (end) => end.operation == call,
+    );
+    expect(body.instructions[invoked.onThrow.target], hasLength(1));
+    expect(
+      body.ends[invoked.onThrow.target],
+      isA<Jump>().having((edge) => edge.target, 'handler', same(failed)),
+    );
+  });
 
   test('boxing a thrown scalar keeps an existing trace alive', () {
     final target = FunctionTarget(uri, 'rethrow', .voidType, [

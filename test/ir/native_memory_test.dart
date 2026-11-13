@@ -123,9 +123,12 @@ void main() {
   test('native memory operations retain types and observable effects', () {
     expect(pointer.type, FfiTypes.int64Pointer);
     expect(pointer.type, isNot(ValueType.integer));
-    expect(pointer.effects, {Effect.allocates});
+    expect(pointer.effects, {Effect.allocates, Effect.mayThrow});
     expect(PointerAddress(pointer).effects, isEmpty);
-    expect(PointerOffset(pointer, address).effects, {Effect.allocates});
+    expect(PointerOffset(pointer, address).effects, {
+      Effect.allocates,
+      Effect.mayThrow,
+    });
     expect(PointerOffset(pointer, address).type, pointer.type);
     expect(LoadNative(address, .of(ffi.Int64)).effects, {Effect.readsStorage});
     expect(StoreNative(address, .of(ffi.Int64), address).effects, {

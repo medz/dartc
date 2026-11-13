@@ -65,7 +65,7 @@ final class Allocator(
             page = Page(objects, address, size, capacity);
           } catch (_) {
             Memory.unmap(address, size * capacity);
-            Memory.fail();
+            rethrow;
           } finally {
             Memory.write(context + RuntimeContext.initializing, 0);
           }
@@ -93,17 +93,28 @@ int slotSize(int bytes) {
   return size;
 }
 
-/// Enters normal Dart allocation after publishing the caller's application roots.
+/// Returns nonzero storage or throws OutOfMemoryError after allocation fails.
 @RuntimeEntry(.allocate)
 int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
   final prefix = Memory.read(descriptor);
-  if (payloadBytes < 0 || payloadBytes > 0x0ffffffffffffff8 - prefix) return 0;
-  final bytes = (prefix + payloadBytes + 7) & -8;
-  if (Memory.read(context + RuntimeContext.initializing) != 0) {
-    return allocateControl(context, descriptor, bytes);
+  var address = 0;
+  if (payloadBytes >= 0 && payloadBytes <= 0x0ffffffffffffff8 - prefix) {
+    final bytes = (prefix + payloadBytes + 7) & -8;
+    address = Memory.read(context + RuntimeContext.initializing) != 0
+        ? allocateControl(context, descriptor, bytes)
+        : _allocator(context).allocate(context, descriptor, bytes, sp, pc);
   }
-  return _allocator(context).allocate(context, descriptor, bytes, sp, pc);
+  if (address == 0) {
+    // Reporting exhaustion must not allocate another exception or stack trace.
+    Error.throwWithStackTrace(const OutOfMemoryError(), StackTrace.empty);
+  }
+  return address;
 }
+
+/// Classifies the preallocated failure before the native boundary frees its heap.
+@RuntimeEntry(.isOutOfMemory)
+@NonAllocating()
+bool isOutOfMemory(Object error) => identical(error, const OutOfMemoryError());
 
 Allocator _allocator(int context) {
   var allocator = Memory.objectAt<Allocator?>(
@@ -124,7 +135,7 @@ Allocator _allocator(int context) {
       Memory.write(context + RuntimeContext.heap, Memory.addressOf(allocator));
     } catch (_) {
       releaseControl(context);
-      Memory.fail();
+      rethrow;
     } finally {
       Memory.write(context + RuntimeContext.initializing, 0);
     }

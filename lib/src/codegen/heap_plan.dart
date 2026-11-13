@@ -28,6 +28,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
       _invalid;
   FunctionTarget get allocate => _runtime.allocate;
   FunctionTarget get release => _runtime.release;
+  FunctionTarget get isOutOfMemory => _runtime.isOutOfMemory;
   FunctionTarget get runEvents => _runtime.runEvents;
   FunctionTarget get eventAccess => _runtime.eventAccess;
   HeapRuntime get _runtime =>
@@ -178,14 +179,6 @@ final class HeapPlan({final HeapRuntime? runtime}) {
           if (layouts.isReference(type)) frame.localOffset + i * 8,
       ]),
     );
-    emitter.loadImmediate(arguments[3], 0);
-    emitter
-        .comparison(.equal)
-        .emit(
-          emitter.failureRegister,
-          allocation.resultRegister!,
-          arguments[3],
-        );
     final allocated = emitter.label();
     emitter.jumpIfZero(emitter.failureRegister, allocated);
     emitter.epilogue(frame);
