@@ -13,6 +13,10 @@ final class CapturedStackTrace(
   final CapturedStackTrace? caller,
   final String? description,
 ) implements StackTrace {
+  /// Adds an asynchronous gap followed by the next suspended frame.
+  CapturedStackTrace followedBy(String description) =>
+      CapturedStackTrace(0, CapturedStackTrace(0, this, null), description);
+
   @override
   String toString() {
     final names = <String>[];
@@ -21,11 +25,17 @@ final class CapturedStackTrace(
       frame != null;
       frame = frame.caller
     ) {
-      names.add(frame.description ?? '0x${frame.pc.toRadixString(16)}');
+      names.add(
+        frame.description ??
+            (frame.pc == 0
+                ? '<asynchronous suspension>'
+                : '0x${frame.pc.toRadixString(16)}'),
+      );
     }
+    var index = 0;
     return [
-      for (var i = names.length - 1; i >= 0; i--)
-        '#${names.length - i - 1} ${names[i]}',
+      for (final name in names.reversed)
+        name == '<asynchronous suspension>' ? name : '#${index++} $name',
     ].join('\n');
   }
 }
@@ -37,9 +47,60 @@ StackTrace captureStackTrace(int sp, int pc) {
   while (frames.moveNext()) {
     if (!frames.isBoundary) {
       head = CapturedStackTrace(frames.pc, head, frames.description);
+      var context = frames.continuation;
+      if (context is Function) {
+        final visited = Set<Function>.identity();
+        while (context is Function && visited.add(context)) {
+          context = closureLink(context);
+        }
+      }
+      if (context is AsyncStack) {
+        final async = context.asynchronousCaller(head);
+        if (async != null) return async;
+      }
     }
   }
   return head ?? StackTrace.empty;
+}
+
+/// A suspended SDK continuation whose links remain in ordinary Dart storage.
+@StackContext()
+abstract interface class AsyncStack() {
+  CapturedStackTrace? asynchronousCaller(CapturedStackTrace synchronous);
+}
+
+int _closureMetadata(Function closure) {
+  final descriptor = Memory.read(Memory.addressOf(closure));
+  final references = Memory.read(
+    descriptor + ObjectDescriptor.referenceCount * 8,
+  );
+  return Memory.read(
+    descriptor + (ObjectDescriptor.asyncBase + references) * 8,
+  );
+}
+
+/// Reads a compiler-described capture without evaluating a late initializer.
+Object? closureLink(Function closure) {
+  final metadata = _closureMetadata(closure);
+  if (metadata == 0) return null;
+  final link = Memory.read(metadata + ClosureTraceMetadata.link);
+  if (link == 0) return null;
+  final value = Memory.readReference(closure, link);
+  final offset = Memory.read(metadata + ClosureTraceMetadata.value);
+  if (value == null || offset == 0) return value;
+  final bound = Memory.read(metadata + ClosureTraceMetadata.bound);
+  if (bound != 0 && Memory.read(Memory.addressOf(value) + bound) == 0) {
+    return null;
+  }
+  return Memory.readReference(value, offset);
+}
+
+/// The source callable behind a continuation, if it has source provenance.
+String? closureDescription(Function closure) {
+  final metadata = _closureMetadata(closure);
+  if (metadata == 0) return null;
+  final name = Memory.read(metadata + ClosureTraceMetadata.description);
+  return name == 0 ? null : Memory.objectAt<String>(name);
 }
 
 int _traceOffset(Object error) {

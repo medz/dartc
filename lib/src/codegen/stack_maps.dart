@@ -8,12 +8,17 @@ import 'package:dartc/object.dart';
 ///
 /// A count precedes records containing a return address, optional name and roots.
 final class StackMaps() {
-  final _entries = <(int, StackRoots, int?)>[];
+  final _entries = <(int, StackRoots, int?, int?)>[];
   final _addresses = <int, List<(int, FixupEncoding)>>{};
 
   /// Adds roots and the optional constant String symbol describing their frame.
-  void add(int returnAddress, StackRoots roots, int? description) {
-    _entries.add((returnAddress, roots, description));
+  void add(
+    int returnAddress,
+    StackRoots roots,
+    int? description, [
+    int? context,
+  ]) {
+    _entries.add((returnAddress, roots, description, context));
   }
 
   void reference(int offset, FixupEncoding encoding, int returnAddress) {
@@ -34,7 +39,7 @@ final class StackMaps() {
     );
     data.setUint64(0, _entries.length, .little);
     var offset = StackMapRecord.tableHeader;
-    for (final (address, roots, description) in _entries) {
+    for (final (address, roots, description, context) in _entries) {
       for (final (position, encoding)
           in _addresses[address] ?? const <(int, FixupEncoding)>[]) {
         relocations.add(.instruction(0, position, encoding, symbols.length));
@@ -50,6 +55,11 @@ final class StackMaps() {
           ),
         );
       }
+      data.setUint64(
+        offset + StackMapRecord.context,
+        context == null ? 0 : context + 1,
+        .little,
+      );
       roots.writeTo(data, offset + StackMapRecord.callerStack);
       offset += StackMapRecord.callerStack + roots.size;
     }

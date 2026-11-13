@@ -4,12 +4,18 @@ import '../runtime/memory.dart';
 import '../../lib/runtime/contracts.dart' as runtime;
 
 @patch
-class _SuspendState(this._data, this._step) {
+class _SuspendState(this._data, this._step) implements traces.AsyncStack {
   Object _data;
   void Function(dynamic)? _then;
   dynamic Function(Object, StackTrace)? _error;
   void Function(Object?, Object?, StackTrace?)? _step;
   bool _suspended = false;
+  String? _stackLocation;
+
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
   bool Function(Object) Function()? _syncFactory;
   bool Function(Object)? _syncStep;
 
@@ -34,6 +40,7 @@ class _SuspendState(this._data, this._step) {
   @patch
   Object? _resume(Object? value, Object? exception, StackTrace? stackTrace) {
     if (_syncStep case final step?) return step(_functionData);
+    _stackLocation = null;
     try {
       _step?.call(value, exception, stackTrace);
     } catch (error, trace) {
@@ -63,9 +70,10 @@ Future<T> _asyncStart<T>(Object state) {
 }
 
 @runtime.RuntimeEntry(.asyncAwait)
-void _asyncAwait<T>(Object state, Object? value) {
+void _asyncAwait<T>(Object state, Object? value, String? location) {
   final activation = state as _SuspendState;
   activation._suspended = true;
+  activation._stackLocation = location;
   activation._awaitWithTypeCheck<T>(value);
 }
 
@@ -139,16 +147,20 @@ Stream<T> _asyncStarStart<T>(Object state) =>
     (state as _SuspendState)._yieldAsyncStar(null) as Stream<T>;
 
 @runtime.RuntimeEntry(.asyncStarYield)
-bool _asyncStarYield(Object state, Object? value) =>
-    ((state as _SuspendState)._functionData
-            as _AsyncStarStreamController<dynamic>)
-        .add(value);
+bool _asyncStarYield(Object state, Object? value, String? location) {
+  final activation = state as _SuspendState;
+  activation._stackLocation = location;
+  return (activation._functionData as _AsyncStarStreamController<dynamic>).add(
+    value,
+  );
+}
 
 @runtime.RuntimeEntry(.asyncStarYieldStream)
-bool _asyncStarYieldStream(Object state, Object stream) {
+bool _asyncStarYieldStream(Object state, Object stream, String? location) {
+  final activation = state as _SuspendState;
+  activation._stackLocation = location;
   final controller =
-      (state as _SuspendState)._functionData
-          as _AsyncStarStreamController<dynamic>;
+      activation._functionData as _AsyncStarStreamController<dynamic>;
   try {
     return controller.addStream(stream as Stream<dynamic>);
   } catch (_) {
@@ -163,4 +175,158 @@ void _asyncStarReturn(Object state, Object? value) {
   final activation = state as _SuspendState;
   activation._step = null;
   _SuspendState._returnAsyncStar(activation, value);
+}
+
+@patch
+class _Future<T> implements traces.AsyncStack {
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
+}
+
+@patch
+class _FutureListener<S, T> implements traces.AsyncStack {
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
+}
+
+@patch
+class _Completer<T> implements traces.AsyncStack {
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
+}
+
+@patch
+class _AsyncStarStreamController<T> implements traces.AsyncStack {
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
+}
+
+@patch
+class _StreamController<T> implements traces.AsyncStack {
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
+}
+
+@patch
+class _StreamIterator<T> implements traces.AsyncStack {
+  @override
+  traces.CapturedStackTrace? asynchronousCaller(
+    traces.CapturedStackTrace trace,
+  ) => _captureAsyncStack(this, trace);
+}
+
+// Follow the pinned SDK's continuation graph; never run a callback to find a link.
+traces.CapturedStackTrace? _captureAsyncStack(
+  Object initial,
+  traces.CapturedStackTrace synchronous,
+) {
+  Object? next = initial;
+  if (initial is _SuspendState) {
+    if (initial._error == null &&
+        initial._data is! _AsyncStarStreamController) {
+      return null;
+    }
+    next = initial._data;
+  } else if (initial is _FutureListener) {
+    next = initial.result;
+  }
+  var trace = synchronous;
+  Object? fallback;
+  final visited = Set<Object>.identity();
+  while (next != null && visited.add(next)) {
+    switch (next) {
+      case _SuspendState state:
+        if (state._stackLocation case final location?) {
+          trace = trace.followedBy(location);
+        }
+        next = state._data;
+      case _Completer completer:
+        next = completer.future;
+      case _Future future:
+        final listeners = future._resultOrListeners;
+        next = listeners is _FutureListener ? listeners : null;
+      case _FutureListener listener:
+        fallback = switch (listener.state) {
+          _FutureListener.stateThen ||
+          _FutureListener.stateThenOnerror ||
+          _FutureListener.stateThenAwait ||
+          _FutureListener.stateCatchError ||
+          _FutureListener.stateWhenComplete => listener.result,
+          _ => null,
+        };
+        next = listener.callback ?? fallback;
+      case _AsyncStarStreamController controller:
+        next = controller.controller;
+      case _StreamIterator iterator:
+        next = iterator._hasValue ? null : iterator._stateData;
+      case _StreamController controller:
+        if (!controller.hasListener) {
+          next = null;
+          break;
+        }
+        final data = controller._varData;
+        final subscription = data is _StreamControllerAddStreamState
+            ? data._varData
+            : data;
+        if (subscription is! _BufferingStreamSubscription) {
+          next = null;
+          break;
+        }
+        // Reading a contravariant callback must not widen its argument type.
+        final callback = unsafeCast<_BufferingStreamSubscription<Never>>(
+          subscription,
+        )._onData;
+        final receiver = traces.closureLink(callback);
+        if (receiver is _StreamIterator) {
+          next = receiver;
+        } else if (receiver is _StreamController &&
+            receiver._varData is _AddStreamState) {
+          final added = receiver._varData as _AddStreamState;
+          final listener = added.addStreamFuture._resultOrListeners;
+          Object? link = listener is _FutureListener ? listener.callback : null;
+          while (link is Function && visited.add(link)) {
+            link = traces.closureLink(link);
+          }
+          next = link is _AsyncStarStreamController
+              ? link.asyncStarBody
+              : callback;
+        } else {
+          next = callback;
+          if (receiver == null) {
+            fallback =
+                traces.closureLink(subscription._onError) ??
+                traces.closureLink(subscription._onDone);
+          }
+        }
+      case Function callback:
+        var closure = callback;
+        var link = traces.closureLink(closure);
+        while (link is Function && visited.add(link)) {
+          closure = link;
+          link = traces.closureLink(closure);
+        }
+        if (link is! _SuspendState) {
+          if (traces.closureDescription(closure) case final description?) {
+            trace = trace.followedBy(description);
+          }
+        }
+        next = link is Function ? null : link ?? fallback;
+        fallback = null;
+      default:
+        next = null;
+    }
+  }
+  return identical(trace, synchronous)
+      ? null
+      : traces.CapturedStackTrace(0, trace, null);
 }

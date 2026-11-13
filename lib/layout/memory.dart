@@ -2,4 +2,9 @@
 library;
 
 export '../src/layout/memory_layout.dart'
-    show ObjectHeader, ObjectDescriptor, RuntimeContext, StackMapRecord;
+    show
+        ObjectHeader,
+        ObjectDescriptor,
+        RuntimeContext,
+        StackMapRecord,
+        ClosureTraceMetadata;

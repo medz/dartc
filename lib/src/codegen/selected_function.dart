@@ -18,6 +18,9 @@ base class SelectedFunction(
 }) extends SelectedGraph {
   final FunctionTarget sourceTarget = sourceTarget ?? target;
   final sourceLocations = <Object, SourceLocation>{};
+
+  /// A continuation reference retained at every call for asynchronous unwinding.
+  Value? stackContext;
   final List<BlockParameter> entryParameters = parameters ?? entry.parameters;
   final operands = <Value, List<Value>>{};
   final edgeArguments = <Jump, List<Value>>{};

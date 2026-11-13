@@ -5,9 +5,14 @@ import 'package:dartc/layout.dart';
 import 'package:dartc/object.dart';
 
 import 'program_layout.dart';
+import 'frame_description.dart';
 
 /// Writes canonical constant objects and their concrete type descriptors.
-final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
+final class ConstantData(
+  final ProgramLayout layouts,
+  final int symbolBase, {
+  final bool stackTraces = false,
+}) {
   final symbols = <Symbol>[];
   final relocations = <Relocation>[];
   final _words = <int>[];
@@ -243,6 +248,65 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
         weak.length;
     _words[start + ObjectDescriptor.ephemeronCountBase + references.length] =
         layout.ephemerons.length;
+    if (stackTraces) {
+      final closure = layouts.closures.all
+          .where((shape) => shape.type == type)
+          .firstOrNull;
+      if (closure != null) {
+        final metadataStart = _words.length;
+        final metadata = _reserve(
+          'closure.trace',
+          ClosureTraceMetadata.size ~/ 8,
+        );
+        relocations.add(
+          .address(
+            1,
+            (start + ObjectDescriptor.asyncBase + references.length) * 8,
+            metadata,
+          ),
+        );
+        // shortcut: pending callbacks have names only, add declaration spans for positions.
+        final description = frameDescription(closure.target);
+        if (description != null) {
+          relocations.add(
+            .address(
+              1,
+              metadataStart * 8 + ClosureTraceMetadata.description,
+              addressOf(Constant.string(description)),
+            ),
+          );
+        }
+        final field =
+            closure.instantiation?.origin ??
+            (closure.target.kind.isVirtual
+                ? closure.captures.first
+                : closure.target.awaiterCapture == null
+                ? null
+                : closure.captures[closure.target.awaiterCapture!]);
+        if (field != null && layouts.isReference(field.type)) {
+          var link = layouts.fieldOffset(field), value = 0, bound = 0;
+          if ((closure.instantiation, closure.target.awaiterCapture) case (
+            null,
+            final int index,
+          )) {
+            if (closure.target.captures[index] case final CellType type) {
+              final cell = layouts.closures.cell(type);
+              if (layouts.isReference(cell.value.type)) {
+                value = layouts.fieldOffset(cell.value);
+                if (cell.lazy case final lazy?) {
+                  bound = layouts.fieldOffset(lazy.bound);
+                }
+              } else {
+                link = 0;
+              }
+            }
+          }
+          _words[metadataStart + ClosureTraceMetadata.link ~/ 8] = link;
+          _words[metadataStart + ClosureTraceMetadata.value ~/ 8] = value;
+          _words[metadataStart + ClosureTraceMetadata.bound ~/ 8] = bound;
+        }
+      }
+    }
     final extra = start + ObjectDescriptor.baseWords + references.length;
     _words.setRange(extra, extra + weak.length, weak);
     _words.setRange(

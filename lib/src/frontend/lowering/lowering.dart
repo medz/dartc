@@ -248,6 +248,7 @@ final class Lowering({final bool enableAssertions = false}) {
         input,
         bindings.libraries,
         bindings.boundTarget,
+        bindings.classType,
       ),
     );
   }

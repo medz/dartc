@@ -78,6 +78,9 @@ enum MemoryOperation() {
   instantiateClosure,
 }
 
+/// Marks the runtime interface whose receivers provide asynchronous stack links.
+final class const StackContext();
+
 /// Excludes this reference slot from strong tracing.
 final class const WeakSlot();
 

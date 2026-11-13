@@ -20,6 +20,9 @@ void main() {
   HeapRuntime withCritical(FunctionTarget function) => HeapRuntime(
     heapRuntime.program,
     types: heapRuntime.types,
+    invocation: heapRuntime.invocation,
+    dispatchFailure: heapRuntime.dispatchFailure,
+    stackContext: heapRuntime.stackContext,
     allocate: heapRuntime.allocate,
     isOutOfMemory: heapRuntime.isOutOfMemory,
     release: heapRuntime.release,
@@ -56,6 +59,9 @@ void main() {
     ]) {
       expect(lowered.program.implementationOf(target)?.target, same(target));
     }
+    final context = lowered.runtime.stackContext;
+    expect(context, isNotNull);
+    expect(heapRuntime.stackContext, same(context));
     final record = heapRuntime.program.classes.singleWhere(
       (c) => c.type.name == 'FinalizationRecord',
     );

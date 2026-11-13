@@ -19,7 +19,7 @@
 | 裸 `Function`/dynamic 函数值调用 | 支持已表示的函数、方法、构造器、闭包及 callable object，包括 Function 上界和 `.call` 提取。先验证位置/命名/类型实参个数，再应用实际声明的默认类型、界限和形参检查。保留闭包环境及构造器别名身份。原生回调只支持明确建模的签名。见[动态调用样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 可调用对象、隐式 `call` 提取 | 支持实例的普通和泛型 `call` 调用，以及在函数类型上下文中隐式提取其绑定方法。见[可调用对象样本](../test/frontend/lowering/fixtures/callables.dart)。 |
 | `sync*` | 支持带显式 `Yield`/恢复边的生成器 IR 和原生执行：调用及取得 iterator 不执行函数体，每个 iterator 的局部状态独立，外层捕获绑定仍共享。复用官方 SDK 迭代器，支持 `yield`、`yield*`、泛型、FutureOr<Iterable<T>> 返回声明及跨暂停的 catch/finally；帧保存活跃值和类型环境，释放不再需要的引用。提前停止不会执行悬挂的 finally；同一 iterator 重入抛出 StateError，内部捕获后可以继续，未捕获则经过 finally 结束迭代。见[原生生成器验证](../test/compiler/sync_generators_test.dart)。参考 IR 执行器仍不模拟具体实现 runtimeType 和重入。 |
-| `async`、`await` | IR 区分公开返回签名与 `completionType`，用显式 `Await` 终结符和正常/异常恢复边保存暂停点。支持立即执行、类型化 Future/value 双臂、跨暂停的捕获/异常/控制流，以及 finally 完成后才接续返回的 Future；返回表达式的类型检查仍在 finally 之前。原生执行保留跨暂停的局部值、共享捕获、词法类型实参和 GC 存活，支持顶层、局部、实例方法、getter、运算符及函数值调用。用户 Future 按实际类型实参检查完成回调。见[原生异步验证](../test/compiler/async_functions_test.dart)；完整异步栈文本仍待实现。 |
+| `async`、`await` | IR 区分公开返回签名与 `completionType`，用显式 `Await` 终结符和正常/异常恢复边保存暂停点。支持立即执行、类型化 Future/value 双臂、跨暂停的捕获/异常/控制流，以及 finally 完成后才接续返回的 Future；返回表达式的类型检查仍在 finally 之前。原生执行保留跨暂停的局部值、共享捕获、词法类型实参和 GC 存活，支持顶层、局部、实例方法、getter、运算符及函数值调用。用户 Future 按实际类型实参检查完成回调。见[原生异步验证](../test/compiler/async_functions_test.dart)；跨暂停点的父栈与源码位置见[异步父栈验证](../test/compiler/async_stack_traces_test.dart)。 |
 | `async*` | 支持顶层、泛型、局部和实例生成器的原生执行，复用官方 SDK Stream 控制器。`Yield` 区分继续和取消，`YieldStream` 委托数据与错误事件；订阅操作本身的异常进入局部处理器，错误事件转发给监听者。保留冷启动、监听 Zone、暂停/恢复、泛型事件与 GC 存活。取消等待异步 finally，清理失败交给取消 Future；等待中的 await 会完成后继续到下一个 yield。委托订阅失败后仍可再次 yield 或委托；固定 SDK 3.14.0 的 VM 会残留委托标记而停住，此恢复路径使用独立预期验证。见[原生流与生成器验证](../test/compiler/async_generators_test.dart)及 [IR 行为对照](../test/ir/async_generators_test.dart)。 |
 | `external` 函数 | `IrExternal` 保存外部实现的 Dart 签名、默认值和声明身份，源码支持顶层函数、类成员、构造器和 extension 成员；external 变量生成访问器声明，不分配普通字段或全局存储。[IR 校验](../test/ir/program_references_test.dart)覆盖重复实现、缺失实现和默认值类型。见[源码声明验证](../test/frontend/lowering/externals_test.dart)。外部符号绑定及原生调用仍由后续领域实现。 |
 
@@ -29,7 +29,7 @@
 
 同步局部函数和匿名函数支持捕获值及共享的非 `late` 可变存储，可在创建函数返回后调用，也可经全局变量跨原生入口保留。普通类型化 `FunctionCall` 按实际闭包目标补齐位置和命名默认值，支持递归及自身引用；循环复制的存储保留各次迭代身份。泛型闭包每次调用绑定自身类型实参，并保留外层函数和类的实际类型环境。闭包对象使用真实 `FunctionType` 作为运行时类型，捕获的引用参与普通 GC 根扫描与异常清理。见[原生闭包验证](../test/compiler/closures_test.dart)。
 
-前端保留局部变量和参数上的 `@pragma('vm:awaiter-link')`：FunctionTarget.awaiterCapture 指向现有闭包捕获槽，跨嵌套闭包传递且保留可变存储类型；未捕获或无标注时为空。多个标注按固定 SDK 的捕获顺序选择最后一个，其他注解不参与。该元数据供后端恢复异步父栈，不单独构成完整异步栈支持。见[捕获契约验证](../test/frontend/lowering/awaiter_captures_test.dart)和[固定 SDK 选择规则](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/vm/scopes.cc#L479)。
+前端保留局部变量和参数上的 `@pragma('vm:awaiter-link')`：FunctionTarget.awaiterCapture 指向现有闭包捕获槽，跨嵌套闭包传递且保留可变存储类型；未捕获或无标注时为空。多个标注按固定 SDK 的捕获顺序选择最后一个，其他注解不参与。后端消费该槽并保留当前等待上下文的 GC 根；普通 Dart 运行时沿 SDK 的等待关系恢复异步父帧，读取可变/late 槽时不触发初始化。见[捕获契约验证](../test/frontend/lowering/awaiter_captures_test.dart)和[固定 SDK 选择规则](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/vm/scopes.cc#L479)。
 
 顶层函数、静态方法及构造器的常量提取支持类型化调用、默认参数、泛型签名和闭合类型实参。函数常量保持规范身份，可存入常量对象、默认参数或全局变量；调用及 `.call` 使用所选函数的实际参数与返回表示。构造器函数值保留泛型类参数、类型别名身份及工厂重定向；提取的声明身份与最终执行的构造器分开。普通类型别名与目标构造器共享身份，非等价的泛型别名保留自己的函数身份；运行时类型来自实际函数签名。函数值调用保留副作用、异常和 finally，引用参与普通 GC。见[函数值原生验证](../test/compiler/function_values_test.dart)。
 
@@ -53,7 +53,7 @@
 
 测试执行器将 guest Future 的类型与载荷分开保存，使用真实 SDK Future 调度，而非把暂停伪装成普通调用或同步循环。支持 `Future.value/error/sync/microtask`、`Completer`/`Completer.sync`、`then`、`catchError` 和 `scheduleMicrotask` 的已建模协议；`Future.sync` 保留可直接返回的 Future 身份与实际类型。普通同步函数不创建异步帧。
 
-参考执行器显式拒绝原生 Future 输入的类型桥、自定义 Future 的 await/接续协议、`whenComplete` 及其他未建模 Future API、Future/Completer 的方法提取和具体实现 runtimeType/toString。Zone 用户 API、完整异步堆栈文本和一般 Stream 成员仍待验证。
+参考执行器显式拒绝原生 Future 输入的类型桥、自定义 Future 的 await/接续协议、`whenComplete` 及其他未建模 Future API、Future/Completer 的方法提取和具体实现 runtimeType/toString。原生 Zone、SDK Stream 与异步父栈的验证范围见[生成器验证](../test/compiler/async_generators_test.dart)及[异步父栈验证](../test/compiler/async_stack_traces_test.dart)；参考执行器没有对应的完整运行时模型。
 
 ## 规范依据
 

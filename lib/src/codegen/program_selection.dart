@@ -114,6 +114,16 @@ final class ProgramSelection(
   }
 
   void _bind(SelectedFunction body) {
+    final owner = body.target.owner;
+    final context = heap.runtime?.stackContext;
+    if (body.target.awaiterCapture != null ||
+        body.target.kind.hasReceiver &&
+            owner != null &&
+            context != null &&
+            owner.asInstanceOf(context) != null) {
+      body.stackContext = body.entryParameters.first;
+    }
+
     for (final instruction
         in body.instructions.values.expand((v) => v).whereType<Instruction>()) {
       if (body.aliases.contains(instruction)) continue;

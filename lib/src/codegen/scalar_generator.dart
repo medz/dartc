@@ -19,6 +19,7 @@ import 'native_callback.dart';
 import 'program_layout.dart';
 import 'constant_data.dart';
 import 'stack_maps.dart';
+import 'frame_description.dart';
 import 'heap_plan.dart';
 import 'heap_entry.dart';
 import 'heap_runtime.dart';
@@ -393,32 +394,28 @@ base class ScalarCodeGenerator<R extends Object>(
           callbacks.length +
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
+      stackTraces: capture,
     );
-    String? frameName;
-    void safepoint(int position, StackRoots roots, [SourceLocation? location]) {
+    FunctionTarget? frameSource;
+    void safepoint(
+      int position,
+      StackRoots roots, [
+      SourceLocation? location,
+      int? context,
+    ]) {
       if (hasRoots) {
-        final description = frameName == null || location == null
-            ? frameName
-            : '$frameName (${location.uri}:${location.line}:${location.column})';
+        final description = frameSource == null
+            ? null
+            : frameDescription(frameSource, location);
         maps.add(
           code.length + position,
           roots,
           description == null
               ? null
               : constants.addressOf(Constant.string(description)),
+          context,
         );
       }
-    }
-
-    String traceName(FunctionTarget function) {
-      final prefix = function.enclosing == null
-          ? function.owner?.name
-          : traceName(function.enclosing!);
-      return prefix == null
-          ? function.name
-          : function.name.isEmpty
-          ? prefix
-          : '$prefix.${function.name}';
     }
 
     final globalAddresses = <(int, Fixup)>[],
@@ -480,7 +477,7 @@ base class ScalarCodeGenerator<R extends Object>(
 
     for (final declaration in selected) {
       final source = functions[declaration]?.sourceTarget ?? declaration;
-      frameName = capture && source.library != null ? traceName(source) : null;
+      frameSource = capture ? source : null;
       final binding = imports[declaration], export = exports[declaration];
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
@@ -628,7 +625,7 @@ base class ScalarCodeGenerator<R extends Object>(
       );
       code.add(bytes);
     }
-    frameName = null;
+    frameSource = null;
     for (final callback in callbacks.entries) {
       code.add(Uint8List((-code.length) & 15));
       final emitter = _createFunction();

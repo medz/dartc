@@ -1,5 +1,6 @@
 import 'package:dartc/ir.dart';
 
+import 'frame_description.dart';
 import 'function_liveness.dart';
 import 'function_representation.dart';
 import 'heap_runtime.dart';
@@ -107,6 +108,11 @@ final class SuspensionFrame(final IrFunction source, int index) {
     result.invocations.addAll(body.invocations);
     result.resultTypes.addAll(body.resultTypes);
     final frame = entry.parameters.first;
+    if (!synchronous) {
+      final context = StorageRead(task, frame, type: .object);
+      result.instructions[entry]!.add(context);
+      result.stackContext = context;
+    }
 
     Value reload(Value value, List<Value> into) {
       if (value is TestedValue) value = value.test.operand;
@@ -188,6 +194,13 @@ final class SuspensionFrame(final IrFunction source, int index) {
       }
       final endStart = into.length, added = result.blocks.length;
       final end = body.ends[block]!;
+      final description = frameDescription(
+        body.sourceTarget,
+        body.sourceLocations[block],
+      );
+      final location = description == null
+          ? const Constant.nullValue()
+          : Constant.string(description);
       switch (end) {
         case Await():
           final continuation = result.addBlock();
@@ -231,10 +244,10 @@ final class SuspensionFrame(final IrFunction source, int index) {
           into.add(activation);
           final call = DirectCall(
             runtime.async!.awaitValue,
-            [activation, value],
+            [activation, value, location],
             typeArguments: [end.result.type],
           );
-          result.operands[call] = [activation, value, argument];
+          result.operands[call] = [activation, value, location, argument];
           result.invocations[call] = runtime.async!.awaitValue;
           into.add(call);
           if (end.onThrow case final edge?) {
@@ -295,7 +308,7 @@ final class SuspensionFrame(final IrFunction source, int index) {
           suspend(continuation, into, block);
           final activation = StorageRead(task, frame, type: .object);
           into.add(activation);
-          final call = DirectCall(target, [activation, value]);
+          final call = DirectCall(target, [activation, value, location]);
           result.invocations[call] = target;
           into.add(call);
           final done = result.addBlock();

@@ -36,7 +36,7 @@ final class ScalarFunction<R extends Object>(
   Uint8List generate(
     void Function(Fixup, FunctionTarget) call,
     void Function(Fixup, Constant) constant,
-    void Function(int, StackRoots, SourceLocation?) safepoint, {
+    void Function(int, StackRoots, SourceLocation?, int?) safepoint, {
     bool failures = false,
     bool persistent = false,
     void Function(Fixup, NativeReference)? nativeAddress,
@@ -260,6 +260,7 @@ final class ScalarFunction<R extends Object>(
             emitter.position,
             roots,
             selection.body.sourceLocations[instruction],
+            allocation.contextOffset,
           );
           if (failures && native == null) {
             final returned = emitter.label();

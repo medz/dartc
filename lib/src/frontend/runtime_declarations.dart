@@ -13,8 +13,9 @@ final class RuntimeDeclarations(
   Map<RuntimeRole, FunctionTarget> entries,
   Map<FunctionTarget, MemoryOperation> primitives,
   Iterable<FunctionTarget> nonAllocating,
-  Iterable<FunctionTarget> systemFunctions,
-) {
+  Iterable<FunctionTarget> systemFunctions, {
+  final ClassType? stackContext,
+}) {
   final Map<RuntimeRole, FunctionTarget> entries = .unmodifiable(entries);
   final Map<FunctionTarget, MemoryOperation> primitives = .unmodifiable(
     primitives,
@@ -27,13 +28,16 @@ final class RuntimeDeclarations(
     CheckedLibraries input,
     Iterable<ResolvedLibraryResult> libraries,
     FunctionTarget? Function(ExecutableElement) targetFor,
+    ClassType Function(InterfaceElement, ResolvedUnitResult, ast.AstNode)
+    classFor,
   ) {
-    final visitor = _RuntimeDeclarations(input, libraries, targetFor);
+    final visitor = _RuntimeDeclarations(input, libraries, targetFor, classFor);
     return .new(
       visitor.entries,
       visitor.primitives,
       visitor.nonAllocating,
       visitor.systemFunctions,
+      stackContext: visitor.stackContext,
     );
   }
 }
@@ -42,6 +46,8 @@ final class _RuntimeDeclarations(
   final CheckedLibraries input,
   Iterable<ResolvedLibraryResult> libraries,
   final FunctionTarget? Function(ExecutableElement) targetFor,
+  final ClassType Function(InterfaceElement, ResolvedUnitResult, ast.AstNode)
+  classFor,
 ) extends RecursiveAstVisitor<void> {
   this {
     if (input.runtimeContracts == null) return;
@@ -58,18 +64,20 @@ final class _RuntimeDeclarations(
   final primitives = <FunctionTarget, MemoryOperation>{};
   final nonAllocating = <FunctionTarget>[];
   final systemFunctions = <FunctionTarget>{};
+  ClassType? stackContext;
   late ResolvedUnitResult unit;
 
   @override
   void visitAnnotation(ast.Annotation node) {
     final element = switch (node.parent) {
+      ast.ClassDeclaration(:final declaredFragment) =>
+        declaredFragment?.element,
       ast.FunctionDeclaration(:final declaredFragment) =>
         declaredFragment?.element,
       ast.MethodDeclaration(:final declaredFragment) =>
         declaredFragment?.element,
       _ => null,
     };
-    if (element is! ExecutableElement) return;
     final value = input.annotationValue(unit, node);
     if (value?.type case dart.InterfaceType(:final element)
         when element.library.uri != input.runtimeContracts) {
@@ -78,6 +86,14 @@ final class _RuntimeDeclarations(
     final type = value?.type;
     if (type is! dart.InterfaceType) return;
     final source = type.element.library;
+    if (type.element == source.getClass('StackContext')) {
+      if (element is! ClassElement || stackContext != null) {
+        throw ArgumentError('Expected one runtime stack context interface.');
+      }
+      stackContext = classFor(element, unit, node);
+      return;
+    }
+    if (element is! ExecutableElement) return;
     final isEntry = type.element == source.getClass('RuntimeEntry');
     final isPrimitive = type.element == source.getClass('Primitive');
     final noAllocation = type.element == source.getClass('NonAllocating');

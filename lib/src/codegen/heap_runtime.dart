@@ -29,6 +29,7 @@ final class HeapRuntime(
   required final FunctionTarget copyBytes,
   required final FunctionTarget captureStackTrace,
   required final FunctionTarget recordError,
+  final ClassType? stackContext,
   final FunctionTarget? invocation,
   final FunctionTarget? dispatchFailure,
   final FunctionTarget? exhaustivenessFailure,
@@ -178,7 +179,7 @@ final class AsyncRuntime(
             )
           : FunctionType(
               .voidType,
-              [.object, .object.nullable],
+              [.object, .object.nullable, .string.nullable],
               typeParameters: [t],
             );
       if (target.signature != signature) {
@@ -244,8 +245,14 @@ final class AsyncGeneratorRuntime(
       }
     }
     for (final (target, signature) in [
-      (yieldValue, FunctionType(.boolean, [.object, .object.nullable])),
-      (yieldStream, FunctionType(.boolean, [.object, .object])),
+      (
+        yieldValue,
+        FunctionType(.boolean, [.object, .object.nullable, .string.nullable]),
+      ),
+      (
+        yieldStream,
+        FunctionType(.boolean, [.object, .object, .string.nullable]),
+      ),
       (complete, FunctionType(.voidType, [.object, .object.nullable])),
     ]) {
       if (target.kind != .function || target.signature != signature) {

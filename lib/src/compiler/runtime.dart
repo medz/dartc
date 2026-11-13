@@ -201,6 +201,7 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     eventAccess: eventAccess,
     copyBytes: copyBytes,
     captureStackTrace: captureStackTrace,
+    stackContext: annotations.stackContext,
     recordError: recordError,
     primitives: primitives,
     nonAllocating: annotations.nonAllocating,

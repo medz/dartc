@@ -16,6 +16,7 @@ Future<LoweringResult> prepareRuntime([String? source]) async {
       'sdk/runtime/allocator.dart',
       'sdk/runtime/stack_trace.dart',
       'sdk/runtime/type_info.dart',
+      'sdk/runtime/dispatch.dart',
     ],
   ).use((input) async {
     final result = await Lowering().lower(input);

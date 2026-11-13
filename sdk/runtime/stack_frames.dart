@@ -14,6 +14,14 @@ final class StackFrames(final int context) {
     return address == 0 ? null : Memory.objectAt<String>(address);
   }
 
+  /// The managed continuation saved in this frame, if any.
+  Object? get continuation {
+    final offset = Memory.read(_record + StackMapRecord.context);
+    return offset == 0
+        ? null
+        : Memory.objectAt<Object?>(Memory.read(_sp + offset - 1));
+  }
+
   void start(int sp, int pc) {
     if (sp == 0 || pc == 0) Memory.fail();
     _nextSp = sp;

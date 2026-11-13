@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Recover asynchronous parent frames through the SDK's Future listeners, completers, streams and annotated callback links. Include `await`/`yield` source positions and asynchronous gaps, preserve snapshots and rethrows across collection, and inspect captured links without invoking callbacks or late initializers.
 - Support DateTime calendar and epoch constructors, current time, local time zones, formatting, conversions, comparisons, arithmetic and copyWith through the SDK algorithms. Preserve DST and timestamp bounds; parse/tryParse still require regular expression matching.
 - Bind native annotations from transitive SDK and runtime libraries before lowering their callers, including leaf address arguments and trusted system functions.
 

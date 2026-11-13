@@ -39,14 +39,17 @@ abstract final class ObjectDescriptor() {
   /// Add the reference count to locate the traced payload offset.
   static const payloadBase = references + 1;
 
+  /// Add the strong reference count to locate optional closure metadata.
+  static const asyncBase = references + 2;
+
   /// Add the strong reference count to locate the weak slot count.
-  static const weakCountBase = references + 2;
+  static const weakCountBase = references + 3;
 
   /// Add the strong reference count to locate the conditional pair count.
-  static const ephemeronCountBase = references + 3;
+  static const ephemeronCountBase = references + 4;
 
   /// Strong offsets precede weak offsets and then key/value offset pairs.
-  static const baseWords = references + 4;
+  static const baseWords = references + 5;
 }
 
 /// Machine entry records shared by native boundaries and the Dart runtime.
@@ -73,8 +76,20 @@ abstract final class StackMapRecord() {
 
   /// The constant frame-description address, or zero for an unnamed frame.
   static const description = 8;
-  static const callerStack = 16;
-  static const returnAddress = 24;
-  static const rootCount = 32;
-  static const roots = 40;
+
+  /// One plus the stack offset of the traced continuation, or zero.
+  static const context = 16;
+  static const callerStack = 24;
+  static const returnAddress = 32;
+  static const rootCount = 40;
+  static const roots = 48;
+}
+
+/// Byte offsets in optional immutable function-value metadata.
+abstract final class ClosureTraceMetadata() {
+  static const description = 0;
+  static const link = 8;
+  static const value = 16;
+  static const bound = 24;
+  static const size = 32;
 }

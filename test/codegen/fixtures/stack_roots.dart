@@ -143,8 +143,12 @@ ObjectModule stackRoots(Target target) {
     },
     imports: {external: NativeImport('roots_probe', signature)},
   );
+  final constantGetters = [
+    for (final name in ['original', 'replacement'])
+      module.symbols.singleWhere((symbol) => symbol.name == name),
+  ];
   final aliases = {
-    for (final (i, function) in module.symbols.take(2).indexed)
+    for (final (i, function) in constantGetters.indexed)
       module.relocations
           .whereType<InstructionRelocation>()
           .where(

@@ -26,6 +26,10 @@ void main() {
               native.table[offset + StackMapRecord.roots ~/ 8 + j],
           ],
         );
+        final context = native.table[offset + StackMapRecord.context ~/ 8];
+        if (context != 0) {
+          expect(maps[native.table[offset]]!.offsets, contains(context - 1));
+        }
         offset += StackMapRecord.roots ~/ 8 + count;
       }
       for (final route in [0, 1]) {

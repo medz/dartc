@@ -116,6 +116,11 @@ final class FunctionAllocation<R extends Object>(
     }
   }
 
+  /// The traced continuation home relative to this function's stack pointer.
+  int? get contextOffset => selection.body.stackContext == null
+      ? null
+      : _slot(selection.body.stackContext!);
+
   /// Saves incoming arguments whose homes must survive beyond entry.
   void initialize() {
     for (final (i, parameter) in selection.body.entryParameters.indexed) {

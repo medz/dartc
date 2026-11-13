@@ -331,7 +331,12 @@ final class FunctionSelection<R>(
         }
       }
     }
-    liveness = FunctionLiveness(body, inputsOf, calls.keys.toSet());
+    liveness = FunctionLiveness(
+      body,
+      inputsOf,
+      calls.keys.toSet(),
+      extraInputs: (_) => [?body.stackContext],
+    );
     calls.removeWhere(
       (instruction, _) => liveness.omitted.contains(instruction),
     );
