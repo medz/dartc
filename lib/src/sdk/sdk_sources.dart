@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'unicode_case_data.dart';
+
 /// Source files used to compile the standard library and target runtime.
 abstract class SdkSources() {
   /// Reads the source tree distributed with the dartc package.
@@ -46,7 +48,7 @@ abstract class SdkSources() {
   }
 }
 
-/// Reads current SDK files and shared contracts from a dartc package directory.
+/// Reads SDK files, shared contracts and derived Unicode case constants.
 ///
 /// File contents are read on every request. Symbolic links are rejected so that
 /// resource packaging cannot include files outside the source tree.
@@ -87,6 +89,7 @@ final class SourceDirectory(Directory directory) extends SdkSources {
 
   @override
   Iterable<String> get paths sync* {
+    if (contains(unicodeCaseSource)) yield unicodeCaseSource;
     for (final name in _shared) {
       if (!contains(name)) throw FormatException('Missing source file: $name');
       yield name;
@@ -110,16 +113,24 @@ final class SourceDirectory(Directory directory) extends SdkSources {
   }
 
   @override
-  bool contains(String path) => _file(path)?.existsSync() ?? false;
+  bool contains(String path) => path == unicodeCaseSource
+      ? unicodeCaseInputs.keys.every(
+          (input) => _file(input)?.existsSync() ?? false,
+        )
+      : _file(path)?.existsSync() ?? false;
 
   @override
   int? length(String path) {
+    if (path == unicodeCaseSource) {
+      return contains(path) ? read(path).length : null;
+    }
     final file = _file(path);
     return file != null && file.existsSync() ? file.lengthSync() : null;
   }
 
   @override
   Uint8List read(String path) {
+    if (path == unicodeCaseSource) return unicodeCaseData(read);
     final file = _file(path);
     if (file == null || !file.existsSync()) {
       throw FormatException('Missing source file: $path');

@@ -10,6 +10,8 @@ These sources are compiled for the user's target platform. They ship with dartc 
 
 The compiler and runtime share the declarations in `lib/runtime/contracts.dart` and the memory layout exposed by `lib/layout/memory.dart`. Those files have one source definition and are included when packaging the SDK.
 
+Unicode 17.0.0 case data and its license are pinned under [patches/unicode](patches/unicode/README.md). The source provider verifies these inputs and derives ordinary Dart constants in its source view; packaged archives retain those constants, so native compilation and execution require no network or external Unicode installation.
+
 Source execution reads this directory directly. Editing runtime or patches requires no archive regeneration. Standard library contents must match the version, commit and fingerprint in `lib/src/sdk/sdk.dart`; SDK updates replace the official sources and update that pin together. Preserve `std/LICENSE` and the original source headers.
 
 `dart run tool/build.dart` packages the current sources, verifies them and embeds them in the standalone compiler. The archive is a build artifact, not a checked-in input. Native compilation uses the same source interface for directories and embedded archives.

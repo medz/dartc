@@ -3,8 +3,16 @@ import 'dart:typed_data' show Uint16List;
 import '../../lib/runtime/contracts.dart' as runtime;
 import '../runtime/string.dart';
 
+import 'unicode_case.dart' as unicode;
+
 @patch
 class _StringBase {
+  @patch
+  String toLowerCase() => unicode.convertCase(this, upper: false);
+
+  @patch
+  String toUpperCase() => unicode.convertCase(this, upper: true);
+
   @patch
   @pragma(
     'dartc:patch',

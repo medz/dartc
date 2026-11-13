@@ -65,6 +65,22 @@ String transform(String value, String pattern, int mode, int first, int last) {
         return '[${match.start}:${match.end}]';
       });
       return '$_trace/$result';
+    case 19:
+      return value.toLowerCase();
+    case 20:
+      return value.toUpperCase();
+    case 21:
+      final lower = value.toLowerCase;
+      return lower();
+    case 22:
+      final upper = value.toUpperCase;
+      return upper();
+    case 23:
+      final dynamic receiver = value;
+      return receiver.toLowerCase();
+    case 24:
+      final dynamic receiver = value;
+      return receiver.toUpperCase();
     default:
       return value.toString();
   }
@@ -97,13 +113,20 @@ int transformBuffer(
   int capacity,
 ) {
   try {
+    final value = String.fromCharCodes(input.asTypedList(length));
     _saved = transform(
-      String.fromCharCodes(input.asTypedList(length)),
+      value,
       String.fromCharCodes(pattern.asTypedList(patternLength)),
       mode,
       first,
       last,
     );
+    if (mode >= 19 &&
+        mode <= 24 &&
+        _saved == value &&
+        !identical(_saved, value)) {
+      throw StateError('Unchanged case mapping must preserve identity.');
+    }
     for (var i = 0; i < 4000; i++) {
       String.fromCharCode(i);
     }

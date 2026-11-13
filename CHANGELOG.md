@@ -4,6 +4,7 @@
 - Pass OS command-line arguments to synchronous and async `main`, preserving fixed writable lists, optional/named defaults, a null second argument and references across collection. Decode UTF-8 through the SDK, preserve leading U+FEFF characters and reject malformed bytes before invoking main.
 - Call variadic native functions with `VarArgs`, including empty tails, mixed scalar and pointer arguments, aggregates, callbacks and native exports. Preserve platform stack rules and floating-register counts; require explicitly promoted native types and emit C ellipses in headers.
 - Project runtime types directly onto the requested superclass or interface, avoiding repeated ancestor traversal and unrelated metadata allocation during type checks, including constant Map and Expando lookups. Preserve generic substitution, nested function binders and diamond inheritance.
+- Support language-independent Unicode 17.0.0 full case conversion, including expansions and contextual final sigma. Preserve UTF-16 and unchanged-string identity, and bundle pinned Unicode data with the compiler.
 
 - Support pow, trigonometric functions, exp and log through the SDK numeric conversion and integer-power algorithms, with floating leaves bound to the target system math library.
 - Support `Abi.current()` through the official SDK factory, selecting the output platform on macOS and Linux ARM64/x64. Preserve constant identity and constructor function values; official VM patch adaptation retains public class modifiers.

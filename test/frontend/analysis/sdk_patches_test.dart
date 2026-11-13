@@ -237,6 +237,7 @@ void main() {
         for (final (type, method, source) in [
           ('_StringBase', '*', '/vm/lib/string_patch.dart'),
           ('_StringBase', 'padLeft', '/sdk/patches/string.dart'),
+          ('_StringBase', 'toUpperCase', '/sdk/patches/string.dart'),
           ('_Double', 'remainder', '/vm/lib/double.dart'),
           ('_Double', '_remainder', '/sdk/patches/double.dart'),
           ('Stopwatch', '_now', '/sdk/patches/core.dart'),
