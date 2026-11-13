@@ -4,6 +4,7 @@ import 'dart:async' as async;
 import '../../lib/runtime/contracts.dart' as runtime;
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/finalization.dart' as finalization;
+import '../runtime/memory.dart';
 import '../runtime/type_info.dart' as metadata;
 import '../runtime/stack_trace.dart' as traces;
 
@@ -62,6 +63,15 @@ class Error {
 class StackTrace {
   @patch
   static StackTrace get current => traces.currentStackTrace();
+}
+
+@patch
+class Stopwatch {
+  @patch
+  static int _now() => Memory.clock();
+
+  @patch
+  static int _computeFrequency() => 1000000000;
 }
 
 @patch

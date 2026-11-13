@@ -90,6 +90,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         'invocation_mirror_patch.dart',
         'function.dart',
         'type_patch.dart',
+        'stopwatch_patch.dart',
       };
       final parts = [
         for (final part in _parse(core).directives.whereType<PartDirective>())

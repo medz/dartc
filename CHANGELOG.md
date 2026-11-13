@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Create native callbacks with `Pointer.fromFunction` for static Dart functions, including scalar, pointer and struct signatures. Preserve state and GC roots across synchronous reentry, return the specified exception value, and reject calls from another OS thread.
+- Support Stopwatch using the SDK lifecycle and elapsed-time conversions over the existing monotonic clock. Preserve accumulated time across pause/resume, reset state and extracted method values.
 
 - Support `Random` through the SDK's existing sampling algorithms, with explicit or clock-based default seeds. Preserve bounds, method values and generator state; `Random.secure()` throws `UnsupportedError` while target entropy is unavailable.
 

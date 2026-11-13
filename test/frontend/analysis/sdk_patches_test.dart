@@ -199,6 +199,7 @@ void main() {
           ('_StringBase', 'padLeft', '/sdk/patches/string.dart'),
           ('_Double', 'remainder', '/vm/lib/double.dart'),
           ('_Double', '_remainder', '/sdk/patches/double.dart'),
+          ('Stopwatch', '_now', '/sdk/patches/core.dart'),
         ]) {
           final member = core.element.getClass(type)!.getMethod(method)!;
           final body = core.getFragmentDeclaration(member.fragments.last)!;
@@ -207,14 +208,21 @@ void main() {
             endsWith(source),
           );
         }
-        final cache = core.element
-            .getClass('_BigIntImpl')!
-            .getGetter('_cachedDivRemResult')!;
-        final cacheBody = core.getFragmentDeclaration(cache.fragments.last)!;
-        expect(
-          patches.origins[cacheBody.resolvedUnit!.uri]!.path,
-          endsWith('/vm/lib/bigint_patch_patch.dart'),
-        );
+        for (final (type, getter, source) in [
+          (
+            '_BigIntImpl',
+            '_cachedDivRemResult',
+            '/vm/lib/bigint_patch_patch.dart',
+          ),
+          ('Stopwatch', 'elapsedMicroseconds', '/vm/lib/stopwatch_patch.dart'),
+        ]) {
+          final member = core.element.getClass(type)!.getGetter(getter)!;
+          final body = core.getFragmentDeclaration(member.fragments.last)!;
+          expect(
+            patches.origins[body.resolvedUnit!.uri]!.path,
+            endsWith(source),
+          );
+        }
         final from = core.element
             .getClass('List')!
             .getNamedConstructor('from')!;

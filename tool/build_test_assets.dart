@@ -113,6 +113,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'math_random',
     'bigint',
     'text_conversion',
+    'stopwatch',
   };
   final selected = names.toSet();
   if (selected.contains('native_callbacks')) {
@@ -221,6 +222,7 @@ Future<void> main(List<String> args) async {
       ('math_random', 'math_random', 'entry_math_random'),
       ('bigint', 'bigint', 'entry_bigint'),
       ('text_conversion', 'text_conversion', 'entry_text_conversion'),
+      ('stopwatch', 'stopwatch', 'entry_stopwatch'),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([

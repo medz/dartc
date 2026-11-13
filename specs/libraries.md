@@ -37,6 +37,12 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 动态库在最外层同步 Dart 入口返回前处理待执行事件。重入的 FFI 入口不启动第二个事件循环；持续活动的周期定时器会使这次调用保持运行。卸载库只释放存储，不启动新回调。外部线程和异步宿主驱动入口尚未接通。
 
+## 秒表
+
+Stopwatch 的启停、重置和累计时间复用[核心库正文](../sdk/std/lib/core/stopwatch.dart)，毫秒及微秒换算复用[官方目标实现](../sdk/std/lib/_internal/vm/lib/stopwatch_patch.dart)。目标只提供现有单调时钟及每秒 10^9 个计数单位；单位为纳秒，实际精度由系统时钟决定。
+
+暂停期间不累加，重复 start/stop 保持既有状态；reset 清零累计时间且不改变运行状态。独立实例、构造器和方法提取、动态调用、单位换算与回收后状态见[原生秒表验证](../test/compiler/stopwatch_test.dart)，覆盖 macOS ARM64 和 Linux ARM64。
+
 ## URI 编解码
 
 `Uri.encodeComponent`、`encodeQueryComponent`、`encodeFull` 及对应的 decode 方法支持原生执行和函数值调用；编码直接复用固定 SDK 的 [uri_encode_patch.dart](../sdk/std/lib/_internal/vm_shared/lib/uri_encode_patch.dart)，解码与 `splitQueryString` 复用 [core/uri.dart](../sdk/std/lib/core/uri.dart)。component、query 和 full 保留各自的字符集合，query 将空格与加号按表单规则转换；查询参数拆分保留 SDK 的重复键、无值键与空键规则。
