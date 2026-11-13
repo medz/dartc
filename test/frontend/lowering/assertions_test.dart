@@ -75,12 +75,16 @@ void main() {
   }
 
   test('disabled assertions omit nested closure bodies', () async {
-    final program = await AnalysisSession([
+    final source = Uri.base.resolve(
       'test/frontend/lowering/fixtures/disabled_assertion_closure.dart',
-    ]).use((input) async => (await Lowering().lower(input)).program);
+    );
+    final program = await AnalysisSession([source.toFilePath()])
+        .use((input) async => (await Lowering().lower(input)).program);
     expect(
-      program.functions.every((fn) => fn.target.enclosing == null),
-      isTrue,
+      program.functions.where(
+        (fn) => fn.target.library == source && fn.target.enclosing != null,
+      ),
+      isEmpty,
     );
     final runner = IrInterpreter(program, {});
     for (final (name, expected) in [
@@ -91,14 +95,16 @@ void main() {
       final fn = program.functions.singleWhere((fn) => fn.target.name == name);
       expect(runner.run(fn, []), expected);
     }
-    final checked =
-        await AnalysisSession([
-          'test/frontend/lowering/fixtures/disabled_assertion_closure.dart',
-        ]).use(
-          (input) async =>
-              (await Lowering(enableAssertions: true).lower(input)).program,
-        );
-    expect(checked.functions.any((fn) => fn.target.enclosing != null), isTrue);
+    final checked = await AnalysisSession([source.toFilePath()]).use(
+      (input) async =>
+          (await Lowering(enableAssertions: true).lower(input)).program,
+    );
+    expect(
+      checked.functions.where(
+        (fn) => fn.target.library == source && fn.target.enclosing != null,
+      ),
+      isNotEmpty,
+    );
   });
 
   test('enabled assertions match condition and lazy message evaluation', () {

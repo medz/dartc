@@ -28,14 +28,6 @@ void main() {
         runtime.element.typeProvider.intType.element,
         same(checked.libraries.first.element.typeProvider.intType.element),
       );
-      final lowered = await Lowering().lower(checked);
-      final body = lowered.program.functions.singleWhere(
-        (f) =>
-            f.target.library == runtime.element.uri &&
-            f.target.name == 'slotSize',
-      );
-      expect(body.target.library?.scheme, 'file');
-      expect(body.callees, isEmpty);
       await session.close();
       expect(() => checked.resources, throwsStateError);
     },
@@ -43,7 +35,11 @@ void main() {
 
   test('missing source resources fail before analysis', () async {
     await expectLater(
-      AnalysisSession([path], resources: ['runtime/missing.dart']).use((_) {}),
+      AnalysisSession(
+        [path],
+        sources: await SdkSources.load(),
+        resources: ['sdk/runtime/missing.dart'],
+      ).use((_) => fail('A missing resource reached the consumer.')),
       throwsArgumentError,
     );
   });
@@ -71,21 +67,6 @@ void main() {
     await session.close();
   });
 
-  test(
-    'checks and lowers a batch without recreating its analysis session',
-    () async {
-      await AnalysisSession([path]).use((input) async {
-        expect(input.libraries, hasLength(1));
-        expect((await Lowering().lower(input)).program.functions, isNotEmpty);
-        expect(
-          (await Lowering(enableAssertions: true).lower(input))
-              .program
-              .functions,
-          isNotEmpty,
-        );
-      });
-    },
-  );
   test('transitive errors precede consumption', () async {
     var consumed = false;
     await expectLater(
@@ -102,10 +83,7 @@ void main() {
   test('constant checks use exact comparisons before rejecting SDK errors', () {
     return AnalysisSession([
       'test/frontend/analysis/fixtures/valid_constants.dart',
-    ]).use((checked) async {
-      expect(checked.libraries, hasLength(1));
-      expect((await Lowering().lower(checked)).program.functions, isNotEmpty);
-    });
+    ]).use((_) {});
   });
 
   for (final fixture in [

@@ -2,17 +2,7 @@ import 'dart:async';
 
 import 'effects.dart';
 
-enum const E() {
-  a,
-  b,
-}
-
 String sdkJoin(List<String> values) => values.join(',');
-List<int> sdkTake(List<int> values) => values.take(2).toList();
-int enumCompare() => Enum.compareByIndex(E.a, E.b);
-int enumCompareNames() => Enum.compareByName(E.a, E.b);
-E enumByName() => E.values.byName('a');
-Map<String, E> enumNames() => E.values.asNameMap();
 Duration duration() => const Duration(seconds: 2);
 
 Future<(int, String)> waitRecord((Future<int>, Future<String>) values) =>

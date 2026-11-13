@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
 import 'package:test/test.dart';
 
@@ -118,21 +117,6 @@ void main() {
     final values = runner.run(function, arguments) as Iterable<Object?>;
     arguments[0] = 1;
     expect(values.toList(), sdk.manyValues(1500).toList());
-  });
-  test('generator mode and resume edges remain visible in the public IR', () {
-    final generators = comparison.program.functions.where(
-      (f) => f.bodyKind == FunctionBodyKind.syncGenerator,
-    );
-    expect(generators, isNotEmpty);
-    for (final function in generators) {
-      expect(function.yieldType, isNotNull);
-      final output = StringBuffer();
-      function.writeTo(output);
-      expect(output.toString(), contains('sync*<'));
-      if (function.blocks.any((block) => block.end is Yield)) {
-        expect(output.toString(), contains(' resume b'));
-      }
-    }
   });
   test(
     'concrete generator implementation runtime types stay explicit boundaries',

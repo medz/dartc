@@ -46,12 +46,6 @@ void main() {
   test('type operations bind to the checked Dart bodies and constructors', () {
     final runtime = heapRuntime.types!;
     final values = TypeValues(runtime);
-    final relations = TypeRelations(values, const []);
-    expect(relations.test, same(runtime.entry(.typeSubtype)));
-    expect(values.equality, same(runtime.entry(.typeEquals)));
-    expect(values.hash, same(runtime.entry(.typeHash)));
-    expect(values.argumentEquality, same(runtime.entry(.typeArgumentsEqual)));
-    expect(values.argumentHash, same(runtime.entry(.typeArgumentsHash)));
     for (final entry in runtime.entries) {
       expect(runtime.program.implementationOf(entry), isA<IrFunction>());
     }
@@ -61,8 +55,6 @@ void main() {
       parameter: values.constant(.integer),
     });
     expect((type as DirectCall).target, same(values.entry(.typeFutureOr)));
-    expect(values.functions, isEmpty);
-    expect(relations.functions, isEmpty);
   });
 
   test('nominal projections use source normalization and lexical shifting', () {

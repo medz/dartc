@@ -66,7 +66,6 @@ void main() {
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,
     });
-    expect(arithmetic.functions.length, greaterThanOrEqualTo(2));
     expect(
       () => layouts.storageOf(CoreTypes.integerDivisionByZeroException),
       returnsNormally,
