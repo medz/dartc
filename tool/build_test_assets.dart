@@ -103,6 +103,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'async_generators',
     'records',
     'enums',
+    'symbols',
   };
   final selected = names.toSet();
   final unknown = selected.difference(available);
@@ -203,6 +204,7 @@ Future<void> main(List<String> args) async {
       ),
       ('records', 'records', 'entry_records'),
       ('enums', 'enums', 'entry_enums'),
+      ('symbols', 'symbols', 'entry_symbols'),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([

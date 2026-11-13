@@ -5,11 +5,7 @@ import 'package:analyzer/dart/element/element.dart';
 
 import 'analyzer_metadata.dart';
 
-/// Rejects constant dependencies whose identity, storage or value analyzer loses.
-///
-/// Inspect syntax before consuming even a scalar result: a private-symbol
-/// comparison may already have folded to the wrong boolean or selected branch.
-/// This deliberately visits both branches, without evaluating Dart expressions.
+/// Rejects constant dependencies with unavailable declaration metadata.
 final class ConstantSafety() {
   void check(
     ResolvedUnitResult unit,
@@ -116,16 +112,6 @@ final class _Scan() extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) {
     reference(node.element);
     super.visitSimpleIdentifier(node);
-  }
-
-  @override
-  void visitSymbolLiteral(SymbolLiteral node) {
-    final name = node.components.map((token) => token.lexeme).join('.');
-    if (name.startsWith('_')) {
-      throw _UnsafeConstant(
-        'private Symbol literal #$name in constant dependencies',
-      );
-    }
   }
 
   @override

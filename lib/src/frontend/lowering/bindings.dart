@@ -1468,18 +1468,18 @@ final class Bindings({
         requireClass((value.type as dart.InterfaceType).element);
         return .string(s);
       }
-      if (value.toSymbolValue() case final name?) {
+      if (ConstantEvaluation.symbol(value) case final symbol?) {
         final internal = origin.typeProvider.objectElement.library.fragments
             .expand((fragment) => fragment.importedLibraries)
             .firstWhere(
               (library) => library.uri == Uri.parse('dart:_internal'),
             );
         requireClass(internal.getClass('Symbol')!);
-        // ConstantSafety has already rejected dependencies on private literals.
-        // Analyzer does not retain their defining library in toSymbolValue().
         return ObjectConstant(CoreTypes.symbolStorage, {
-          CoreTypes.symbolName: .string(name),
-          CoreTypes.symbolPrivateLibrary: const .nullValue(),
+          CoreTypes.symbolName: .string(symbol.name),
+          CoreTypes.symbolPrivateLibrary: symbol.library == null
+              ? const .nullValue()
+              : .string(symbol.library!),
         });
       }
       if (value.toFunctionValue() case final executable?) {

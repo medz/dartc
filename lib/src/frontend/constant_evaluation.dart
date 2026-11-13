@@ -1,6 +1,7 @@
 // The pinned analyzer evaluator consumes its canonical, experimental AST API.
 // ignore_for_file: experimental_member_use
 
+import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/token.dart';
@@ -28,17 +29,30 @@ import 'package:analyzer/src/dart/element/type.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/element/type_algebra.dart' as internal;
 // ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type_system.dart' as internal;
+// ignore: implementation_imports
 import 'package:analyzer/src/diagnostic/diagnostic.dart' as diagnostics;
 
 import 'constant_collection.dart';
 import 'constant_patterns.dart';
 import 'constant_safety.dart';
 
-/// Checks and evaluates constants with exact mixed numeric comparisons.
+/// Checks and evaluates constants with exact numeric and private-name identity.
 final class ConstantEvaluation() {
   final _safety = ConstantSafety();
   final _values = <VariableElement, internal.Constant?>{};
   final _active = <VariableElement>{};
+
+  /// Reads a symbol's name without discarding its defining private library.
+  static ({String name, String? library})? symbol(DartObject value) {
+    if (value case internal.DartObjectImpl(
+      state: _PrivateSymbolState(:final name, :final library),
+    )) {
+      return (name: name, library: library);
+    }
+    final name = value.toSymbolValue();
+    return name == null ? null : (name: name, library: null);
+  }
 
   /// Checks constant obligations in every declaration, including dead code.
   void check(ResolvedUnitResult unit, List<Diagnostic> errors) {
@@ -334,6 +348,22 @@ final class _Visitor(
   }
 
   @override
+  internal.Constant visitSymbolLiteral(SymbolLiteral node) {
+    if (node.components.length != 1 ||
+        !node.components.single.lexeme.startsWith('_')) {
+      return super.visitSymbolLiteral(node);
+    }
+    return internal.DartObjectImpl(
+      typeSystem,
+      library.typeProvider.symbolType,
+      _PrivateSymbolState(
+        node.components.single.lexeme,
+        library.uri.toString(),
+      ),
+    );
+  }
+
+  @override
   internal.Constant visitListLiteral(ListLiteral node) =>
       ConstantCollection(node, this, library).evaluate();
 
@@ -436,6 +466,40 @@ final class _Visitor(
       _ => computer.greaterThanOrEqual(node, left, right),
     };
   }
+}
+
+// Keep private identity separate from strings accepted by Symbol(String).
+final class _PrivateSymbolState(final String name, final String library)
+    extends internal.InstanceState {
+  @override
+  int get hashCode => Object.hash(name, library);
+
+  @override
+  String get typeName => 'Symbol';
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PrivateSymbolState &&
+      name == other.name &&
+      library == other.library;
+
+  @override
+  internal.StringState convertToString() => internal.StringState(name);
+
+  @override
+  bool hasPrimitiveEquality(FeatureSet featureSet) => true;
+
+  @override
+  internal.BoolState equalEqual(
+    internal.TypeSystemImpl typeSystem,
+    internal.InstanceState rightOperand,
+  ) => isIdentical(typeSystem, rightOperand);
+
+  @override
+  internal.BoolState isIdentical(
+    internal.TypeSystemImpl typeSystem,
+    internal.InstanceState rightOperand,
+  ) => internal.BoolState.from(this == rightOperand);
 }
 
 final class _Invalid(final internal.InvalidConstant value) implements Exception;

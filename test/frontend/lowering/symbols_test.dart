@@ -1,6 +1,3 @@
-import 'dart:io';
-
-import 'package:dartc/frontend.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
@@ -128,39 +125,4 @@ void main() {
       }
     });
   });
-
-  test(
-    'private Symbol literals and their constant dependencies stay rejected',
-    () async {
-      final directory = Directory.systemTemp.createTempSync('dartc-symbol-');
-      addTearDown(() => directory.deleteSync(recursive: true));
-      final file = File('${directory.path}/entry.dart');
-      for (final source in [
-        'Object f() => #_private;',
-        'Object f() => #_foo.bar;',
-        "const hidden = #_private == Symbol('_private'); bool f() => hidden;",
-        'class const Box(final Object value); '
-            'Object f() => const Box(<Object>[#_private]);',
-        'Object f([Object value = const <Object>[#_private]]) => value;',
-        'class const Box([final Object value = #_private]); '
-            'Object f() => const Box();',
-      ]) {
-        file.writeAsStringSync(source);
-        await expectLater(
-          AnalysisSession([file.path])
-              .use((input) async => (await Lowering().lower(input)).program),
-          throwsA(
-            isA<UnsupportedError>()
-                .having((e) => e.message, 'source', contains('entry.dart:'))
-                .having(
-                  (e) => e.message,
-                  'reason',
-                  contains('private Symbol literal'),
-                ),
-          ),
-          reason: source,
-        );
-      }
-    },
-  );
 }

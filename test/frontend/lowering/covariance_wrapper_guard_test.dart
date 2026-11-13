@@ -72,26 +72,6 @@ class C extends B {}
     });
   }
 
-  test(
-    'covariance forwarding preserves private Symbol constant validation',
-    () async {
-      await expectLater(
-        lower('''
-class R { Object? f([Object x = 0]) => x; }
-abstract class B extends R { Object? f([covariant Symbol x = #_selected]); }
-class C extends B {}
-'''),
-        throwsA(
-          isA<UnsupportedError>().having(
-            (error) => error.message,
-            'reason',
-            contains('constant safety: private Symbol'),
-          ),
-        ),
-      );
-    },
-  );
-
   test('own real covariant override wins over inherited body', () async {
     final program = await lower('''
 class R { Object? f([num x = 10]) => x; }

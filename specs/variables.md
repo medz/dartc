@@ -11,7 +11,7 @@
 | 确定赋值与确定未赋值 | analyzer 检查非 late 局部变量的读取及 final 首次赋值；IR 保留分支、循环、异常路径与闭包共享的延后初始化存储。见[确定赋值样本](../test/frontend/lowering/fixtures/definite_assignment.dart)。 |
 | 局部 `final` 首次赋值 | 支持立即初始化和声明后的首次赋值，包括分支合流及闭包捕获。 |
 | 库级/字段 `final` 与隐式访问器 | 支持顶层及静态 final 与合成访问器，沿用普通调用、复合赋值及索引更新路径。实例 final 保留构造初始化。 |
-| `const` 与常量对象 | 顶层、静态和局部 const 支持标量、record、List/Set/Map、普通用户类及枚举实例、Type 和函数值的嵌套组合；保留规范身份、实际泛型和不可变操作检查。支持公开 Symbol 及 Symbol 字符串构造的常量；可恢复完整字段值的 SDK 常量使用相同的对象表示；未知或不完整的常量存储仍拒绝。私有 Symbol 字面量可能被 analyzer 错误折叠，当前在读取结果前递归检查并拒绝这类依赖，包括已折叠的标量；不另写常量求值器。 |
+| `const` 与常量对象 | 顶层、静态和局部 const 支持标量、record、List/Set/Map、普通用户类及枚举实例、Type 和函数值的嵌套组合；保留规范身份、实际泛型和不可变操作检查。支持公开/私有 Symbol 及字符串构造常量。私有 Symbol 从字面量保留定义库，沿现有常量求值路径传播到比较、构造器、集合与默认值；重复键、类型、断言和模式检查仍生效，见[静态错误验证](../test/frontend/analysis/private_symbols_test.dart)。可恢复完整字段值的 SDK 常量使用相同对象表示；未知或不完整的常量存储仍拒绝。 |
 | `late`、`late final` | 支持顶层、静态、实例及局部 late/late final：未绑定读取及重复 final 赋值抛出运行时错误，null 与未绑定状态不同，RHS 和类型转换先于重复写检查。实例初始化体按声明字段只生成一次，接收实际对象和泛型环境；构造器不提前执行，但显式构造写入仍会绑定。局部 initializer 复用词法闭包与 cell，捕获未绑定存储不触发读取，延后求值保留可变捕获的当前值和循环迭代身份。见[实例 late 样本](../test/frontend/lowering/fixtures/late_fields.dart)和[局部 late 样本](../test/frontend/lowering/fixtures/late_locals.dart)。 |
 | 库变量和静态字段惰性初始化 | 支持首次实际读取才初始化、先写跳过初始化、失败重试及递归初始化。初始化中已写值不因后续异常回滚；final 初始化完成时检查递归绑定，保留内层值。闭包与异常/trace 身份保持，未输入库的访问器仍是 import，不伪造存储。见[全局存储样本](../test/frontend/lowering/fixtures/global_storage.dart)。 |
 | 模式变量声明与赋值 | 支持用 record 模式声明局部变量、交换已有变量及在三段式 for 中解构。后续字段断言抛错时，catch 仍可读到目标变量的原值。见[解构](../test/frontend/lowering/fixtures/destructure.dart)和[失败赋值样本](../test/frontend/lowering/fixtures/exceptions.dart)。 |
