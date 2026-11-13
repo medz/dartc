@@ -164,6 +164,14 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
         AsyncRuntime(create, start, awaitValue, complete),
       _ => null,
     },
+    sync: switch (annotations.entries) {
+      {
+        RuntimeRole.syncCreate: final create,
+        RuntimeRole.syncYield: final yieldValue,
+      } =>
+        SyncRuntime(create, yieldValue),
+      _ => null,
+    },
     invocation: annotations.entries[RuntimeRole.invocation],
     dispatchFailure: annotations.entries[RuntimeRole.dispatchFailure],
     exhaustivenessFailure:

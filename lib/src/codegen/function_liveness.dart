@@ -64,6 +64,8 @@ final class FunctionLiveness(
         }
       }
       switch (end) {
+        case Yield(:final value):
+          read(body.operandsForYield[end] ?? value);
         case Await(:final operand):
           read(body.operandsForAwait[end] ?? operand);
         case Return(value: final value?):

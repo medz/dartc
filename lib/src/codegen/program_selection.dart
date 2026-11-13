@@ -11,7 +11,7 @@ import 'native_invocation.dart';
 import 'numeric_operations.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
-import 'async_functions.dart';
+import 'suspension_functions.dart';
 
 /// Selects function bodies and closes generated call dependencies before emission.
 final class ProgramSelection(
@@ -23,9 +23,9 @@ final class ProgramSelection(
   final NumericOperations arithmetic,
   final GlobalStorage globals,
   final InstanceStorage instances, {
-  AsyncFunctions? asyncFunctions,
+  SuspensionFunctions? suspensions,
 }) {
-  final asyncFunctions = asyncFunctions ?? AsyncFunctions(const []);
+  final suspensions = suspensions ?? SuspensionFunctions(const []);
   final functions = <FunctionTarget, SelectedFunction>{};
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
@@ -76,10 +76,15 @@ final class ProgramSelection(
       heap,
       captureTrace: traces.capture,
     );
-    if (asyncFunctions.frames[function.target] case final frame?) {
+    if (suspensions.frames[function.target] case final frame?) {
       final runtime =
-          heap.runtime?.async ??
-          (throw UnsupportedError('Async runtime unavailable.'));
+          heap.runtime ??
+          (throw UnsupportedError('Suspension runtime unavailable.'));
+      if (frame.synchronous ? runtime.sync == null : runtime.async == null) {
+        throw UnsupportedError(
+          'Missing runtime entries for ${function.bodyKind}.',
+        );
+      }
       final resumed = frame.lower(body, runtime, heap.invalid);
       final entryParameters = body.entryParameters;
       body = FunctionRepresentation(
@@ -91,6 +96,7 @@ final class ProgramSelection(
         captureTrace: traces.capture,
       );
       frame.initialize(body, entryParameters);
+      if (frame.synchronous) include(frame.factory(entryParameters));
       _bind(resumed);
       functions[frame.resume] = resumed;
     }
@@ -208,7 +214,7 @@ final class ProgramSelection(
         ...arithmetic.classes,
         ...layouts.closures.classes,
         ?layouts.records.generatedClass,
-        ...asyncFunctions.classes,
+        ...suspensions.classes,
         layouts.strings.declaration,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
@@ -240,7 +246,7 @@ final class ProgramSelection(
               defaults: members.program.implementationOf(target)!.defaults,
             ),
         if (!globals.isEmpty) IrExternal(globals.address),
-        ...asyncFunctions.entries,
+        ...suspensions.entries,
       ],
     );
     return {};

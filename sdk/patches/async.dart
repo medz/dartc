@@ -9,6 +9,12 @@ class _SuspendState(this._data, this._step) {
   dynamic Function(Object, StackTrace)? _error;
   void Function(Object?, Object?, StackTrace?)? _step;
   bool _suspended = false;
+  bool Function(Object) Function()? _syncFactory;
+  bool Function(Object)? _syncStep;
+
+  @patch
+  _SuspendState _clone() =>
+      _SuspendState(_data, null).._syncStep = _syncFactory!();
 
   @patch
   Object get _functionData => _data;
@@ -26,6 +32,7 @@ class _SuspendState(this._data, this._step) {
 
   @patch
   Object? _resume(Object? value, Object? exception, StackTrace? stackTrace) {
+    if (_syncStep case final step?) return step(_functionData);
     try {
       _step?.call(value, exception, stackTrace);
     } catch (error, trace) {
@@ -77,4 +84,44 @@ class _AsyncRun {
   @patch
   static void _scheduleImmediate(void Function() callback) =>
       allocator.events().scheduleMicrotasks(callback);
+}
+
+@runtime.RuntimeEntry(.syncCreate)
+Iterable<T> _syncCreate<T>(bool Function(Object) Function() create) {
+  final value = _SuspendState._initSyncStar<T>()!;
+  final state = _SuspendState(value, null).._syncFactory = create;
+  return state._suspendSyncStarAtStart(null) as Iterable<T>;
+}
+
+@runtime.RuntimeEntry(.syncYield)
+void _syncYield(Object iterator, Object? value) {
+  (iterator as _SyncStarIterator<dynamic>)._current = value;
+}
+
+@patch
+class _SyncStarIterable<T> {
+  @patch
+  @pragma(
+    'dartc:patch',
+    'storage: guard reentry into a native suspension frame',
+  )
+  Iterator<T> get iterator =>
+      _GuardedSyncStarIterator<T>(_stateAtStart!._clone());
+}
+
+// Reject recursive resume before the SDK iterator unwinds its active state.
+class _GuardedSyncStarIterator<T> extends _SyncStarIterator<T> {
+  _GuardedSyncStarIterator(super.state);
+  bool _running = false;
+
+  @override
+  bool moveNext() {
+    if (_running) throw StateError('Iterator is already running');
+    _running = true;
+    try {
+      return super.moveNext();
+    } finally {
+      _running = false;
+    }
+  }
 }

@@ -98,6 +98,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'descriptor_write',
     'futures',
     'async_functions',
+    'sync_generators',
     'records',
   };
   final selected = names.toSet();
@@ -189,6 +190,8 @@ Future<void> main(List<String> args) async {
       ('futures', 'futures', 'entry_futures'),
       ('async_functions', 'async_functions', 'entry_async_functions'),
       ('async_functions', 'async_error', 'entry_async_error'),
+      ('sync_generators', 'sync_generators', 'entry_sync_generators'),
+      ('sync_generators', 'sync_reentry', 'entry_sync_reentry'),
       ('records', 'records', 'entry_records'),
     ]) {
       if (!selected.contains(fixture)) continue;

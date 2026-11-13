@@ -118,6 +118,21 @@ void main() {
     );
   });
 
+  test('generator entries require a typed factory and yield contract', () {
+    final sync = heapRuntime.sync!;
+    expect(
+      () => SyncRuntime(sync.yieldValue, sync.create),
+      throwsArgumentError,
+    );
+    expect(
+      () => SyncRuntime(
+        sync.create,
+        FunctionTarget(uri, 'yield', .boolean, [.object, .object.nullable]),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('runtime linking rejects conflicting instance storage', () {
     final declaration = heapRuntime.program.classes.firstWhere(
       (c) => c.fields.isNotEmpty,

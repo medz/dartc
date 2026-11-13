@@ -31,7 +31,7 @@ import 'closure_storage.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
 import 'record_storage.dart';
-import 'async_functions.dart';
+import 'suspension_functions.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -246,17 +246,17 @@ base class ScalarCodeGenerator<R extends Object>(
         records: records,
         instantiatedTypes: instantiatedTypes,
       );
-      final asynchronous = AsyncFunctions(
+      final suspensions = SuspensionFunctions(
         selected.map(program.implementationOf).whereType<IrFunction>(),
       );
       final closures = ClosureStorage(
         [
           ...selected.map(program.implementationOf).whereType<IrCallable>(),
-          ...asynchronous.entries,
+          ...suspensions.entries,
         ],
         boundMethods: [
           ...members.tearOffTargets,
-          ...asynchronous.entries.map((entry) => entry.target),
+          ...suspensions.entries.map((entry) => entry.target),
         ],
         lateFailure: instances.failure?.target,
       );
@@ -266,7 +266,7 @@ base class ScalarCodeGenerator<R extends Object>(
           ...arithmetic.classes,
           ...program.classes,
           ...closures.classes,
-          ...asynchronous.classes,
+          ...suspensions.classes,
         ],
         nativeLayout: NativeLayout(target),
         functions: program.functions,
@@ -291,7 +291,7 @@ base class ScalarCodeGenerator<R extends Object>(
         arithmetic,
         globals,
         instances,
-        asyncFunctions: asynchronous,
+        suspensions: suspensions,
       );
       for (final declaration in selected) {
         final function = program.implementationOf(declaration);

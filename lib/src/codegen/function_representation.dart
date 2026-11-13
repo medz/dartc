@@ -165,7 +165,7 @@ final class FunctionRepresentation(
     for (final parameter in function.entry.parameters) {
       if (addressOnly.contains(parameter)) resultTypes[parameter] = .integer;
     }
-    if (function.bodyKind == .asynchronous) stackCells.clear();
+    if (function.bodyKind != .synchronous) stackCells.clear();
     Value pointerAddress(Value pointer, List<Value> into) {
       if (!addressOnly.contains(pointer)) {
         return _load(layouts.pointers.address, pointer, into);
@@ -2018,7 +2018,7 @@ final class FunctionRepresentation(
         Return(:final value) => Return(
           convert(
             value ?? const Constant.nullValue(),
-            function.bodyKind == .asynchronous
+            function.bodyKind != .synchronous
                 ? .object.nullable
                 : function.target.returnType,
             body,
@@ -2040,6 +2040,19 @@ final class FunctionRepresentation(
         ),
         final end => end,
       };
+      if (ends[block] case final Yield end) {
+        final suspended = Yield(
+          end.value,
+          edge(end.onResume),
+          onCancel: end.onCancel == null ? null : edge(end.onCancel!),
+        );
+        ends[block] = suspended;
+        operandsForYield[suspended] = convert(
+          end.value,
+          .object.nullable,
+          body,
+        );
+      }
       if (ends[block] case final Await end) {
         final suspended = Await(
           end.operand,

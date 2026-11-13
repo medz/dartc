@@ -26,6 +26,7 @@ base class SelectedFunction(
   final resultTypes = <Value, ValueType>{};
   final stackCells = <NewCell>{};
   final operandsForAwait = <Await, Value>{};
+  final operandsForYield = <Yield, Value>{};
   final parameterOverrides = <Block, List<BlockParameter>>{};
 
   List<BlockParameter> parametersOf(Block block) =>
@@ -59,6 +60,7 @@ base class SelectedFunction(
     Throw(:final onThrow) ||
     ExhaustivenessFailure(:final onThrow) => [?onThrow],
     Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
+    Yield(:final onResume, :final onCancel) => [onResume, ?onCancel],
     Return() || Unreachable() => const [],
     _ => block.successors,
   };

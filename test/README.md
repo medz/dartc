@@ -30,7 +30,7 @@ dart test -P native
 
 The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. Without target names it builds all supported targets, including when selecting fixtures. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target and binding configuration, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise object, static, shared and executable output requests.
 
-For a compiler fixture, pass `--fixture=<name>`; repeat the option to select more than one. Names match the library fixtures in `test/compiler/fixtures/`, with `entry` selecting the basic executable group, `futures`, `async_functions` and `records` their executables, and `descriptor_write` both IO variants. Required provider libraries, FFI storage and associated executables are built with the selection. Unknown names fail before building anything. Other domains still use the full target build.
+For a compiler fixture, pass `--fixture=<name>`; repeat the option to select more than one. Names match the library fixtures in `test/compiler/fixtures/`, with `entry` selecting the basic executable group, `futures`, `async_functions`, `sync_generators` and `records` their executables, and `descriptor_write` both IO variants. Required provider libraries, FFI storage and associated executables are built with the selection. Unknown names fail before building anything. Other domains still use the full target build.
 
 ```sh
 dart run tool/build_test_assets.dart macos-arm64 --fixture=pointers

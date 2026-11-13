@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Encode and decode URI components, queries and full URI text in native code using the SDK implementations. Support query-string splitting, UTF-8/Latin-1/ASCII encodings and malformed-input errors.
+- Run synchronous generators in native programs using the SDK iterator implementation. Preserve lazy, independent iterations, generic captures, yield delegation, catch/finally and live references across suspension. Reject recursive moveNext with StateError before changing the active iteration.
 
 - Use the SDK's immutable Map lookup and NoSuchMethodError construction and formatting. Constant Map indexes retain their entries through collection; method, getter and setter failures keep their invocation details. VM-specific matching-signature descriptions remain unavailable.
 - Reuse the SDK's String repetition body. Padding handles negative widths before subtracting the string length, including the minimum signed integer.

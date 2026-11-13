@@ -30,6 +30,7 @@ final class HeapRuntime(
   final FunctionTarget? floatingRemainder,
   final FunctionTarget? floatingModulo,
   final AsyncRuntime? async,
+  final SyncRuntime? sync,
   final TypeRuntime? types,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
@@ -106,6 +107,13 @@ final class HeapRuntime(
         throw ArgumentError('Invalid memory service: ${target.name}');
       }
     }
+    for (final target in [?sync?.create, ?sync?.yieldValue]) {
+      if (program.implementationOf(target) is! IrFunction) {
+        throw ArgumentError(
+          'Generator runtime entry requires a Dart body: ${target.name}',
+        );
+      }
+    }
     if (async case final entries?) {
       for (final target in [
         entries.create,
@@ -162,6 +170,33 @@ final class AsyncRuntime(
         complete.signature !=
             FunctionType(.voidType, [.object, .object.nullable])) {
       throw ArgumentError('Invalid async completion entry: ${complete.name}');
+    }
+  }
+}
+
+/// Ordinary Dart entries for independent synchronous generator iterations.
+final class SyncRuntime(
+  final FunctionTarget create,
+  final FunctionTarget yieldValue,
+) {
+  static final callback = FunctionType(.boolean, [.object]);
+  static final factory = FunctionType(callback, []);
+
+  this {
+    if (create.kind != .function || create.typeParameters.length != 1) {
+      throw ArgumentError('Invalid generator entry: ${create.name}');
+    }
+    final t = create.typeParameters.single;
+    if (create.signature !=
+            FunctionType(
+              CoreTypes.iterableOf(t),
+              [factory],
+              typeParameters: [t],
+            ) ||
+        yieldValue.kind != .function ||
+        yieldValue.signature !=
+            FunctionType(.voidType, [.object, .object.nullable])) {
+      throw ArgumentError('Invalid generator entry signature.');
     }
   }
 }

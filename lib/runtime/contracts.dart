@@ -21,6 +21,8 @@ enum RuntimeRole() {
   asyncStart,
   asyncAwait,
   asyncReturn,
+  syncCreate,
+  syncYield,
   typeSubtype,
   typeEquals,
   typeHash,

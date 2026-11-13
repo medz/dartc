@@ -6,45 +6,64 @@ import 'heap_runtime.dart';
 import 'selected_function.dart';
 import 'storage_access.dart';
 
-/// Assigns one traced activation and resume entry to each async source body.
-final class AsyncFunctions(Iterable<IrFunction> functions) {
-  final frames = <FunctionTarget, AsyncFrame>{};
+/// Assigns traced activations and resume entries to suspendable source bodies.
+final class SuspensionFunctions(Iterable<IrFunction> functions) {
+  final frames = <FunctionTarget, SuspensionFrame>{};
 
   this {
     for (final function in functions) {
-      if (function.bodyKind == .asynchronous) {
-        frames[function.target] = AsyncFrame(function, frames.length);
+      if (function.bodyKind == .asynchronous ||
+          function.bodyKind == .syncGenerator) {
+        frames[function.target] = SuspensionFrame(function, frames.length);
       }
     }
   }
 
   Iterable<IrClass> get classes =>
       frames.values.map((frame) => frame.declaration);
-  Iterable<IrExternal> get entries =>
-      frames.values.map((frame) => IrExternal(frame.resume));
+  Iterable<IrExternal> get entries => frames.values.expand(
+    (frame) => [
+      IrExternal(frame.resume),
+      if (frame.synchronous) IrExternal(frame.clone),
+    ],
+  );
 }
 
-final class AsyncFrame(final IrFunction source, int index) {
-  final type = ClassType(null, 'AsyncFrame$index');
+final class SuspensionFrame(final IrFunction source, int index) {
+  final type = ClassType(null, 'SuspensionFrame$index');
+  bool get synchronous => source.bodyKind == .syncGenerator;
   late final state = InstanceField(type, 'state', .integer);
   late final task = InstanceField(type, 'task', .object.nullable);
   late final resume = FunctionTarget(
     null,
     'resume',
-    .voidType,
-    AsyncRuntime.callback.parameters,
+    synchronous ? .boolean : .voidType,
+    synchronous
+        ? SyncRuntime.callback.parameters
+        : AsyncRuntime.callback.parameters,
+    owner: type,
+    kind: .method,
+  );
+  late final clone = FunctionTarget(
+    null,
+    'clone',
+    SyncRuntime.callback,
+    [],
     owner: type,
     kind: .method,
   );
   final slots = <Value, InstanceField>{};
 
-  IrClass get declaration =>
-      IrClass(type, [state, task, ...slots.values], members: [resume]);
+  IrClass get declaration => IrClass(
+    type,
+    [state, if (!synchronous) task, ...slots.values],
+    members: [resume, if (synchronous) clone],
+  );
 
   /// Spills only values crossing a suspension, then makes all resume edges explicit.
   SelectedFunction lower(
     FunctionRepresentation body,
-    AsyncRuntime runtime,
+    HeapRuntime runtime,
     FunctionTarget invalid,
   ) {
     final flow = FunctionLiveness(
@@ -56,7 +75,8 @@ final class AsyncFrame(final IrFunction source, int index) {
     final saved = {
       ...body.entryParameters,
       for (final block in body.blocks)
-        if (body.ends[block] is Await) ...flow.liveOut[block]!,
+        if (body.ends[block] is Await || body.ends[block] is Yield)
+          ...flow.liveOut[block]!,
     };
     for (final value in saved) {
       final stored = body.typeOf(value);
@@ -119,6 +139,28 @@ final class AsyncFrame(final IrFunction source, int index) {
     dispatch = next;
     var stateId = 0;
 
+    void suspend(Block continuation, List<Value> into, Block block) {
+      stateId++;
+      final following = result.addBlock();
+      final match = Equals(currentState, Constant.integer(stateId));
+      result.instructions[dispatch]!.add(match);
+      result.ends[dispatch] = Branch(
+        match,
+        Jump(continuation),
+        Jump(following),
+      );
+      dispatch = following;
+      for (final entry in slots.entries) {
+        if (body.layouts.isReference(entry.value.type) &&
+            !flow.liveOut[block]!.contains(entry.key)) {
+          into.add(
+            StorageWrite(entry.value, frame, const Constant.nullValue()),
+          );
+        }
+      }
+      into.add(StorageWrite(state, frame, Constant.integer(stateId)));
+    }
+
     for (final block in body.blocks) {
       final into = result.instructions[block] = <Value>[];
       for (final parameter in body.parametersOf(block)) {
@@ -139,16 +181,7 @@ final class AsyncFrame(final IrFunction source, int index) {
       final end = body.ends[block]!;
       switch (end) {
         case Await():
-          stateId++;
-          final continuation = result.addBlock(), following = result.addBlock();
-          final match = Equals(currentState, Constant.integer(stateId));
-          result.instructions[dispatch]!.add(match);
-          result.ends[dispatch] = Branch(
-            match,
-            Jump(continuation),
-            Jump(following),
-          );
-          dispatch = following;
+          final continuation = result.addBlock();
           final success = result.addBlock(), failure = result.addBlock();
           final failed = Equals(
             entry.parameters[2],
@@ -184,24 +217,16 @@ final class AsyncFrame(final IrFunction source, int index) {
                 });
           final value = reload(body.operandsForAwait[end]!, into);
           final argument = reload(body.awaitTypes[end]!, into);
-          for (final entry in slots.entries) {
-            if (body.layouts.isReference(entry.value.type) &&
-                !flow.liveOut[block]!.contains(entry.key)) {
-              into.add(
-                StorageWrite(entry.value, frame, const Constant.nullValue()),
-              );
-            }
-          }
-          into.add(StorageWrite(state, frame, Constant.integer(stateId)));
+          suspend(continuation, into, block);
           final activation = StorageRead(task, frame, type: .object);
           into.add(activation);
           final call = DirectCall(
-            runtime.awaitValue,
+            runtime.async!.awaitValue,
             [activation, value],
             typeArguments: [end.result.type],
           );
           result.operands[call] = [activation, value, argument];
-          result.invocations[call] = runtime.awaitValue;
+          result.invocations[call] = runtime.async!.awaitValue;
           into.add(call);
           if (end.onThrow case final edge?) {
             final done = result.addBlock();
@@ -214,12 +239,27 @@ final class AsyncFrame(final IrFunction source, int index) {
           } else {
             result.ends[block] = const Return(Constant.nullValue());
           }
+        case Yield():
+          final value = reload(body.operandsForYield[end]!, into);
+          suspend(transfer(end.onResume).target, into, block);
+          final call = DirectCall(runtime.sync!.yieldValue, [
+            entry.parameters[1],
+            value,
+          ]);
+          result.invocations[call] = runtime.sync!.yieldValue;
+          into.add(call);
+          result.ends[block] = const Return(Constant.boolean(true));
+        case Return() when synchronous:
+          result.ends[block] = const Return(Constant.boolean(false));
         case Return(:final value):
           final returned = reload(value ?? const Constant.nullValue(), into);
           final activation = StorageRead(task, frame, type: .object);
           into.add(activation);
-          final call = DirectCall(runtime.complete, [activation, returned]);
-          result.invocations[call] = runtime.complete;
+          final call = DirectCall(runtime.async!.complete, [
+            activation,
+            returned,
+          ]);
+          result.invocations[call] = runtime.async!.complete;
           into.add(call);
           result.ends[block] = const Return(Constant.nullValue());
         case final Jump edge:
@@ -245,7 +285,7 @@ final class AsyncFrame(final IrFunction source, int index) {
         case Unreachable():
           result.ends[block] = end;
         default:
-          throw UnsupportedError('Async terminator: ${end.runtimeType}');
+          throw UnsupportedError('Suspension terminator: ${end.runtimeType}');
       }
     }
     final failure = DirectCall(invalid, []);
@@ -255,13 +295,29 @@ final class AsyncFrame(final IrFunction source, int index) {
     return result;
   }
 
-  IrFunction wrapper(AsyncRuntime runtime) {
+  IrFunction wrapper(HeapRuntime runtime) {
     final entry = Block(source.target.parameterTypes);
     final frame = entry.emit(NewPayload(type, const Constant.integer(0)));
-    final callback = entry.emit(BindMethod(resume, frame, direct: true));
+    final callback = entry.emit(
+      BindMethod(synchronous ? clone : resume, frame, direct: true),
+    );
+    if (synchronous) {
+      entry.finish(
+        Return(
+          entry.emit(
+            DirectCall(
+              runtime.sync!.create,
+              [callback],
+              typeArguments: [source.yieldType!],
+            ),
+          ),
+        ),
+      );
+      return IrFunction(source.target, [entry], defaults: source.defaults);
+    }
     final activation = entry.emit(
       DirectCall(
-        runtime.create,
+        runtime.async!.create,
         [callback],
         typeArguments: [source.completionType!],
       ),
@@ -271,7 +327,7 @@ final class AsyncFrame(final IrFunction source, int index) {
       Return(
         entry.emit(
           DirectCall(
-            runtime.start,
+            runtime.async!.start,
             [activation],
             typeArguments: [source.completionType!],
           ),
@@ -279,6 +335,18 @@ final class AsyncFrame(final IrFunction source, int index) {
       ),
     );
     return IrFunction(source.target, [entry], defaults: source.defaults);
+  }
+
+  IrFunction factory(List<BlockParameter> parameters) {
+    final entry = Block(clone.parameterTypes);
+    final frame = entry.emit(NewPayload(type, const Constant.integer(0)));
+    for (final parameter in parameters) {
+      final field = slots[parameter]!;
+      final value = entry.emit(LoadField(field, entry.parameters.first));
+      entry.emit(StoreField(field, frame, value));
+    }
+    entry.finish(Return(entry.emit(BindMethod(resume, frame, direct: true))));
+    return IrFunction(clone, [entry]);
   }
 
   /// Installs arguments before the first callback can enter the activation.
@@ -298,6 +366,6 @@ final class AsyncFrame(final IrFunction source, int index) {
       ]);
       return;
     }
-    throw StateError('Missing async activation allocation.');
+    throw StateError('Missing suspension activation allocation.');
   }
 }
