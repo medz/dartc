@@ -331,18 +331,18 @@ Future<void> main(List<String> args) async {
         );
       }
     }
-    const storageNames = {
-      'doubles': 'double',
-      'mixed_numeric': 'numeric',
-      'math': 'numeric',
-      'pointers': 'pointer',
-      'managed_objects': 'pointer',
-      'exceptions': 'pointer',
-      'type_checks': 'pointer',
-      'native_integers': 'integer',
-      'abi_integers': 'integer',
-      'native_floats': 'float',
-      'pointer_arithmetic': 'index',
+    const storageFixtures = {
+      'doubles',
+      'mixed_numeric',
+      'math',
+      'pointers',
+      'managed_objects',
+      'exceptions',
+      'type_checks',
+      'native_integers',
+      'abi_integers',
+      'native_floats',
+      'pointer_arithmetic',
     };
     if (selected.contains('native_finalizers')) {
       await shared([
@@ -359,10 +359,8 @@ Future<void> main(List<String> args) async {
       await entry.write(assets.file('compiler/entry_native_finalizers'));
     }
     late final data = dataModules(target);
-    for (final name in {
-      for (final fixture in selected) ?storageNames[fixture],
-    }) {
-      await shared([data.first], assets.library('compiler/${name}_storage'));
+    for (final fixture in selected.where(storageFixtures.contains)) {
+      await shared([data.first], assets.library('compiler/${fixture}_storage'));
     }
     if (requested.isNotEmpty) {
       print('Built compiler fixtures ${selected.join(', ')} for $target.');

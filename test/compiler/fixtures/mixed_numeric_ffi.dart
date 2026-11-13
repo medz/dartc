@@ -6,7 +6,8 @@ import '../../support/native_assets.dart';
 
 final class NumericLibrary() {
   final _library = NativeAssets(Target.host()).open('compiler/mixed_numeric');
-  final _storage = NativeAssets(Target.host()).open('compiler/numeric_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/mixed_numeric_storage');
   late final memory = _storage.lookup<Int64>('counter');
   late final binary = [
     for (final name in ['add', 'subtract', 'multiply', 'divide'])

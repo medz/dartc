@@ -14,7 +14,7 @@ import 'doubles.dart'
 
 final class DoubleLibrary() {
   final _library = NativeAssets(Target.host()).open('compiler/doubles');
-  final _storage = NativeAssets(Target.host()).open('compiler/double_storage');
+  final _storage = NativeAssets(Target.host()).open('compiler/doubles_storage');
   late final memory = _storage.lookup<Int64>('counter');
   late final binary = [
     for (final name in ['add', 'subtract', 'multiply', 'divide'])

@@ -7,7 +7,8 @@ import '../../support/native_assets.dart';
 final class PointerArithmeticLibrary() {
   final _library = NativeAssets(Target.host())
       .open('compiler/pointer_arithmetic');
-  final _storage = NativeAssets(Target.host()).open('compiler/index_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/pointer_arithmetic_storage');
   late final memory = _storage.lookup<Int64>('counter');
 
   int Function(int, int, int) offset(String type) =>

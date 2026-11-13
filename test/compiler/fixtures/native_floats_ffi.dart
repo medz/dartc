@@ -7,7 +7,8 @@ import 'native_floats.dart' show MixedNative, MixedDart;
 
 final class NativeFloats() {
   final _library = NativeAssets(Target.host()).open('compiler/native_floats');
-  final _storage = NativeAssets(Target.host()).open('compiler/float_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/native_floats_storage');
   late final memory = _storage.lookup<Uint8>('counter');
   late final identity = _library
       .lookupFunction<Float Function(Float), double Function(double)>(

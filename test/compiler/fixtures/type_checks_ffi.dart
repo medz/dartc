@@ -6,7 +6,8 @@ import '../../support/native_assets.dart';
 
 final class TypeChecks() {
   final _library = NativeAssets(Target.host()).open('compiler/type_checks');
-  final _storage = NativeAssets(Target.host()).open('compiler/pointer_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/type_checks_storage');
   late final effects = _storage.lookup<Int64>('counter');
 
   late final classify = _library

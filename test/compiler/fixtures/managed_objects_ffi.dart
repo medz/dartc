@@ -6,7 +6,8 @@ import '../../support/native_assets.dart';
 
 final class ManagedObjects() {
   final _library = NativeAssets(Target.host()).open('compiler/managed_objects');
-  final _storage = NativeAssets(Target.host()).open('compiler/pointer_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/managed_objects_storage');
   late final output = _storage.lookup<Int64>('counter');
   late final floatingOutput = _storage.lookup<Double>('state');
   late final constructStackPointer = _library

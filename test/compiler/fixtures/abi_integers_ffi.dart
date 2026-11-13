@@ -7,7 +7,8 @@ import 'abi_integers.dart';
 
 final class AbiIntegers() {
   final _library = NativeAssets(Target.host()).open('compiler/abi_integers');
-  final _storage = NativeAssets(Target.host()).open('compiler/integer_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/abi_integers_storage');
   late final memory = _storage.lookup<PlatformInt>('counter');
   late final identity = _library.lookupFunction<Callback, int Function(int)>(
     'identity',

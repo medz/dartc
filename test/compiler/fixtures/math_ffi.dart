@@ -6,7 +6,7 @@ import '../../support/native_assets.dart';
 
 final class MathLibrary() {
   final _library = NativeAssets(Target.host()).open('compiler/math');
-  final _storage = NativeAssets(Target.host()).open('compiler/numeric_storage');
+  final _storage = NativeAssets(Target.host()).open('compiler/math_storage');
 
   late final memory = _storage.lookup<Double>('counter');
   late final squareRoot = _library

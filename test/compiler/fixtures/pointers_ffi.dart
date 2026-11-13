@@ -7,7 +7,8 @@ import 'pointers.dart' show MixedNative, MixedDart, ReadPointer;
 
 final class PointerLibrary() {
   final _library = NativeAssets(Target.host()).open('compiler/pointers');
-  final _storage = NativeAssets(Target.host()).open('compiler/pointer_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/pointers_storage');
   late final memory = _storage.lookup<Int64>('counter');
   late final fromAddress = _library
       .lookupFunction<

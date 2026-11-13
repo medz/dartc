@@ -6,7 +6,8 @@ import '../../support/native_assets.dart';
 
 final class Exceptions() {
   final _library = NativeAssets(Target.host()).open('compiler/exceptions');
-  final _storage = NativeAssets(Target.host()).open('compiler/pointer_storage');
+  final _storage = NativeAssets(Target.host())
+      .open('compiler/exceptions_storage');
   late final effects = _storage.lookup<Int64>('counter');
   late final cleanup = _library
       .lookupFunction<
