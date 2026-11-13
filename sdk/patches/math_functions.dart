@@ -1,3 +1,4 @@
+// shortcut: analyzer 14.7 mischecks Native across augmentation fragments, inline after its FFI verifier is fixed.
 import 'dart:ffi';
 
 import '../../lib/runtime/contracts.dart';
