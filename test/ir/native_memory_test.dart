@@ -10,6 +10,29 @@ void main() {
   const address = Constant.integer(-1);
   final pointer = PointerFromAddress(address, FfiTypes.int64Pointer);
 
+  test(
+    'abstract compound views expose addresses without becoming allocatable',
+    () {
+      for (final type in [FfiTypes.struct, FfiTypes.union]) {
+        final view = Block([type]).parameters.single;
+        expect(NativeAddress(view).inputs, [view]);
+        expect(() => NativeView(type), throwsArgumentError);
+        expect(() => FfiTypes.describe(type), throwsUnsupportedError);
+      }
+      for (final type in <ValueType>[
+        .object,
+        FfiTypes.struct.nullable,
+        FfiTypes.compound,
+        ClassType(Uri.parse('dart:ffi'), 'Struct'),
+      ]) {
+        expect(
+          () => NativeAddress(Block([type]).parameters.single),
+          throwsArgumentError,
+        );
+      }
+    },
+  );
+
   test('reference recovery preserves traced types without allocating', () {
     final object = Block([.object.nullable]).parameters.single;
     final location = ReferenceAddress(object);

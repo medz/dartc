@@ -113,15 +113,23 @@ AddressState compounds() {
   );
   move(state.entries[1].address.cast(), state.entries[2].address.cast(), 4);
   final copy = Struct.create<AddressState>();
-  copyState(copy, state);
+  copyState(copy, state, sizeOf<AddressState>());
   final choice = Union.create<AddressChoice>();
   move(choice.address.cast(), Float64List.fromList([2.5]).address.cast(), 8);
-  move(copy.value.address.cast(), choice.value.address.cast(), 8);
+  final unionCopy = Union.create<AddressChoice>();
+  copyUnion(unionCopy, choice, sizeOf<AddressChoice>());
+  move(copy.value.address.cast(), unionCopy.value.address.cast(), 8);
   return copy;
 }
 
-void copyState<T extends AddressState>(T target, T source) =>
-    move(target.address.cast(), source.address.cast(), sizeOf<AddressState>());
+void copyState<T extends Struct>(T target, T source, int bytes) {
+  later(false);
+  move(target.address.cast(), source.address.cast(), bytes);
+}
+
+void copyUnion(Union target, Union source, int bytes) {
+  move(target.address.cast(), source.address.cast(), bytes);
+}
 
 @Export<Bool Function()>()
 bool subviews() {

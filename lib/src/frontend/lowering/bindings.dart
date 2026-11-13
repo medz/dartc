@@ -1920,6 +1920,9 @@ final class Bindings({
           requireClass(internal.getClass('Symbol')!);
         }
         if (ffi == FfiTypes.pointer ||
+            ffi == FfiTypes.compound ||
+            ffi == FfiTypes.struct ||
+            ffi == FfiTypes.union ||
             builtin == ValueType.number ||
             builtin == ValueType.integer ||
             builtin == ValueType.floating ||

@@ -55,6 +55,9 @@ ClassType? ffiClass(InterfaceElement element) {
   if (library.uri != _library) return null;
   if (element == library.getClass('Finalizable')) return FfiTypes.finalizable;
   if (element == library.getClass('NativeType')) return FfiTypes.nativeType;
+  if (element == library.getClass('_Compound')) return FfiTypes.compound;
+  if (element == library.getClass('Struct')) return FfiTypes.struct;
+  if (element == library.getClass('Union')) return FfiTypes.union;
   if (element == library.getClass('AbiSpecificInteger')) {
     return FfiTypes.abiSpecificInteger;
   }

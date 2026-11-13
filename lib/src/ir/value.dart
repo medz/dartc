@@ -749,10 +749,11 @@ final class NativeView(
 }
 
 /// The address of a native compound view; the view owns any managed backing.
+///
+/// Abstract Struct/Union views need no concrete native layout to expose storage.
 final class NativeAddress(final Value view) extends Instruction {
   this : super(.integer) {
-    if (view.type is! ClassType ||
-        (view.type as ClassType).nativeType is! NativeCompoundType) {
+    if (!FfiTypes.isCompound(view.type)) {
       throw ArgumentError('Expected a native compound view.');
     }
   }

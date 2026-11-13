@@ -35,6 +35,38 @@ abstract final class FfiTypes() {
     isAbstract: true,
   );
 
+  /// The SDK base of native arrays, structs and unions.
+  static final compound = ClassType(
+    _library,
+    '_Compound',
+    interfaces: [nativeType],
+  );
+
+  /// The Dart supertype of native struct views, without a by-value layout.
+  static final struct = ClassType(
+    _library,
+    'Struct',
+    superclass: compound,
+    interfaces: [sizedNativeType],
+    isAbstract: true,
+  );
+
+  /// The Dart supertype of native union views, without a by-value layout.
+  static final union = ClassType(
+    _library,
+    'Union',
+    superclass: compound,
+    interfaces: [sizedNativeType],
+    isAbstract: true,
+  );
+
+  /// Whether [type] is a non-null reference to struct or union storage.
+  static bool isCompound(ValueType type) =>
+      type is ClassType &&
+      (type.nativeType is NativeCompoundType ||
+          type.asInstanceOf(struct) != null ||
+          type.asInstanceOf(union) != null);
+
   static final abiSpecificInteger = ClassType(
     _library,
     'AbiSpecificInteger',

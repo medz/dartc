@@ -155,12 +155,9 @@ final class ProgramLayout(
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;
     if (_storage[declaration] case final known?) return known;
-    if (declaration.nativeType is NativeCompoundType) {
+    if (FfiTypes.isCompound(declaration)) {
       final view = native!.view(declaration);
-      return _storage[declaration] = ClassStorage([
-        view.address,
-        view.owner,
-      ], this);
+      return _storage[declaration] = ClassStorage(view.fields, this);
     }
     if (declaration == native?.buffer) {
       return _storage[declaration] = ClassStorage([], this);

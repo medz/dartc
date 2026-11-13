@@ -1,4 +1,5 @@
 import 'package:dartc/abi.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
@@ -12,10 +13,12 @@ final class NativeStorage(final NativeLayout layout) {
       _views.putIfAbsent(type, () => NativeViewStorage(type));
   Iterable<IrClass> get classes => [
     IrClass(buffer, []),
-    for (final view in _views.values) view.declaration,
+    for (final view in _views.values)
+      if (view.type.nativeType is NativeCompoundType) view.declaration,
   ];
   Iterable<IrFunction> get functions => [
-    for (final view in _views.values) view.function,
+    for (final view in _views.values)
+      if (view.type.nativeType is NativeCompoundType) view.function,
     ..._copies.values,
   ];
 
@@ -54,6 +57,7 @@ final class NativeStorage(final NativeLayout layout) {
   }).target;
 }
 
+/// The same address/owner layout for every struct and union view.
 final class NativeViewStorage(final ClassType type) {
   late final address = InstanceField(
     type,
@@ -75,11 +79,8 @@ final class NativeViewStorage(final ClassType type) {
     owner: type,
     kind: .initializer,
   );
-  late final declaration = IrClass(
-    type,
-    [address, owner],
-    constructors: [initializer],
-  );
+  late final fields = [address, owner];
+  late final declaration = IrClass(type, fields, constructors: [initializer]);
   late final function = _initialize();
 
   IrFunction _initialize() {

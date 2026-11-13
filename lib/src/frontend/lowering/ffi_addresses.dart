@@ -210,18 +210,8 @@ final class FfiAddressArguments(
     }
     final owner = _owner(receiver);
     if (owner == null) return null;
-    if (owner.type case ClassType(nativeType: NativeCompoundType())) {
+    if (FfiTypes.isCompound(owner.type)) {
       return (owner: owner, address: () => context.emit(NativeAddress(owner)));
-    }
-    if (getter.baseElement ==
-            library.getExtension('StructAddress')?.getGetter('address') ||
-        getter.baseElement ==
-            library.getExtension('UnionAddress')?.getGetter('address')) {
-      unsupported(
-        context.unit,
-        receiver,
-        'address of a compound without a bound storage type',
-      );
     }
     if (getter.baseElement ==
         library.getExtension('ArrayAddress')?.getGetter('address')) {
