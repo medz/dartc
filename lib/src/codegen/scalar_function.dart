@@ -23,6 +23,7 @@ final class ScalarFunction<R extends Object>(
   final FunctionEmitter<R> emitter,
 ) {
   final target = body.target;
+  final sourceTarget = body.sourceTarget;
   final layouts = body.layouts;
   final selection = FunctionSelection(body, emitter);
 
@@ -35,7 +36,7 @@ final class ScalarFunction<R extends Object>(
   Uint8List generate(
     void Function(Fixup, FunctionTarget) call,
     void Function(Fixup, Constant) constant,
-    void Function(int, StackRoots) safepoint, {
+    void Function(int, StackRoots, SourceLocation?) safepoint, {
     bool failures = false,
     bool persistent = false,
     void Function(Fixup, NativeReference)? nativeAddress,
@@ -255,7 +256,11 @@ final class ScalarFunction<R extends Object>(
           for (final fixup in parked) {
             codeAddress!(fixup, emitter.position);
           }
-          safepoint(emitter.position, roots);
+          safepoint(
+            emitter.position,
+            roots,
+            selection.body.sourceLocations[instruction],
+          );
           if (failures && native == null) {
             final returned = emitter.label();
             final end = selection.body.ends[block]!;

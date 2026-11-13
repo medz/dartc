@@ -6,6 +6,9 @@ import 'type.dart';
 import 'value.dart';
 import 'verify.dart';
 
+/// A source URI and one-based line and column for an executable operation.
+typedef SourceLocation = ({Uri uri, int line, int column});
+
 /// A callable supplied by the program, with a Dart signature and checked defaults.
 ///
 /// Verification seals all referenced type metadata against later initialization.
@@ -97,6 +100,7 @@ final class IrFunction(
   super.target,
   Iterable<Block> blocks, {
   super.defaults,
+  Map<Object, SourceLocation> sourceLocations = const {},
 
   /// Whether this graph returns directly or uses an async/generator activation.
   final FunctionBodyKind bodyKind = .synchronous,
@@ -109,6 +113,13 @@ final class IrFunction(
 }) extends IrCallable {
   /// The reachable blocks in the supplied order, starting with [entry].
   final List<Block> blocks = .unmodifiable(blocks);
+
+  /// Positions of instructions and terminating blocks in this graph.
+  ///
+  /// A [Block] key locates its terminator; omitted entries have no source position.
+  final Map<Object, SourceLocation> sourceLocations = .unmodifiable(
+    sourceLocations,
+  );
 
   /// The local bodies that this graph can instantiate.
   Set<FunctionTarget> get closures => _references.closures;
@@ -124,6 +135,8 @@ final class IrFunction(
   /// Throws [ArgumentError] when the entry parameters differ from the signature.
   /// Throws [StateError] for an empty or malformed graph. Every block must be
   /// sealed and reachable, and each SSA definition must dominate its uses.
+  /// Source positions require a graph-owned instruction or block, an absolute URI
+  /// and positive line and column coordinates; invalid positions throw [ArgumentError].
   /// Ordinary returns must match the callable result. Generator returns complete
   /// iteration and supply only `null`; yields must match [yieldType].
   this {
@@ -159,6 +172,23 @@ final class IrFunction(
       yieldType: yieldType,
       completionType: completionType,
     );
+    if (sourceLocations.isNotEmpty) {
+      final sites = <Object>{
+        for (final block in this.blocks) ...[
+          block,
+          ...block.instructions,
+          if (block.end case Invoke(:final operation)) operation,
+        ],
+      };
+      for (final MapEntry(:key, :value) in sourceLocations.entries) {
+        if (!sites.contains(key) ||
+            !value.uri.isAbsolute ||
+            value.line < 1 ||
+            value.column < 1) {
+          throw ArgumentError('Invalid source location for ${target.name}.');
+        }
+      }
+    }
   }
 
   /// Writes the typed blocks, instructions and outgoing edges to [output].

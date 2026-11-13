@@ -16,7 +16,10 @@ import 'selectors.dart';
 
 /// Returns the emitted operand, or `null` when [expression] cannot complete normally.
 Value? lowerExpression(FunctionContext context, ast.Expression expression) =>
-    context.normal(_lower(context, expression));
+    context.withSource(
+      expression,
+      () => context.normal(_lower(context, expression)),
+    );
 
 /// Operator overrides are receiver syntax, not first-class expression values.
 Value? _operatorReceiver(FunctionContext context, ast.Expression expression) {

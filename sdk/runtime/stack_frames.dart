@@ -8,9 +8,9 @@ final class StackFrames(final int context) {
 
   int get pc => _pc;
 
-  /// The source function name, or `null` for a generated machine frame.
-  String? get functionName {
-    final address = Memory.read(_record + StackMapRecord.functionName);
+  /// The source frame description, or `null` for a generated machine frame.
+  String? get description {
+    final address = Memory.read(_record + StackMapRecord.description);
     return address == 0 ? null : Memory.objectAt<String>(address);
   }
 

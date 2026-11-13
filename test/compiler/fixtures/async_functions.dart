@@ -78,7 +78,9 @@ Future<String> zones() {
       throw StateError('resumed');
     },
     (error, trace) {
-      done.complete('${error is StateError}:${trace.toString().isNotEmpty}');
+      done.complete(
+        '${error is StateError}:${trace.toString().contains('async_functions.dart:78:')}',
+      );
     },
     zoneValues: {'name': 'async'},
   );

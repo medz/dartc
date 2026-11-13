@@ -371,14 +371,17 @@ base class ScalarCodeGenerator<R extends Object>(
           (entryPoint == null ? 0 : 1),
     );
     String? frameName;
-    void safepoint(int position, StackRoots roots) {
+    void safepoint(int position, StackRoots roots, [SourceLocation? location]) {
       if (hasRoots) {
+        final description = frameName == null || location == null
+            ? frameName
+            : '$frameName (${location.uri}:${location.line}:${location.column})';
         maps.add(
           code.length + position,
           roots,
-          frameName == null
+          description == null
               ? null
-              : constants.addressOf(Constant.string(frameName)),
+              : constants.addressOf(Constant.string(description)),
         );
       }
     }
@@ -452,9 +455,8 @@ base class ScalarCodeGenerator<R extends Object>(
     }
 
     for (final declaration in selected) {
-      frameName = capture && declaration.library != null
-          ? traceName(declaration)
-          : null;
+      final source = functions[declaration]?.sourceTarget ?? declaration;
+      frameName = capture && source.library != null ? traceName(source) : null;
       final binding = imports[declaration], export = exports[declaration];
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));

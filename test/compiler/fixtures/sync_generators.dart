@@ -22,7 +22,19 @@ Iterable<String> retained(
   yield '${value.id}:${value.text}:$floating:${pointer.address}';
 }
 
+Iterable<StackTrace> tracePositions() sync* {
+  yield StackTrace.current;
+  yield StackTrace.current;
+}
+
 void main() {
+  var index = 0;
+  for (final trace in tracePositions()) {
+    final line = ++index == 1 ? 26 : 27;
+    if (!trace.toString().contains('sync_generators.dart:$line:')) {
+      throw StateError('Missing generator source position');
+    }
+  }
   for (final run in <Object? Function()>[
     cases.lazyPhases,
     cases.earlyStopAndRepeat,

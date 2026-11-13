@@ -4,10 +4,34 @@ import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
+import 'package:analyzer/source/line_info.dart';
 
 /// Connects target implementations to SDK declarations through augmentation.
 final class SdkPatches(final OverlayResourceProvider files) {
   final origins = <Uri, Uri>{};
+  final _locations =
+      <Uri, ({Uri uri, LineInfo lines, List<(int, int, int)> edits})>{};
+
+  /// Maps an augmented view's offset back to the unchanged source resource.
+  ({Uri uri, int line, int column})? sourceLocation(Uri uri, int offset) {
+    final source = _locations[uri];
+    if (source == null) return null;
+    for (final (start, end, length) in source.edits.reversed) {
+      if (offset >= start + length) {
+        offset += end - start - length;
+      } else if (offset >= start) {
+        final inside = offset - start;
+        offset = start + (inside < end - start ? inside : end - start);
+      }
+    }
+    final location = source.lines.getLocation(offset);
+    return (
+      uri: source.uri,
+      line: location.lineNumber,
+      column: location.columnNumber,
+    );
+  }
+
   final _official = <String>{};
   CompilationUnit _parse(String path) => parseString(
     content: files.getFile(path).readAsStringSync(),
@@ -778,11 +802,25 @@ final class SdkPatches(final OverlayResourceProvider files) {
     }
     for (final MapEntry(key: path, value: changes) in edits.entries) {
       var content = files.getFile(path).readAsStringSync();
+      final view = views[path];
+      final uri = view != null
+          ? Uri.parse('$ownerUri/$view')
+          : path == libraryPath
+          ? ownerUri
+          : Uri.parse('$ownerUri/').resolve(
+              files.pathContext.relative(path, from: library.parent.path),
+            );
+      _locations[uri] = (
+        uri: files.getFile(path).toUri(),
+        lines: LineInfo.fromContent(content),
+        edits: <(int, int, int)>[],
+      );
       changes.sort(
         (a, b) => a.$1 == b.$1 ? b.$2.compareTo(a.$2) : b.$1.compareTo(a.$1),
       );
       for (final (start, end, replacement) in changes) {
         content = content.replaceRange(start, end, replacement);
+        _locations[uri]!.edits.add((start, end, replacement.length));
       }
       final destination = views[path];
       files.setOverlay(
@@ -799,12 +837,21 @@ final class SdkPatches(final OverlayResourceProvider files) {
     var content = edits.containsKey(libraryPath)
         ? files.getFile(libraryPath).readAsStringSync()
         : original;
-    content = content.replaceRange(
-      end,
-      end,
-      "\n${views.values.map((path) => "part '$path';").join('\n')}\n",
+    final source = _locations.putIfAbsent(
+      ownerUri,
+      () => (
+        uri: libraryUri,
+        lines: LineInfo.fromContent(original),
+        edits: <(int, int, int)>[],
+      ),
     );
-    content = content.replaceRange(insert, insert, "${imports.join('\n')}\n");
+    final partText =
+        "\n${views.values.map((path) => "part '$path';").join('\n')}\n";
+    content = content.replaceRange(end, end, partText);
+    source.edits.add((end, end, partText.length));
+    final importText = "${imports.join('\n')}\n";
+    content = content.replaceRange(insert, insert, importText);
+    source.edits.add((insert, insert, importText.length));
     files.setOverlay(libraryPath, content: content, modificationStamp: 0);
     for (final MapEntry(key: path, value: view) in views.entries) {
       origins[Uri.parse('$ownerUri/$view')] = files.getFile(path).toUri();

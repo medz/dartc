@@ -36,6 +36,46 @@ void main() {
     },
   );
 
+  test(
+    'source locations reject foreign operations and invalid coordinates',
+    () {
+      final entry = Block(f.parameterTypes)..finish(const Return(one));
+      final location = (
+        uri: Uri.parse('file:///source.dart'),
+        line: 3,
+        column: 5,
+      );
+      final positions = <Object, SourceLocation>{entry: location};
+      final function = IrFunction(f, [entry], sourceLocations: positions);
+      positions.clear();
+      expect(function.sourceLocations[entry], location);
+      for (final invalid in <Object, SourceLocation>{
+        entry.end: location,
+        Block(): location,
+        IntBinary(.add, one, one): location,
+      }.entries) {
+        expect(
+          () => IrFunction(
+            f,
+            [entry],
+            sourceLocations: {invalid.key: invalid.value},
+          ),
+          throwsArgumentError,
+        );
+      }
+      for (final invalid in [
+        (uri: Uri.parse('source.dart'), line: 3, column: 5),
+        (uri: location.uri, line: 0, column: 5),
+        (uri: location.uri, line: 3, column: 0),
+      ]) {
+        expect(
+          () => IrFunction(f, [entry], sourceLocations: {entry: invalid}),
+          throwsArgumentError,
+        );
+      }
+    },
+  );
+
   test('a branch-local value cannot escape through the other arm', () {
     final entry = Block(f.parameterTypes),
         yes = Block(),

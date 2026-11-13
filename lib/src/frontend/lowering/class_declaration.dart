@@ -415,7 +415,7 @@ void _initialize(
     ConstructorElement target,
     ast.ArgumentList? arguments, {
     bool forwardSuper = false,
-  }) {
+  }) => context.withSource(arguments?.parent, () {
     final call = bindings.initializerCall(
       ctor,
       target,
@@ -444,7 +444,7 @@ void _initialize(
         ], ownerType: call.ownerType),
       );
     }
-  }
+  });
 
   if (initializers case [
     ast.RedirectingConstructorInvocation(:final element, :final argumentList),
@@ -519,7 +519,7 @@ void _storeInitializedField(
   FieldElement field,
   Value value,
   ast.AstNode site,
-) {
+) => context.withSource(site, () {
   final converted = context.normal(
     context.convert(value, context.typeOf(field.type, site)),
   );
@@ -537,4 +537,4 @@ void _storeInitializedField(
       converted,
     ),
   );
-}
+});

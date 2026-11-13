@@ -182,6 +182,7 @@ final class AnalysisSession(
             in patches.origins.entries)
           if (runtimeSources.contains(origin)) view,
       },
+      patches,
       _checkOpen,
     );
   }
@@ -193,6 +194,7 @@ final class CheckedLibraries._(
   Map<String, ResolvedLibraryResult> resources,
   final Uri? _runtimeContracts,
   final Set<Uri> _runtimeSources,
+  final SdkPatches _patches,
   void Function() checkOpen,
 ) {
   final List<ResolvedLibraryResult> _libraries = .unmodifiable(input);
@@ -216,6 +218,21 @@ final class CheckedLibraries._(
   Map<String, ResolvedLibraryResult> get resources {
     _checkOpen();
     return _resources;
+  }
+
+  /// Locates an operation in its original unit, including SDK augmentations.
+  ({Uri uri, int line, int column}) sourceLocation(
+    CompilationUnit unit,
+    int offset,
+  ) {
+    _checkOpen();
+    final uri = unit.declaredFragment?.source.uri;
+    if (uri == null) throw ArgumentError('Source unit is not resolved.');
+    RangeError.checkValueInInterval(offset, 0, unit.end, 'offset');
+    final patched = _patches.sourceLocation(uri, offset);
+    if (patched != null) return patched;
+    final location = unit.lineInfo.getLocation(offset);
+    return (uri: uri, line: location.lineNumber, column: location.columnNumber);
   }
 
   /// Evaluates an annotation using this session's checked constant semantics.

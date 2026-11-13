@@ -14,7 +14,10 @@ base class SelectedFunction(
   final ProgramLayout layouts,
   final Block entry, {
   List<BlockParameter>? parameters,
+  FunctionTarget? sourceTarget,
 }) extends SelectedGraph {
+  final FunctionTarget sourceTarget = sourceTarget ?? target;
+  final sourceLocations = <Object, SourceLocation>{};
   final List<BlockParameter> entryParameters = parameters ?? entry.parameters;
   final operands = <Value, List<Value>>{};
   final edgeArguments = <Jump, List<Value>>{};

@@ -235,7 +235,10 @@ final class FunctionLowering._(
             when _target.kind == .initializer || _representationConstructor:
           _return(null);
         case ast.ExpressionFunctionBody(:final expression):
-          _return(lowerExpression(context, expression));
+          context.withSource(
+            body,
+            () => _return(lowerExpression(context, expression)),
+          );
         case ast.BlockFunctionBody(:final block):
           _statement(block);
           if (context.current != null) {
@@ -252,6 +255,7 @@ final class FunctionLowering._(
     return .new(
       _target,
       context.blocks,
+      sourceLocations: context.sourceLocations,
       defaults: context.bindings.defaults(_target),
       bodyKind: switch ((context.isAsynchronous, _yieldType)) {
         (true, null) => .asynchronous,
@@ -280,7 +284,7 @@ final class FunctionLowering._(
       region.returnValue(value);
       return;
     }
-    context.current!.finish(Return(value));
+    context.finish(Return(value));
     context.current = null;
   }
 
@@ -382,7 +386,7 @@ final class FunctionLowering._(
   void _suspend(Value value, {bool delegate = false}) {
     final next = JumpTarget(context);
     final cancel = context.isAsynchronous ? JumpTarget(context) : null;
-    context.current!.finish(
+    context.finish(
       delegate
           ? YieldStream(
               value,
@@ -400,7 +404,10 @@ final class FunctionLowering._(
     next.enter();
   }
 
-  void _statement(ast.Statement statement) {
+  void _statement(ast.Statement statement) =>
+      context.withSource(statement, () => _lowerStatement(statement));
+
+  void _lowerStatement(ast.Statement statement) {
     switch (statement) {
       case ast.Block():
         _scoped(statement);

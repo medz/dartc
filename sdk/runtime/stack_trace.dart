@@ -11,7 +11,7 @@ external StackTrace currentStackTrace();
 final class CapturedStackTrace(
   final int pc,
   final CapturedStackTrace? caller,
-  final String? functionName,
+  final String? description,
 ) implements StackTrace {
   @override
   String toString() {
@@ -21,7 +21,7 @@ final class CapturedStackTrace(
       frame != null;
       frame = frame.caller
     ) {
-      names.add(frame.functionName ?? '0x${frame.pc.toRadixString(16)}');
+      names.add(frame.description ?? '0x${frame.pc.toRadixString(16)}');
     }
     return [
       for (var i = names.length - 1; i >= 0; i--)
@@ -36,7 +36,7 @@ StackTrace captureStackTrace(int sp, int pc) {
   CapturedStackTrace? head;
   while (frames.moveNext()) {
     if (!frames.isBoundary) {
-      head = CapturedStackTrace(frames.pc, head, frames.functionName);
+      head = CapturedStackTrace(frames.pc, head, frames.description);
     }
   }
   return head ?? StackTrace.empty;

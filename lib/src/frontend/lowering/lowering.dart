@@ -32,6 +32,7 @@ final class Lowering({final bool enableAssertions = false}) {
     final bindings = Bindings(
       enableAssertions: enableAssertions,
       constants: input.constants,
+      sourceLocation: input.sourceLocation,
       runtimeContracts: input.runtimeContracts,
       runtimeSources: input.runtimeSources,
       sourceLibraries: {for (final library in input.libraries) library.element},

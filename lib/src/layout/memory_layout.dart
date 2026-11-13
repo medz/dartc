@@ -71,8 +71,8 @@ abstract final class StackMapRecord() {
   static const tableHeader = 8;
   static const pc = 0;
 
-  /// The constant function-name address, or zero for an unnamed frame.
-  static const functionName = 8;
+  /// The constant frame-description address, or zero for an unnamed frame.
+  static const description = 8;
   static const callerStack = 16;
   static const returnAddress = 24;
   static const rootCount = 32;

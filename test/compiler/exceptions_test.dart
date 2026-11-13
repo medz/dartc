@@ -12,10 +12,10 @@ import 'fixtures/exceptions.dart' as sdk;
 import 'fixtures/exceptions_ffi.dart';
 
 void main() {
-  test('stack names, snapshots and first Error traces survive collection and overrides', () {
+  test('stack locations, snapshots and first Error traces survive collection and overrides', () {
     final native = Exceptions();
     addTearDown(native.close);
-    for (var mode = 0; mode < 7; mode++) {
+    for (var mode = 0; mode < 8; mode++) {
       expect(sdk.stackTraceLifecycle(mode), isTrue, reason: 'SDK case $mode');
       expect(
         native.stackTraceLifecycle(mode),

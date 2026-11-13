@@ -2,6 +2,8 @@ import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 
+part 'exceptions_locations.dart';
+
 class Token(final int value);
 
 Never fail(Object value) => throw value;
@@ -129,6 +131,7 @@ StackTrace namedTrace() => TraceSource().capture();
 
 @Export<Bool Function(Int32)>()
 bool stackTraceLifecycle(int mode) {
+  if (mode == 7) return sourceLocations();
   if (mode == 6) {
     final trace = namedTrace();
     final text = trace.toString();

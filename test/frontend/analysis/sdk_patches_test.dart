@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/source/line_info.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 // SDK patch fragments require the same SDK-specific experiment view as compilation.
 // ignore: implementation_imports
@@ -77,6 +80,62 @@ Future<void> withImplementations(
 }
 
 void main() {
+  test('source positions map patched views and library insertions back to originals', () async {
+    final sources = await SdkSources.load();
+    await withImplementations((libraries, patches) {
+      final math = libraries.singleWhere(
+        (library) => library.element.uri.toString() == 'dart:math',
+      );
+      final vm = libraries.singleWhere(
+        (library) => library.element.uri.toString() == 'dart:_vm',
+      );
+      final squareRoot = math.getFragmentDeclaration(
+        math.element.getTopLevelFunction('sqrt')!.fragments.last,
+      )!;
+      final seed = math.getFragmentDeclaration(
+        math.element
+            .getClass('_Random')!
+            .getMethod('_initialSeed')!
+            .fragments
+            .last,
+      )!;
+      final value = vm.getFragmentDeclaration(
+        vm.element
+            .getClass('FinalThreadLocal')!
+            .getGetter('value')!
+            .fragments
+            .last,
+      )!;
+      for (final (declaration, path, marker) in [
+        (
+          squareRoot,
+          'sdk/std/lib/_internal/vm/lib/math_patch.dart',
+          '=> _sqrt(x.toDouble())',
+        ),
+        (seed, 'sdk/patches/math.dart', '=> _setupSeed(Memory.clock())'),
+        (value, 'sdk/std/lib/_vm/_vm.dart', '{\n    if (!variable.hasValue)'),
+      ]) {
+        final body = switch (declaration.node) {
+          FunctionDeclaration(:final functionExpression) =>
+            functionExpression.body,
+          MethodDeclaration(:final body) => body,
+          _ => throw StateError('Expected executable declaration'),
+        };
+        final original = utf8.decode(sources.read(path));
+        final offset = original.lastIndexOf(marker);
+        expect(offset, greaterThanOrEqualTo(0));
+        final location = LineInfo.fromContent(original).getLocation(offset);
+        expect(
+          patches.sourceLocation(declaration.resolvedUnit!.uri, body.offset),
+          (
+            uri: Uri.file('/__dartc__/$path'),
+            line: location.lineNumber,
+            column: location.columnNumber,
+          ),
+        );
+      }
+    });
+  });
   test(
     'all installed SDK implementation units are analyzed in their library',
     () async {

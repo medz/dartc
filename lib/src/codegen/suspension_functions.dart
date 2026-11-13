@@ -90,7 +90,13 @@ final class SuspensionFrame(final IrFunction source, int index) {
     }
     body.layouts.defineStorage(declaration);
     final entry = Block(resume.parameterTypes);
-    final result = SelectedFunction(resume, body.layouts, entry);
+    final result = SelectedFunction(
+      resume,
+      body.layouts,
+      entry,
+      sourceTarget: body.sourceTarget,
+    );
+    result.sourceLocations.addAll(body.sourceLocations);
     result.blocks.add(entry);
     result.instructions[entry] = [];
     result.blocks.addAll(body.blocks);
@@ -180,6 +186,7 @@ final class SuspensionFrame(final IrFunction source, int index) {
           into.add(StorageWrite(field, frame, operation));
         }
       }
+      final endStart = into.length, added = result.blocks.length;
       final end = body.ends[block]!;
       switch (end) {
         case Await():
@@ -339,6 +346,16 @@ final class SuspensionFrame(final IrFunction source, int index) {
           result.ends[block] = end;
         default:
           throw UnsupportedError('Suspension terminator: ${end.runtimeType}');
+      }
+      if (body.sourceLocations[block] case final location?) {
+        for (final value in into.skip(endStart)) {
+          result.sourceLocations[value] = location;
+        }
+        for (final next in result.blocks.skip(added)) {
+          for (final value in result.instructions[next]!) {
+            result.sourceLocations[value] = location;
+          }
+        }
       }
     }
     final failure = DirectCall(invalid, []);

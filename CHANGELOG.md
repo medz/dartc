@@ -3,7 +3,7 @@
 - Support `Random` through the SDK's existing sampling algorithms, with explicit or clock-based default seeds. Preserve bounds, method values and generator state; `Random.secure()` throws `UnsupportedError` while target entropy is unavailable.
 
 - Close Latin-1 decoder outputs for empty final slices and avoid closing them twice in replacement mode. Preserve invalid-byte rejection and replacement characters across chunk boundaries.
-- Show source function names in synchronous stack traces, including enclosing class and local function names. Keep frame order and captured names stable through collection; generated machine frames retain their address fallback.
+- Show function names and source URI, line and column in stack traces, including part files, local functions and resumed async/generator frames. Preserve call-site positions through generated checks and boxing, and keep captured descriptions stable through collection; generated machine frames retain their address fallback.
 
 - Validate Base64/Base64Url conversion through the SDK algorithms, including chunked streams, normalization, codec composition and collection. Fix empty final decoder slices so they validate pending input and close the output sink.
 - Catch allocation failures when assigning scalar values to captured reference variables, preserving the previous value on failure. Pattern caches reuse their stored value without a second boxing allocation.

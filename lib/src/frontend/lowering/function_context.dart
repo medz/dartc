@@ -27,6 +27,42 @@ final class FunctionContext(
   /// The blocks created so far, with the function entry first.
   final blocks = <Block>[];
 
+  /// Original source positions for operations and terminating blocks.
+  final sourceLocations = <Object, SourceLocation>{};
+  SourceLocation? _sourceLocation;
+
+  /// Gives emitted operations this node's position without replacing child sites.
+  T withSource<T>(ast.AstNode? site, T Function() lower) {
+    if (site == null) return lower();
+    final previous = _sourceLocation;
+    final source = site.root as ast.CompilationUnit;
+    final location = source.lineInfo.getLocation(site.offset);
+    _sourceLocation =
+        bindings.sourceLocation?.call(source, site.offset) ??
+        (
+          uri: source.declaredFragment!.source.uri,
+          line: location.lineNumber,
+          column: location.columnNumber,
+        );
+    try {
+      return lower();
+    } finally {
+      _sourceLocation = previous;
+    }
+  }
+
+  void _locate(Object operation) {
+    if (_sourceLocation case final location?) {
+      sourceLocations[operation] = location;
+    }
+  }
+
+  /// Seals the current block at the active source operation.
+  void finish(Terminator terminator) {
+    _locate(current!);
+    current!.finish(terminator);
+  }
+
   /// The instance being initialized or invoked, when the entry has a receiver.
   Value? receiver;
 
@@ -442,13 +478,14 @@ final class FunctionContext(
 
   /// Emits [operation], capturing the local values at this site if it can throw.
   Value emit(Instruction operation) {
+    _locate(operation);
     if (!operation.mayThrow) return current!.emit(operation);
     final retained = operation.type == .never
         ? _finalizables()
         : const <Value>[];
     if (handler == null && retained.isEmpty) return current!.emit(operation);
     final next = operation.type == .never ? null : addBlock([operation.type]);
-    current!.finish(
+    finish(
       Invoke(
         operation,
         onReturn: next == null ? null : Jump(next, [operation]),
@@ -464,7 +501,7 @@ final class FunctionContext(
     if (!isAsynchronous) throw StateError('Await outside an async body.');
     final result = AwaitResult(type);
     final next = type == .never ? null : addBlock([type]);
-    current!.finish(
+    finish(
       Await(
         operand,
         result,
@@ -478,7 +515,7 @@ final class FunctionContext(
 
   /// Throws to the active handler or caller, preserving [stackTrace] for a rethrow.
   void raise(Value exception, [Value? stackTrace]) {
-    current!.finish(
+    finish(
       Throw(
         exception,
         stackTrace: stackTrace,

@@ -33,6 +33,7 @@ final class ExtensionApplication(
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({
   final bool enableAssertions = false,
+  final SourceLocation Function(ast.CompilationUnit, int)? sourceLocation,
   ConstantEvaluation? constants,
   final Uri? runtimeContracts,
   final Set<Uri> runtimeSources = const {},
