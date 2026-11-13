@@ -162,8 +162,13 @@ void main() {
         );
       final program = await AnalysisSession([entry.path])
           .use((input) async => (await Lowering().lower(input)).program);
-      expect(program.globals, isEmpty);
-      final calls = program.functions.single.blocks
+      expect(
+        program.globals.where((slot) => slot.library == dependency.uri),
+        isEmpty,
+      );
+      final calls = program.functions
+          .singleWhere((f) => f.target.library == entry.uri)
+          .blocks
           .expand((block) => block.instructions)
           .whereType<DirectCall>()
           .toList();

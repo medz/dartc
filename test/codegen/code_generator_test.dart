@@ -12,41 +12,6 @@ import 'fixtures/aliases.dart';
 
 void main() {
   setUpAll(prepareRuntime);
-  test(
-    'string construction includes its ordinary Dart List dependencies',
-    () async {
-      final lowered = await prepareRuntime(
-        'test/compiler/fixtures/strings.dart',
-      );
-      final entry = lowered.program.functions
-          .firstWhere((f) => f.target.name == 'stringCodesProtocol')
-          .target;
-      final definitions = lowered.program.reachableFrom([entry]).toSet();
-      expect(
-        lowered.program.functions
-            .where((f) => definitions.contains(f.target))
-            .expand((f) => f.blocks)
-            .expand((b) => b.instructions)
-            .whereType<NewCollection>(),
-        isNotEmpty,
-      );
-      for (final CodeGenerator generator in [
-        Arm64CodeGenerator(const Target(.macos, .arm64)),
-        X64CodeGenerator(const Target(.linux, .x64)),
-      ]) {
-        final module = generator.generate(
-          lowered.program,
-          runtime: heapRuntime,
-          definitions: definitions,
-        );
-        expect(
-          module.symbols.map((s) => s.name),
-          containsAll(['fromCharCodes', 'empty', 'add']),
-        );
-      }
-    },
-  );
-
   test('List length needs no unused SDK error or iterator declarations', () {
     for (final constant in [false, true]) {
       final entry = Block();

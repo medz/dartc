@@ -7,6 +7,9 @@ import '../../support/ir_interpreter.dart';
 import 'fixtures/extension_types.dart' as sdk;
 
 void main() {
+  final fixtureUri = Uri.base.resolve(
+    'test/frontend/lowering/fixtures/extension_types.dart',
+  );
   late FixtureComparison fixture;
   setUpAll(() async {
     fixture = await FixtureComparison.load('extension_types');
@@ -61,18 +64,18 @@ void main() {
     'extension types do not allocate nominal storage or virtual members',
     () {
       expect(
-        fixture.program.classes.where((c) => c.type.library?.scheme != 'dart'),
+        fixture.program.classes.where((c) => c.type.library == fixtureUri),
         isEmpty,
       );
       final operations = fixture.program.functions
-          .where((f) => f.target.library?.scheme != 'dart')
+          .where((f) => f.target.library == fixtureUri)
           .expand((f) => f.blocks)
           .expand((b) => b.instructions);
       expect(operations.whereType<Construct>(), isEmpty);
       expect(operations.whereType<LoadField>(), isEmpty);
       expect(
         operations.whereType<InstanceCall>().where(
-          (c) => c.member.name.startsWith('<extension-type:'),
+          (c) => c.member.library == fixtureUri,
         ),
         isEmpty,
       );
@@ -85,11 +88,11 @@ void main() {
           'test/frontend/lowering/fixtures/extension_type_import.dart';
       final imported = await AnalysisSession([entry])
           .use((input) async => (await Lowering().lower(input)).program);
-      expect(imported.classes, isEmpty);
       final keep = imported.functions.singleWhere(
         (f) => f.target.name == 'keep',
       );
       expect(keep.target.returnType, ValueType.integer);
+      expect(keep.target.parameterTypes, [ValueType.integer]);
       final run = imported.functions.singleWhere((f) => f.target.name == 'run');
       expect(
         run.callees.where((t) => imported.implementationOf(t) == null),

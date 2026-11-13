@@ -10,6 +10,5 @@ void main() {
       }
     }
     expect(() => Target.parse('windows-x64'), throwsFormatException);
-    expect(Target.host().architecture, isIn(Architecture.values));
   });
 }

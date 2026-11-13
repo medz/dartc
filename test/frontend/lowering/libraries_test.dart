@@ -101,7 +101,10 @@ int run() => direct.value() + exposed.value();
       final program = await AnalysisSession([entry, original])
           .use((input) async => (await Lowering().lower(input)).program);
       expect(run(program), 14);
-      final calls = program.functions.first.entry.instructions
+      final calls = program.functions
+          .singleWhere((f) => f.target.library == File(entry).uri)
+          .entry
+          .instructions
           .whereType<DirectCall>();
       expect(calls.map((call) => call.target).toSet(), hasLength(1));
     },
@@ -117,7 +120,10 @@ int run() => absolute.value() + relative.value();
     final program = await AnalysisSession([entry, other])
         .use((input) async => (await Lowering().lower(input)).program);
     expect(run(program), 12);
-    final calls = program.functions.first.entry.instructions
+    final calls = program.functions
+        .singleWhere((f) => f.target.library == File(entry).uri)
+        .entry
+        .instructions
         .whereType<DirectCall>();
     expect(calls.map((call) => call.target).toSet(), hasLength(1));
   });
@@ -141,8 +147,10 @@ int run() => _value();
             .use((input) async => (await Lowering().lower(input)).program);
         expect(run(program), 11);
         expect(
-          program.functions.map((f) => f.target.library).toSet(),
-          hasLength(1),
+          program.functions
+              .where((f) => f.target.library == File(entry).uri)
+              .map((f) => f.target.name),
+          unorderedEquals(['run', '_value']),
         );
         await expectLater(
           AnalysisSession(['${directory.path}/piece.dart'])
@@ -161,18 +169,24 @@ int run() => _value();
     );
     final program = await AnalysisSession([entry])
         .use((input) async => (await Lowering().lower(input)).program);
-    expect(program.functions.single.target.name, 'main');
-    final call = program.functions.single.entry.instructions
-        .whereType<DirectCall>()
-        .single;
-    expect(call.target.name, 'value');
-    expect(
-      program.functions.any((f) => identical(f.target, call.target)),
-      isFalse,
+    final main = program.functions.singleWhere(
+      (f) => f.target.library == File(entry).uri,
     );
+    expect(main.target.name, 'main');
+    final call = main.entry.instructions.whereType<DirectCall>().single;
+    expect(call.target.name, 'value');
+    expect(call.target.library, File(other).uri);
+    expect(program.implementationOf(call.target), isNull);
     final linked = await AnalysisSession([entry, other])
         .use((input) async => (await Lowering().lower(input)).program);
-    expect(IrInterpreter(linked, {}).run(linked.functions.first, []), isNull);
-    expect(linked.functions.map((f) => f.target.name), ['main', 'value']);
+    expect(
+      IrInterpreter(linked, {}).run(
+        linked.functions.singleWhere(
+          (f) => f.target.library == File(entry).uri,
+        ),
+        [],
+      ),
+      isNull,
+    );
   });
 }

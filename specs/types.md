@@ -31,7 +31,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 
 `as`、后缀 `!` 及已降为类型转换的隐式检查支持上述具体类型。函数类型参数可用于 `is T`、`is! T`、`is T?` 和 `as T`，也可组成检查所用的泛型类型。成功保留原值，失败抛出 TypeError，可由 `on TypeError` 或 `on Error` 捕获并正常经过 `finally`；转换前的表达式只求值一次。标量转为泛型引用时保留整数和浮点值，成功结果在回收后仍可读取。`as Never` 始终失败，`as Never?` 仅接受 null；`FutureOr<int?>` 的 `!` 在保留静态类型的同时拒绝 null。见[转换、隐式检查与清理顺序对照](../test/compiler/type_checks_test.dart)及[开放类型检查](../test/compiler/type_arguments_test.dart)。
 
-int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。Pointer 可经 Object?、开放泛型函数返回视图、字段、可空全局槽和 late 捕获传递；调用、异常及移动回收保留同一对象的别名。指针的 `==` 和 `hashCode` 取决于地址，与[对象身份](https://api.dart.dev/dart-core/identical.html)不同；FFI 参数及返回值仍按平台 ABI 传递原始地址。见[对象身份与原生往返验证](../test/compiler/pointer_values_test.dart)及[函数返回表示边界](../test/codegen/closure_dispatch_test.dart)。跨模块托管值传递尚未接通。
+int、double 和 bool 值均可装箱为引用，包括运行时计算的数值；仍被使用的装箱值在调用及回收后保持不变，见[计算结果装箱验证](../test/codegen/dynamic_boxes_native_test.dart)。地址为零的非空 FFI Pointer 值不等于 Dart null；指针的运行时类型为 `Pointer<Never>`，因此元素类型不同的 Pointer 类型测试仍可成功。静态元素类型继续决定 FFI 签名和访存大小。Pointer 可经 Object?、开放泛型函数返回视图、字段、可空全局槽和 late 捕获传递；调用、异常及移动回收保留同一对象的别名。指针的 `==` 和 `hashCode` 取决于地址，与[对象身份](https://api.dart.dev/dart-core/identical.html)不同；FFI 参数及返回值仍按平台 ABI 传递原始地址。见[对象身份与原生往返验证](../test/compiler/pointer_values_test.dart)。跨模块托管值传递尚未接通。
 
 原生 record 的运行时类型取各字段值的实际类型，忽略用户覆盖的 runtimeType；不会把变量的 Object?、num 或泛型静态类型写成字段运行时类型。支持按形状、字段类型与可空性检查和转换，包括嵌套常量。见[原生 record 验证](../test/compiler/records_test.dart)。
 

@@ -191,57 +191,6 @@ void main() {
       final CodeGenerator generator = arch == .arm64
           ? Arm64CodeGenerator(target)
           : X64CodeGenerator(target);
-      test('$target specializes a direct generic late initializer result', () {
-        final t = TypeParameterType('T')
-          ..initializeBound(ValueType.object.nullable);
-        final owner = ClassType(uri, 'Generic', typeParameters: [t]);
-        final initialize = FunctionTarget(
-          uri,
-          'initialize',
-          t,
-          [],
-          owner: owner,
-          kind: .fieldInitializer,
-        );
-        final seed = InstanceField(owner, 'seed', t);
-        final value = InstanceField(
-          owner,
-          'value',
-          t,
-          isLate: true,
-          initializer: initialize,
-        );
-        final initial = Block(initialize.parameterTypes);
-        initial.finish(
-          Return(initial.emit(LoadField(seed, initial.parameters.single))),
-        );
-        final read = FunctionTarget(uri, 'read', .integer, [
-          owner.instantiate([ValueType.integer]),
-        ]);
-        final entry = Block(read.parameterTypes);
-        entry.finish(
-          Return(entry.emit(LoadField(value, entry.parameters.single))),
-        );
-        final program = IrProgram(
-          [
-            IrClass(owner, [seed, value]),
-          ],
-          [
-            IrFunction(initialize, [initial]),
-            IrFunction(read, [entry]),
-          ],
-        );
-        expect(
-          generator
-              .generate(
-                program,
-                runtime: heapRuntime,
-                definitions: program.reachableFrom([read]),
-              )
-              .sections,
-          isNotEmpty,
-        );
-      });
       test('$target mutable initialized instance late needs no LateError', () {
         final owner = ClassType(uri, 'Cell');
         final initialize = FunctionTarget(

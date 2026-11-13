@@ -11,6 +11,53 @@ void main() {
     Block(target.parameterTypes)..finish(const Return(Constant.integer(0))),
   ]);
 
+  test('open closure dispatch excludes incompatible result types', () {
+    final t = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    final outer = FunctionTarget(
+      uri,
+      'outer',
+      .integer,
+      [],
+      typeParameters: [t],
+    );
+    final targets = [
+      for (final (index, result) in [
+        ValueType.integer,
+        ValueType.voidType,
+        ValueType.floating,
+      ].indexed)
+        FunctionTarget(
+          uri,
+          'closure$index',
+          result,
+          [t],
+          kind: .closure,
+          enclosing: outer,
+          sourceOffset: index,
+        ),
+    ];
+    final storage = ClosureStorage([
+      body(outer),
+      for (final target in targets)
+        IrFunction(target, [
+          Block(target.parameterTypes)..finish(switch (target.returnType) {
+            ValueType.voidType => const Return(),
+            ValueType.floating => const Return(Constant.floating(1.5)),
+            _ => const Return(Constant.integer(7)),
+          }),
+        ]),
+    ]);
+    for (final argument in [ValueType.integer, t]) {
+      expect(
+        storage
+            .targetsFor(FunctionType(.integer, [argument]))
+            .map((shape) => shape.target),
+        [targets.first],
+      );
+    }
+  });
+
   test(
     'static values share a carrier without allocation or wrapper bodies',
     () {

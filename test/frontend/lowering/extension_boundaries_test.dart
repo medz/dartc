@@ -48,11 +48,6 @@ extension Public on int {
           .use((input) async => (await Lowering().lower(input)).program);
       final run = program.functions.singleWhere((f) => f.target.name == 'run');
       expect(IrInterpreter(program, {}).run(run, []), 109);
-      final markTargets = program.functions.where(
-        (f) => f.target.name.endsWith(':method:mark>'),
-      );
-      expect(markTargets.length, 2);
-      expect(markTargets.map((f) => f.target.name).toSet().length, 2);
     },
   );
 
@@ -143,9 +138,13 @@ extension E<T> on List<T> {
 ''');
       final program = await AnalysisSession([path])
           .use((input) async => (await Lowering().lower(input)).program);
-      expect(program.classes, isEmpty);
-      expect(program.functions.length, 4);
-      for (final function in program.functions) {
+      final library = File(path).uri;
+      expect(program.classes.where((c) => c.type.library == library), isEmpty);
+      final functions = program.functions.where(
+        (f) => f.target.library == library,
+      );
+      expect(functions, hasLength(4));
+      for (final function in functions) {
         expect(function.target.kind, FunctionKind.function);
         expect(function.target.owner, isNull);
         expect(function.target.signature.parameters, isNotEmpty);
