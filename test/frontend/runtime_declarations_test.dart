@@ -1,5 +1,6 @@
 import 'package:dartc/frontend.dart';
 import 'package:dartc/sdk.dart';
+import 'package:dartc/runtime/contracts.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -15,8 +16,8 @@ void main() {
     final clock = result.imports.entries.singleWhere(
       (entry) => entry.value.symbol == 'clock_gettime',
     );
-    expect(result.runtime.systemFunctions.contains(user.key), isFalse);
-    expect(result.runtime.systemFunctions.contains(clock.key), isTrue);
+    expect(result.runtime.systemFunctions.containsKey(user.key), isFalse);
+    expect(result.runtime.systemFunctions[clock.key], SystemLibrary.c);
     expect(clock.value.isLeaf, isTrue);
   });
 }

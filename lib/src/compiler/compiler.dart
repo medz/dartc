@@ -115,14 +115,20 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     final nativeImports = <FunctionTarget, NativeImport>{};
     final addresses = <NativeReference, String>{};
     final systemReferences = {
-      for (final function in lowered.runtime.systemFunctions)
-        ?imports[function],
+      for (final MapEntry(key: function, value: library)
+          in lowered.runtime.systemFunctions.entries)
+        ?imports[function]: library,
     };
-    final systemSymbols = <String, String>{};
+    final systemSymbols = <String, Map<String, String>>{};
     String resolve(NativeReference reference) {
-      if (systemReferences.contains(reference)) {
+      if (systemReferences[reference] case final library?) {
         final name = target.nativeSymbol(reference.symbol);
-        systemSymbols[name] = name;
+        final path = switch ((target.operatingSystem, library)) {
+          (.macos, _) => '/usr/lib/libSystem.B.dylib',
+          (.linux, .c) => 'libc.so.6',
+          (.linux, .math) => 'libm.so.6',
+        };
+        (systemSymbols[path] ??= {})[name] = name;
         return reference.symbol;
       }
       return nativeSymbols[reference.assetId]?[reference.symbol] ??
@@ -178,15 +184,8 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .macos => MachO(target),
       .linux => Elf(target),
     };
-    if (systemSymbols.isNotEmpty) {
-      inputs.add(
-        .sharedLibrary(
-          target.operatingSystem == .macos
-              ? '/usr/lib/libSystem.B.dylib'
-              : 'libc.so.6',
-          symbols: systemSymbols,
-        ),
-      );
+    for (final MapEntry(key: path, value: symbols) in systemSymbols.entries) {
+      inputs.add(.sharedLibrary(path, symbols: symbols));
     }
     final bytes = switch (output) {
       ObjectOutput() => format.encodeObject(object),

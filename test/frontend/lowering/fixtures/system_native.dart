@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/runtime/contracts.dart';
 
-@SystemNative()
+@SystemNative(library: .math)
 @Native<Int Function()>(symbol: 'getpid')
 external int processId();
 

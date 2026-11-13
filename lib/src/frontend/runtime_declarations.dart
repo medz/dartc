@@ -13,7 +13,7 @@ final class RuntimeDeclarations(
   Map<RuntimeRole, FunctionTarget> entries,
   Map<FunctionTarget, MemoryOperation> primitives,
   Iterable<FunctionTarget> nonAllocating,
-  Iterable<FunctionTarget> systemFunctions, {
+  Map<FunctionTarget, SystemLibrary> systemFunctions, {
   final ClassType? stackContext,
 }) {
   final Map<RuntimeRole, FunctionTarget> entries = .unmodifiable(entries);
@@ -21,7 +21,9 @@ final class RuntimeDeclarations(
     primitives,
   );
   final List<FunctionTarget> nonAllocating = .unmodifiable(nonAllocating);
-  final Set<FunctionTarget> systemFunctions = .unmodifiable(systemFunctions);
+  final Map<FunctionTarget, SystemLibrary> systemFunctions = .unmodifiable(
+    systemFunctions,
+  );
 
   /// Reads trusted annotations while their owning analysis session is open.
   factory resolve(
@@ -63,7 +65,7 @@ final class _RuntimeDeclarations(
   final entries = <RuntimeRole, FunctionTarget>{};
   final primitives = <FunctionTarget, MemoryOperation>{};
   final nonAllocating = <FunctionTarget>[];
-  final systemFunctions = <FunctionTarget>{};
+  final systemFunctions = <FunctionTarget, SystemLibrary>{};
   ClassType? stackContext;
   late ResolvedUnitResult unit;
 
@@ -101,31 +103,36 @@ final class _RuntimeDeclarations(
     if (!isEntry && !isPrimitive && !noAllocation && !system) return;
     final target = targetFor(element);
     if (target == null) return;
-    if (system) {
-      if (!element.isExternal || !systemFunctions.add(target)) {
-        throw ArgumentError('Invalid system declaration: ${target.name}');
-      }
-      return;
-    }
     if (noAllocation) {
       nonAllocating.add(target);
       return;
     }
-    var enumeration = value!.getField(isEntry ? 'role' : 'operation');
+    final values = isEntry
+        ? RuntimeRole.values
+        : isPrimitive
+        ? MemoryOperation.values
+        : SystemLibrary.values;
+    var enumeration = value!.getField(
+      isEntry
+          ? 'role'
+          : isPrimitive
+          ? 'operation'
+          : 'library',
+    );
     int? index;
     while (enumeration != null && index == null) {
       index = enumeration.getField('index')?.toIntValue();
       enumeration = enumeration.getField('(super)');
     }
-    if (index == null ||
-        index < 0 ||
-        index >=
-            (isEntry
-                ? RuntimeRole.values.length
-                : MemoryOperation.values.length)) {
+    if (index == null || index < 0 || index >= values.length) {
       throw ArgumentError('Invalid runtime annotation.');
     }
-    if (isEntry) {
+    if (system) {
+      if (!element.isExternal || systemFunctions.containsKey(target)) {
+        throw ArgumentError('Invalid system declaration: ${target.name}');
+      }
+      systemFunctions[target] = SystemLibrary.values[index];
+    } else if (isEntry) {
       final role = RuntimeRole.values[index];
       if (entries.containsKey(role)) {
         throw ArgumentError('Repeated runtime entry: $role');

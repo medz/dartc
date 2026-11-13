@@ -47,7 +47,13 @@ enum RuntimeRole() {
 final class const Primitive(final MemoryOperation operation);
 
 /// Resolves a trusted SDK `@Native` declaration in the target's system library.
-final class const SystemNative();
+final class const SystemNative({final SystemLibrary library = .c});
+
+/// A target system library used by trusted SDK native declarations.
+enum SystemLibrary() {
+  c,
+  math,
+}
 
 enum MemoryOperation() {
   map,
