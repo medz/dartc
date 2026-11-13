@@ -207,6 +207,17 @@ void main() {
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );
+        final uriEncoder = core.getFragmentDeclaration(
+          core.element
+              .getClass('_Uri')!
+              .getMethod('_uriEncode')!
+              .fragments
+              .last,
+        )!;
+        expect(
+          patches.origins[uriEncoder.resolvedUnit!.uri]!.path,
+          endsWith('/vm_shared/lib/uri_encode_patch.dart'),
+        );
         expect(core.element.getClass('_ConstantMap'), isNull);
         expect(core.element.getClass('_MissingMethod'), isNull);
         final compact = libraries.singleWhere(

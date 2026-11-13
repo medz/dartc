@@ -273,4 +273,71 @@ void main() {
       }
     },
   );
+  test(
+    'URI encoding preserves character sets, encodings and malformed text',
+    () {
+      for (final source in [
+        '',
+        "AZaz09-_.!~*'()",
+        r":/?#[]@!$&'()*+,;= %",
+        'https://example.com/a b?query=a+b#片段🙂',
+        'café ÿ 中文🙂',
+        '\u0000\t\n\r',
+        '\ud800x\udc00',
+      ]) {
+        compareConversion(source, .uriEncodeComponent);
+        compareConversion(source, .uriEncodeFull);
+        for (var encoding = 0; encoding < 4; encoding++) {
+          compareConversion(source, .uriEncodeQuery, encoding);
+        }
+      }
+      expect(native.convert('a b+c/', .uriEncodeComponent), 'a%20b%2Bc%2F');
+      expect(native.convert('a b+c/', .uriEncodeQuery), 'a+b%2Bc%2F');
+      expect(native.convert('café', .uriEncodeQuery, 1), 'caf%E9');
+    },
+  );
+
+  test(
+    'URI decoding and query splitting preserve errors and duplicate keys',
+    () {
+      for (final source in [
+        '',
+        'plain+text/a?b=c',
+        '%00%20%2b%2F%3f%3D',
+        '%E4%B8%AD%E6%96%87%F0%9F%99%82',
+        '%E9',
+        '%C0%AF',
+        '%ED%A0%80',
+        '%F4%90%80%80',
+        '%E2%82',
+        '%',
+        '%0',
+        '%GG',
+        '%1z',
+        '中文',
+      ]) {
+        compareConversion(source, .uriDecodeComponent);
+        compareConversion(source, .uriDecodeFull);
+        for (var encoding = 0; encoding < 4; encoding++) {
+          compareConversion(source, .uriDecodeQuery, encoding);
+        }
+      }
+      for (final query in [
+        '',
+        'flag&empty=&=ignored&&a=first&a=last',
+        'a+b=c%2Bd&unicode=%E4%B8%AD%E6%96%87&equals=a=b',
+        'name=caf%E9',
+        'broken=%',
+        'broken=%FF',
+      ]) {
+        for (var encoding = 0; encoding < 4; encoding++) {
+          compareConversion(query, .uriQuery, encoding);
+        }
+      }
+      expect(native.convert('a+b%2Bc', .uriDecodeQuery), 'a b+c');
+      expect(native.convert('a+b%2Bc', .uriDecodeComponent), 'a+b+c');
+      expect(native.convert('a=1&a=2&flag', .uriQuery), '{"a":"2","flag":""}');
+      expect(native.convert('%', .uriDecodeComponent), 'argument');
+    },
+  );
 }

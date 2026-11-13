@@ -35,6 +35,12 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 
 动态库在最外层同步 Dart 入口返回前处理待执行事件。重入的 FFI 入口不启动第二个事件循环；持续活动的周期定时器会使这次调用保持运行。卸载库只释放存储，不启动新回调。外部线程和异步宿主驱动入口尚未接通。
 
+## URI 编解码
+
+`Uri.encodeComponent`、`encodeQueryComponent`、`encodeFull` 及对应的 decode 方法支持原生执行和函数值调用；编码直接复用固定 SDK 的 [uri_encode_patch.dart](../sdk/std/lib/_internal/vm_shared/lib/uri_encode_patch.dart)，解码与 `splitQueryString` 复用 [core/uri.dart](../sdk/std/lib/core/uri.dart)。component、query 和 full 保留各自的字符集合，query 将空格与加号按表单规则转换；查询参数拆分保留 SDK 的重复键、无值键与空键规则。
+
+UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生对照](../test/compiler/object_text_test.dart)，包括控制字符、孤立代理项、非法百分号和非法字节序列。错误仍以 ArgumentError 或 FormatException 传播。URI 对象的完整构造、解析、路径处理和 `Uri.base` 尚未接通，仍依赖大小写转换、RegExp 与平台环境能力；上述编解码范围不代表完整 Uri 支持。
+
 ## 数学函数
 
 直接调用 `dart:math.sqrt` 保留官方声明身份，支持导入前缀与转导；同名用户函数或静态方法仍调用用户实现。输入先转换为 double，再计算平方根；保留负零，其他负值和 NaN 返回 NaN，正无穷返回正无穷。依据为 [sqrt 库契约](https://api.dart.dev/stable/3.13.7/dart-math/sqrt.html)。

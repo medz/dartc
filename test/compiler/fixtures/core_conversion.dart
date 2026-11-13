@@ -16,6 +16,13 @@ enum Conversion() {
   customJson,
   invalidJsonObject,
   safeString,
+  uriEncodeComponent,
+  uriEncodeQuery,
+  uriEncodeFull,
+  uriDecodeComponent,
+  uriDecodeQuery,
+  uriDecodeFull,
+  uriQuery,
 }
 
 final class Payload(final String text) {
@@ -108,7 +115,35 @@ String conversionText(String source, Conversion mode, int split) {
         return jsonEncode(value, toEncodable: (_) => throw StateError(source));
       case .safeString:
         return Error.safeToString(source);
+      case .uriEncodeComponent:
+        return Uri.encodeComponent(source);
+      case .uriEncodeFull:
+        return Uri.encodeFull.call(source);
+      case .uriDecodeComponent:
+        return Uri.decodeComponent.call(source);
+      case .uriDecodeFull:
+        return Uri.decodeFull(source);
+      case .uriEncodeQuery || .uriDecodeQuery || .uriQuery:
+        final encoding = switch (split) {
+          1 => latin1,
+          2 => ascii,
+          3 => const Utf8Codec(allowMalformed: true),
+          _ => utf8,
+        };
+        return switch (mode) {
+          .uriEncodeQuery => Uri.encodeQueryComponent(
+            source,
+            encoding: encoding,
+          ),
+          .uriDecodeQuery => Uri.decodeQueryComponent(
+            source,
+            encoding: encoding,
+          ),
+          _ => jsonEncode(Uri.splitQueryString(source, encoding: encoding)),
+        };
     }
+  } on ArgumentError {
+    return 'argument';
   } on FormatException catch (error) {
     return 'format:${error.offset}';
   } on JsonCyclicError {

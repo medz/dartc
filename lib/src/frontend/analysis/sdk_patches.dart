@@ -74,6 +74,8 @@ final class SdkPatches(final OverlayResourceProvider files) {
         patches('core')
             .singleWhere((path) => path.endsWith('/array_patch.dart')),
         patches('core').singleWhere((path) => path.endsWith('/map_patch.dart')),
+        patches('core')
+            .singleWhere((path) => path.endsWith('/uri_encode_patch.dart')),
       ];
       if (selected.isNotEmpty) {
         throw FormatException(
