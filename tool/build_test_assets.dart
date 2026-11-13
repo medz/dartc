@@ -101,6 +101,7 @@ const _compilerLibraries = {
   'member_calls',
   'object_members',
   'object_text',
+  'platform_environment',
 };
 
 Set<String> selectCompilerFixtures(Iterable<String> names) {
@@ -269,6 +270,11 @@ Future<void> main(List<String> args) async {
       ('text_conversion', 'text_conversion', 'entry_text_conversion'),
       ('stopwatch', 'stopwatch', 'entry_stopwatch'),
       ('date_time', 'date_time', 'entry_date_time'),
+      (
+        'platform_environment',
+        'platform_environment',
+        'entry_platform_environment',
+      ),
       ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
       ('native_callables', 'native_callables', 'entry_native_callables'),
       (

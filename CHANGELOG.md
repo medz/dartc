@@ -1,6 +1,8 @@
 ## Unreleased
 
 - Configure compilation declarations through `Compiler.compile(environment: ...)` and CLI `-D`/`--define`. Constants, runtime environment constructors and conditional imports share the same values; malformed declarations leave existing outputs unchanged.
+- Read `Platform.environment` from the target process on macOS and Linux, preserving the SDK's cached unmodifiable map, duplicate-key handling and invalid-entry filtering. Preserve UTF-8 and leading BOM names, omit malformed UTF-8 entries, and expose target OS flags and path separators.
+
 - Call Dart implementations of `Allocator` with typed allocation syntax. Preserve target-native sizes, allocator defaults, evaluation order, null-aware calls and allocation failures.
 - Preserve target defaults when invoking redirecting constructor function values, including `Queue.new`, generic redirects and reordered named parameters. Keep the public callable signature and reject target-only arguments.
 

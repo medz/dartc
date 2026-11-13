@@ -85,9 +85,8 @@ void main() {
 
   test('malformed UTF-8 process arguments fail before main', () async {
     final result = await Process.run(Platform.resolvedExecutable, [
-      File('test/compiler/fixtures/entry/raw_arguments_client.dart')
-          .absolute
-          .path,
+      File('test/compiler/fixtures/raw_process_client.dart').absolute.path,
+      'arguments',
       assets.file('compiler/entry_arguments').absolute.path,
     ]);
     expect(result.exitCode, 255);

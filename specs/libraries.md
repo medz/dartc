@@ -109,13 +109,19 @@ pow、sin/cos/tan、asin/acos/atan、atan2、exp/log 和 sqrt 复用固定 SDK �
 
 入口选择遵循主规范的 Scripts 条款，使用根库导出命名空间中的 main，不按依赖遍历顺序查找同名函数。`Compiler.compile(output: const Output.executable())` 和 CLI `--kind exe` 接通现有标量函数的独立执行。整个输入依赖图先完成静态检查，未使用代码的错误仍拒绝编译。
 
-同步及 async 入口可调用当前已接通的 Dart 函数和显式绑定的原生函数。事件队列正常排空后退出码为 0；main 的 Dart 返回值不作为进程退出码。main 返回后先处理微任务，再执行终结和定时事件；每个事件结束后重新处理微任务，直到队列为空才释放堆。定时器使用单调时钟及平台等待，取消的定时器不再保活。返回 Future 的入口及 async main 使用同一事件队列；未捕获的异步错误使进程失败。只有未完成 Future 而没有待执行事件时，不额外保活进程。I/O 事件源、环境变量和跨线程唤醒仍是实现缺口。
+同步及 async 入口可调用当前已接通的 Dart 函数和显式绑定的原生函数。事件队列正常排空后退出码为 0；main 的 Dart 返回值不作为进程退出码。main 返回后先处理微任务，再执行终结和定时事件；每个事件结束后重新处理微任务，直到队列为空才释放堆。定时器使用单调时钟及平台等待，取消的定时器不再保活。返回 Future 的入口及 async main 使用同一事件队列；未捕获的异步错误使进程失败。只有未完成 Future 而没有待执行事件时，不额外保活进程。I/O 事件源和跨线程唤醒仍是实现缺口。
 
 Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器；提供 `LinkInput.sharedLibrary` 时生成 PIE，由目标 GNU 动态加载器解析函数、数据地址及装载重定位，只读地址表在重定位后受 RELRO 保护。缺失依赖或符号在装载时失败，见[入口执行验证](../test/compiler/entry_test.dart)与[重定位验证](../test/linker/address_relocations_test.dart)。动态入口不改变现有进程退出协议；原生库终结、musl 加载器及无加载器的静态 PIE 尚未接通。macOS 输出使用 LC_MAIN、系统 dyld 和 ad-hoc 签名，并支持显式动态库依赖。macOS x64 具有结构检查，尚无该目标的实际执行证据。
 
 [入口执行验证](../test/compiler/entry_test.dart)检查正常完成、忽略 Dart 返回值、跨库入口、只读/可写/BSS 数据和指针重定位，以及明确拒绝未支持入口。[独立编译器验证](../test/compiler/standalone_test.dart)通过预编译 CLI 在空 PATH 下生成并执行程序；[链接契约](../test/linker/linker_test.dart)检查入口地址、归档成员选择及非法入口。
 
 命令行参数来自目标进程的 argc/argv，排除可执行文件名，使用 SDK UTF-8 解码并保留开头的 U+FEFF；非法 UTF-8 在调用 main 前使进程失败。参数 List 长度固定、元素可修改。入口按 SDK 的零/一/二位置参数调用规则执行，第二参数为 null，其余可选位置及命名参数保留默认值；泛型入口沿用 SDK 的默认调用规则。参数经过 async 挂起及 GC 后保留内容和身份，见[入口执行验证](../test/compiler/entry_test.dart)。
+
+## 进程环境
+
+`Platform.environment` 在 macOS/Linux 可执行文件和原生库中读取所在进程的环境。环境项解析、重复键处理、首次读取缓存和只读 Map 保留[官方 platform_impl.dart](../sdk/std/lib/io/platform_impl.dart) 正文；目标片段通过现有 FFI 动态符号读取 `environ`，使用 SDK UTF-8 解码。名字开头的 U+FEFF 保留为数据，含非法 UTF-8 的整条环境项忽略；空值保留，没有等号或名称为空的条目丢弃，重复名称取最后一项。
+
+后续系统环境修改不改变已取得的快照；写入、删除和清空视图抛出 UnsupportedError。环境文本和视图跨回收保留，见[环境执行验证](../test/compiler/platform_environment_test.dart)。`Platform.operatingSystem`、平台布尔标记和 `pathSeparator` 使用输出目标 ABI 的平台事实。其他 Platform 元数据、文件/目录操作和子进程管理尚未接通。
 
 ## 原生库
 

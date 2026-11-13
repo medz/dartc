@@ -204,6 +204,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
       _official.add(convert);
       _apply(library('convert'), [convert, '$runtime/convert.dart']);
       _apply(library('_vm'), ['$runtime/vm.dart']);
+      _apply(library('io'), ['$runtime/io.dart']);
     }
 
     final experimentsPath = '$sdk/lib/_internal/allowed_experiments.json';
@@ -225,6 +226,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         'math',
         'typed_data',
         '_vm',
+        'io',
       ],
     ]) {
       sdkLibraries[name] = {'experimentSet': 'dartc'};

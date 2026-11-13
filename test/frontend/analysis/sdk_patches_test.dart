@@ -44,7 +44,11 @@ Future<void> withImplementations(
     final session = contexts.contextFor(input).currentSession;
     final user =
         await session.getResolvedLibrary(input) as ResolvedLibraryResult;
-    final pending = [user.element.typeProvider.objectElement.library];
+    final io = await session.getLibraryByUri('dart:io') as LibraryElementResult;
+    final pending = [
+      user.element.typeProvider.objectElement.library,
+      io.element,
+    ];
     final libraries = <ResolvedLibraryResult>[user];
     for (var i = 0; i < pending.length; i++) {
       final library = pending[i];
@@ -67,6 +71,7 @@ Future<void> withImplementations(
               'dart:math',
               'dart:ffi',
               'dart:typed_data',
+              'dart:io',
             }.contains(imported.uri.toString()) &&
             !pending.contains(imported)) {
           pending.add(imported);
@@ -145,6 +150,24 @@ void main() {
           for (final unit in units)
             ...unit.diagnostics.where((d) => d.severity == .error),
         ], isEmpty);
+        final io = libraries.singleWhere(
+          (library) => library.element.uri == Uri.parse('dart:io'),
+        );
+        final platform = io.element.getClass('_Platform')!;
+        final environment = io.getFragmentDeclaration(
+          platform.getGetter('environment')!.fragments.last,
+        )!;
+        expect(
+          environment.resolvedUnit!.uri,
+          Uri.parse('dart:io/platform_impl.dart'),
+        );
+        final readEnvironment = io.getFragmentDeclaration(
+          platform.getMethod('_environment')!.fragments.last,
+        )!;
+        expect(
+          patches.origins[readEnvironment.resolvedUnit!.uri]!.path,
+          endsWith('/sdk/patches/io.dart'),
+        );
         final analyzed = {for (final unit in units) unit.uri};
         expect(analyzed, containsAll(patches.origins.keys));
         final ffi = libraries.singleWhere(
