@@ -107,4 +107,26 @@ void main() {
       }
     }
   });
+  test('numeric constant identity preserves native types and defaults', () {
+    final native = NumericMethods();
+    addTearDown(native.close);
+    const expected = [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+    ];
+    for (var mode = 0; mode < expected.length; mode++) {
+      expect(
+        native.constantIdentity(mode),
+        expected[mode],
+        reason: 'case $mode',
+      );
+    }
+  });
 }

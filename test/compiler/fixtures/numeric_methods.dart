@@ -2,6 +2,9 @@ import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 
+import '../../frontend/lowering/fixtures/constant_safety/numeric.dart'
+    as constants;
+
 T identity<T>(T value) => value;
 
 num method(num value, int mode) => switch (mode) {
@@ -60,3 +63,17 @@ double arithmetic(int integer, double floating, int shape, int operation) {
   };
   return result.toDouble();
 }
+
+@Export<Bool Function(Int64)>()
+bool constantIdentity(int mode) => mode == 8
+    ? const constants.IdentityBox().value
+    : const [
+        constants.mixedIdentity,
+        constants.reversedIdentity,
+        constants.roundedIdentity,
+        constants.zeroIdentity,
+        constants.integerIdentity,
+        constants.doubleIdentity,
+        constants.contextualIdentity,
+        constants.distinctZeros,
+      ][mode];

@@ -348,6 +348,49 @@ final class _Visitor(
   }
 
   @override
+  internal.Constant visitUnqualifiedFunctionInvocation(
+    UnqualifiedFunctionInvocation node,
+  ) => _numericIdentity(node, super.visitUnqualifiedFunctionInvocation(node));
+
+  @override
+  internal.Constant visitImportPrefixedFunctionInvocation(
+    ImportPrefixedFunctionInvocation node,
+  ) =>
+      _numericIdentity(node, super.visitImportPrefixedFunctionInvocation(node));
+
+  internal.Constant _numericIdentity(
+    NamedFunctionInvocation node,
+    internal.Constant result,
+  ) {
+    if (result is! internal.DartObjectImpl || !result.isUnknown) return result;
+    final element = switch (node.resolution) {
+      ExecutableInvocationResolution(:final element) => element,
+      _ => null,
+    };
+    if (element == null ||
+        !element.library.isDartCore ||
+        element.baseElement !=
+            element.library.getTopLevelFunction('identical')) {
+      return result;
+    }
+    final arguments = node.argumentList.arguments2;
+    final left = evaluateConstant(arguments[0]);
+    final right = evaluateConstant(arguments[1]);
+    // Analyzer leaves mixed numeric identity unknown for the web; native types differ.
+    if (left is internal.DartObjectImpl &&
+        right is internal.DartObjectImpl &&
+        (left.type.isDartCoreInt && right.type.isDartCoreDouble ||
+            left.type.isDartCoreDouble && right.type.isDartCoreInt)) {
+      return internal.DartObjectImpl(
+        typeSystem,
+        library.typeProvider.boolType,
+        internal.BoolState.FALSE_STATE,
+      );
+    }
+    return result;
+  }
+
+  @override
   internal.Constant visitSymbolLiteral(SymbolLiteral node) {
     if (node.components.length != 1 ||
         !node.components.single.lexeme.startsWith('_')) {

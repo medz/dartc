@@ -1,3 +1,6 @@
+import 'dart:core';
+import 'dart:core' as core;
+
 const integer = 9007199254740993;
 const floating = 9007199254740992.0;
 const equal = integer == floating;
@@ -12,6 +15,15 @@ const largeDifferent = integer != 1.0;
 const zeros = -0.0 == 0;
 const signedDoubleZeros = 0.0 == -0.0;
 const distinctZeros = identical(0.0, -0.0);
+const mixedIdentity = identical(1, 1.0);
+const reversedIdentity = core.identical(1.0, 1);
+const roundedIdentity = identical(integer, floating);
+const zeroIdentity = core.identical(0, -0.0);
+const integerIdentity = identical(integer, integer + 0);
+const doubleIdentity = core.identical(floating, floating + 0.0);
+const double contextualDouble = 1;
+const contextualIdentity = identical(contextualDouble, 1.0);
+
 // ignore: unnecessary_nan_comparison
 const nan = double.nan == integer;
 const strings = 'value' == 'value';
@@ -41,3 +53,7 @@ bool constructedArgument() => const Compared(integer == floating).value;
 bool recordExpression() => (const (integer > floating,)).$1;
 bool listExpression() => const [integer > floating][0];
 bool mapExpression() => const {'result': integer > floating}['result']!;
+
+class const IdentityBox([final bool value = identical(1, 1.0)]) {
+  this : assert(!identical(1, 1.0));
+}

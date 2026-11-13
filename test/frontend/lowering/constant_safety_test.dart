@@ -28,6 +28,14 @@ void main() {
         'zeros': true,
         'signedDoubleZeros': true,
         'distinctZeros': false,
+        'mixedIdentity': false,
+        'reversedIdentity': false,
+        'roundedIdentity': false,
+        'zeroIdentity': false,
+        'integerIdentity': true,
+        'doubleIdentity': true,
+        'contextualDouble': 1.0,
+        'contextualIdentity': true,
         'nan': false,
         'strings': true,
         'maximumLess': true,
@@ -167,6 +175,19 @@ void main() {
         AnalysisSession([
           'test/frontend/lowering/fixtures/constant_safety/numeric_${kind}_error.dart',
         ]).use((_) => fail('An invalid constant passed analysis.')),
+        throwsFormatException,
+      );
+    });
+  }
+  for (final kind in ['assertion', 'type', 'duplicate']) {
+    test('native numeric identity retains $kind checks', () async {
+      await expectLater(
+        AnalysisSession([
+          'test/frontend/lowering/fixtures/constant_safety/numeric_identity_$kind.dart',
+        ]).use(
+          (_) =>
+              fail('An invalid identity-dependent constant passed analysis.'),
+        ),
         throwsFormatException,
       );
     });

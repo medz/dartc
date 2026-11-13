@@ -1,6 +1,8 @@
 ## Unreleased
 
+- Resolve constant `identical` calls between integers and doubles using native type identity. Preserve contextual doubles and same-type identity, and apply the result to defaults, assertions, types and duplicate-key checks.
 - Use fixed FFI Array list views for booleans, pointers, structs, unions and nested arrays. Writes share native storage; struct and union elements remain mutable through unmodifiable lists. Escaped elements and views keep their managed storage alive.
+
 
 - Preserve private Symbol library identity through constant evaluation, nested storage, collection keys, patterns, defaults and Invocation calls. Same-library parts share identity; symbols from different libraries and string-constructed names remain distinct. Dotted symbol literals follow the language specification as public library names.
 - Preserve ARM64 indirect struct return buffers when a native callback publishes managed roots. Large callback results no longer overwrite the active entry frame or corrupt later collections.

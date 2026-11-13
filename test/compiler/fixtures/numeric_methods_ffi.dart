@@ -32,5 +32,10 @@ final class NumericMethods() {
         double Function(int, double, int, int)
       >('arithmetic');
 
+  late final constantIdentity = _library
+      .lookupFunction<Bool Function(Int64), bool Function(int)>(
+        'constantIdentity',
+      );
+
   void close() => _library.close();
 }
