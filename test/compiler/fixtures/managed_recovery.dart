@@ -105,6 +105,34 @@ bool recoverReturn() {
   }
 }
 
+class Link(final Link? previous);
+
+void recoverCapturedWrite() {
+  Object value = 'old';
+  Object read() => value;
+  Link? head;
+  var count = 0;
+  final limit = restrictMemory(0);
+  var exhausted = false, caught = false;
+  try {
+    try {
+      for (; count < 1000000; count++) {
+        head = Link(head);
+      }
+    } on OutOfMemoryError {
+      exhausted = true;
+    }
+    try {
+      value = count + 1;
+    } on OutOfMemoryError {
+      caught = true;
+    }
+  } finally {
+    restrictMemory(limit);
+  }
+  print('$exhausted:$caught:${read()}:${head != null}');
+}
+
 void main() {
   final cast = recoverBoxing(0);
   final implicit = recoverBoxing(1);
@@ -116,4 +144,5 @@ void main() {
   print('$cast:$implicit:$record:$type:$typeTest:$returned');
   recover(true);
   recover(true);
+  recoverCapturedWrite();
 }

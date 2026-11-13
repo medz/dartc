@@ -50,7 +50,8 @@ void main() {
       'true:true:true:true:true\n'
       'true:true:true:true:true:true\n'
       'true:true:true:true:true\n'
-      'true:true:true:true:true\n',
+      'true:true:true:true:true\n'
+      'true:true:old:true\n',
     );
     expect(result.stderr, isEmpty);
   }, skip: !Platform.isLinux);

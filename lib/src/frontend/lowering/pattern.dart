@@ -226,9 +226,10 @@ final class PatternCache(
       () {
         final value = extract();
         if (value == null) return null;
-        context.current!.emit(WriteCell(stored, value));
+        context.emit(WriteCell(stored, value));
         context.current!.emit(WriteCell(ready, Constant.boolean(true)));
-        return value;
+        // Reuse the stored box instead of allocating again on the merge edge.
+        return context.current!.emit(ReadCell(stored));
       },
       ValueType.object.nullable,
     );

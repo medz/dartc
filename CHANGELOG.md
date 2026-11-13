@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Validate Base64/Base64Url conversion through the SDK algorithms, including chunked streams, normalization, codec composition and collection. Fix empty final decoder slices so they validate pending input and close the output sink.
+- Catch allocation failures when assigning scalar values to captured reference variables, preserving the previous value on failure. Pattern caches reuse their stored value without a second boxing allocation.
 
 - Support variable-length inline FFI arrays, including nested dimensions, declared minimum sizes and caller-supplied tail storage. Array list views expose the declared minimum; nested fixed dimensions retain bounds checks, and managed tail views keep their storage alive.
 - Extract and invoke `asFunction` method values for closed native signatures, including generic, specialized, dynamic and nullable calls. Preserve captured pointers through collection, select leaf calls from the supplied argument, and reject incompatible Dart representations before creating a native closure.

@@ -582,6 +582,12 @@ sealed class Instruction(super.type) extends Value {
     ) => _bindOnce,
     StoreField(:final field) when field.type.freeTypeParameters.isNotEmpty =>
       _checkedWrite,
+    WriteCell(
+      cell: Value(type: CellType(:final content)),
+      value: Value(type: final source),
+    )
+        when (source == .integer || source == .floating) && source != content =>
+      _checkedWrite,
     StoreGlobal() ||
     StoreField() ||
     WriteCell() ||
