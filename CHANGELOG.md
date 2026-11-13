@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Support RegExp.escape through the official SDK implementation, preserving literal UTF-16 data, function values and dynamic argument checks. Regular expression matching remains unavailable.
+
 - Create native callbacks with `Pointer.fromFunction` for static Dart functions, including scalar, pointer and struct signatures. Preserve state and GC roots across synchronous reentry, return the specified exception value, and reject calls from another OS thread.
 - Support Stopwatch using the SDK lifecycle and elapsed-time conversions over the existing monotonic clock. Preserve accumulated time across pause/resume, reset state and extracted method values.
 
@@ -58,7 +60,7 @@
 - Parse booleans with `bool.parse` and `bool.tryParse`, using the SDK's Dart implementation. Preserve default and explicit ASCII case sensitivity, function values, null results and FormatException source values.
 - Parse integers with `int.parse` and `int.tryParse`, and format them with `toString` and `toRadixString`. Support bases 2–36, signs, surrounding whitespace, signed 64-bit limits and unsigned default hexadecimal literals, including method values. Invalid input and overflow remain catchable.
 - Preserve receiver types in virtual calls and method values when selecting native definitions. IR clients now read `(receiver, target)` entries from `virtualMembers` and `(receiver, method, direct)` entries from `methodTearOffs`; `Value.unviewedType` exposes the type before static upcasts. `ValueType.mayHaveInstance` replaces `classBound` and checks closed generic receiver bounds. Integer calls through proven `Object` and `num` views no longer require unrelated floating-point formatting bodies.
-- Use String slicing, searching, replacement callbacks, splitting, padding, repetition, Unicode whitespace trimming and rune iteration in native code. String and custom Pattern implementations preserve empty matches, UTF-16 offsets and callback order; results remain live across collection and native calls. Unicode case conversion and RegExp remain unimplemented.
+- Use String slicing, searching, replacement callbacks, splitting, padding, repetition, Unicode whitespace trimming and rune iteration in native code. String and custom Pattern implementations preserve empty matches, UTF-16 offsets and callback order; results remain live across collection and native calls. Unicode case conversion and RegExp matching remain unimplemented.
 - Bind native global variables and static fields with `@Native`, including scalar, pointer and struct/union storage. Obtain real data and function addresses with `Native.addressOf` through static or dynamic linking. Direct IR clients use `NativeSymbolAddress` and `CodeGenerator.generate(nativeSymbols: ...)`; `NativeReference.type` describes either storage or a `NativeFunctionType`.
 
 - Attach native resource callbacks with `NativeFinalizer`, account for external memory, and preserve `Finalizable` values through their scopes and closures. Normal process shutdown and library unload run remaining native callbacks. `Pointer.asTypedList` supports optional finalizers and tokens; derived views share ownership of the native buffer.

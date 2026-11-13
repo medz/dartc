@@ -117,6 +117,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'text_conversion',
     'stopwatch',
     'platform_time',
+    'regexp_escape',
   };
   final selected = names.toSet();
   if (selected.contains('native_callbacks')) {
@@ -226,6 +227,7 @@ Future<void> main(List<String> args) async {
       ('bigint', 'bigint', 'entry_bigint'),
       ('text_conversion', 'text_conversion', 'entry_text_conversion'),
       ('stopwatch', 'stopwatch', 'entry_stopwatch'),
+      ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([
