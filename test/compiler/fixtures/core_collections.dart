@@ -189,6 +189,19 @@ String collectionText(int mode) {
       return 'iterator failed to detect modification';
     case 16:
       return '${ArgumentError.value('line\n\t"', 'input', 'bad')}|${RangeError.range(4, 0, 2, 'index')}|${StateError('state')}|${UnsupportedError('operation')}';
+    case 22:
+      final receiver = Label('receiver');
+      return [
+        NoSuchMethodError.withInvocation(
+          receiver,
+          Invocation.genericMethod(#missing, [int], ['argument'], {#named: 1}),
+        ),
+        NoSuchMethodError.withInvocation(null, Invocation.getter(#missing)),
+        NoSuchMethodError.withInvocation(
+          receiver,
+          Invocation.setter(#missing, 1),
+        ),
+      ].join('|');
     case 18:
       final text = StringBuffer();
       for (var i = 0; i < 260; i++) {

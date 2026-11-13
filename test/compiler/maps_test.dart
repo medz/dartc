@@ -13,6 +13,10 @@ void main() {
     addTearDown(native.close);
   });
 
+  test('constant maps retain canonical identity, key semantics and lazy index roots', () {
+    expect(sdk.mapConstants(), 127);
+    expect(native.constants(), 127);
+  });
   test(
     'map lookup and insertion order survive growth and moving collection',
     () {

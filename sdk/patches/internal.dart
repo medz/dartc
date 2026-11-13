@@ -15,6 +15,10 @@ class Symbol {
   @patch
   const Symbol(String name) : _name = name;
   @patch
+  @pragma(
+    'dartc:patch',
+    'storage: symbol identity includes the defining private library',
+  )
   bool operator ==(Object other) =>
       other is Symbol &&
       _name == other._name &&

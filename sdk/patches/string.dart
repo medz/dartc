@@ -6,6 +6,26 @@ import '../runtime/string.dart';
 @patch
 class _StringBase {
   @patch
+  @pragma(
+    'dartc:patch',
+    'specification: String padding treats negative widths as zero before subtraction can overflow',
+  )
+  String padLeft(int width, [String padding]) =>
+      width <= length || padding.isEmpty
+      ? this
+      : padding * (width - length) + this;
+
+  @patch
+  @pragma(
+    'dartc:patch',
+    'specification: String padding treats negative widths as zero before subtraction can overflow',
+  )
+  String padRight(int width, [String padding]) =>
+      width <= length || padding.isEmpty
+      ? this
+      : this + padding * (width - length);
+
+  @patch
   bool _isWhitespace(int codeUnit) => _isTwoByteWhitespace(codeUnit);
 
   @patch
@@ -84,6 +104,10 @@ class String {
   bool get _isOneByte => this is _OneByteString;
 
   @patch
+  @pragma(
+    'dartc:patch',
+    'storage: target list class IDs use the generic SDK character decoder',
+  )
   factory String.fromCharCodes(Iterable<int> charCodes, [int start, int? end]) {
     RangeError.checkNotNegative(start, 'start');
     if (end != null && end < start) {
@@ -117,31 +141,6 @@ class String {
     StringStorage.copy(other, 0, other.length, result, length);
     return result;
   }
-
-  @patch
-  String operator *(int times) {
-    if (times <= 0 || isEmpty) return '';
-    if (times == 1) return this;
-    final result = StringStorage.create(
-      times > StringStorage.maximumLength ~/ length ? -1 : length * times,
-    );
-    for (var offset = 0; offset < result.length; offset += length) {
-      StringStorage.copy(this, 0, length, result, offset);
-    }
-    return result;
-  }
-
-  @patch
-  String padLeft(int width, [String padding]) =>
-      width <= length || padding.isEmpty
-      ? this
-      : padding * (width - length) + this;
-
-  @patch
-  String padRight(int width, [String padding]) =>
-      width <= length || padding.isEmpty
-      ? this
-      : this + padding * (width - length);
 
   @patch
   int get hashCode {

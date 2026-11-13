@@ -1,36 +1,11 @@
 import 'dart:_internal' show checkValidWeakTarget;
 import 'dart:async' as async;
-import 'dart:collection' as collection;
 
 import '../../lib/runtime/contracts.dart' as runtime;
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/finalization.dart' as finalization;
 import '../runtime/type_info.dart' as metadata;
 import '../runtime/stack_trace.dart' as traces;
-
-@runtime.ConstantMapStorage('_keys', '_values')
-final class const _ConstantMap<K, V>(final List<K> _keys, final List<V> _values)
-    extends collection.UnmodifiableMapBase<K, V> {
-  int _index(Object? key) {
-    for (var i = 0; i < _keys.length; i++) {
-      if (_keys[i] == key) return i;
-    }
-    return -1;
-  }
-
-  @override
-  V? operator [](Object? key) {
-    final index = _index(key);
-    return index < 0 ? null : _values[index];
-  }
-
-  @override
-  bool containsKey(Object? key) => _index(key) >= 0;
-  @override
-  int get length => _keys.length;
-  @override
-  Iterable<K> get keys => _keys;
-}
 
 @patch
 class Finalizer<T> {
@@ -66,6 +41,9 @@ class Object {
   @runtime.Primitive(.className)
   external String get _className;
 
+  static String _toString(Object? object) =>
+      object == null ? 'null' : "Instance of '${object._className}'";
+
   @patch
   String toString() => "Instance of '" + _className + "'";
 }
@@ -73,14 +51,11 @@ class Object {
 @patch
 class Error {
   @patch
+  @pragma(
+    'dartc:patch',
+    'storage: error traces are recorded by the target unwinder',
+  )
   StackTrace? get stackTrace => traces.errorTrace(this);
-
-  @patch
-  static String _objectToString(Object object) =>
-      "Instance of '" + object._className + "'";
-
-  @patch
-  static String _stringToSafeString(String string) => json.encode(string);
 }
 
 @patch
@@ -124,17 +99,11 @@ class Type {
 
 @patch
 class NoSuchMethodError {
+  // shortcut: signatures are not retained for VM mirrors, add them with reflective call metadata.
   @patch
-  factory NoSuchMethodError.withInvocation(
+  static String? _existingMethodSignature(
     Object? receiver,
-    Invocation invocation,
-  ) => _MissingMethod(receiver, invocation);
-}
-
-final class _MissingMethod(final Object? receiver, final Invocation invocation)
-    extends Error
-    implements NoSuchMethodError {
-  @override
-  String toString() =>
-      'NoSuchMethodError: ${invocation.memberName} on $receiver';
+    String methodName,
+    int invocationType,
+  ) => null;
 }

@@ -61,8 +61,8 @@ final class const WeakSlot();
 /// Pairs a nullable key slot with a nullable value slot in the same class.
 final class const EphemeronKey(final String valueField);
 
-/// Identifies the immutable map implementation and its parallel constant lists.
-final class const ConstantMapStorage(final String keys, final String values);
+/// Identifies an immutable map and its interleaved key/value list field.
+final class const ConstantMapStorage(final String data);
 
 /// Identifies the immutable set implementation and its constant map field.
 final class const ConstantSetStorage(final String entries);

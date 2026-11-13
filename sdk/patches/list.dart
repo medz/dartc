@@ -4,6 +4,10 @@ import 'dart:_internal' show ListData, NativeList;
 class List<E> {
   // A literal here would call this factory again during native construction.
   @patch
+  @pragma(
+    'dartc:patch',
+    'storage: list literals delegate to this factory on the target',
+  )
   factory List.empty({bool growable}) =>
       growable ? _GrowableList<E>.empty() : _List<E>(0);
 }
@@ -64,6 +68,10 @@ class _List<E> {
   }
 
   @patch
+  @pragma(
+    'dartc:patch',
+    'specification: List.setRange rejects negative skips and insufficient input',
+  )
   void setRange(int start, int end, Iterable<E> iterable, [int skipCount]) =>
       // The generic SDK path rejects negative skips and insufficient input.
       super.setRange(start, end, iterable, skipCount);

@@ -56,7 +56,12 @@ void main() {
           throwsRangeError,
         );
       }
-      expect(native.transform('abc', 'x', 5, -0x8000000000000000, -1), 'abc');
+      for (final mode in [5, 6]) {
+        expect(
+          native.transform('abc', 'x', mode, -0x8000000000000000, -1),
+          'abc',
+        );
+      }
       expect(native.transform('abc', '', 4, -1, -1), '');
     },
   );

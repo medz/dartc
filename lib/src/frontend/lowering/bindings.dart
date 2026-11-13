@@ -42,7 +42,7 @@ final class Bindings({
   final _targets = <ExecutableElement, FunctionTarget>{};
   final nativeReferences = <FunctionTarget, NativeReference>{};
   final _primitiveClasses = <ClassType>{};
-  (InterfaceElement, FieldElement, FieldElement)? _constantMapStorage;
+  (InterfaceElement, FieldElement)? _constantMapStorage;
   (InterfaceElement, FieldElement)? _constantSetStorage;
 
   /// Dependency functions with Dart bodies, discovered through direct references.
@@ -312,8 +312,14 @@ final class Bindings({
               requireClass(element);
               _constantMapStorage = (
                 element,
-                element.getField(value!.getField('keys')!.toStringValue()!)!,
-                element.getField(value.getField('values')!.toStringValue()!)!,
+                [element, ...element.allSupertypes.map((type) => type.element)]
+                    .map(
+                      (owner) => owner.getField(
+                        value!.getField('data')!.toStringValue()!,
+                      ),
+                    )
+                    .nonNulls
+                    .single,
               );
             }
           }
@@ -1419,6 +1425,29 @@ final class Bindings({
     return _constantValue(value, unit.libraryElement, unit, expression);
   }
 
+  ObjectConstant _constantMap(
+    List<ValueType> arguments,
+    Iterable<(Constant, Constant)> entries,
+    LibraryElement origin,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    final (storage, data) = _constantMapStorage!;
+    requireClass(storage);
+    requireListSupport(origin, requireClass);
+    return ObjectConstant(
+      classType(storage, unit, site).instantiate(arguments),
+      {
+        field(data, unit, site): SequenceConstant(
+          CoreTypes.listOf(.dynamicType),
+          [
+            for (final (key, value) in entries) ...[key, value],
+          ],
+        ),
+      },
+    );
+  }
+
   Constant _constantValue(
     DartObject? value,
     LibraryElement origin,
@@ -1505,27 +1534,19 @@ final class Bindings({
       if (list ?? value.toSetValue()?.toList() case final elements?) {
         if (_constantSetStorage case (final storage, final entries)
             when list == null) {
-          final (map, keys, values) = _constantMapStorage!;
           requireClass(storage);
-          requireClass(map);
           requireListSupport(origin, requireClass);
           final type = valueType(value.type!, unit, site) as ClassType;
           final element = type.typeArguments.single;
           return ObjectConstant(
             classType(storage, unit, site).instantiate([element]),
             {
-              field(entries, unit, site): ObjectConstant(
-                classType(map, unit, site).instantiate([element, .nullType]),
-                {
-                  field(keys, unit, site): SequenceConstant(
-                    CoreTypes.listOf(element),
-                    elements.map(convert),
-                  ),
-                  field(values, unit, site): SequenceConstant(
-                    CoreTypes.listOf(.nullType),
-                    elements.map((_) => const Constant.nullValue()),
-                  ),
-                },
+              field(entries, unit, site): _constantMap(
+                [element, .nullType],
+                elements.map((e) => (convert(e), const Constant.nullValue())),
+                origin,
+                unit,
+                site,
               ),
             },
           );
@@ -1539,26 +1560,16 @@ final class Bindings({
         );
       }
       if (value.toMapValue() case final entries?) {
-        if (_constantMapStorage case (
-          final storage,
-          final keys,
-          final values,
-        )) {
-          requireClass(storage);
-          requireListSupport(origin, requireClass);
+        if (_constantMapStorage != null) {
           final type = valueType(value.type!, unit, site) as ClassType;
-          return ObjectConstant(
-            classType(storage, unit, site).instantiate(type.typeArguments),
-            {
-              field(keys, unit, site): SequenceConstant(
-                CoreTypes.listOf(type.typeArguments[0]),
-                entries.keys.map(convert),
-              ),
-              field(values, unit, site): SequenceConstant(
-                CoreTypes.listOf(type.typeArguments[1]),
-                entries.values.map(convert),
-              ),
-            },
+          return _constantMap(
+            type.typeArguments,
+            entries.entries.map(
+              (entry) => (convert(entry.key), convert(entry.value)),
+            ),
+            origin,
+            unit,
+            site,
           );
         }
         return MapConstant(

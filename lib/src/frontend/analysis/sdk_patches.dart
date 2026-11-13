@@ -54,6 +54,10 @@ final class SdkPatches(final OverlayResourceProvider files) {
         'growable_array.dart',
         'string_patch.dart',
         'record_patch.dart',
+        'errors_patch.dart',
+        'invocation_mirror_patch.dart',
+        'function.dart',
+        'type_patch.dart',
       };
       final parts = [
         for (final part in _parse(core).directives.whereType<PartDirective>())
@@ -125,7 +129,14 @@ final class SdkPatches(final OverlayResourceProvider files) {
         hashes,
         '$runtime/collection.dart',
       ]);
-      _apply(library('_compact_hash'), ['$runtime/compact_hash.dart']);
+      _apply(
+        library('_compact_hash'),
+        ['$runtime/compact_hash.dart'],
+        storageClasses: const {'_LinkedHashImmutableBase'},
+      );
+      final math = patches('math').single;
+      _official.add(math);
+      _apply(library('math'), [math]);
       final convert = patches('convert')
           .singleWhere((path) => path.endsWith('/convert_patch.dart'));
       _official.add(convert);
@@ -149,6 +160,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
         'collection',
         '_compact_hash',
         'convert',
+        'math',
         'typed_data',
         '_vm',
       ],
@@ -230,7 +242,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
     ];
     final units = {for (final path in paths) path: _parse(path)};
     bool replaced(String path, CompilationUnitMember declaration) =>
-        _official.contains(path) &&
+        (_official.contains(path) || !implementations.contains(path)) &&
         declaration is ClassDeclaration &&
         storageClasses.contains(declaration.namePart.typeName.lexeme);
     for (final name in storageClasses) {
@@ -246,21 +258,6 @@ final class SdkPatches(final OverlayResourceProvider files) {
         throw FormatException('SDK storage implementation unavailable: $name');
       }
     }
-    final replacements = {
-      for (final path in implementations.where((p) => !_official.contains(p)))
-        for (final declaration
-            in units[path]!.declarations.whereType<ClassDeclaration>())
-          if (_patched(declaration))
-            for (final member in declaration.body.members.where(_patched))
-              if (switch (member) {
-                ConstructorDeclaration(:final externalKeyword) ||
-                MethodDeclaration(
-                  :final externalKeyword,
-                ) => externalKeyword == null,
-                _ => false,
-              })
-                (declaration.namePart.typeName.lexeme, _memberKey(member)),
-    };
     final originals = <String, ClassDeclaration>{};
     final mixins = <String, MixinDeclaration>{};
     final members = <(String, (String?, String)), (String, ClassMember)>{};
@@ -309,7 +306,15 @@ final class SdkPatches(final OverlayResourceProvider files) {
         }
       }
     }
-    final edits = <String, List<(int, int, String)>>{};
+    final edits = <String, List<(int, int, String)>>{
+      for (final MapEntry(key: path, value: syntax) in units.entries)
+        if (!implementations.contains(path))
+          path: [
+            for (final declaration in syntax.declarations)
+              if (replaced(path, declaration))
+                (declaration.offset, declaration.end, ''),
+          ],
+    };
     bool inheritsMember(ClassDeclaration owner, ClassMember member) {
       if (member is! MethodDeclaration || member.isStatic) return false;
       Iterable<String> parents(ClassDeclaration declaration) => [
@@ -360,6 +365,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
     void allowImplementation(
       String path,
       AnnotatedNode declaration, {
+      required AnnotatedNode implementation,
       bool externalBody = false,
     }) {
       final external = switch (declaration) {
@@ -374,20 +380,36 @@ final class SdkPatches(final OverlayResourceProvider files) {
             'Cannot replace a Dart body with an external: $path',
           );
         }
-        // Retain the declared type when replacing a platform implementation.
-        if (declaration is MethodDeclaration &&
-            (ownerUri == Uri.parse('dart:_internal') ||
-                _official.contains(path))) {
-          edit(path, declaration.body.offset, declaration.body.end, ';');
-          return;
-        }
         if (declaration is MethodDeclaration &&
             declaration.body is EmptyFunctionBody) {
           return;
         }
-        throw FormatException(
-          'Expected external SDK declaration: $path:${declaration.offset}',
-        );
+        final adaptation = implementation.metadata.any((annotation) {
+          final arguments = annotation.arguments?.arguments;
+          if (annotation.name.name != 'pragma' || arguments?.length != 2) {
+            return false;
+          }
+          final name = arguments![0], reason = arguments[1];
+          return name is StringLiteral &&
+              name.stringValue == 'dartc:patch' &&
+              reason is StringLiteral &&
+              RegExp(r'^(storage|specification): .+')
+                  .hasMatch(reason.stringValue ?? '');
+        });
+        if (!adaptation) {
+          throw FormatException(
+            'SDK Dart body requires an explicit storage or specification adaptation: $path:${declaration.offset}',
+          );
+        }
+        final body = switch (declaration) {
+          ConstructorDeclaration(:final body) ||
+          MethodDeclaration(:final body) => body,
+          FunctionDeclaration(:final functionExpression) =>
+            functionExpression.body,
+          _ => throw FormatException('Unsupported body'),
+        };
+        edit(path, body.offset, body.end, ';');
+        return;
       }
       edit(path, external.offset, external.end, ' ' * external.length);
     }
@@ -456,7 +478,17 @@ final class SdkPatches(final OverlayResourceProvider files) {
                     'SDK mixin member unavailable: $path',
                   ));
               augment(path, member);
-              allowImplementation(ownerPath, original);
+              final isExternal =
+                  member is MethodDeclaration && member.externalKeyword != null;
+              allowImplementation(
+                ownerPath,
+                original,
+                implementation: member,
+                externalBody: isExternal,
+              );
+              if (!isExternal) {
+                members[(name, _memberKey(member)!)] = (path, member);
+              }
             }
           case ClassDeclaration():
             final owner =
@@ -501,15 +533,6 @@ final class SdkPatches(final OverlayResourceProvider files) {
               modifiers.map((token) => '${token.lexeme} ').join(),
             );
             for (final member in declaration.body.members.where(_patched)) {
-              // Target bodies replace VM-specific bodies while retaining the SDK contract.
-              if (_official.contains(path) &&
-                  replacements.contains((
-                    declaration.namePart.typeName.lexeme,
-                    _memberKey(member),
-                  ))) {
-                edit(path, member.offset, member.end, '');
-                continue;
-              }
               final (ownerPath, target) =
                   members[(
                     declaration.namePart.typeName.lexeme,
@@ -531,7 +554,21 @@ final class SdkPatches(final OverlayResourceProvider files) {
                 continue;
               }
               augment(path, member);
-              allowImplementation(ownerPath, target, externalBody: isExternal);
+              allowImplementation(
+                ownerPath,
+                target,
+                implementation: member,
+                externalBody: isExternal,
+              );
+              if (!isExternal) {
+                members[(
+                  declaration.namePart.typeName.lexeme,
+                  _memberKey(member)!,
+                )] = (
+                  path,
+                  member,
+                );
+              }
               if (_official.contains(path)) {
                 final parameters = switch (member) {
                   ConstructorDeclaration(:final parameters) => parameters,
@@ -710,8 +747,18 @@ final class SdkPatches(final OverlayResourceProvider files) {
             allowImplementation(
               ownerPath,
               owner,
+              implementation: declaration,
               externalBody: declaration.externalKeyword != null,
             );
+            if (declaration.externalKeyword == null) {
+              functions[(
+                declaration.name.lexeme,
+                declaration.propertyKeyword?.lexeme,
+              )] = (
+                path,
+                declaration,
+              );
+            }
           default:
             throw FormatException('Unsupported SDK augmentation: $path');
         }

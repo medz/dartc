@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
+import 'package:dartc/src/frontend/lowering/no_such_method.dart';
 import 'package:dartc/src/frontend/analyzer_metadata.dart';
 import 'package:dartc/src/frontend/lowering/bindings.dart';
 import 'package:test/test.dart';
@@ -30,7 +32,12 @@ abstract class Other { num _f({num z = 30, num a = 20}); }
 import 'imported.dart';
 class Replacement extends Base implements Contract, Other {}
 ''');
-      await AnalysisSession([entry.path, imported.path]).use((input) {
+      final sources = await SdkSources.load();
+      await AnalysisSession(
+        [entry.path, imported.path],
+        sdk: DartSdk(sources),
+        sources: sources,
+      ).use((input) {
         final unit = input.libraries
             .expand((l) => l.units)
             .firstWhere(
@@ -93,7 +100,16 @@ class Replacement extends Base implements Contract, Other {}
         expect(factory.owner, ValueType.noSuchMethodError);
         expect(factory.kind, FunctionKind.factory);
         expect(factory.name, 'withInvocation');
-        expect(factory.redirect, isNull);
+        expect(factory.implementation.kind, FunctionKind.initializer);
+        final body = lowerNoSuchMethodForwarder(bindings, forwarder, factory);
+        expect(
+          body.blocks
+              .expand((block) => block.instructions)
+              .whereType<Construct>()
+              .single
+              .initializer,
+          same(factory.implementation),
+        );
         expect(factory.typeParameters, isEmpty);
         expect(bindings.defaults(factory), isEmpty);
         expect(

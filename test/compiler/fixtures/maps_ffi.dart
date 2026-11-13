@@ -36,5 +36,7 @@ final class Maps() {
   );
   late final callbackRoots = _library
       .lookupFunction<Int64 Function(), int Function()>('mapCallbackRoots');
+  late final constants = _library
+      .lookupFunction<Int64 Function(), int Function()>('mapConstants');
   void close() => _library.close();
 }

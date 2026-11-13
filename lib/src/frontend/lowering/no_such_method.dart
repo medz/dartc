@@ -32,8 +32,23 @@ IrFunction lowerNoSuchMethodForwarder(
     ),
   );
   if (foreignPrivate) {
+    final construction = bodyTarget.resolveConstruction(bodyTarget.owner!);
+    final arguments = bindings.bind(construction.target, (
+      positional: [entry.parameters.first, invocation],
+      named: const <String, Value>{},
+    ));
     final error = entry.emit(
-      DirectCall(bodyTarget, [entry.parameters.first, invocation]),
+      construction.target.kind == .initializer
+          ? Construct(
+              construction.target,
+              arguments,
+              instantiatedType: construction.ownerType,
+            )
+          : DirectCall(
+              construction.target,
+              arguments,
+              ownerType: construction.ownerType,
+            ),
     );
     entry.finish(Throw(error));
   } else {

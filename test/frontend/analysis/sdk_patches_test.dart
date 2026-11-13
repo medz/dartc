@@ -15,6 +15,7 @@ import 'package:test/test.dart';
 Future<void> withImplementations(
   void Function(List<ResolvedLibraryResult>, SdkPatches) check, {
   String Function(String)? change,
+  String changePath = 'core.dart',
 }) async {
   final archive = await SdkSources.load();
   const root = '/__dartc__', runtime = '$root/sdk/patches';
@@ -22,7 +23,7 @@ Future<void> withImplementations(
     SourceFiles(archive, root, extraSources: archive),
   );
   if (change != null) {
-    final path = '$runtime/core.dart';
+    final path = '$runtime/$changePath';
     files.setOverlay(
       path,
       content: change(files.getFile(path).readAsStringSync()),
@@ -60,6 +61,7 @@ Future<void> withImplementations(
               'dart:collection',
               'dart:_compact_hash',
               'dart:convert',
+              'dart:math',
               'dart:ffi',
               'dart:typed_data',
             }.contains(imported.uri.toString()) &&
@@ -205,6 +207,42 @@ void main() {
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );
+        expect(core.element.getClass('_ConstantMap'), isNull);
+        expect(core.element.getClass('_MissingMethod'), isNull);
+        final compact = libraries.singleWhere(
+          (library) => library.element.uri == Uri.parse('dart:_compact_hash'),
+        );
+        for (final fragment in [
+          compact.element.getClass('_ConstMap')!.firstFragment,
+          compact.element.mixins
+              .singleWhere((m) => m.name == '_ImmutableLinkedHashMapMixin')
+              .getMethod('_createIndex')!
+              .firstFragment,
+        ]) {
+          expect(
+            compact
+                .getFragmentDeclaration(fragment)!
+                .resolvedUnit!
+                .uri
+                .toString(),
+            'dart:_compact_hash',
+          );
+        }
+        for (final member in [
+          core.element
+              .getClass('NoSuchMethodError')!
+              .getNamedConstructor('withInvocation')!,
+          core.element.getClass('NoSuchMethodError')!.getMethod('toString')!,
+          core.element
+              .getClass('NoSuchMethodError')!
+              .getMethod('_toStringPlain')!,
+        ]) {
+          final body = core.getFragmentDeclaration(member.fragments.last)!;
+          expect(
+            patches.origins[body.resolvedUnit!.uri]!.path,
+            endsWith('/vm/lib/errors_patch.dart'),
+          );
+        }
         for (final member in [
           core.element
               .getClass('StackTrace')!
@@ -233,6 +271,9 @@ void main() {
             '/vm_shared/lib/string_buffer_patch.dart',
           ),
           ('StringBuffer', '_create', '/sdk/patches/string.dart'),
+          ('_StringBase', '*', '/vm/lib/string_patch.dart'),
+          ('_StringBase', 'padLeft', '/sdk/patches/string.dart'),
+          ('_StringBase', 'padRight', '/sdk/patches/string.dart'),
           ('_StringBase', 'trim', '/vm/lib/string_patch.dart'),
           ('_StringBase', 'indexOf', '/vm/lib/string_patch.dart'),
           ('_StringBase', 'allMatches', '/vm/lib/string_patch.dart'),
@@ -289,7 +330,7 @@ void main() {
               .getClass(type)!
               .constructors
               .singleWhere((c) => c.name == constructor);
-          expect(member.fragments, hasLength(2));
+          expect(member.fragments.length, greaterThanOrEqualTo(2));
           final body = core.getFragmentDeclaration(member.fragments.last)!;
           expect(
             patches.origins[body.resolvedUnit!.uri]!.path,
@@ -413,6 +454,17 @@ void main() {
       }, change: change);
     });
   }
+  test('internal library bodies also require a concrete adaptation', () async {
+    await expectLater(
+      withImplementations(
+        (_, _) {},
+        changePath: 'internal.dart',
+        change: (source) =>
+            '$source\n@patch class Symbol { @patch static String getName(Symbol symbol) => "overwritten"; }',
+      ),
+      throwsFormatException,
+    );
+  });
   for (final patch in [
     'class PublicApi {}',
     'mixin PublicApi {}',
@@ -423,6 +475,7 @@ void main() {
     '@patch class Finalizer<T> extends Object {}',
     '@patch class Expando<T extends Object> { @patch String toString() => "overwritten"; }',
     '@patch class Error { @patch external static String safeToString(Object? object); }',
+    '@patch class _StringBase { @patch String trim() => "overwritten"; }',
   ]) {
     test(
       'rejects changes outside the SDK implementation boundary: $patch',

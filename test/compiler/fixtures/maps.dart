@@ -250,3 +250,83 @@ int mapCallbackRoots() {
   if (!identical(map.keys.first, first)) return -1;
   return map.remove(_AllocatingKey(1))!.id + map[_AllocatingKey(2)]!.id;
 }
+
+class const _IdentityKey(final int id);
+Type _typeOf<T>() => T;
+
+@Export<Int64 Function()>()
+int mapConstants() {
+  const key = _IdentityKey(7);
+  const map = <Object?, Object?>{
+    1: 'integer',
+    0x100000001: 'collision',
+    null: 'null',
+    true: 'bool',
+    #name: 'symbol',
+    '汉🙂': 'string',
+    key: 'object',
+    List<int>: 'type',
+    8: 'eight',
+    9: 'nine',
+    10: 'ten',
+    11: [1, 2],
+  };
+  var result = 0;
+  if (identical(map, const <Object?, Object?>{
+    1: 'integer',
+    0x100000001: 'collision',
+    null: 'null',
+    true: 'bool',
+    #name: 'symbol',
+    '汉🙂': 'string',
+    key: 'object',
+    List<int>: 'type',
+    8: 'eight',
+    9: 'nine',
+    10: 'ten',
+    11: [1, 2],
+  })) {
+    result |= 1;
+  }
+  if (map[1.0] == 'integer' &&
+      map[0x100000001] == 'collision' &&
+      map[null] == 'null' &&
+      map[true] == 'bool' &&
+      map[#name] == 'symbol' &&
+      map['汉🙂'] == 'string' &&
+      map[key] == 'object' &&
+      map[_IdentityKey(7)] == null &&
+      map[_typeOf<List<int>>()] == 'type') {
+    result |= 2;
+  }
+  _churn();
+  if (map.containsKey(key) &&
+      !map.containsKey('missing') &&
+      map[double.nan] == null &&
+      identical(map[11], const [1, 2]) &&
+      map.keys.first == 1 &&
+      map.values.last is List<int>) {
+    result |= 4;
+  }
+  try {
+    map[2] = 'bad';
+  } on UnsupportedError {
+    result |= 8;
+  }
+  try {
+    map.remove('missing');
+  } on UnsupportedError {
+    result |= 16;
+  }
+  try {
+    map.clear();
+  } on UnsupportedError {
+    result |= 32;
+  }
+  if ((const <int, int>{})[1] == null &&
+      !(const <int, int>{}).containsKey(1) &&
+      map.length == 12) {
+    result |= 64;
+  }
+  return result;
+}

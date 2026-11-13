@@ -825,6 +825,10 @@ void _checkView(_TypedList data, int offset, int length, int width) {
 @patch
 mixin _TypedListMixin<E, L extends List<E>> {
   @patch
+  @pragma(
+    'dartc:patch',
+    'specification: TypedDataList addition retains numeric typed storage',
+  )
   List<E> operator +(List<E> other) {
     // The public typed-data contract retains typed storage for numeric operands.
     final List<E> result;

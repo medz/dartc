@@ -149,6 +149,9 @@ void main() {
       () => expect(native.collection(i), collections.collectionText(i)),
     );
   }
+  test('NoSuchMethodError uses SDK formatting for methods and accessors', () {
+    expect(native.collection(22), collections.collectionText(22));
+  });
   test('fixed lists reject invalid skips and insufficient range input', () {
     expect(native.collection(21), 'range/short/short');
   });
