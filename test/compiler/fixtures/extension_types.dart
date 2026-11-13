@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import '../../frontend/lowering/fixtures/effects.dart';
 import '../../frontend/lowering/fixtures/extension_types.dart' as basic;
+import '../../frontend/lowering/fixtures/extension_types_constructors.dart'
+    as constructors;
 import '../../frontend/lowering/fixtures/extension_types_generic.dart'
     as generic;
 import '../../frontend/lowering/fixtures/extension_types_interfaces.dart'
@@ -17,6 +19,10 @@ void observe(String name, Object? Function() run, [Object? input]) {
   String? error;
   try {
     value = run();
+  } on AssertionError catch (failure) {
+    error = 'assert:${failure.message}';
+  } on String catch (failure) {
+    error = failure;
   } on TypeError {
     error = 'type';
   } on StateError {
@@ -148,6 +154,51 @@ void main(List<String> args) {
         );
       }
       observe('inheritedNullable', () => interfaces.inheritedNullable(null));
+    case 'constructors':
+      for (final (name, run) in <(String, Object? Function(int))>[
+        ('primary', constructors.primary),
+        ('other', constructors.other),
+        ('redirect', constructors.redirect),
+        ('factory', constructors.factory),
+        ('generic', constructors.generic),
+        ('genericPrimary', constructors.genericPrimary),
+        ('ordered', constructors.ordered),
+        ('nullable', constructors.nullable),
+        ('genericConstructor', constructors.genericConstructor),
+        ('runtimeConst', constructors.runtimeConst),
+        ('tearoff', constructors.tearoff),
+        ('factoryTearoff', constructors.factoryTearoff),
+      ]) {
+        for (final seed in [0, 1, 2, -1, -2, -3]) {
+          observe(name, () => run(seed), seed);
+        }
+      }
+      observe('constConstructors', constructors.constConstructors);
+      observe('recursiveDefaults', constructors.recursiveDefaults);
+      observe('staticDefaults', constructors.staticDefaults);
+      for (final value in <Object?>[null, 3, 'bad']) {
+        observe(
+          'nullableDynamic',
+          () => constructors.nullableDynamic(value),
+          value,
+        );
+      }
+      observe('afterThrow', () {
+        try {
+          constructors.ordered(1);
+        } on String {
+          return constructors.saved!();
+        }
+        throw StateError('Missing body exception');
+      });
+      observe('retainedRepresentation', () {
+        constructors.Generic<List<int>>.named([7]);
+        for (var i = 0; i < 2000; i++) {
+          final garbage = List<String>.filled(64, 'allocation:$i');
+          if (garbage.length != 64) throw StateError('allocation');
+        }
+        return (constructors.saved!() as List<int>).single;
+      });
     default:
       throw ArgumentError(args);
   }

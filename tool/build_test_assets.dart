@@ -250,6 +250,17 @@ Future<void> main(List<String> args) async {
       }
     }
 
+    if (selected.contains('extension_types')) {
+      final entry = await Compiler(target).compile(
+        ['test/compiler/fixtures/extension_types.dart'],
+        output: const .executable(),
+        enableAssertions: true,
+      );
+      await entry.write(
+        assets.file('compiler/entry_extension_types_assertions'),
+      );
+    }
+
     for (final (fixture, source, output) in [
       ('managed_objects', 'managed_objects', 'entry_managed'),
       ('allocators', 'allocators', 'entry_allocators'),
