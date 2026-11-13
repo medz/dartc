@@ -24,6 +24,7 @@ double floatingRemainder(double value, double divisor) {
 @RuntimeEntry(.floatingModulo)
 double floatingModulo(double value, double divisor) {
   final remainder = floatingRemainder(value, divisor);
+  // shortcut: retain SDK rounding at the divisor bound until Dart clarifies it.
   return remainder == 0
       ? 0
       : remainder < 0

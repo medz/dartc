@@ -37,5 +37,11 @@ final class NumericMethods() {
         'constantIdentity',
       );
 
+  late final reduction = _library
+      .lookupFunction<
+        Double Function(Double, Double, Int64),
+        double Function(double, double, int)
+      >('reduction');
+
   void close() => _library.close();
 }

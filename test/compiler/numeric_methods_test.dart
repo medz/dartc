@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
+import '../support/floating_reduction.dart';
 import 'fixtures/numeric_methods.dart' as sdk;
 import 'fixtures/numeric_methods_ffi.dart';
 
@@ -97,7 +98,8 @@ void main() {
     for (final integer in integers) {
       for (final floating in numbers) {
         for (var shape = 0; shape < 4; shape++) {
-          for (var op = 0; op < 4; op++) {
+          for (var op = 0; op < 6; op++) {
+            if (op >= 4 && shape == 0 && integer == 0) continue;
             sameDouble(
               native.arithmetic(integer, floating, shape, op),
               sdk.arithmetic(integer, floating, shape, op),
@@ -107,6 +109,24 @@ void main() {
       }
     }
   });
+  test(
+    'floating reduction preserves direct, boxed, dynamic and bound calls',
+    () {
+      final native = NumericMethods();
+      addTearDown(native.close);
+      for (final (value, divisor) in floatingReductionCases()) {
+        final expected = exactFloatingReduction(value, divisor);
+        for (var mode = 0; mode < 9; mode++) {
+          sameDouble(
+            native.reduction(value, divisor, mode),
+            mode == 0 || mode == 2 || mode == 6
+                ? expected.modulo
+                : expected.remainder,
+          );
+        }
+      }
+    },
+  );
   test('numeric constant identity preserves native types and defaults', () {
     final native = NumericMethods();
     addTearDown(native.close);

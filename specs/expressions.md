@@ -57,7 +57,11 @@ record 的 `==` 按字段值比较，包括同一 record 含 NaN 的情况。SDK
 
 ## 原生整数除法、余数与移位
 
-原生整数 `~/` 向零截断，`%` 返回非负欧几里得余数，`remainder` 返回与被除数同号的截断余数；结果遵循 64 位整数回绕。最小整数除以 -1 返回最小整数，相应余数为 0。三个操作遇到整数零除数均抛出 IntegerDivisionByZeroException，保留操作数求值顺序、typed catch 与 finally；忽略结果不会删除抛错。见 [~/ 契约](https://api.dart.dev/dart-core/num/operator_truncate_divide.html)、[% 契约](https://api.dart.dev/dart-core/num/operator_modulo.html)、[remainder 契约](https://api.dart.dev/dart-core/num/remainder.html)和[原生边界验证](../test/compiler/integer_operations_test.dart)。源码数值运算需要的异常类采用官方 SDK 声明，其 message 字符串与空 stackTrace getter 已接通；异常格式化仍未验证。浮点余数仍待实现。
+原生整数 `~/` 向零截断，`%` 返回非负欧几里得余数，`remainder` 返回与被除数同号的截断余数；结果遵循 64 位整数回绕。最小整数除以 -1 返回最小整数，相应余数为 0。三个操作遇到整数零除数均抛出 IntegerDivisionByZeroException，保留操作数求值顺序、typed catch 与 finally；忽略结果不会删除抛错。见 [~/ 契约](https://api.dart.dev/dart-core/num/operator_truncate_divide.html)、[% 契约](https://api.dart.dev/dart-core/num/operator_modulo.html)、[remainder 契约](https://api.dart.dev/dart-core/num/remainder.html)和[原生边界验证](../test/compiler/integer_operations_test.dart)。源码数值运算需要的异常类采用官方 SDK 声明，其 message 字符串与空 stackTrace getter 已接通；异常格式化仍未验证。
+
+原生浮点 `%` 与 `remainder` 已接通直接调用、装箱 `num`、dynamic 和绑定方法。混合整数操作先按 SDK 正文转换为 double；`remainder` 保留被除数符号及负零，`%` 的零结果为正零。非有限被除数、NaN 或零除数返回 NaN；有限值除以无穷时 remainder 保留原值，负值的 modulo 为正无穷。官方 `_Double` 正文复用，实际 external 缺口由普通 Dart [SDK patch](../sdk/patches/remainder.dart) 实现。有限输入使用精确二进制整数余数并舍入到 double 的[独立参考计算](../test/support/floating_reduction.dart)，[原生验证](../test/compiler/numeric_methods_test.dart)另覆盖非有限值和调用形状。
+
+浮点 modulo 的严格上界仍有契约疑点：[公开文档](https://api.dart.dev/dart-core/double/operator_modulo.html)要求结果小于除数绝对值，但[固定 SDK 的 `DartModulo`](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/runtime/vm/runtime_entry.cc)先求 fmod 再加除数绝对值，可能向上舍入到该值，例如 `-double.minPositive % 1.0 == 1.0`。当前保留这一舍入结果，不擅自 clamp，也不据此宣称严格上界已经满足。
 
 只要 `~/` 的实际操作数之一是 double，按 `(a / b).truncate()` 执行；整数操作数先参与 double 除法，有限商超出原生 int 范围时饱和，非有限商抛出 UnsupportedError。boxed num 的两个实际整数仍走精确整数除法，不提前转换为 double。求值顺序与忽略结果时的异常均保留。依据[固定 SDK 的 num 契约](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/num.dart)，见[数值转换原生验证](../test/compiler/numeric_conversions_test.dart)。
 
@@ -81,7 +85,7 @@ int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。d
 
 `abs`、`sign`、`isNaN`、`isInfinite`、`isFinite`、`isNegative`、`compareTo` 和 `clamp` 支持 int、double 及装箱 num，包括直接调用、虚调用和方法提取。保留整数边界、负零、NaN 的排序及无效上下界的 ArgumentError；clamp 返回选中的原值或边界值。装箱 num 的加、减、乘、除、取负和 toDouble 根据实际数值类型执行，支持跨调用、返回及泛型传值。见[原生数值方法验证](../test/compiler/numeric_methods_test.dart)及[固定 SDK num 契约](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/num.dart)。
 
-`toInt`、`truncate`、`floor`、`ceil` 和 `round` 支持 int、double 及装箱 num 接收者。整数保持全部 64 位；浮点的 toInt/truncate 向零舍入，floor 向下、ceil 向上，round 就近舍入且半数远离零。有限值超出有符号 64 位范围时饱和到对应边界；正负零转换为 0，NaN 与正负无穷抛出 UnsupportedError。求值和 finally 顺序不变，未使用转换结果仍须执行可能抛错的转换。错误通过 SDK 构造器携带当前固定版本的字符串消息，用户同名成员与 extension 不会被拦截。见 [num.truncate](https://api.dart.dev/dart-core/num/truncate.html)、[num.round](https://api.dart.dev/dart-core/num/round.html)、[double.round](https://api.dart.dev/dart-core/double/round.html)和[原生转换验证](../test/compiler/numeric_conversions_test.dart)。浮点余数仍未接通。
+`toInt`、`truncate`、`floor`、`ceil` 和 `round` 支持 int、double 及装箱 num 接收者。整数保持全部 64 位；浮点的 toInt/truncate 向零舍入，floor 向下、ceil 向上，round 就近舍入且半数远离零。有限值超出有符号 64 位范围时饱和到对应边界；正负零转换为 0，NaN 与正负无穷抛出 UnsupportedError。求值和 finally 顺序不变，未使用转换结果仍须执行可能抛错的转换。错误通过 SDK 构造器携带当前固定版本的字符串消息，用户同名成员与 extension 不会被拦截。见 [num.truncate](https://api.dart.dev/dart-core/num/truncate.html)、[num.round](https://api.dart.dev/dart-core/num/round.html)、[double.round](https://api.dart.dev/dart-core/double/round.html)和[原生转换验证](../test/compiler/numeric_conversions_test.dart)。
 
 `truncateToDouble`、`floorToDouble`、`ceilToDouble` 和 `roundToDouble` 同样支持 int、double 及装箱 num，返回 double 而不饱和到整数范围。已经为整数的 double、正负零和非有限值保持不变；负数舍入到零得到 -0.0，roundToDouble 的半数远离零。int 接收者仅执行通常的 int 到 double 转换。实现先排除绝对值大于等于 2^52 的 double，再复用安全范围内的整数舍入计算，不把 NaN 或无穷送进整数转换。契约见[固定 SDK double 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/double.dart)，行为及负零位模式由同一[原生转换验证](../test/compiler/numeric_conversions_test.dart)覆盖。
 

@@ -19,7 +19,7 @@ void main() {
       'lib/runtime/contracts.dart',
       'lib/layout/memory.dart',
       'lib/src/layout/memory_layout.dart',
-      'sdk/runtime/numbers.dart',
+      'sdk/runtime/allocator.dart',
     ]) {
       final output = File('${directory.path}/$path');
       output.parent.createSync(recursive: true);
@@ -31,7 +31,7 @@ void main() {
   test(
     'reads edits directly and packs a reproducible independent snapshot',
     () {
-      const path = 'sdk/runtime/numbers.dart';
+      const path = 'sdk/runtime/allocator.dart';
       final original = sources.read(path);
       final packed = SourceArchive.encode(sources);
       expect(SourceArchive.encode(sources), packed);
@@ -56,10 +56,10 @@ void main() {
     for (final path in [
       'sdk/runtime/missing.dart',
       'sdk/runtime/../../pubspec.yaml',
-      '/sdk/runtime/numbers.dart',
-      'sdk/runtime/./numbers.dart',
-      'sdk\\runtime\\numbers.dart',
-      'sdk/runtime/numbers.dart\u0000',
+      '/sdk/runtime/allocator.dart',
+      'sdk/runtime/./allocator.dart',
+      'sdk\\runtime\\allocator.dart',
+      'sdk/runtime/allocator.dart\u0000',
       'lib/compiler.dart',
     ]) {
       expect(sources.contains(path), isFalse);

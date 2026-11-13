@@ -59,7 +59,9 @@ double arithmetic(int integer, double floating, int shape, int operation) {
     0 => left + right,
     1 => left - right,
     2 => left * right,
-    _ => left / right,
+    3 => left / right,
+    4 => left % right,
+    _ => left.remainder(right),
   };
   return result.toDouble();
 }
@@ -77,3 +79,16 @@ bool constantIdentity(int mode) => mode == 8
         constants.contextualIdentity,
         constants.distinctZeros,
       ][mode];
+
+@Export<Double Function(Double, Double, Int64)>()
+double reduction(double value, double divisor, int mode) => switch (mode) {
+  0 => value % divisor,
+  1 => value.remainder(divisor),
+  2 => identity<num>(value) % identity<num>(divisor),
+  3 => identity<num>(value).remainder(identity<num>(divisor)),
+  4 => value.remainder.call(divisor),
+  5 => identity<num>(value).remainder.call(divisor),
+  6 => identity<dynamic>(value) % divisor,
+  7 => identity<dynamic>(value).remainder(divisor),
+  _ => identity<dynamic>(value).remainder.call(divisor),
+};

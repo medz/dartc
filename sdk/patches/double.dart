@@ -1,5 +1,5 @@
 import 'decimal.dart';
-import '../runtime/numbers.dart';
+import 'remainder.dart';
 
 @patch
 class double {

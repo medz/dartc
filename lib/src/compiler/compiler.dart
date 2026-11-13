@@ -65,7 +65,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         'sdk/runtime/allocator.dart',
         'sdk/runtime/type_info.dart',
         'sdk/runtime/dispatch.dart',
-        'sdk/runtime/numbers.dart',
+        'sdk/patches/remainder.dart',
         'sdk/runtime/console.dart',
         'sdk/runtime/stack_trace.dart',
       ],
