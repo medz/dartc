@@ -63,6 +63,12 @@ RegExp.escape 复用[官方 Dart 实现](../sdk/std/lib/_internal/vm/lib/regexp_
 
 UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生对照](../test/compiler/object_text_test.dart)，包括控制字符、孤立代理项、非法百分号和非法字节序列。错误仍以 ArgumentError 或 FormatException 传播。URI 对象的完整构造、解析、路径处理和 `Uri.base` 尚未接通，仍依赖大小写转换、RegExp 与平台环境能力；上述编解码范围不代表完整 Uri 支持。
 
+## FFI 回调类型检查
+
+Pointer.fromFunction 与 NativeCallable 的回调可带额外可选位置参数或可选命名参数，只要原函数可接受原生入口提供的参数。原函数类型和默认参数保留；缺少必需参数、参数或结果表示不兼容、非法异常返回值，以及 Pointer.fromFunction 的非静态来源仍在未使用代码中拒绝。见[分析合同](../test/frontend/analysis/ffi_callbacks_test.dart)。
+
+固定 analyzer 14.7 会拒绝这种可选回调，并提前跳过异常返回值检查。dartc 先确认函数子类型关系，再以本次调用的固定参数形状重新运行 analyzer 的完整 FFI 检查；检查后恢复原始类型。依据为固定 SDK 的[回调转换](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/pkg/vm/lib/modular/transformations/ffi/use_sites.dart#L1344)及[调用方向的子类型规则](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/pkg/vm/lib/modular/transformations/ffi/common.dart#L1968)。
+
 ## 数学函数
 
 `dart:math.sqrt` 直接复用固定 SDK 的 [Dart 实现](../sdk/std/lib/_internal/vm/lib/math_patch.dart)，仅将外部 `_sqrt` 接到机器平方根操作。输入通过 `num.toDouble()` 转换；保留负零，其他负值和 NaN 返回 NaN，正无穷返回正无穷。

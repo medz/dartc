@@ -110,23 +110,46 @@ Pointer<NativeFunction<Pointer<Void> Function(Pointer<Void>)>> threadEntry() {
 
 int optional(int value, [int extra = 3]) => value + extra;
 int named(int value, {int extra = 4}) => value + extra;
-const int Function(int) optionalCallback = optional;
+int allOptional([int value = 2, int extra = 3]) => value + extra;
 
 void main() {
   final staticCall = Pointer.fromFunction<Unary>(
-    optionalCallback,
+    // ignore: must_be_a_subtype
+    optional,
     -1,
   ).asFunction<int Function(int)>();
   if (staticCall(2) != 5) throw StateError('static defaults');
-  final int Function(int) namedCallback = named;
   final defaults = NativeCallable<Unary>.isolateLocal(
-    namedCallback,
+    // ignore: must_be_a_subtype
+    named,
     exceptionalReturn: -1,
   );
   if (defaults.nativeFunction.asFunction<int Function(int)>()(2) != 6) {
     throw StateError('closure defaults');
   }
   defaults.close();
+  final supplied = Pointer.fromFunction<Int64 Function(Int64, Int64)>(
+    // ignore: must_be_a_subtype
+    optional,
+    -1,
+  ).asFunction<int Function(int, int)>();
+  if (supplied(2, 7) != 9) throw StateError('supplied optional parameter');
+  final empty = Pointer.fromFunction<Int64 Function()>(
+    // ignore: must_be_a_subtype
+    allOptional,
+    -1,
+  ).asFunction<int Function()>();
+  if (empty() != 5) throw StateError('all optional parameters');
+  final captured = 7;
+  final closureDefaults = NativeCallable<Unary>.isolateLocal(
+    // ignore: must_be_a_subtype
+    (int value, {int extra = 4}) => value + extra + captured,
+    exceptionalReturn: -1,
+  );
+  if (closureDefaults.nativeFunction.asFunction<int Function(int)>()(2) != 13) {
+    throw StateError('captured optional parameter');
+  }
+  closureDefaults.close();
   final calls = <NativeCallable<Unary>>[];
   for (var i = 0; i < 4097; i++) {
     calls.add(

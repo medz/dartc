@@ -16,6 +16,7 @@ import 'package:dartc/sdk.dart';
 
 import '../analyzer_metadata.dart';
 import '../constant_evaluation.dart';
+import 'ffi_callbacks.dart';
 import 'source_files.dart';
 import 'sdk_patches.dart';
 
@@ -278,6 +279,7 @@ final class CheckedLibraries._(
         );
       }
     }
+    FfiCallbackChecks(unit, errors).check();
     unit.unit.accept(_SourceObligations(unit, _constants));
     _constants.check(unit, errors);
   }
