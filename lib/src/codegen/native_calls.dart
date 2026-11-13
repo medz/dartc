@@ -10,7 +10,9 @@ final class NativeCalls() {
     signature,
     () {
       ValueType raw(NativeTypeRef type) =>
-          type.isFloating ? .floating : .integer;
+          type is NativePointerType || type is NativeCompoundType
+          ? .integer
+          : FfiTypes.valueType(type);
       final target = FunctionTarget(null, 'nativeCall', raw(signature.result), [
         ValueType.integer,
         if (signature.result is NativeCompoundType) ValueType.integer,

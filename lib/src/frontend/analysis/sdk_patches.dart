@@ -58,15 +58,30 @@ final class SdkPatches(final OverlayResourceProvider files) {
     };
     final ffi = patches('ffi')
         .singleWhere((path) => path.endsWith('/ffi_patch.dart'));
-    _official.add(ffi);
+    final dynamicLibrary = patches(
+      'ffi',
+    ).singleWhere((path) => path.endsWith('/ffi_dynamic_library_patch.dart'));
+    _official.addAll([ffi, dynamicLibrary]);
     _apply(
       library('ffi'),
-      [ffi, if (runtime != null) '$runtime/ffi.dart'],
+      [
+        ffi,
+        if (runtime != null) ...[
+          dynamicLibrary,
+          '$runtime/ffi.dart',
+          '$runtime/dynamic_library.dart',
+        ],
+      ],
       declarations: {
         '_ArraySize',
         'Abi',
         '_abi',
         if (runtime != null) ...{
+          'DynamicLibrary',
+          '_open',
+          '_codeAsset',
+          '_processLibrary',
+          '_executableLibrary',
           '_NativeCallableBase',
           '_NativeCallableIsolateLocal',
           '_deleteNativeCallable',
@@ -565,6 +580,14 @@ final class SdkPatches(final OverlayResourceProvider files) {
             )) {
               if (!owner.namePart.typeName.lexeme.startsWith('_') &&
                   !inheritsMember(owner, member)) {
+                if (_official.contains(path) &&
+                    member is MethodDeclaration &&
+                    member.externalKeyword != null &&
+                    !member.name.lexeme.startsWith('_')) {
+                  // VM-only helpers must not enlarge the public SDK interface.
+                  edit(path, member.offset, member.end, '');
+                  continue;
+                }
                 _checkPrivate(member, path);
               }
             }
@@ -914,6 +937,7 @@ void _checkPrivate(AnnotatedNode node, String path) {
       fields: final variables,
     ) => variables.variables.map((variable) => variable.name.lexeme),
     ConstructorDeclaration(:final name) => [name?.lexeme ?? 'new'],
+    ExtensionDeclaration(:final name) => [name?.lexeme ?? ''],
     _ => throw FormatException(
       'Unsupported SDK declaration: $path:${node.offset}',
     ),

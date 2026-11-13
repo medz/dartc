@@ -7,6 +7,12 @@ typedef DartUnary = int Function(int);
 typedef FunctionPointer = Pointer<NativeFunction<NativeUnary>>;
 const _leaf = 1 + 1 == 2;
 
+DartUnary lookup(DynamicLibrary library, String symbol) =>
+    library.lookupFunction<NativeUnary, DartUnary>(symbol);
+
+DartUnary lookupLeaf(DynamicLibrary library, String symbol) =>
+    library.lookupFunction<NativeUnary, DartUnary>(symbol, isLeaf: _leaf);
+
 DartUnary bind(int address) =>
     FunctionPointer.fromAddress(address).asFunction<DartUnary>();
 

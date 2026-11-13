@@ -127,6 +127,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
           (.macos, _) => '/usr/lib/libSystem.B.dylib',
           (.linux, .c) => 'libc.so.6',
           (.linux, .math) => 'libm.so.6',
+          (.linux, .dynamicLoader) => 'libdl.so.2',
         };
         (systemSymbols[path] ??= {})[name] = name;
         return reference.symbol;

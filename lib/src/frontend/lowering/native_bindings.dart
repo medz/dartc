@@ -33,7 +33,15 @@ final class NativeBindings(final Bindings bindings)
       ...library.units.where((unit) => unit != root),
     ]) {
       unit = current;
-      unit.unit.accept(this);
+      if (bindings.sourceLibraries.contains(library.element) ||
+          bindings.runtimeSources.contains(unit.uri)) {
+        unit.unit.accept(this);
+      } else if (current == root) {
+        for (final directive
+            in unit.unit.directives.whereType<ast.LibraryDirective>()) {
+          directive.accept(this);
+        }
+      }
     }
   }
 

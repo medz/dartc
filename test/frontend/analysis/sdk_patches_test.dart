@@ -151,6 +151,15 @@ void main() {
           (library) => library.element.uri == Uri.parse('dart:ffi'),
         );
         expect(ffi.element.getClass('Abi')!.isFinal, isFalse);
+        final dynamicLibrary = ffi.element.getClass('DynamicLibrary')!;
+        expect(dynamicLibrary.getMethod('getHandle'), isNull);
+        final equality = ffi.getFragmentDeclaration(
+          dynamicLibrary.getMethod('==')!.fragments.last,
+        )!;
+        expect(
+          patches.origins[equality.resolvedUnit!.uri]!.path,
+          endsWith('/vm/lib/ffi_dynamic_library_patch.dart'),
+        );
         final close = ffi.getFragmentDeclaration(
           ffi.element
               .getClass('_NativeCallableBase')!
@@ -381,6 +390,7 @@ void main() {
   });
   for (final patch in [
     'class PublicApi {}',
+    'extension PublicApi on String {}',
     'mixin PublicApi {}',
     'typedef PublicAlias = int;',
     'class _OneByteString {}',
@@ -401,4 +411,16 @@ void main() {
       },
     );
   }
+
+  test('target patches cannot introduce public native helpers', () async {
+    await expectLater(
+      withImplementations(
+        (_, _) {},
+        changePath: 'dynamic_library.dart',
+        change: (source) =>
+            '$source\n@patch class DynamicLibrary { external int extra(); }',
+      ),
+      throwsFormatException,
+    );
+  });
 }

@@ -17,7 +17,7 @@ void main() {
           resources: _Sources(await SdkSources.load()),
         );
         final prefix = os == .macos ? '_' : '';
-        for (final (fixture, math) in [
+        for (final (fixture, extra) in [
           ('system_libraries.dart', true),
           ('system_library_unused.dart', false),
         ]) {
@@ -30,17 +30,24 @@ void main() {
               : 'libc.so.6';
           expect(
             libraries.map((library) => library.name),
-            unorderedEquals([system, if (math && os == .linux) 'libm.so.6']),
+            unorderedEquals([
+              system,
+              if (extra && os == .linux) ...['libm.so.6', 'libdl.so.2'],
+            ]),
           );
           final symbols = {
             for (final library in libraries)
               library.name: library.symbols.keys.toSet(),
           };
           expect(symbols[system], contains('${prefix}getpid'));
-          if (math) {
+          if (extra) {
             expect(
               symbols[os == .macos ? system : 'libm.so.6'],
               contains('${prefix}sin'),
+            );
+            expect(
+              symbols[os == .macos ? system : 'libdl.so.2'],
+              contains('${prefix}dlerror'),
             );
           }
           expect(

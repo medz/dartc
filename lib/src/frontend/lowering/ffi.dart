@@ -46,6 +46,13 @@ bool isAsFunction(ExecutableElement member) =>
             .getExtension('NativeFunctionPointer')
             ?.getMethod('asFunction');
 
+bool isLookupFunction(ExecutableElement member) =>
+    member.library.uri == _library &&
+    member.baseElement ==
+        member.library
+            .getExtension('DynamicLibraryExtension')
+            ?.getMethod('lookupFunction');
+
 bool isPointerCast(ExecutableElement member) =>
     member.library.uri == _library &&
     member.baseElement == member.library.getClass('Pointer')?.getMethod('cast');

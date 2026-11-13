@@ -2,6 +2,7 @@
 
 - Support pow, trigonometric functions, exp and log through the SDK numeric conversion and integer-power algorithms, with floating leaves bound to the target system math library.
 - Support `Abi.current()` through the official SDK factory, selecting the output platform on macOS and Linux ARM64/x64. Preserve constant identity and constructor function values; official VM patch adaptation retains public class modifiers.
+- Load dynamic libraries and resolve typed native functions with `DynamicLibrary` and `lookupFunction`. Preserve library identity, independent open references, pointer and struct signatures, callback reentry, and loader failures. Reject lookups on closed handles and embedded NUL names.
 
 - Create `NativeCallable.isolateLocal` callbacks from Dart closures and method values. Preserve captured state through collection and reentry, release it on close, honor `keepIsolateAlive`, and use the declared exception result at the native boundary.
 - Expose native link dependencies on `Compilation` so object and archive consumers can retain required system libraries when linking separately.

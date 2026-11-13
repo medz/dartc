@@ -53,6 +53,7 @@ final class const SystemNative({final SystemLibrary library = .c});
 enum SystemLibrary() {
   c,
   math,
+  dynamicLoader,
 }
 
 enum MemoryOperation() {

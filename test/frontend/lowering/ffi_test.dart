@@ -9,7 +9,7 @@ import '../../support/ir_interpreter.dart';
 
 void main() {
   test(
-    'asFunction creates typed lexical bodies with native call contracts',
+    'asFunction and lookupFunction share typed native call contracts',
     () async {
       final result = await AnalysisSession([
         'test/frontend/lowering/fixtures/ffi_functions.dart',
@@ -46,7 +46,11 @@ void main() {
         expect(call.pointer, same(adapter.entry.parameters[1]));
         expect(
           call.isLeaf,
-          ['leaf', 'constantLeaf'].contains(adapter.target.enclosing?.name),
+          [
+            'leaf',
+            'constantLeaf',
+            'lookupLeaf',
+          ].contains(adapter.target.enclosing?.name),
         );
       }
       expect(
@@ -65,6 +69,8 @@ void main() {
     () async {
       for (final name in [
         'invalid_ffi_functions',
+        'invalid_ffi_lookup',
+        'invalid_ffi_lookup_inferred',
         'invalid_variable_array',
         'invalid_ffi_callback',
         'invalid_ffi_generic_callback',

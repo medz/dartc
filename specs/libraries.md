@@ -63,6 +63,16 @@ RegExp.escape 复用[官方 Dart 实现](../sdk/std/lib/_internal/vm/lib/regexp_
 
 UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生对照](../test/compiler/object_text_test.dart)，包括控制字符、孤立代理项、非法百分号和非法字节序列。错误仍以 ArgumentError 或 FormatException 传播。URI 对象的完整构造、解析、路径处理和 `Uri.base` 尚未接通，仍依赖大小写转换、RegExp 与平台环境能力；上述编解码范围不代表完整 Uri 支持。
 
+## 动态库加载
+
+`DynamicLibrary.open`、`process`、`executable`、`lookup`、`providesSymbol`、`handle`、相等性、哈希和 `close` 已接通。重复打开同一库共享系统句柄，分别持有加载引用；关闭同一对象可重复，其他仍打开的句柄继续保留库。关闭后 `lookup` 和 `providesSymbol` 抛出 `StateError`；进程和可执行文件句柄不可关闭。此前返回的指针和函数不会自动保活已关闭的库，必须遵守其存活期。
+
+库路径和符号名按 UTF-8 传递，拒绝嵌入 NUL，避免截断后访问另一个名称。找不到库或符号抛出 `ArgumentError`；零符号地址是否成功由系统加载器错误状态决定。
+
+直接调用 `lookupFunction<T, F>` 使用封闭的原生签名和兼容的 Dart 函数类型，支持当前 FFI 的标量、指针和 Struct/Union 形状，返回普通可保存和调用的函数值。保留接收者与符号表达式的求值顺序、空感知调用和常量 `isLeaf`；未使用调用同样检查静态义务。`lookupFunction` 方法本身的提取调用、`codeAsset` 和构建钩子原生资产解析仍待接通。
+
+[动态库验证](../test/compiler/dynamic_libraries_test.dart)使用固定 Dart 库和客户端检查类型化调用、回调重入、UTF-8、系统与可执行文件符号、加载引用和失败路径。API 约束见 [DynamicLibrary](https://api.dart.dev/dart-ffi/DynamicLibrary-class.html)。
+
 ## FFI 回调类型检查
 
 Pointer.fromFunction 与 NativeCallable 的回调可带额外可选位置参数或可选命名参数，只要原函数可接受原生入口提供的参数。原函数类型和默认参数保留；缺少必需参数、参数或结果表示不兼容、非法异常返回值，以及 Pointer.fromFunction 的非静态来源仍在未使用代码中拒绝。见[分析合同](../test/frontend/analysis/ffi_callbacks_test.dart)。

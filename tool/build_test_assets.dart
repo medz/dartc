@@ -79,6 +79,7 @@ const _compilerLibraries = {
   'native_callbacks',
   'native_callbacks_plain',
   'native_callables',
+  'dynamic_library_provider',
   'native_aggregates',
   'typed_data',
   'managed_objects',
@@ -238,6 +239,11 @@ Future<void> main(List<String> args) async {
       ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
       ('native_callables', 'native_callables', 'entry_native_callables'),
       (
+        'dynamic_library_provider',
+        'dynamic_libraries',
+        'entry_dynamic_libraries',
+      ),
+      (
         'native_callables',
         'native_callables_alive',
         'entry_native_callables_alive',
@@ -383,6 +389,9 @@ Future<void> main(List<String> args) async {
             ),
         ],
       );
+      if (fixture == 'dynamic_library_provider') {
+        await library.copy(assets.library('compiler/动态库').path);
+      }
       if (fixture == 'native_symbols') {
         await shared([
           nativeSymbolsProvider(target),

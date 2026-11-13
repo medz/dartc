@@ -5,6 +5,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart' show FunctionType;
 import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 // A single options override also protects transitive dependency diagnostics.
@@ -341,6 +342,19 @@ final class _SourceObligations(
   @override
   void visitMethodInvocation(MethodInvocation node) {
     final method = node.methodName.element;
+    if (method is MethodElement &&
+        method.library.uri == Uri.parse('dart:ffi') &&
+        method.baseElement ==
+            method.library
+                .getExtension('DynamicLibraryExtension')
+                ?.getMethod('lookupFunction') &&
+        node.typeArgumentTypes?.firstOrNull is! FunctionType) {
+      throw FormatException(
+        '${unit.uri}: lookupFunction requires a concrete native function signature.',
+        unit.content,
+        node.offset,
+      );
+    }
     if (method is MethodElement &&
         method.library.uri == Uri.parse('dart:ffi') &&
         method ==

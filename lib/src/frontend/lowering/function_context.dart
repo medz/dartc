@@ -82,7 +82,9 @@ final class FunctionContext(
   }) => evaluateArguments(
     arguments,
     (expression, parameter) => switch (parameter?.enclosingElement) {
-      final ExecutableElement member when isAsFunction(member) =>
+      final ExecutableElement member
+          when isAsFunction(member) ||
+              isLookupFunction(member) && parameter!.name == 'isLeaf' =>
         bindings.constantExpression(unit, expression),
       _ => evaluate(expression),
     },
@@ -269,7 +271,41 @@ final class FunctionContext(
     List<ValueType> memberTypes,
     ast.AstNode site,
   ) {
-    if (isAsFunction(application.executable.declaration)) {
+    final lookup = isLookupFunction(application.executable.declaration);
+    if (lookup) {
+      if (memberTypes case [
+        final FunctionType native,
+        final FunctionType dart,
+      ]) {
+        final pointer = normal(
+          emit(
+            DirectCall(
+              bindings.target(
+                application.executable.declaration.library
+                    .getClass('DynamicLibrary')!
+                    .getMethod('lookup')!,
+                unit,
+                site,
+              ),
+              [receiver, args.positional.single],
+              typeArguments: [
+                FfiTypes.nativeFunction.instantiate([native]),
+              ],
+            ),
+          ),
+        );
+        if (pointer == null) return null;
+        receiver = pointer;
+        memberTypes = [dart];
+      } else {
+        unsupported(
+          unit,
+          site,
+          'lookupFunction native and Dart function types',
+        );
+      }
+    }
+    if (lookup || isAsFunction(application.executable.declaration)) {
       if (memberTypes case [final FunctionType signature]) {
         final isLeaf = args.named['isLeaf'];
         return emit(
