@@ -110,6 +110,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'entry',
     'allocators',
     'environment',
+    'assertions',
     'descriptor_write',
     'futures',
     'async_functions',
@@ -221,6 +222,17 @@ Future<void> main(List<String> args) async {
           );
           await result.write(assets.file('compiler/entry_$name'));
         }
+      }
+    }
+
+    if (selected.contains('assertions')) {
+      for (final enabled in [false, true]) {
+        final entry = await Compiler(target).compile(
+          ['test/compiler/fixtures/assertions.dart'],
+          output: const .executable(),
+          enableAssertions: enabled,
+        );
+        await entry.write(assets.file('compiler/entry_assertions_$enabled'));
       }
     }
 

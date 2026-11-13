@@ -74,6 +74,33 @@ void main() {
     },
   );
 
+  test('CLI enables assertions without consuming a following value', () async {
+    final errors = StringBuffer();
+    final command = CompilerCommand(StringBuffer(), errors);
+    final directory = (Directory(
+      'build/test',
+    )..createSync(recursive: true)).createTempSync('cli-assertions-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final output = File.fromUri(directory.uri.resolve('program'));
+    expect(
+      await command.run([
+        'test/compiler/fixtures/assertions.dart',
+        '-o',
+        output.path,
+        '--kind',
+        'exe',
+        '--enable-asserts',
+      ]),
+      0,
+      reason: errors.toString(),
+    );
+    final result = await Process.run(output.path, []);
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    expect(result.stdout, contains('["asserted",0,null,["assert",20],[0,20]]'));
+    expect(result.stdout, contains('["retainedMessage",5,true,null,[]]'));
+    expect(result.stderr, isEmpty);
+  });
+
   test('CLI reports usage errors and writes each native file kind', () async {
     final output = StringBuffer(), errors = StringBuffer();
     final command = CompilerCommand(output, errors);

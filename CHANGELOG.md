@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Enable native assertion checks with `Compiler.compile(enableAssertions: true)` or CLI `--enable-asserts`. Preserve lazy messages, initializer order, catch/finally, message identity and error traces across collection; assertions remain disabled by default.
+
 - Throw catchable `StateError` for failed irrefutable List and Map patterns in native code. Preserve existing local values, `finally` effects and error stack traces across collection.
 
 - Configure compilation declarations through `Compiler.compile(environment: ...)` and CLI `-D`/`--define`. Constants, runtime environment constructors and conditional imports share the same values; malformed declarations leave existing outputs unchanged.

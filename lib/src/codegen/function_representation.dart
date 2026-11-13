@@ -420,6 +420,18 @@ final class FunctionRepresentation(
               heap.runtime?.patternMatchFailure ??
               (throw UnsupportedError('Pattern match runtime unavailable'));
         }
+        if (instruction case AssertionFailure(:final message)) {
+          invocations[instruction] =
+              heap.runtime?.assertionFailure ??
+              (throw UnsupportedError('Assertion runtime unavailable'));
+          operands[instruction] = [
+            convert(
+              message ?? const Constant.nullValue(),
+              .object.nullable,
+              body,
+            ),
+          ];
+        }
         if (instruction case ObjectClassName(:final operand)) {
           final type = layouts.types.runtimeTypeOf(operand, body);
           final name = _load(TypeMetadata.className, type, body);

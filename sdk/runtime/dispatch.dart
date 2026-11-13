@@ -27,6 +27,10 @@ Object? dispatchFailure(Object? receiver, Invocation invocation) {
 @RuntimeEntry(.patternMatchFailure)
 Never patternMatchFailure() => throw StateError('Pattern matching error');
 
+/// Reports a failed enabled assertion with its lazily evaluated message.
+@RuntimeEntry(.assertionFailure)
+Never assertionFailure(Object? message) => throw AssertionError(message);
+
 /// Reports a reachable miss after an exhaustive switch.
 @RuntimeEntry(.exhaustivenessFailure)
 Never exhaustivenessFailure() => throw _ExhaustivenessError();

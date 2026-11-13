@@ -41,12 +41,14 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
   /// Object and archive outputs retain unresolved imports for a later link.
   /// [environment] supplies compilation declarations, independent of OS variables.
   /// The reserved `dart.library.*` declarations are supplied by the native SDK.
+  /// [enableAssertions] retains assertion conditions and lazy failure messages.
   Future<Compilation> compile(
     List<String> paths, {
     Output output = const .object(),
     Map<String, Map<String, String>> nativeSymbols = const {},
     Iterable<LinkInput> linkInputs = const [],
     Map<String, String> environment = const {},
+    bool enableAssertions = false,
   }) async {
     environment = Map.unmodifiable(environment);
     for (final name in environment.keys) {
@@ -100,7 +102,8 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         if (output is ExecutableOutput) 'sdk/runtime/process.dart',
       ],
     ).use((input) async {
-      final lowered = await Lowering().lower(input);
+      final lowered = await Lowering(enableAssertions: enableAssertions)
+          .lower(input);
       return (
         lowered,
         [

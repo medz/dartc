@@ -37,6 +37,7 @@ final class HeapRuntime(
   final FunctionTarget? dispatchFailure,
   final FunctionTarget? exhaustivenessFailure,
   final FunctionTarget? patternMatchFailure,
+  final FunctionTarget? assertionFailure,
   final FunctionTarget? floatingRemainder,
   final FunctionTarget? floatingModulo,
   final AsyncRuntime? async,
@@ -92,6 +93,8 @@ final class HeapRuntime(
             CoreTypes.invocation,
           ]),
         ),
+      if (assertionFailure case final target?)
+        (target, FunctionType(.never, [.object.nullable])),
       for (final target in [
         exhaustivenessFailure,
         patternMatchFailure,

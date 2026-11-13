@@ -20,6 +20,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       String? destination, header;
       var target = Target.host();
       var kind = _OutputKind.object;
+      var enableAssertions = false;
       final environment = <String, String>{};
       void define(String declaration) {
         final separator = declaration.indexOf('=');
@@ -32,6 +33,10 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
 
       for (var i = 1; i < arguments.length; i++) {
         final option = arguments[i];
+        if (option == '--enable-asserts') {
+          enableAssertions = true;
+          continue;
+        }
         if (option.startsWith('-D') && option.length > 2) {
           define(option.substring(2));
           continue;
@@ -82,6 +87,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       final library = await compiler.compile(
         [source],
         environment: environment,
+        enableAssertions: enableAssertions,
         output: switch (kind) {
           .object => const .object(),
           .executable => const .executable(),
@@ -110,7 +116,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
 const _usage =
     'Usage: dartc <source.dart> -o <output> '
     '[--kind object|static|shared|exe] [--header <file.h>] '
-    '[-DNAME=VALUE] [--define NAME=VALUE] '
+    '[-DNAME=VALUE] [--define NAME=VALUE] [--enable-asserts] '
     '[--target macos-arm64|macos-x64|linux-arm64|linux-x64]';
 
 enum _OutputKind() {

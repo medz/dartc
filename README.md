@@ -88,6 +88,8 @@ dart pub get
 dartc bin/main.dart --kind exe -o app
 ```
 
+Assertions are disabled by default. Use `--enable-asserts` or `Compiler.compile(enableAssertions: true)` to retain assertion checks and failure messages.
+
 Entry points can be synchronous or async, with optional command-line arguments. Normal completion exits with status zero; the Dart return value is discarded.
 
 Pass compilation declarations for `String.fromEnvironment`, `int.fromEnvironment`, `bool.fromEnvironment` and `bool.hasEnvironment`:
@@ -260,6 +262,7 @@ dartc <source.dart> -o <output> [options]
 | `-o <path>` | Set the required output path. |
 | `--kind <kind>` | Select `object`, `static`, `shared` or `exe`. Defaults to `object`. |
 | `--header <path>` | Write C/C++ declarations for native exports. |
+| `--enable-asserts` | Enable assertion conditions and failure messages. |
 | `--target <target>` | Select an output platform. Defaults to the host. |
 
 Use `dartc --help` to display command syntax.
