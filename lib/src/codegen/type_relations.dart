@@ -35,9 +35,9 @@ final class TypeRelations(
 
   FunctionTarget get test => values.entry(.typeSubtype);
 
-  Iterable<IrFunction> get functions => [?_parents, ..._views.values];
+  Iterable<IrFunction> get functions => [?_projection, ..._views.values];
 
-  /// Projects a closed instance type onto its declaring superclass or interface.
+  /// Projects an instance type onto its declaring superclass or interface.
   FunctionTarget viewOf(ClassType owner) => _views.putIfAbsent(owner, () {
     final target = FunctionTarget(
       null,
@@ -68,11 +68,22 @@ final class TypeRelations(
         Return(
           declaration == owner
               ? actual
-              : values.build(found, view, {
-                  for (final (i, parameter)
-                      in declaration.typeParameters.indexed)
-                    parameter: _part(found, actual, _int(i)),
-                }),
+              : values.build(
+                  found,
+                  view,
+                  {
+                    for (final (i, parameter)
+                        in declaration.typeParameters.indexed)
+                      parameter: _part(found, actual, _int(i)),
+                  },
+                  shift: (value, count) => found.emit(
+                    DirectCall(values.entry(.typeShift), [
+                      value,
+                      _int(count),
+                      _int(0),
+                    ]),
+                  ),
+                ),
         ),
       );
       current = next;
@@ -93,49 +104,39 @@ final class TypeRelations(
     ]),
   );
 
-  IrFunction? _parents;
-  IrFunction get supertypes => _parents ??= _parentProjection();
+  IrFunction? _projection;
+  IrFunction get projection => _projection ??= _typeProjection();
 
-  IrFunction _parentProjection() {
-    final target = values.runtime!.supertypes;
-    final entry = Block(target.parameterTypes), nominal = Block();
+  IrFunction _typeProjection() {
+    final target = values.runtime!.projection;
+    final entry = Block(target.parameterTypes);
+    final nominal = Block([TypeMetadata.type]);
     final missing = Block()..finish(const Return(Constant.nullValue()));
     final blocks = [entry, nominal, missing];
-    final actual = entry.parameters.single;
-    final kind = _load(entry, TypeMetadata.kind, actual);
+    final [actual, shape] = entry.parameters;
     if (recordStorage case final storage?) {
-      final record = Block();
-      blocks.add(record);
-      _equal(entry, kind, _int(TypeKind.record.index), record, nominal);
-      record.finish(Return(values.argumentConstants([storage])));
+      final record = Block(), ordinary = Block();
+      blocks.addAll([record, ordinary]);
+      _equal(
+        entry,
+        _load(entry, TypeMetadata.kind, actual),
+        _int(TypeKind.record.index),
+        record,
+        ordinary,
+      );
+      record.finish(Jump(nominal, [values.constant(storage)]));
+      ordinary.finish(Jump(nominal, [actual]));
     } else {
-      entry.finish(Jump(nominal));
+      entry.finish(Jump(nominal, [actual]));
     }
-    final shape = _load(nominal, TypeMetadata.shape, actual);
     var current = nominal;
-    for (final declaration in _declarations) {
-      final parents = [?declaration.superclass, ...declaration.interfaces];
-      if (parents.isEmpty) continue;
-      final selected = Block(), next = Block();
-      blocks.addAll([selected, next]);
-      _equal(current, shape, _int(values.id(declaration)), selected, next);
-      final environment = {
-        for (final (i, parameter) in declaration.typeParameters.indexed)
-          parameter: _part(selected, actual, _int(i)),
-      };
-      Value result = const Constant.nullValue();
-      for (final parent in parents.reversed) {
-        final value = values.build(
-          selected,
-          parent,
-          environment,
-          shift: (value, count) => selected.emit(
-            DirectCall(values.entry(.typeShift), [value, _int(count), _int(0)]),
-          ),
-        );
-        result = selected.emit(values.cons(value, result));
-      }
-      selected.finish(Return(result));
+    for (final owner in _declarations) {
+      final found = Block(), next = Block();
+      blocks.addAll([found, next]);
+      _equal(current, shape, _int(values.id(owner)), found, next);
+      found.finish(
+        Return(found.emit(DirectCall(viewOf(owner), nominal.parameters))),
+      );
       current = next;
     }
     current.finish(Jump(missing));

@@ -48,12 +48,34 @@ void main() {
     },
   );
 
-  test('runtime subtyping preserves function variance and recursive lexical bounds', () {
+  test('runtime subtyping preserves variance, lexical bounds and diamond projections', () {
     final native = TypeArguments();
     addTearDown(native.close);
-    const expected = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1];
+    const expected = [
+      1,
+      0,
+      1,
+      0,
+      1,
+      0,
+      1,
+      0,
+      1,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      1,
+      0,
+      0,
+    ];
     for (final count in [0, 40000]) {
-      for (var mode = 0; mode < 16; mode++) {
+      for (var mode = 0; mode < expected.length; mode++) {
         final result = expected[mode];
         // SDK 3.13.7 traps on recursive bounds and mischecks this projection; see specs/types.md.
         if (mode != 10 && mode != 11 && mode != 12) {

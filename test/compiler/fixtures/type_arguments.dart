@@ -106,6 +106,11 @@ int wordCast(int mode, int value, int count) {
 double doubleCast(double value, int count) => doubleAs<double>(value, count);
 
 class FunctionProjection<T>() extends Box<T Function<U>(U)>;
+class LeftProjection<T>() extends Box<List<T?>>;
+class RightProjection<T>() implements Box<List<T?>>;
+class DiamondProjection<T>()
+    extends LeftProjection<T>
+    implements RightProjection<T>;
 typedef RecursiveResult = X Function<X extends FutureOr<X>>();
 typedef RecursiveObject = Object Function<X extends FutureOr<X>>();
 typedef RecursiveTop = Object? Function<X extends FutureOr<X>>();
@@ -171,7 +176,24 @@ int subtypeShapes(int mode, int count) => switch (mode) {
     const TypeTag<void Function<X extends num>()>(1),
     count,
   ),
-  _ => subtype<Function>(const TypeTag<RecursiveResult>(1), count),
+  15 => subtype<Function>(const TypeTag<RecursiveResult>(1), count),
+  16 => subtype<Box<List<num?>>>(
+    const TypeTag<DiamondProjection<int>>(1),
+    count,
+  ),
+  17 => subtype<Box<List<int>>>(
+    const TypeTag<DiamondProjection<int>>(1),
+    count,
+  ),
+  18 => subtype<RightProjection<num>>(
+    const TypeTag<DiamondProjection<int>>(1),
+    count,
+  ),
+  19 => subtype<RightProjection<String>>(
+    const TypeTag<DiamondProjection<int>>(1),
+    count,
+  ),
+  _ => subtype<Child>(const TypeTag<DiamondProjection<int>>(1), count),
 };
 
 int compareRuntime(Object? object, Type expected, int count) {

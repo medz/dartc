@@ -87,7 +87,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
           throw ArgumentError('Invalid unchecked cast signature.');
         }
         value = block.emit(UncheckedCast(args.single, target.returnType));
-      case .typeSupertypes:
+      case .typeProjection:
         continue;
       case .typeView:
         if (target.kind != .function ||
@@ -194,7 +194,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       program,
       annotations.entries,
       annotations.primitives.entries
-          .singleWhere((entry) => entry.value == MemoryOperation.typeSupertypes)
+          .singleWhere((entry) => entry.value == MemoryOperation.typeProjection)
           .key,
     ),
     async: switch (annotations.entries) {

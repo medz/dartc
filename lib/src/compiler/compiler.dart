@@ -185,7 +185,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         continue;
       }
       if (runtime.primitives.containsKey(target) ||
-          target == runtime.types?.supertypes) {
+          target == runtime.types?.projection) {
         continue;
       }
       final reference = imports[target];

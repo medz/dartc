@@ -314,8 +314,8 @@ base class ScalarCodeGenerator<R extends Object>(
             heap.primitives.contains(declaration)) {
           continue;
         }
-        if (declaration == runtime?.types?.supertypes) {
-          selection.include(layouts.relations.supertypes);
+        if (declaration == runtime?.types?.projection) {
+          selection.include(layouts.relations.projection);
         } else if (function is! IrFunction) {
           throw ArgumentError(
             'Definition has no body: ${declaration.library}::'

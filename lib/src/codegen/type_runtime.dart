@@ -5,7 +5,9 @@ import 'package:dartc/runtime/contracts.dart';
 final class TypeRuntime(
   final IrProgram program,
   Map<RuntimeRole, FunctionTarget> entries,
-  final FunctionTarget supertypes,
+
+  /// Maps (type metadata, declaration shape) to its ancestor view or null.
+  final FunctionTarget projection,
 ) {
   final Map<RuntimeRole, FunctionTarget> _entries = {
     for (final role in _signatures.keys)
@@ -53,12 +55,15 @@ final class TypeRuntime(
         throw ArgumentError('Invalid type runtime entry: $role');
       }
     }
-    if (supertypes.typeParameters.isNotEmpty ||
-        supertypes.signature.optionalPositional != 0 ||
-        supertypes.signature.named.isNotEmpty ||
-        FunctionType(supertypes.returnType, supertypes.parameterTypes) !=
-            FunctionType(TypeMetadata.list.nullable, [TypeMetadata.type]) ||
-        program.implementationOf(supertypes) is! IrExternal) {
+    if (projection.typeParameters.isNotEmpty ||
+        projection.signature.optionalPositional != 0 ||
+        projection.signature.named.isNotEmpty ||
+        FunctionType(projection.returnType, projection.parameterTypes) !=
+            FunctionType(TypeMetadata.type.nullable, [
+              TypeMetadata.type,
+              ValueType.integer,
+            ]) ||
+        program.implementationOf(projection) is! IrExternal) {
       throw ArgumentError('Invalid type metadata projection.');
     }
   }

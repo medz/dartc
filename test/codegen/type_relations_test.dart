@@ -75,9 +75,12 @@ void main() {
     );
     final values = TypeValues(heapRuntime.types);
     final relations = TypeRelations(values, [base, child]);
-    relations.viewOf(base);
-    final projection = relations.supertypes;
-    final calls = projection.blocks
+    final target = relations.viewOf(base);
+    final projection = relations.projection;
+    final view = relations.functions.singleWhere(
+      (body) => body.target == target,
+    );
+    final calls = view.blocks
         .expand((b) => b.instructions)
         .whereType<DirectCall>()
         .map((call) => call.target)
@@ -90,9 +93,9 @@ void main() {
         values.entry(.typeShift),
       ]),
     );
-    expect(projection.target, same(heapRuntime.types!.supertypes));
+    expect(projection.target, same(heapRuntime.types!.projection));
     expect(
-      projection.blocks
+      view.blocks
           .expand((b) => b.instructions)
           .whereType<Construct>()
           .map((call) => call.initializer),

@@ -82,7 +82,7 @@ enum MemoryOperation() {
   float64Bits,
   className,
   typeView,
-  typeSupertypes,
+  typeProjection,
   captureStackTrace,
   uncheckedCast,
   instantiateClosure,

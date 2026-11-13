@@ -13,8 +13,9 @@ final class TypeInfo(
   @Primitive(.typeView)
   external static TypeInfo of(Type value);
 
-  @Primitive(.typeSupertypes)
-  external TypeArguments? get _supertypes;
+  /// Projects onto one nominal declaration without constructing unrelated types.
+  @Primitive(.typeProjection)
+  external TypeInfo? _asInstanceOf(int shape);
 
   @override
   bool operator ==(Object other) => equal(this, other);
@@ -186,12 +187,15 @@ final class TypeInfo(
         );
       }
     }
-    for (var parent = _supertypes; parent != null; parent = parent.tail) {
-      if (parent.head._isSubtype(other, sourceScope, targetScope, active)) {
-        return true;
-      }
-    }
-    return false;
+    final view = _asInstanceOf(other.shape);
+    return view != null &&
+        TypeArguments._subtypes(
+          view.parts,
+          other.parts,
+          sourceScope,
+          targetScope,
+          active,
+        );
   }
 
   bool _boundSubtype(
