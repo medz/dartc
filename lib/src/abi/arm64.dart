@@ -24,16 +24,20 @@ final class Arm64Abi(@override final Target target)
 
   @override
   CallLayout<CpuRegister> classify(NativeSignature signature) {
+    signature = signature.resolveAbi(target.abi);
     final storage = NativeLayout(target);
     final apple = target.operatingSystem == .macos;
     var integers = 0, floats = 0, stack = 0;
-    ArgumentLocation<CpuRegister> stacked(NativeTypeRef type) {
+    ArgumentLocation<CpuRegister> stacked(
+      NativeTypeRef type, {
+      bool variadic = false,
+    }) {
       final layout = storage.of(type);
-      final alignment = apple
+      final alignment = apple && !variadic
           ? layout.alignment
           : math.max(8, layout.alignment);
       stack = (stack + alignment - 1) & -alignment;
-      final size = apple ? layout.size : (layout.size + 7) & ~7;
+      final size = apple && !variadic ? layout.size : (layout.size + 7) & ~7;
       final location = StackArgument<CpuRegister>(
         stack,
         size: size,
@@ -46,8 +50,18 @@ final class Arm64Abi(@override final Target target)
     ArgumentLocation<CpuRegister> assign(
       NativeTypeRef type, {
       bool result = false,
+      bool variadic = false,
     }) {
-      type = type.resolveAbi(target.abi);
+      if (apple && variadic) {
+        if (type is NativeCompoundType &&
+            storage.of(type).size > 16 &&
+            storage.homogeneous(type) == null) {
+          return IndirectArgument(
+            stacked(NativeTypeRef.of(Pointer<Void>), variadic: true),
+          );
+        }
+        return stacked(type, variadic: true);
+      }
       if (type is NativeCompoundType) {
         final layout = storage.of(type);
         final hfa = storage.homogeneous(type);
@@ -108,13 +122,25 @@ final class Arm64Abi(@override final Target target)
     final result = signature.result.isVoid
         ? null
         : assign(signature.result, result: true);
-    return CallLayout(signature.parameters.map(assign), result, [
-      for (var i = 0; i <= 17; i++) Register.values[i],
-      if (!apple) Register.x18,
-      Register.x30,
-      ...FloatRegister.values.take(8),
-      ...FloatRegister.values.skip(16),
-    ]);
+    return CallLayout(
+      [
+        for (final (i, type) in signature.parameters.indexed)
+          assign(
+            type,
+            variadic:
+                signature.variadicStart != null &&
+                i >= signature.variadicStart!,
+          ),
+      ],
+      result,
+      [
+        for (var i = 0; i <= 17; i++) Register.values[i],
+        if (!apple) Register.x18,
+        Register.x30,
+        ...FloatRegister.values.take(8),
+        ...FloatRegister.values.skip(16),
+      ],
+    );
   }
 
   @override

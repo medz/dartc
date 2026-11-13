@@ -656,10 +656,7 @@ sealed class NativeCallbackEntry(
   final NativeSignature signature = (FfiTypes.describe(
     FfiTypes.nativeFunction.instantiate([nativeType]),
   ) as NativeFunctionType).signature;
-  final FunctionType dartSignature = FunctionType(
-    FfiTypes.dartValueType(nativeType.result),
-    nativeType.parameters.map(FfiTypes.dartValueType),
-  );
+  final FunctionType dartSignature = FfiTypes.dartSignature(nativeType);
 
   this : super(.integer) {
     final type = callbackType;
@@ -1864,10 +1861,7 @@ final class NativeCall._(
         pointer,
         arguments,
         signature,
-        FunctionType(
-          FfiTypes.dartValueType(declaration.result),
-          declaration.parameters.map(FfiTypes.dartValueType),
-        ),
+        FfiTypes.dartSignature(declaration),
         isLeaf,
         borrowedOwners,
       );

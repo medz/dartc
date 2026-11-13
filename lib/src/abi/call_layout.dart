@@ -9,8 +9,9 @@ import 'argument_location.dart';
 final class CallLayout<R>(
   Iterable<ArgumentLocation<R>> parameters,
   final ArgumentLocation<R>? result,
-  Iterable<R> clobberedRegisters,
-) {
+  Iterable<R> clobberedRegisters, {
+  Map<R, int> registerInputs = const {},
+}) {
   /// Parameter locations in source order.
   final List<ArgumentLocation<R>> parameters = .unmodifiable(parameters);
 
@@ -23,6 +24,9 @@ final class CallLayout<R>(
 
   /// Registers whose previous contents may be lost across the call.
   final Set<R> clobberedRegisters = .unmodifiable(clobberedRegisters);
+
+  /// Implicit integer inputs set after argument staging, such as the SysV AL count.
+  final Map<R, int> registerInputs = .unmodifiable(registerInputs);
 
   /// Whether integer condition flags may change across the call.
   bool get clobbersFlags => true;
@@ -60,8 +64,14 @@ final class CallLayout<R>(
         'A hidden result address must have a distinct register.',
       );
     }
+    if (this.registerInputs.keys.any(registers.contains)) {
+      throw ArgumentError(
+        'Implicit inputs must not overlap parameter registers.',
+      );
+    }
     if (!this.clobberedRegisters.containsAll([
       ...registers,
+      ...this.registerInputs.keys,
       ...?result?.registers,
       if (result case IndirectArgument(:final returnedAddress?))
         returnedAddress,

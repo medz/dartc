@@ -4,6 +4,72 @@ import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('variadic signatures retain call shape and declare the C ellipsis', () {
+    final signature = NativeSignature(Int32, [
+      Pointer<Uint8>,
+      Int32,
+      Double,
+    ], variadicStart: 1);
+    expect(signature.declaration('format'), 'int32_t format(uint8_t*, ...)');
+    expect(
+      signature,
+      NativeSignature(Int32, [Pointer<Uint8>, Int32, Double], variadicStart: 1),
+    );
+    expect(
+      signature,
+      isNot(NativeSignature(Int32, [Pointer<Uint8>, Int32, Double])),
+    );
+    expect(
+      signature,
+      isNot(
+        NativeSignature(Int32, [
+          Pointer<Uint8>,
+          Int32,
+          Double,
+        ], variadicStart: 2),
+      ),
+    );
+    expect(
+      NativeSignature(Void, [Int32], variadicStart: 1).declaration('empty'),
+      'void empty(int32_t, ...)',
+    );
+    expect(
+      NativeSignature(Void, [], variadicStart: 0).declaration('all'),
+      'void all(...)',
+    );
+    for (final start in [-1, 2]) {
+      expect(
+        () => NativeSignature(Void, [Int32], variadicStart: start),
+        throwsRangeError,
+      );
+    }
+    for (final type in [Bool, Int8, Uint8, Int16, Uint16, Float]) {
+      expect(
+        () => NativeSignature(Void, [type], variadicStart: 0),
+        throwsUnsupportedError,
+      );
+      expect(NativeSignature(Void, [type]).parameters, [
+        NativeScalarType(type),
+      ]);
+    }
+    final integer = NativeAbiIntegerType(
+      Uri.parse('package:example/types.dart'),
+      'TargetInt',
+      {
+        Abi.macosArm64: NativeScalarType(Int32),
+        Abi.linuxArm64: NativeScalarType(Int16),
+      },
+    );
+    final dependent = NativeSignature.types(NativeScalarType(Void), [
+      integer,
+    ], variadicStart: 0);
+    expect(
+      dependent.resolveAbi(Abi.macosArm64),
+      NativeSignature(Void, [Int32], variadicStart: 0),
+    );
+    expect(() => dependent.resolveAbi(Abi.linuxArm64), throwsUnsupportedError);
+  });
+
   test(
     'ABI integer mappings reject non-integer storage and require a target',
     () {

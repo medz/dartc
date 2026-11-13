@@ -199,7 +199,17 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 [闭包回调验证](../test/compiler/native_callables_test.dart)覆盖独立捕获、跨页登记、关闭后释放捕获、调用中关闭及重入、异常和聚合返回、错误线程拒绝，以及进程保活和定时器关闭。生命周期依据 [NativeCallable.isolateLocal](https://api.dart.dev/dart-ffi/NativeCallable/NativeCallable.isolateLocal.html)。
 
+### 可变参数
+
+`VarArgs<(...)>` 可作为原生签名的最后一个参数，其位置记录字段依次展开为 Dart 实参；不接受命名记录字段、非末尾标记或非具体记录类型。`VarArgs<()>` 表示这次调用没有额外参数，仍保留可变参数调用约定。每个签名描述一次调用的实际类型与数量；传入其他形状时须另建绑定。契约见 [VarArgs](https://api.dart.dev/dart-ffi/VarArgs-class.html)。
+
+`@Native`、`lookupFunction`、`asFunction` 及其方法值、`Pointer.fromFunction`、`NativeCallable.isolateLocal` 和 `@Export` 共用该签名。支持已实现的标量、指针和按值 Struct/Union；导出声明生成 C 的 `...`。macOS ARM64 的匿名参数使用八字节栈槽，Linux ARM64 遵循 AAPCS64 参数分配，x86-64 的 AL 记录实际使用的向量参数寄存器数量。平台契约见 [Apple ARM64](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms)、[AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst) 和 [System V AMD64 ABI](https://gitlab.com/x86-psABIs/x86-64-ABI)。
+
+[原生验证](../test/compiler/varargs_test.dart)调用系统 snprintf 检查格式化结果、缓冲区写入、截断、空尾部以及整数和浮点寄存器耗尽；SDK 与 dartc 双向传递浮点聚合和大结构体，检查按值复制。回调包含闭包、静态函数及可选参数。[ABI 契约](../test/abi/variadic_test.dart)检查固定栈参数后的对齐和隐含寄存器输入；[签名契约](../test/interop/native_signature_test.dart)检查边界、类型及 C 声明。
+
 ### FFI 对照差异
+
+可变参数须显式使用 C 默认提升后的类型。dartc 拒绝匿名参数中的 Float、Bool 及 8/16 位整数；ABI-specific integer 按输出平台检查，不隐式改写类型。SDK 仍接受其中部分未定义调用，见 [SDK #56058](https://github.com/dart-lang/sdk/issues/56058)。固定参数不受此限制。
 
 [Array API](https://api.dart.dev/dart-ffi/Array/Array.variable.html) 规定只有最外层维度可变。固定 SDK 3.14.0 的 VM 将该标志传给内层数组，未拒绝固定内层的越界索引；dartc 保留内层 RangeError 检查。
 

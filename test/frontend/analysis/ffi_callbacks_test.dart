@@ -112,7 +112,34 @@ void unused() {
     );
   }
 
+  test('optional callbacks use the flattened variadic arity', () async {
+    await check('''
+import 'dart:ffi';
+double callback(int first, [double second = 0, int third = 0]) => first + second + third;
+void unused() {
+  Pointer.fromFunction<Double Function(Int, VarArgs<(Double, Int)>)>(callback, -1.0);
+  NativeCallable<Double Function(Int, VarArgs<(Double, Int)>)>.isolateLocal(callback, exceptionalReturn: -1.0);
+  NativeCallable<Double Function(Int, VarArgs<()>)>.isolateLocal(callback, exceptionalReturn: -1.0);
+}
+''');
+  });
+
   for (final (name, declaration, invocation) in [
+    (
+      'excess variadic arguments',
+      'int callback(int first, [int second = 0]) => first;',
+      'Pointer.fromFunction<Int Function(Int, VarArgs<(Int, Int)>)>(callback, -1)',
+    ),
+    (
+      'named variadic fields',
+      'int callback(int first, [int second = 0]) => first;',
+      'Pointer.fromFunction<Int Function(Int, VarArgs<({Int second})>)>(callback, -1)',
+    ),
+    (
+      'nonfinal variadic marker',
+      'int callback(int first, [int second = 0]) => first;',
+      'Pointer.fromFunction<Int Function(VarArgs<(Int,)>, Int)>(callback, -1)',
+    ),
     (
       'missing required positional argument',
       'int callback(int first, int second, [int third = 0]) => first;',

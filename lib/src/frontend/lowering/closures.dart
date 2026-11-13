@@ -183,10 +183,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
       if (application.receiverType case ClassType(
         typeArguments: [ClassType(typeArguments: [final FunctionType native])],
       )) {
-        final representation = FunctionType(
-          FfiTypes.dartValueType(native.result),
-          native.parameters.map(FfiTypes.dartValueType),
-        );
+        final representation = FfiTypes.dartSignature(native);
         entry.emit(
           DirectCall(nativeTypeCheck, [
             entry.emit(ReifyType(signature.result)),

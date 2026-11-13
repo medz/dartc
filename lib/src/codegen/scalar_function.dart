@@ -206,7 +206,9 @@ final class ScalarFunction<R extends Object>(
                       layout.clobberedRegisters.contains(r),
                 );
                 allocation.load(value, scratch, asType: parameterTypes?[i]);
-                final type = native?.signature.parameters[i];
+                final type = native?.signature.parameters[i].resolveAbi(
+                  emitter.convention.target.abi,
+                );
                 if (type != null && type.isSinglePrecision) {
                   adapter.convert(scratch, type, intoDart: false);
                 }
@@ -245,12 +247,17 @@ final class ScalarFunction<R extends Object>(
               (r) =>
                   emitter.bank(r) == .general &&
                   layout.clobberedRegisters.contains(r) &&
+                  !layout.registerInputs.containsKey(r) &&
                   !layout.parameters.any(
                     (p) => p is RegisterArgument<R> && p.register == r,
                   ),
             );
             allocation.load(selection.body.inputsOf(native).first, address);
             allocation.release(selection.body.inputsOf(native).first);
+            for (final MapEntry(:key, :value)
+                in layout.registerInputs.entries) {
+              emitter.loadImmediate(key, value);
+            }
             emitter.callRegister(address);
           }
           for (final fixup in parked) {

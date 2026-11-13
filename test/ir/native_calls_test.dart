@@ -5,6 +5,50 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'VarArgs flatten to Dart arguments without losing the native boundary',
+    () {
+      final native = NativeSignature(ffi.Int32, [
+        ffi.Int32,
+        ffi.Double,
+      ], variadicStart: 1);
+      final type = FfiTypes.resolve(NativeFunctionType(native));
+      expect(FfiTypes.describe(type), NativeFunctionType(native));
+      final declaration = type.typeArguments.single as FunctionType;
+      expect(
+        FfiTypes.dartSignature(declaration),
+        FunctionType(.integer, [.integer, .floating]),
+      );
+      final pointer = Block([
+        FfiTypes.pointer.instantiate([type]),
+      ]).parameters.single;
+      final call = NativeCall(pointer, [
+        const Constant.integer(7),
+        const Constant.floating(1.5),
+      ]);
+      expect(call.signature, native);
+      expect(call.type, ValueType.integer);
+      expect(
+        () => NativeCall(pointer, [const Constant.integer(7)]),
+        throwsArgumentError,
+      );
+      for (final record in [
+        RecordType([], {'named': FfiTypes.int64}),
+        ValueType.record,
+      ]) {
+        final malformed = FunctionType(FfiTypes.int64, [
+          FfiTypes.varArgs.instantiate([record]),
+        ]);
+        expect(() => FfiTypes.signature(malformed), throwsUnsupportedError);
+      }
+      final empty = NativeSignature(ffi.Void, [], variadicStart: 0);
+      expect(
+        FfiTypes.describe(FfiTypes.resolve(NativeFunctionType(empty))),
+        NativeFunctionType(empty),
+      );
+    },
+  );
+
   final signature = NativeSignature(ffi.Int8, [ffi.Int64, ffi.Float]);
   final type = FfiTypes.resolve(
     NativePointerType(NativeFunctionType(signature)),

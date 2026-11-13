@@ -110,6 +110,19 @@ abstract final class FfiTypes() {
     ],
   );
 
+  /// The final native parameter marker containing the actual variadic types.
+  static final varArgs = ClassType(
+    _library,
+    'VarArgs',
+    interfaces: [nativeType],
+    isAbstract: true,
+    typeParameters: [
+      TypeParameterType('T')
+        ..initializeBound(.record)
+        ..initializeDefaultType(.record),
+    ],
+  );
+
   /// The Dart pointer declaration; its type argument describes native storage.
   static final pointer = ClassType(
     _library,
@@ -147,10 +160,15 @@ abstract final class FfiTypes() {
       resolve(element),
     ]),
     NativeFunctionType(:final signature) => nativeFunction.instantiate([
-      FunctionType(
-        resolve(signature.result),
-        signature.parameters.map(resolve),
-      ),
+      FunctionType(resolve(signature.result), [
+        ...signature.parameters
+            .take(signature.variadicStart ?? signature.parameters.length)
+            .map(resolve),
+        if (signature.variadicStart case final start?)
+          varArgs.instantiate([
+            RecordType(signature.parameters.skip(start).map(resolve)),
+          ]),
+      ]),
     ]),
     NativeCompoundType() ||
     NativeArrayType() ||
@@ -173,20 +191,54 @@ abstract final class FfiTypes() {
       );
     }
     if (type is ClassType && type.declaration == nativeFunction) {
-      final signature = type.typeArguments.single;
-      if (signature is FunctionType &&
-          signature.typeParameters.isEmpty &&
-          signature.optionalPositional == 0 &&
-          signature.named.isEmpty) {
-        return NativeFunctionType(
-          NativeSignature.types(
-            describe(signature.result),
-            signature.parameters.map(describe),
-          ),
-        );
+      if (type.typeArguments.single case final FunctionType function) {
+        return NativeFunctionType(signature(function));
       }
     }
     throw UnsupportedError('Native declaration: ${type.dartName}');
+  }
+
+  /// Describes the actual native arguments, including a final VarArgs record.
+  static NativeSignature signature(FunctionType function) {
+    final (:parameters, :variadicStart) = _parameters(function);
+    return NativeSignature.types(
+      describe(function.result),
+      parameters.map(describe),
+      variadicStart: variadicStart,
+    );
+  }
+
+  /// The Dart call shape, retaining bound pointer and compound identities.
+  static FunctionType dartSignature(FunctionType native) => FunctionType(
+    dartValueType(native.result),
+    _parameters(native).parameters.map(dartValueType),
+  );
+
+  static ({List<ValueType> parameters, int? variadicStart}) _parameters(
+    FunctionType native,
+  ) {
+    if (native.typeParameters.isNotEmpty ||
+        native.optionalPositional != 0 ||
+        native.named.isNotEmpty) {
+      throw UnsupportedError(
+        'Expected a non-generic positional FFI signature.',
+      );
+    }
+    final parameters = native.parameters;
+    if (parameters.lastOrNull
+        case ClassType(
+          :final declaration,
+          typeArguments: [final RecordType record],
+        )
+        when declaration == varArgs &&
+            record.positionalCount == record.fields.length) {
+      final start = parameters.length - 1;
+      return (
+        parameters: [...parameters.take(start), ...record.fields],
+        variadicStart: start,
+      );
+    }
+    return (parameters: parameters, variadicStart: null);
   }
 
   /// The sized pointee storage, retaining ABI-dependent integer mappings.

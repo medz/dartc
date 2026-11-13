@@ -7,17 +7,45 @@ import 'native_type.dart';
 /// The unnamed constructor accepts supported `dart:ffi` type literals. Use
 /// [NativeSignature.types] for nested pointers and native function signatures.
 /// Unsized parameters and results other than [Void] throw [UnsupportedError].
+/// Variadic arguments must already use C's promoted types (`Int` or wider, and
+/// `Double`); narrow integers, `Bool` and `Float` are rejected, not converted.
 final class NativeSignature.types(
   final NativeTypeRef result,
-  Iterable<NativeTypeRef> parameters,
-) {
+  Iterable<NativeTypeRef> parameters, {
+
+  /// Index of the first variadic argument, or null for a fixed signature.
+  ///
+  /// May equal the parameter count when no variadic arguments are passed.
+  final int? variadicStart,
+}) {
   /// Parameter types in declaration order.
   final List<NativeTypeRef> parameters = .unmodifiable(parameters);
 
-  new(Type result, Iterable<Type> parameters)
-    : this.types(NativeTypeRef.of(result), parameters.map(NativeTypeRef.of));
+  new(Type result, Iterable<Type> parameters, {int? variadicStart})
+    : this.types(
+        NativeTypeRef.of(result),
+        parameters.map(NativeTypeRef.of),
+        variadicStart: variadicStart,
+      );
 
   this {
+    if (variadicStart case final start?) {
+      RangeError.checkValueInInterval(
+        start,
+        0,
+        this.parameters.length,
+        'variadicStart',
+      );
+      for (final type in this.parameters.skip(start)) {
+        if (type.isSinglePrecision ||
+            type.isBoolean ||
+            (type.integerLayout?.bytes ?? 4) < 4) {
+          throw UnsupportedError(
+            'Variadic arguments require promoted native types: use Int or Double instead of $type.',
+          );
+        }
+      }
+    }
     for (final type in [if (!result.isVoid) result, ...this.parameters]) {
       if (!type.isSized || type is NativeArrayType) {
         throw UnsupportedError('Unsized or array native parameter: $type');
@@ -25,23 +53,38 @@ final class NativeSignature.types(
     }
   }
 
+  /// Resolves ABI-dependent scalar storage while retaining the variadic boundary.
+  NativeSignature resolveAbi(Abi abi) => .types(
+    result.resolveAbi(abi),
+    parameters.map((type) => type.resolveAbi(abi)),
+    variadicStart: variadicStart,
+  );
+
   /// Formats a C function declarator, including nested pointer types.
   ///
   /// [abi] is required when a declaration contains an ABI-specific integer.
-  String declaration(String name, {Abi? abi}) => result.declaration(
-    '$name(${parameters.isEmpty ? 'void' : parameters.map((p) => p.declaration('', abi: abi)).join(', ')})',
-    abi: abi,
-  );
+  String declaration(String name, {Abi? abi}) {
+    final arguments = [
+      if (parameters.isEmpty && variadicStart == null) 'void',
+      ...parameters
+          .take(variadicStart ?? parameters.length)
+          .map((p) => p.declaration('', abi: abi)),
+      if (variadicStart != null) '...',
+    ];
+    return result.declaration('$name(${arguments.join(', ')})', abi: abi);
+  }
 
   @override
   bool operator ==(Object other) =>
       other is NativeSignature &&
       result == other.result &&
+      variadicStart == other.variadicStart &&
       parameters.length == other.parameters.length &&
       parameters.indexed.every((p) => p.$2 == other.parameters[p.$1]);
 
   @override
-  int get hashCode => Object.hash(result, Object.hashAll(parameters));
+  int get hashCode =>
+      Object.hash(result, Object.hashAll(parameters), variadicStart);
 }
 
 /// A native type described by FFI declarations rather than host reflection.

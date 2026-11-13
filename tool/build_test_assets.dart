@@ -79,6 +79,8 @@ const _compilerLibraries = {
   'native_callbacks',
   'native_callbacks_plain',
   'native_callables',
+  'varargs',
+  'varargs_scalar',
   'dynamic_library_provider',
   'native_aggregates',
   'typed_data',
@@ -125,6 +127,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
   if (selected.contains('native_callbacks')) {
     selected.add('native_callbacks_plain');
   }
+  if (selected.contains('varargs')) selected.add('varargs_scalar');
   final unknown = selected.difference(available);
   if (unknown.isNotEmpty) {
     throw ArgumentError('Unknown compiler fixtures: ${unknown.join(', ')}');
@@ -271,6 +274,27 @@ Future<void> main(List<String> args) async {
         'test/compiler/fixtures/$source.dart',
       ], output: const .executable());
       await entry.write(assets.file('compiler/$output'));
+    }
+    if (selected.contains('varargs')) {
+      final source = Uri.base.resolve('test/compiler/fixtures/varargs.dart');
+      final entry = await Compiler(target).compile(
+        [source.toFilePath()],
+        output: const .executable(),
+        nativeSymbols: {
+          source.toString(): {'snprintf': 'snprintf'},
+        },
+        linkInputs: [
+          LinkInput.sharedLibrary(
+            target.operatingSystem == .macos
+                ? '/usr/lib/libSystem.B.dylib'
+                : 'libc.so.6',
+            symbols: {
+              target.nativeSymbol('snprintf'): target.nativeSymbol('snprintf'),
+            },
+          ),
+        ],
+      );
+      await entry.write(assets.file('compiler/entry_varargs'));
     }
     if (target == const Target(.linux, .arm64) &&
         selected.contains('math_random')) {

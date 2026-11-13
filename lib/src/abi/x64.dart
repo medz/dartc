@@ -22,6 +22,7 @@ final class X64Abi(@override final Target target)
 
   @override
   CallLayout<CpuRegister> classify(NativeSignature signature) {
+    signature = signature.resolveAbi(target.abi);
     const general = <Register>[.rdi, .rsi, .rdx, .rcx, .r8, .r9];
     const results = <Register>[.rax, .rdx];
     final storage = NativeLayout(target);
@@ -101,10 +102,18 @@ final class X64Abi(@override final Target target)
     final result = signature.result.isVoid
         ? null
         : assign(signature.result, result: true);
-    return CallLayout(signature.parameters.map(assign), result, [
-      ...const <Register>[.rax, .rcx, .rdx, .rsi, .rdi, .r8, .r9, .r10, .r11],
-      ...FloatRegister.values,
-    ]);
+    final parameters = signature.parameters.map(assign).toList();
+    return CallLayout(
+      parameters,
+      result,
+      [
+        ...const <Register>[.rax, .rcx, .rdx, .rsi, .rdi, .r8, .r9, .r10, .r11],
+        ...FloatRegister.values,
+      ],
+      registerInputs: {
+        if (signature.variadicStart != null) Register.rax: floats,
+      },
+    );
   }
 
   @override

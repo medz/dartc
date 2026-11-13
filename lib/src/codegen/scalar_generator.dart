@@ -895,6 +895,7 @@ base class ScalarCodeGenerator<R extends Object>(
   }
 
   bool _needsEntry(NativeSignature signature) =>
+      signature.variadicStart != null ||
       [signature.result, ...signature.parameters].any(
         (t) =>
             t is NativeCompoundType ||

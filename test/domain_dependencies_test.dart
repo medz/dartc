@@ -29,6 +29,7 @@ void main() {
       },
       'linker': {'object', 'assembler', 'target'},
       'compiler': {
+        'abi',
         'runtime',
         'sdk',
         'ir',

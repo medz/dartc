@@ -31,7 +31,9 @@ NativeAbiIntegerType? abiInteger(InterfaceElement element) {
         final abi = ffi.Abi.values.firstWhere(
           (abi) => abi.toString() == '${os}_$architecture',
         );
-        mapping[abi] = nativeType(entry.value!.type!) as NativeScalarType;
+        final storage = entry.value!.type! as dart.InterfaceType;
+        mapping[abi] =
+            FfiTypes.describe(ffiClass(storage.element)!) as NativeScalarType;
       }
       return NativeAbiIntegerType(element.library.uri, element.name!, mapping);
     }
@@ -79,55 +81,23 @@ ClassType? ffiClass(InterfaceElement element) {
   if (element == library.getClass('NativeFunction')) {
     return FfiTypes.nativeFunction;
   }
+  if (element == library.getClass('VarArgs')) return FfiTypes.varArgs;
   return null;
 }
 
 NativeTypeRef nativeType(
   dart.DartType type, {
-  ValueType Function(dart.DartType)? bind,
-}) {
-  if (bind != null) return FfiTypes.describe(bind(type));
-  if (type is dart.InterfaceType && type.nullabilitySuffix == .none) {
-    final library = type.element.library;
-    if (library.uri == _library) {
-      for (final MapEntry(:key, :value) in FfiTypes.scalarTypes.entries) {
-        if (type.element == library.getClass(value.name)) {
-          return NativeScalarType(key);
-        }
-      }
-      if (type.element == library.getClass('Void')) {
-        return NativeScalarType(ffi.Void);
-      }
-      if (type.element == library.getClass('Pointer')) {
-        return NativePointerType(nativeType(type.typeArguments.single));
-      }
-      if (type.element == library.getClass('NativeFunction')) {
-        final signature = type.typeArguments.single;
-        if (signature is dart.FunctionType) {
-          return NativeFunctionType(nativeSignature(signature));
-        }
-      }
-    }
-    if (abiInteger(type.element) case final integer?) return integer;
-  }
-  throw UnsupportedError('Native signature type: $type');
-}
+  required ValueType Function(dart.DartType) bind,
+}) => FfiTypes.describe(bind(type));
 
 NativeSignature nativeSignature(
   dart.FunctionType type, {
-  ValueType Function(dart.DartType)? bind,
+  required ValueType Function(dart.DartType) bind,
 }) {
-  if (type.nullabilitySuffix != .none ||
-      type.typeParameters.isNotEmpty ||
-      type.formalParameters.any((p) => !p.isRequiredPositional)) {
-    throw UnsupportedError(
-      'Expected a non-generic positional FFI function signature.',
-    );
+  if (bind(type) case final FunctionType function) {
+    return FfiTypes.signature(function);
   }
-  return NativeSignature.types(
-    nativeType(type.returnType, bind: bind),
-    type.formalParameters.map((p) => nativeType(p.type, bind: bind)),
-  );
+  throw UnsupportedError('Expected a non-nullable FFI function signature.');
 }
 
 Value? lowerFfi(

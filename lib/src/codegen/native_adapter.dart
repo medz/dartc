@@ -25,14 +25,10 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     if (callback != null && !intoDart) {
       throw ArgumentError('A callback requires an incoming native boundary.');
     }
-    signature = NativeSignature.types(
-      signature.result.resolveAbi(emitter.convention.target.abi),
-      signature.parameters.map(
-        (type) => type.resolveAbi(emitter.convention.target.abi),
-      ),
-    );
+    signature = signature.resolveAbi(emitter.convention.target.abi);
     if (callback != null ||
         indirectCall != null ||
+        signature.variadicStart != null ||
         signature.result is NativeCompoundType ||
         signature.parameters.any((type) => type is NativeCompoundType)) {
       return _aggregate(
@@ -226,7 +222,10 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     if (scratch.length < 2) {
       throw StateError('Native aggregate bridge requires two temporaries.');
     }
-    final address = scratch[0], value = scratch[1];
+    final address = scratch.firstWhere(
+      (r) => !destination.registerInputs.containsKey(r),
+    );
+    final value = scratch.firstWhere((r) => r != address);
     final floating = emitter.allocatableRegisters.firstWhere(
       (r) =>
           emitter.bank(r) == .floating &&
@@ -405,6 +404,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         convert(register, type, intoDart: intoDart);
         writeScalar(location, register, size: intoDart ? 8 : type.nativeSize);
       }
+    }
+    for (final MapEntry(:key, :value) in destination.registerInputs.entries) {
+      emitter.loadImmediate(key, value);
     }
     if (indirectCall == null) {
       call(emitter.call(), emitter.position, frame);

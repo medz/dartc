@@ -90,7 +90,22 @@ final class FfiCallbackChecks(
     final positional = original.parameters
         .where((parameter) => parameter.isPositional)
         .toList();
-    final count = native.normalParameterTypes.length;
+    var count = native.normalParameterTypes.length;
+    if (native.normalParameterTypes.lastOrNull
+        case internal.InterfaceTypeImpl(
+          :final element,
+          typeArguments: [
+            internal.RecordTypeImpl(
+              :final positionalFields,
+              :final namedFields,
+            ),
+          ],
+        )
+        when element.library.uri == Uri.parse('dart:ffi') &&
+            element == element.library.getClass('VarArgs') &&
+            namedFields.isEmpty) {
+      count += positionalFields.length - 1;
+    }
     if (positional.length < count) return;
     final projected = internal.FunctionTypeImpl(
       typeParameters: const [],
