@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
 import 'package:dartc/src/frontend/analyzer_metadata.dart';
 import 'package:dartc/src/frontend/lowering/bindings.dart';
 import 'package:test/test.dart';
@@ -113,8 +114,10 @@ class ForeignPrivate implements PrivateContract {
 }
 class UnknownParent extends ImportedParent {}
 ''');
-      final program = await AnalysisSession([entry.path])
-          .use((input) async => (await Lowering().lower(input)).program);
+      final program = await AnalysisSession(
+        [entry.path],
+        sources: await SdkSources.load(),
+      ).use((input) async => (await Lowering().lower(input)).program);
       final foreign = program.classes.singleWhere(
         (c) => c.type.name == 'ForeignPrivate',
       );

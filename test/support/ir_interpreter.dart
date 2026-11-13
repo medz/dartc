@@ -20,6 +20,12 @@ final class IrInterpreter(
   final Map<(Uri, String), Object? Function(int)> imports, {
   final Object? Function(NativeCall, int, List<Object?>)? callNative,
 }) {
+  static Object exceptionType(Object error) => switch (error) {
+    _Instance(:final type) => type,
+    NoSuchMethodError() => ValueType.noSuchMethodError,
+    _ => error.runtimeType,
+  };
+
   final _loadedLibraries = <DeferredImport>{};
   final _globals = <GlobalVariable, Object?>{
     for (final global in program.globals)

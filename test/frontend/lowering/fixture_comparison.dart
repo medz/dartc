@@ -54,7 +54,7 @@ final class FixtureComparison(final IrProgram program) {
         AssertionError(:final message) => (AssertionError, message),
         TypeError() => TypeError,
         int() || String() || bool() => e,
-        _ => e.runtimeType,
+        _ => IrInterpreter.exceptionType(e),
       };
     }
     return (result, error, List.of(effects.calls));

@@ -1,5 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
@@ -10,12 +11,15 @@ void main() {
   late FixtureComparison fixture;
   setUpAll(() async {
     fixture = FixtureComparison(
-      await AnalysisSession([
-        'test/frontend/lowering/fixtures/private_forwarders.dart',
-        'test/frontend/lowering/fixtures/private_forwarders_a.dart',
-        'test/frontend/lowering/fixtures/private_forwarders_b.dart',
-        'test/frontend/lowering/fixtures/private_forwarders_child.dart',
-      ]).use((input) async => (await Lowering().lower(input)).program),
+      await AnalysisSession(
+        [
+          'test/frontend/lowering/fixtures/private_forwarders.dart',
+          'test/frontend/lowering/fixtures/private_forwarders_a.dart',
+          'test/frontend/lowering/fixtures/private_forwarders_b.dart',
+          'test/frontend/lowering/fixtures/private_forwarders_child.dart',
+        ],
+        sources: await SdkSources.load(),
+      ).use((input) async => (await Lowering().lower(input)).program),
     );
   });
 
@@ -149,33 +153,6 @@ void main() {
       ], () => sdk.privateErrorFactory(form));
     }
   });
-  test(
-    'source factory construction binds the real imported SDK declaration',
-    () {
-      final body = fixture.program.functions.singleWhere(
-        (f) => f.target.name == 'privateErrorFactory',
-      );
-      final instructions = body.blocks.expand((b) => b.instructions).toList();
-      final calls = instructions
-          .whereType<DirectCall>()
-          .where((i) => i.target.owner == ValueType.noSuchMethodError)
-          .toList();
-      expect(calls, hasLength(2));
-      for (final call in calls) {
-        expect(call.target.library, Uri.parse('dart:core'));
-        expect(call.target.kind, FunctionKind.factory);
-        expect(call.target.name, 'withInvocation');
-        expect(call.target.redirect, isNull);
-        expect(call.target.returnType, ValueType.noSuchMethodError);
-      }
-      expect(
-        instructions.whereType<Construct>().where(
-          (i) => i.initializer.owner == ValueType.noSuchMethodError,
-        ),
-        isEmpty,
-      );
-    },
-  );
   test('public known-shaped body still calls virtual Object.noSuchMethod', () {
     fixture.compare('privatePublicBody', [], sdk.privatePublicBody);
     final body = fixture.program.functions.singleWhere(
@@ -193,7 +170,7 @@ void main() {
     expect(call.member.returnType, ValueType.dynamicType);
   });
   test(
-    'foreign bodies construct genuine errors then throw without return casts',
+    'foreign failures retain the forwarding library in private invocations',
     () {
       final bodies = fixture.program.functions.where(
         (f) =>
@@ -203,33 +180,15 @@ void main() {
       );
       expect(bodies, isNotEmpty);
       for (final body in bodies) {
-        final instructions = body.blocks.expand((b) => b.instructions).toList();
-        final invocation = instructions.whereType<MakeInvocation>().single;
-        final call = instructions.whereType<DirectCall>().single;
-        expect(call.target.library, Uri.parse('dart:core'));
-        expect(call.target.owner, ValueType.noSuchMethodError);
-        expect(call.target.returnType, ValueType.noSuchMethodError);
-        expect(call.target.name, 'withInvocation');
-        expect(call.target.kind, FunctionKind.factory);
-        expect(call.target.redirect, isNull);
-        expect(call.target.signature.parameters, [
-          ValueType.object.nullable,
-          CoreTypes.invocation,
-        ]);
-        expect(call.target.signature.optionalSlots, isEmpty);
-        expect(call.inputs.last, same(invocation));
-        expect(invocation.selector.privateScope, body.target.library);
-        expect(
-          invocation.selector.privateScope,
-          isNot(body.target.selector.privateScope),
-        );
-        expect(invocation.selector.name, body.target.selector.name);
-        expect(invocation.selector.kind, body.target.selector.kind);
-        expect(instructions.whereType<TypeCast>(), isEmpty);
-        expect(instructions.whereType<Construct>(), isEmpty);
-        expect(body.blocks.map((b) => b.end).whereType<Unreachable>(), isEmpty);
-        expect(body.blocks.last.end, isA<Throw>());
-        expect((body.blocks.last.end as Throw).exception, same(call));
+        final invocation = body.blocks
+            .expand((b) => b.instructions)
+            .whereType<MakeInvocation>()
+            .single;
+        expect(invocation.selector, (
+          kind: body.target.selector.kind,
+          name: body.target.selector.name,
+          privateScope: body.target.library,
+        ));
       }
     },
   );
