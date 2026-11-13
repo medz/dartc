@@ -143,6 +143,12 @@ UTF-8 编解码保留有效码点；编码将孤立 UTF-16 代理项替换为 U+
 
 StringConversionSink.addSlice 的 `isLast: true` 必须关闭输入，并让 JSON 输出 sink 收到唯一结果。固定 SDK 3.14.0 的字符串 JSON sink 仅完成解析，遗漏结果交付和输出关闭；dartc 按[addSlice 契约](../sdk/std/lib/convert/string_conversion.dart)执行完整关闭。[分块验证](../test/compiler/object_text_test.dart)分别检查显式 close 与最后一个 slice，后者的预期不采用该 SDK 错误行为。
 
+## Base64
+
+Base64 与 Base64Url 复用[官方 Dart 实现](../sdk/std/lib/convert/base64.dart)，支持整段、分块、Stream 转换、UTF-8 组合与反向 codec。编码保留标准或 URL 安全字母表及填充，解码接受两种字母表，拒绝非法字符、非零尾位、错误填充和截断输入；normalize 支持百分号转义、URL 字母归一与补齐填充，并保留指定切片外的文本。原生验证以 [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648.html#section-10) 的固定向量为独立预期，覆盖所有分块位置、输入切片复用、非法字节、边界、sink 关闭及异常身份、GC 后的转换状态。见[验证](../test/compiler/base64_conversion_test.dart)。
+
+固定 SDK 3.14.0 的 Base64 解码 sink 对空切片直接返回，遗漏 `isLast: true` 的最终校验和输出关闭。dartc 按 [StringConversionSink.addSlice](../sdk/std/lib/convert/string_conversion.dart) 的公开契约补齐该分支：有效输入关闭输出，未完成的 Base64 数据抛出 FormatException。其余编解码算法保持官方正文。
+
 ## 数值比较与 SDK 差异
 
 [`num.==`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_equals.html) 要求 int 与 double 具有相同数值；[`num.<`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_less.html) 按数值大小比较。正负零在这些运算符下相等；NaN 与任何值不等，四种大小关系均为假。整数先舍入成 double 再比较不满足这一契约。例如 `9007199254740993 > 9007199254740992.0` 应为真，两者相等应为假；最大 int 小于 `9223372036854775808.0`。

@@ -104,6 +104,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'records',
     'enums',
     'symbols',
+    'base64_conversion',
   };
   final selected = names.toSet();
   final unknown = selected.difference(available);
@@ -205,6 +206,7 @@ Future<void> main(List<String> args) async {
       ('records', 'records', 'entry_records'),
       ('enums', 'enums', 'entry_enums'),
       ('symbols', 'symbols', 'entry_symbols'),
+      ('base64_conversion', 'base64_conversion', 'entry_base64_conversion'),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([

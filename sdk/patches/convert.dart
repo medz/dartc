@@ -19,3 +19,23 @@ class _JsonStringDecoderSink {
     if (isLast) close();
   }
 }
+
+@patch
+class _Base64DecoderSink {
+  @patch
+  @pragma(
+    'dartc:patch',
+    'specification: an empty final Base64 slice validates pending data and closes the output sink',
+  )
+  void addSlice(String string, int start, int end, bool isLast) {
+    RangeError.checkValidRange(start, end, string.length);
+    if (start != end) {
+      final buffer = _decoder.decode(string, start, end);
+      if (buffer != null) _sink.add(buffer);
+    }
+    if (isLast) {
+      _decoder.close(string, end);
+      _sink.close();
+    }
+  }
+}
