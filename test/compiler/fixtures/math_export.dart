@@ -1,1 +1,1 @@
-export 'dart:math' show sqrt;
+export 'dart:math' show sqrt, sin, pow;

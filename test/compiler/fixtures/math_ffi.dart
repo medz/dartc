@@ -48,6 +48,33 @@ final class MathLibrary() {
   late final rejectedRoot = _library
       .lookupFunction<Int32 Function(Int32), int Function(int)>('rejectedRoot');
 
+  late final floatingMath = _library
+      .lookupFunction<
+        Double Function(Int32, Double, Double),
+        double Function(int, double, double)
+      >('floatingMath');
+  late final integerPower = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'integerPower',
+      );
+  late final indirectMath = _library
+      .lookupFunction<
+        Double Function(Double, Int64, Int32),
+        double Function(double, int, int)
+      >('indirectMath');
+  late final composed = _library
+      .lookupFunction<
+        Double Function(Double, Double),
+        double Function(double, double)
+      >('composed');
+  late final orderedPower = _library
+      .lookupFunction<
+        Double Function(Pointer<Double>),
+        double Function(Pointer<Double>)
+      >('orderedPower');
+  late final rejectedMath = _library
+      .lookupFunction<Int32 Function(Int32), int Function(int)>('rejectedMath');
+
   void close() {
     _library.close();
     _storage.close();

@@ -194,6 +194,20 @@ void main() {
           endsWith('/vm/lib/math_patch.dart'),
         );
         expect(math.element.getTopLevelFunction('_sqrt')!.isExternal, isTrue);
+        for (final (name, source) in [
+          ('pow', '/vm/lib/math_patch.dart'),
+          ('_intPow', '/vm/lib/math_patch.dart'),
+          ('sin', '/vm/lib/math_patch.dart'),
+          ('_doublePow', '/sdk/patches/math.dart'),
+        ]) {
+          final function = math.element.getTopLevelFunction(name)!;
+          final body = math.getFragmentDeclaration(function.fragments.last)!;
+          expect(function.isExternal, isFalse);
+          expect(
+            patches.origins[body.resolvedUnit!.uri]!.path,
+            endsWith(source),
+          );
+        }
         for (final (type, method, source) in [
           ('_Random', 'nextInt', '/vm/lib/math_patch.dart'),
           ('_Random', '_initialSeed', '/sdk/patches/math.dart'),

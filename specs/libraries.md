@@ -71,9 +71,9 @@ Pointer.fromFunction 与 NativeCallable 的回调可带额外可选位置参数�
 
 ## 数学函数
 
-`dart:math.sqrt` 直接复用固定 SDK 的 [Dart 实现](../sdk/std/lib/_internal/vm/lib/math_patch.dart)，仅将外部 `_sqrt` 接到机器平方根操作。输入通过 `num.toDouble()` 转换；保留负零，其他负值和 NaN 返回 NaN，正无穷返回正无穷。
+pow、sin/cos/tan、asin/acos/atan、atan2、exp/log 和 sqrt 复用固定 SDK 的 [Dart 实现](../sdk/std/lib/_internal/vm/lib/math_patch.dart)。公开入口保留 num.toDouble() 转换，整数底数及非负整数指数走原有整数幂算法；平方根使用机器操作，其余浮点叶子通过类型化 FFI 绑定目标数学库（macOS libSystem、Linux libm）。这一分界与固定 SDK 的[浮点运行入口](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/vm/runtime_entry.cc#L5689)一致。
 
-直接调用与函数值调用均支持 int、double 和装箱 num，包括导入前缀与转导。dynamic 实参保留类型检查，实参只求值一次；同名用户函数或静态方法仍调用用户实现。已在 macOS ARM64 与 Linux ARM64 原生执行，见[平方根行为验证](../test/compiler/math_test.dart)和[独立进程验证](../test/compiler/entry_test.dart)。其余数学函数尚未完整接通。
+直接调用与函数值调用支持 int、double 和装箱 num，包括导入前缀与转导；dynamic 实参保留类型检查，实参按源码顺序各求值一次。整数幂保留 int 结果及 64 位溢出，浮点路径保留负零、NaN、无穷、定义域和上下溢边界。[数学原生检查](../test/compiler/math_test.dart)已在 macOS ARM64 与 Linux ARM64 执行：特殊值和正负零精确验证，有限非零样本与同平台 SDK 对照，容差为 4 ULP；平方根继续逐位验证。
 
 `Random([seed])` 的种子混合、状态推进与 `nextInt`/`nextDouble`/`nextBool` 复用同一官方 Dart 实现。`nextInt` 接受 1 到 2^32 的上界，拒绝非法上界且不推进状态；构造器和方法提取、动态参数检查及回收后状态见[随机数验证](../test/compiler/math_random_test.dart)。显式种子沿用固定 SDK 的序列，不承诺跨 SDK 版本的序列稳定。
 
