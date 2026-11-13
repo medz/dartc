@@ -40,6 +40,14 @@ final class MathLibrary() {
         'shadowed',
       );
 
+  late final boxedRoot = _library
+      .lookupFunction<
+        Double Function(Double, Int64, Int32),
+        double Function(double, int, int)
+      >('boxedRoot');
+  late final rejectedRoot = _library
+      .lookupFunction<Int32 Function(Int32), int Function(int)>('rejectedRoot');
+
   void close() {
     _library.close();
     _storage.close();

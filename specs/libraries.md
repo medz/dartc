@@ -45,9 +45,9 @@ UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生�
 
 ## 数学函数
 
-直接调用 `dart:math.sqrt` 保留官方声明身份，支持导入前缀与转导；同名用户函数或静态方法仍调用用户实现。输入先转换为 double，再计算平方根；保留负零，其他负值和 NaN 返回 NaN，正无穷返回正无穷。依据为 [sqrt 库契约](https://api.dart.dev/stable/3.13.7/dart-math/sqrt.html)。
+`dart:math.sqrt` 直接复用固定 SDK 的 [Dart 实现](../sdk/std/lib/_internal/vm/lib/math_patch.dart)，仅将外部 `_sqrt` 接到机器平方根操作。输入通过 `num.toDouble()` 转换；保留负零，其他负值和 NaN 返回 NaN，正无穷返回正无穷。
 
-IR 支持 num 参数及 dynamic 实参的类型检查，实参只求值一次。原生调用要求输入具有已知的 int 或 double 表示，可用于当前支持的独立程序和原生库。函数值调用、需要装箱的 num 原生执行及其他数学函数仍是缺口。见[声明与类型检查验证](../test/frontend/lowering/math_test.dart)、[原生行为验证](../test/compiler/math_test.dart)和[独立进程验证](../test/compiler/entry_test.dart)。
+直接调用与函数值调用均支持 int、double 和装箱 num，包括导入前缀与转导。dynamic 实参保留类型检查，实参只求值一次；同名用户函数或静态方法仍调用用户实现。已在 macOS ARM64 与 Linux ARM64 原生执行，见[平方根行为验证](../test/compiler/math_test.dart)和[独立进程验证](../test/compiler/entry_test.dart)。其余数学函数尚未完整接通。
 
 ## 独立程序入口
 

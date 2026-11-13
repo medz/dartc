@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Compile `dart:math.sqrt` through its SDK body, binding only the external square-root operation. Direct calls and function values accept boxed `num` arguments, preserve numeric conversion and special values, and reject invalid dynamic arguments.
+
 - Accept a single const primary constructor for ABI-specific integer classes. Reject extra constructors and members even when the analyzer misses them; retain mapping and other static checks.
 - Enforce non-allocating runtime call contracts in otherwise unmanaged modules and through the machine stack-capture bridge. Reject foreign calls and allocating stack walkers before native code generation.
 
@@ -121,7 +123,6 @@ The development checkout uses analyzer 14.7.0 to resolve Dart source, produces v
 - Bundle the original Dart SDK 3.14.0 standard library sources and license at a fixed official commit. The standalone compiler works without an installed SDK, source cache or network access; declared project dependencies remain separate. `DartSdk.load()` loads the fixed sources; `SourceArchive` reads and verifies individual files without expanding the entire library. The development-only `SdkResolver`, `DartSdk.at/current`, `--sdk` and SDK selection parameters have been removed.
 - Compile non-late locals initialized after declaration, preserving represented values across branches, loops and calls. Locals that need no shared storage identity retain stack slots; captured or aliased cells use managed storage. Initialization checks remain separate from zeroing reference storage for GC safety.
 - Remove the development-only `runtime/platform/io.dart` source API.
-- Compile direct `dart:math.sqrt` calls with known `int` or `double` inputs in native libraries and executables, preserving negative zero, NaN and infinities.
 - Lower referenced SDK top-level functions, static methods and generative classes from their original Dart bodies, including inherited members. `Lowering.lower` is asynchronous. Factory bodies and redirects follow the same Dart source path; native execution still requires implementations for every referenced external operation.
 - Store symbol addresses in read-only or writable data with `Relocation.address(section, offset, symbol)`. ELF and Mach-O objects, archives and linked outputs preserve these references, including across shared libraries; read-only storage is protected after loading. Instruction references now use `Relocation.instruction(...)` and the `InstructionRelocation` subtype. Address fields require eight-byte alignment and do not support symbol addends.
 - Generate immutable object constants and direct field reads through `CodeGenerator`, including inherited fields and nested references. Integers, doubles and booleans can enter reference storage; generic fields and member calls unbox known scalar results. Computed numeric boxes survive collection during argument preparation, calls and control flow. `package:dartc/layout.dart` provides 64-bit object sizes, field offsets and reference slots. Complete Dart class execution remains unimplemented.

@@ -204,6 +204,16 @@ void main() {
             endsWith('/vm/lib/convert_patch.dart'),
           );
         }
+        final math = libraries.singleWhere(
+          (library) => library.element.uri == Uri.parse('dart:math'),
+        );
+        final squareRoot = math.getFragmentDeclaration(
+          math.element.getTopLevelFunction('sqrt')!.fragments.last,
+        )!;
+        expect(
+          patches.origins[squareRoot.resolvedUnit!.uri]!.path,
+          endsWith('/vm/lib/math_patch.dart'),
+        );
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );

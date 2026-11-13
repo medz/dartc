@@ -78,4 +78,32 @@ void main() {
     expect(library.memory.value, 10);
     expect(library.shadowed(9), 128);
   });
+
+  test(
+    'num arguments and function values retain conversion and special values',
+    () {
+      for (final (floating, integer) in [
+        (-0.0, -1),
+        (0.0, 0),
+        (2.0, 4),
+        (double.minPositive, 9007199254740993),
+        (double.maxFinite, 0x7fffffffffffffff),
+        (double.infinity, -0x8000000000000000),
+        (double.nan, 81),
+      ]) {
+        for (var mode = 0; mode < 8; mode++) {
+          expectDouble(
+            library.boxedRoot(floating, integer, mode),
+            math.sqrt(mode.isEven ? floating : integer),
+          );
+        }
+      }
+    },
+  );
+
+  test('direct and dynamic function calls reject non-numeric arguments', () {
+    for (var mode = 0; mode < 6; mode++) {
+      expect(library.rejectedRoot(mode), 1, reason: 'argument/call $mode');
+    }
+  });
 }

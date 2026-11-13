@@ -42,3 +42,41 @@ class LocalMath() {
 
 @Export<Double Function(Double)>()
 double shadowed(double value) => sqrt(value) + LocalMath.sqrt(value);
+
+final _root = alias.sqrt;
+
+@Export<Double Function(Double, Int64, Int32)>()
+double boxedRoot(double floating, int integer, int mode) {
+  final num value = mode.isEven ? floating : integer;
+  switch (mode ~/ 2) {
+    case 0:
+      return numberRoot(value);
+    case 1:
+      return dynamicRoot(value);
+    case 2:
+      return _root(value);
+    default:
+      final dynamic root = _root;
+      return root(value);
+  }
+}
+
+@Export<Int32 Function(Int32)>()
+int rejectedRoot(int mode) {
+  final dynamic value = switch (mode ~/ 2) {
+    0 => null,
+    1 => true,
+    _ => '9',
+  };
+  try {
+    if (mode.isEven) {
+      math.sqrt(value);
+    } else {
+      final dynamic root = _root;
+      root(value);
+    }
+  } on TypeError {
+    return 1;
+  }
+  return 0;
+}

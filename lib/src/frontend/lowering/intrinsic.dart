@@ -53,6 +53,12 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
     return (target, entry) =>
         entry.emit(Identical(entry.parameters[0], entry.parameters[1]));
   }
+  if (element.isExternal &&
+      element.library.uri == Uri.parse('dart:math') &&
+      element.baseElement == element.library.getTopLevelFunction('_sqrt')) {
+    return (target, entry) =>
+        entry.emit(NumericSquareRoot(entry.parameters.single));
+  }
   if (isPointerCast(element)) {
     return (target, entry) => lowerFfi(
       element,

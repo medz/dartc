@@ -683,10 +683,6 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       }
       final target =
           loadLibrary ?? context.bindings.target(callee, unit, expression);
-      if (callee.library.uri == Uri.parse('dart:math') &&
-          callee.baseElement == callee.library.getTopLevelFunction('sqrt')) {
-        return context.emit(NumericSquareRoot(args.positional.single));
-      }
       return context.emit(
         DirectCall(
           target,
