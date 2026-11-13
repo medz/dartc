@@ -149,6 +149,12 @@ Base64 与 Base64Url 复用[官方 Dart 实现](../sdk/std/lib/convert/base64.da
 
 固定 SDK 3.14.0 的 Base64 解码 sink 对空切片直接返回，遗漏 `isLast: true` 的最终校验和输出关闭。dartc 按 [StringConversionSink.addSlice](../sdk/std/lib/convert/string_conversion.dart) 的公开契约补齐该分支：有效输入关闭输出，未完成的 Base64 数据抛出 FormatException。其余编解码算法保持官方正文。
 
+## Latin-1 解码
+
+Latin1Decoder 的整段和分块解码复用 SDK 正文，严格模式拒绝 0..255 以外的整数，allowInvalid 模式逐项替换为 U+FFFD。所有分块位置、空输入、最后一个空切片及末尾有效/无效字节均由[原生验证](../test/compiler/object_text_test.dart)核对结果和输出关闭次数。
+
+固定 SDK 3.14.0 的严格模式会跳过空的最后一片；替换模式在末尾还有有效字节时会关闭两次，输出后抛出空断言异常。目标补丁按 [ByteConversionSink.addSlice](../sdk/std/lib/convert/byte_conversion.dart) 的契约补齐关闭，并让替换模式只关闭一次；字节校验、替换算法及正常错误传播保持不变。
+
 ## 数值比较与 SDK 差异
 
 [`num.==`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_equals.html) 要求 int 与 double 具有相同数值；[`num.<`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_less.html) 按数值大小比较。正负零在这些运算符下相等；NaN 与任何值不等，四种大小关系均为假。整数先舍入成 double 再比较不满足这一契约。例如 `9007199254740993 > 9007199254740992.0` 应为真，两者相等应为假；最大 int 小于 `9223372036854775808.0`。

@@ -23,6 +23,12 @@ enum Conversion() {
   uriDecodeQuery,
   uriDecodeFull,
   uriQuery,
+  latin1Decode,
+  latin1DecodeInvalid,
+  latin1Chunks,
+  latin1InvalidChunks,
+  latin1FinalSlice,
+  latin1InvalidFinalSlice,
 }
 
 final class Payload(final String text) {
@@ -113,6 +119,36 @@ String conversionText(String source, Conversion mode, int split) {
           _ => Payload(source),
         };
         return jsonEncode(value, toEncodable: (_) => throw StateError(source));
+      case .latin1Decode ||
+          .latin1DecodeInvalid ||
+          .latin1Chunks ||
+          .latin1InvalidChunks ||
+          .latin1FinalSlice ||
+          .latin1InvalidFinalSlice:
+        final bytes = (jsonDecode(source) as List).cast<int>();
+        final decoder = Latin1Decoder(
+          allowInvalid:
+              mode == .latin1DecodeInvalid ||
+              mode == .latin1InvalidChunks ||
+              mode == .latin1InvalidFinalSlice,
+        );
+        if (mode == .latin1Decode || mode == .latin1DecodeInvalid) {
+          return decoder.convert(bytes);
+        }
+        String? result;
+        var closes = 0;
+        final input = decoder.startChunkedConversion(
+          StringConversionSink.withCallback((value) {
+            result = value;
+            closes++;
+          }),
+        );
+        final last =
+            mode == .latin1FinalSlice || mode == .latin1InvalidFinalSlice;
+        input.addSlice(bytes, 0, split, false);
+        input.addSlice(bytes, split, bytes.length, last);
+        if (!last) input.close();
+        return '${jsonEncode(result)}|$closes';
       case .safeString:
         return Error.safeToString(source);
       case .uriEncodeComponent:

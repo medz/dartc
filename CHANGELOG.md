@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Close Latin-1 decoder outputs for empty final slices and avoid closing them twice in replacement mode. Preserve invalid-byte rejection and replacement characters across chunk boundaries.
+
 - Validate Base64/Base64Url conversion through the SDK algorithms, including chunked streams, normalization, codec composition and collection. Fix empty final decoder slices so they validate pending input and close the output sink.
 - Catch allocation failures when assigning scalar values to captured reference variables, preserving the previous value on failure. Pattern caches reuse their stored value without a second boxing allocation.
 

@@ -254,6 +254,47 @@ void main() {
     }
   });
 
+  test('Latin-1 final slices validate bytes and close their output once', () {
+    for (final (bytes, expected) in <(List<int>, String)>[
+      ([], ''),
+      ([0, 65, 127, 128, 255], '\u0000A\u007f\u0080\u00ff'),
+      ([-1, 65, 256], '\ufffdA\ufffd'),
+      ([256, 66], '\ufffdB'),
+      ([0x100000000], '\ufffd'),
+    ]) {
+      final source = jsonEncode(bytes);
+      expect(native.convert(source, .latin1DecodeInvalid), expected);
+      final valid = bytes.every((byte) => byte >= 0 && byte <= 255);
+      if (valid) {
+        expect(native.convert(source, .latin1Decode), expected);
+      } else {
+        expect(native.convert(source, .latin1Decode), startsWith('format:'));
+      }
+      for (var split = 0; split <= bytes.length; split++) {
+        for (final mode in <conversion.Conversion>[
+          .latin1InvalidChunks,
+          .latin1InvalidFinalSlice,
+        ]) {
+          expect(
+            native.convert(source, mode, split),
+            '${jsonEncode(expected)}|1',
+            reason: '$mode/$source/$split',
+          );
+        }
+        for (final mode in <conversion.Conversion>[
+          .latin1Chunks,
+          .latin1FinalSlice,
+        ]) {
+          expect(
+            native.convert(source, mode, split),
+            valid ? '${jsonEncode(expected)}|1' : startsWith('format:'),
+            reason: '$mode/$source/$split',
+          );
+        }
+      }
+    }
+  });
+
   test('fused UTF-8 and JSON conversion retains chunks and failures', () {
     for (final document in [...documents, '[1,]', r'"\u12x4"']) {
       final bytes = utf8.encode(document);
