@@ -15,16 +15,26 @@ void main() {
     final native = ExceptionCalls();
     addTearDown(native.close);
     final maps = <int, StackRoots>{};
-    var offset = 1;
+    var offset = StackMapRecord.tableHeader ~/ 8;
     for (var i = 0; i < native.table.value; i++) {
-      final count = native.table[offset + 3];
-      maps[native.table[offset]] = StackRoots(
-        native.table[offset + 1],
-        native.table[offset + 2],
-        [for (var j = 0; j < count; j++) native.table[offset + 4 + j]],
+      final count = native.table[offset + StackMapRecord.rootCount ~/ 8];
+      maps[native.table[offset + StackMapRecord.pc ~/ 8]] = StackRoots(
+        native.table[offset + StackMapRecord.callerStack ~/ 8],
+        native.table[offset + StackMapRecord.returnAddress ~/ 8],
+        [
+          for (var j = 0; j < count; j++)
+            native.table[offset + StackMapRecord.roots ~/ 8 + j],
+        ],
       );
-      offset += 4 + count;
+      offset += StackMapRecord.roots ~/ 8 + count;
     }
+    int errorTraceSlot(Pointer<Uint64> object) {
+      final descriptor = Pointer<Uint64>.fromAddress(object.value);
+      return descriptor[ObjectDescriptor.traceBase +
+              descriptor[ObjectDescriptor.referenceCount]] ~/
+          ObjectHeader.alignment;
+    }
+
     List<int> trace(int address) {
       final result = <int>[], seen = <int>{};
       while (address != 0) {
@@ -49,59 +59,65 @@ void main() {
       for (final count in [0, 40000]) {
         var calls = 0;
         List<int>? originalTrace;
+        (Object, StackTrace)? failure;
         final visitor = NativeCallable<RootVisitor>.isolateLocal((
           int pc,
           Pointer<Uint64> sp,
         ) {
-          final roots = <int>[];
-          for (var depth = 0; depth < 20; depth++) {
-            final record = maps[pc]!;
-            roots.addAll([
-              for (final offset in record.offsets) sp[offset ~/ 8],
-            ]);
-            if (record.callerStackOffset == 0) break;
-            pc = sp[record.returnAddressOffset ~/ 8];
-            sp += record.callerStackOffset ~/ 8;
+          try {
+            final roots = <int>[];
+            for (var depth = 0; depth < 20; depth++) {
+              final record = maps[pc]!;
+              roots.addAll([
+                for (final offset in record.offsets) sp[offset ~/ 8],
+              ]);
+              if (record.callerStackOffset == 0) break;
+              pc = sp[record.returnAddressOffset ~/ 8];
+              sp += record.callerStackOffset ~/ 8;
+            }
+            final payloads = roots.where((address) {
+              if (address == 0) return false;
+              final object = Pointer<Uint64>.fromAddress(address);
+              final slot = isError ? errorTraceSlot(object) - 1 : payload;
+              return slot >= payload && object[slot] == 123;
+            }).toList();
+            final traces = roots
+                .where(
+                  (address) =>
+                      address != 0 &&
+                      maps.containsKey(
+                        Pointer<Uint64>.fromAddress(address)[payload],
+                      ),
+                )
+                .toSet();
+            expect(payloads.length, greaterThanOrEqualTo(2));
+            expect(payloads.toSet(), hasLength(1));
+            expect(traces, hasLength(1));
+            final stack = trace(traces.single);
+            if (calls == 0) originalTrace = stack;
+            expect(stack, calls < 2 ? originalTrace : hasLength(2));
+            if (calls < 2) expect(stack, hasLength(5));
+            if (isError) {
+              final object = Pointer<Uint64>.fromAddress(payloads.first);
+              final slot = errorTraceSlot(object);
+              expect(trace(object[slot]), originalTrace);
+              expect(object[slot] == traces.single, calls < 2);
+            }
+            calls++;
+            return 0;
+          } catch (error, trace) {
+            failure ??= (error, trace);
+            return -1;
           }
-          final payloads = roots
-              .where(
-                (address) =>
-                    address != 0 &&
-                    Pointer<Uint64>.fromAddress(address)[payload] == 123,
-              )
-              .toList();
-          final traces = roots
-              .where(
-                (address) =>
-                    address != 0 &&
-                    maps.containsKey(
-                      Pointer<Uint64>.fromAddress(address)[payload],
-                    ),
-              )
-              .toSet();
-          expect(payloads.length, greaterThanOrEqualTo(2));
-          expect(payloads.toSet(), hasLength(1));
-          expect(traces, hasLength(1));
-          final stack = trace(traces.single);
-          if (calls == 0) originalTrace = stack;
-          expect(stack, calls < 2 ? originalTrace : hasLength(2));
-          if (calls < 2) expect(stack, hasLength(5));
-          if (isError) {
-            final object = Pointer<Uint64>.fromAddress(payloads.first);
-            final descriptor = Pointer<Uint64>.fromAddress(object.value);
-            final slot = descriptor[2 + descriptor[1]] ~/ 8;
-            expect(slot, payload + 1);
-            expect(trace(object[slot]), originalTrace);
-            expect(object[slot] == traces.single, calls < 2);
-          }
-          calls++;
-          return 0;
         }, exceptionalReturn: -1);
         try {
           expect(
             run(count, native.probe.address, visitor.nativeFunction.address),
             123,
           );
+          if (failure case (final error, final trace)) {
+            Error.throwWithStackTrace(error, trace);
+          }
           expect(calls, 3);
         } finally {
           visitor.close();

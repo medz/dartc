@@ -118,8 +118,29 @@ class TraceInterface() implements Error {
   }
 }
 
+class TraceSource() {
+  StackTrace capture() {
+    StackTrace localTrace() => StackTrace.current;
+    return localTrace();
+  }
+}
+
+StackTrace namedTrace() => TraceSource().capture();
+
 @Export<Bool Function(Int32)>()
 bool stackTraceLifecycle(int mode) {
+  if (mode == 6) {
+    final trace = namedTrace();
+    final text = trace.toString();
+    allocate(40000);
+    final local = text.indexOf('localTrace');
+    final method = text.indexOf('TraceSource.capture', local + 1);
+    final outer = text.indexOf('namedTrace', method + 1);
+    return local >= 0 &&
+        method > local &&
+        outer > method &&
+        trace.toString() == text;
+  }
   if (mode == 0) {
     const text = 'user trace\n🦋\n';
     return StackTrace.empty.toString().isEmpty &&

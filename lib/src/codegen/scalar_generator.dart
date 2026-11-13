@@ -364,16 +364,36 @@ base class ScalarCodeGenerator<R extends Object>(
     bool needsEntry(NativeSignature signature) =>
         hasRoots || _needsEntry(signature);
     final maps = StackMaps();
-    void safepoint(int position, StackRoots roots) {
-      if (hasRoots) maps.add(code.length + position, roots);
-    }
-
     final constants = ConstantData(
       layouts,
       selected.length +
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
     );
+    String? frameName;
+    void safepoint(int position, StackRoots roots) {
+      if (hasRoots) {
+        maps.add(
+          code.length + position,
+          roots,
+          frameName == null
+              ? null
+              : constants.addressOf(Constant.string(frameName)),
+        );
+      }
+    }
+
+    String traceName(FunctionTarget function) {
+      final prefix = function.enclosing == null
+          ? function.owner?.name
+          : traceName(function.enclosing!);
+      return prefix == null
+          ? function.name
+          : function.name.isEmpty
+          ? prefix
+          : '$prefix.${function.name}';
+    }
+
     final globalAddresses = <(int, Fixup)>[],
         contextAddresses = <(int, Fixup)>[];
     final rootAddresses = <(int, Fixup)>[],
@@ -432,6 +452,9 @@ base class ScalarCodeGenerator<R extends Object>(
     }
 
     for (final declaration in selected) {
+      frameName = capture && declaration.library != null
+          ? traceName(declaration)
+          : null;
       final binding = imports[declaration], export = exports[declaration];
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
@@ -572,6 +595,7 @@ base class ScalarCodeGenerator<R extends Object>(
       );
       code.add(bytes);
     }
+    frameName = null;
     for (final MapEntry(:key, :value) in exports.entries) {
       if (!needsEntry(value.signature)) continue;
       code.add(Uint8List((-code.length) & 15));

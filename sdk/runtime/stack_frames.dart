@@ -8,6 +8,12 @@ final class StackFrames(final int context) {
 
   int get pc => _pc;
 
+  /// The source function name, or `null` for a generated machine frame.
+  String? get functionName {
+    final address = Memory.read(_record + StackMapRecord.functionName);
+    return address == 0 ? null : Memory.objectAt<String>(address);
+  }
+
   void start(int sp, int pc) {
     if (sp == 0 || pc == 0) Memory.fail();
     _nextSp = sp;

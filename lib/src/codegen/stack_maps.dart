@@ -6,13 +6,14 @@ import 'package:dartc/object.dart';
 
 /// Relocates return addresses to the stack records of suspended callers.
 ///
-/// A little-endian count precedes (absolute return address, StackRoots) entries.
+/// A count precedes records containing a return address, optional name and roots.
 final class StackMaps() {
-  final _entries = <(int, StackRoots)>[];
+  final _entries = <(int, StackRoots, int?)>[];
   final _addresses = <int, List<(int, FixupEncoding)>>{};
 
-  void add(int returnAddress, StackRoots roots) {
-    _entries.add((returnAddress, roots));
+  /// Adds roots and the optional constant String symbol naming their function.
+  void add(int returnAddress, StackRoots roots, int? functionName) {
+    _entries.add((returnAddress, roots, functionName));
   }
 
   void reference(int offset, FixupEncoding encoding, int returnAddress) {
@@ -33,13 +34,22 @@ final class StackMaps() {
     );
     data.setUint64(0, _entries.length, .little);
     var offset = StackMapRecord.tableHeader;
-    for (final (address, roots) in _entries) {
+    for (final (address, roots, functionName) in _entries) {
       for (final (position, encoding)
           in _addresses[address] ?? const <(int, FixupEncoding)>[]) {
         relocations.add(.instruction(0, position, encoding, symbols.length));
       }
       relocations.add(.address(sections.length, offset, symbols.length));
       symbols.add(.new('.dartc.return', 0, address, null, binding: .local));
+      if (functionName != null) {
+        relocations.add(
+          .address(
+            sections.length,
+            offset + StackMapRecord.functionName,
+            functionName,
+          ),
+        );
+      }
       roots.writeTo(data, offset + StackMapRecord.callerStack);
       offset += StackMapRecord.callerStack + roots.size;
     }

@@ -12,21 +12,18 @@ import 'fixtures/exceptions.dart' as sdk;
 import 'fixtures/exceptions_ffi.dart';
 
 void main() {
-  test(
-    'stack snapshots and first Error traces survive collection and overrides',
-    () {
-      final native = Exceptions();
-      addTearDown(native.close);
-      for (var mode = 0; mode < 6; mode++) {
-        expect(sdk.stackTraceLifecycle(mode), isTrue, reason: 'SDK case $mode');
-        expect(
-          native.stackTraceLifecycle(mode),
-          isTrue,
-          reason: 'native case $mode',
-        );
-      }
-    },
-  );
+  test('stack names, snapshots and first Error traces survive collection and overrides', () {
+    final native = Exceptions();
+    addTearDown(native.close);
+    for (var mode = 0; mode < 7; mode++) {
+      expect(sdk.stackTraceLifecycle(mode), isTrue, reason: 'SDK case $mode');
+      expect(
+        native.stackTraceLifecycle(mode),
+        isTrue,
+        reason: 'native case $mode',
+      );
+    }
+  });
 
   test(
     'stack snapshots cross suspended native reentry without losing callers',

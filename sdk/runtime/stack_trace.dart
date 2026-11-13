@@ -8,21 +8,24 @@ import 'stack_frames.dart';
 external StackTrace currentStackTrace();
 
 /// An immutable snapshot; its links remain traced after the original stack exits.
-final class CapturedStackTrace(final int pc, final CapturedStackTrace? caller)
-    implements StackTrace {
+final class CapturedStackTrace(
+  final int pc,
+  final CapturedStackTrace? caller,
+  final String? functionName,
+) implements StackTrace {
   @override
   String toString() {
-    final addresses = <int>[];
+    final names = <String>[];
     for (
       CapturedStackTrace? frame = this;
       frame != null;
       frame = frame.caller
     ) {
-      addresses.add(frame.pc);
+      names.add(frame.functionName ?? '0x${frame.pc.toRadixString(16)}');
     }
     return [
-      for (var i = addresses.length - 1; i >= 0; i--)
-        '#${addresses.length - i - 1} 0x${addresses[i].toRadixString(16)}',
+      for (var i = names.length - 1; i >= 0; i--)
+        '#${names.length - i - 1} ${names[i]}',
     ].join('\n');
   }
 }
@@ -32,7 +35,9 @@ StackTrace captureStackTrace(int sp, int pc) {
   final frames = StackFrames(Memory.context())..start(sp, pc);
   CapturedStackTrace? head;
   while (frames.moveNext()) {
-    if (!frames.isBoundary) head = CapturedStackTrace(frames.pc, head);
+    if (!frames.isBoundary) {
+      head = CapturedStackTrace(frames.pc, head, frames.functionName);
+    }
   }
   return head ?? StackTrace.empty;
 }

@@ -70,8 +70,11 @@ abstract final class RuntimeContext() {
 abstract final class StackMapRecord() {
   static const tableHeader = 8;
   static const pc = 0;
-  static const callerStack = 8;
-  static const returnAddress = 16;
-  static const rootCount = 24;
-  static const roots = 32;
+
+  /// The constant function-name address, or zero for an unnamed frame.
+  static const functionName = 8;
+  static const callerStack = 16;
+  static const returnAddress = 24;
+  static const rootCount = 32;
+  static const roots = 40;
 }
