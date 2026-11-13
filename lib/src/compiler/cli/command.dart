@@ -20,12 +20,31 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       String? destination, header;
       var target = Target.host();
       var kind = _OutputKind.object;
-      for (var i = 1; i < arguments.length; i += 2) {
-        if (i + 1 == arguments.length) {
-          throw FormatException('Missing value for ${arguments[i]}');
+      final environment = <String, String>{};
+      void define(String declaration) {
+        final separator = declaration.indexOf('=');
+        if (separator <= 0) {
+          throw FormatException('Expected NAME=VALUE: $declaration');
         }
-        final value = arguments[i + 1];
-        switch (arguments[i]) {
+        environment[declaration.substring(0, separator)] = declaration
+            .substring(separator + 1);
+      }
+
+      for (var i = 1; i < arguments.length; i++) {
+        final option = arguments[i];
+        if (option.startsWith('-D') && option.length > 2) {
+          define(option.substring(2));
+          continue;
+        }
+        if (option.startsWith('--define=')) {
+          define(option.substring('--define='.length));
+          continue;
+        }
+        if (i + 1 == arguments.length) {
+          throw FormatException('Missing value for $option');
+        }
+        final value = arguments[++i];
+        switch (option) {
           case '-o':
             destination = value;
           case '--header':
@@ -40,8 +59,10 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
               'exe' => .executable,
               _ => throw FormatException('Unknown output kind: $value'),
             };
+          case '-D' || '--define':
+            define(value);
           default:
-            throw FormatException('Unknown option: ${arguments[i]}');
+            throw FormatException('Unknown option: $option');
         }
       }
       if (destination == null) {
@@ -60,6 +81,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
       final file = File(destination);
       final library = await compiler.compile(
         [source],
+        environment: environment,
         output: switch (kind) {
           .object => const .object(),
           .executable => const .executable(),
@@ -88,6 +110,7 @@ final class CompilerCommand(final StringSink output, final StringSink errors) {
 const _usage =
     'Usage: dartc <source.dart> -o <output> '
     '[--kind object|static|shared|exe] [--header <file.h>] '
+    '[-DNAME=VALUE] [--define NAME=VALUE] '
     '[--target macos-arm64|macos-x64|linux-arm64|linux-x64]';
 
 enum _OutputKind() {

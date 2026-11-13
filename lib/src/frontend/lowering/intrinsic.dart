@@ -47,6 +47,7 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
   ExecutableElement element,
   void Function(InterfaceElement) requireClass,
   FunctionTarget Function(ExecutableElement) bind,
+  Constant Function(ClassType, Iterable<(Constant, Constant)>) mapConstant,
 ) {
   if (element.library.isDartCore &&
       element.baseElement == element.library.getTopLevelFunction('identical')) {
@@ -74,15 +75,31 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
         IntBinary(.bitXor, entry.parameters.single, const Constant.integer(-1)),
       );
     }
-    if (element is ConstructorElement &&
-        element.name == 'fromEnvironment' &&
-        [
-          'bool',
-          'int',
-          'String',
-        ].any((name) => owner == element.library.getClass(name))) {
-      // No compilation environment entries are configured for native output.
-      return (target, entry) => entry.parameters[1];
+    if (element is ConstructorElement) {
+      final helper = switch (element.name) {
+        'fromEnvironment' when owner == element.library.getClass('String') =>
+          '_stringFromEnvironment',
+        'fromEnvironment' when owner == element.library.getClass('int') =>
+          '_intFromEnvironment',
+        'fromEnvironment' when owner == element.library.getClass('bool') =>
+          '_boolFromEnvironment',
+        'hasEnvironment' when owner == element.library.getClass('bool') =>
+          '_hasEnvironment',
+        _ => null,
+      };
+      if (helper != null) {
+        final implementation = element.library.getTopLevelFunction(helper);
+        if (implementation == null) return null;
+        requireMapSupport(element.library, requireClass);
+        final variables = element.library.session.declaredVariables;
+        final values = mapConstant(CoreTypes.mapOf(.string, .string), [
+          for (final name in variables.variableNames)
+            (Constant.string(name), Constant.string(variables.get(name)!)),
+        ]);
+        final body = bind(implementation);
+        return (target, entry) =>
+            entry.emit(DirectCall(body, [values, ...entry.parameters]));
+      }
     }
     if (element.isExternal &&
         (owner == element.library.getClass('Object') ||

@@ -33,6 +33,9 @@ final class AnalysisSession(
   final bool includeDependencies = false,
   final DartSdk? sdk,
 
+  /// Compilation declarations shared by constants and conditional imports.
+  Map<String, String> environment = const {},
+
   /// Additional private sources, separate from the standard library selection.
   final SdkSources? sources,
 
@@ -41,6 +44,9 @@ final class AnalysisSession(
 }) {
   final List<String> _paths = .unmodifiable(paths);
   final List<String> _resources = .unmodifiable(resources);
+
+  /// The immutable declaration snapshot used throughout this session.
+  final Map<String, String> environment = .unmodifiable(environment);
   AnalysisContextCollectionImpl? _contexts;
   Future<CheckedLibraries>? _resolution;
   Future<void>? _closing;
@@ -137,6 +143,7 @@ final class AnalysisSession(
       resourceProvider: files,
       sdkPath: sdkPath,
       optionsFile: options,
+      declaredVariables: environment,
     );
     final session = contexts.contextFor(inputs.first).currentSession;
     final libraries = <ResolvedLibraryResult>[];

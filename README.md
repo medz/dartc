@@ -79,7 +79,7 @@ dartc sum.dart --kind exe -o sum
 Sum check passed
 ```
 
-The executable adds the integers from 1 to 10 and checks the result. It exits successfully when the check passes; the shell prints the confirmation. The program itself does not write to stdout. Native `print` calls are not supported yet.
+The executable adds the integers from 1 to 10 and checks the result. It exits successfully when the check passes; the shell prints the confirmation. Use Dart `print` to write from the program itself.
 
 For a Dart project, resolve its dependencies before compiling the entry point:
 
@@ -88,7 +88,15 @@ dart pub get
 dartc bin/main.dart --kind exe -o app
 ```
 
-Executable entry points must be synchronous and parameterless. Normal completion exits with status zero; the Dart return value is discarded.
+Entry points can be synchronous or async, with optional command-line arguments. Normal completion exits with status zero; the Dart return value is discarded.
+
+Pass compilation declarations for `String.fromEnvironment`, `int.fromEnvironment`, `bool.fromEnvironment` and `bool.hasEnvironment`:
+
+```sh
+dartc bin/main.dart --kind exe -o app -DAPP_NAME=demo --define DEBUG=false
+```
+
+Declarations also select conditional imports and exports. They are separate from the program's OS environment. Library callers can pass the same values through `Compiler.compile(environment: {'APP_NAME': 'demo'})`.
 
 </details>
 

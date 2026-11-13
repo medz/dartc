@@ -4,6 +4,45 @@ import 'package:test/test.dart';
 
 void main() {
   const path = 'test/compiler/fixtures/arithmetic.dart';
+  test(
+    'environment declarations are isolated from later caller edits',
+    () async {
+      final declarations = {'flavor': 'native', 'text': 'before'};
+      final session = AnalysisSession(
+        ['test/compiler/fixtures/environment.dart'],
+        includeDependencies: true,
+        environment: declarations,
+      );
+      declarations['flavor'] = 'default';
+      declarations['text'] = 'after';
+      await session.use((checked) {
+        final library = checked.libraries.first.element;
+        final strings = library
+            .getTopLevelVariable('stringValues')!
+            .computeConstantValue()!
+            .toMapValue()!;
+        expect(
+          strings.entries
+              .singleWhere((e) => e.key!.toStringValue() == 'text')
+              .value!
+              .toStringValue(),
+          'before',
+        );
+        expect(
+          checked.libraries.any(
+            (l) => l.element.uri.path.endsWith('/environment_selected.dart'),
+          ),
+          isTrue,
+        );
+        expect(
+          checked.libraries.any(
+            (l) => l.element.uri.path.endsWith('/environment_default.dart'),
+          ),
+          isFalse,
+        );
+      });
+    },
+  );
   test('SDK selection alone does not mount private runtime sources', () async {
     await expectLater(
       AnalysisSession(

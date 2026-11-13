@@ -39,12 +39,15 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
   /// [linkInputs] supplies implementations for libraries and executables.
   /// Shared-library inputs follow the target loader's symbol lookup rules.
   /// Object and archive outputs retain unresolved imports for a later link.
+  /// [environment] supplies compilation declarations, independent of OS variables.
   Future<Compilation> compile(
     List<String> paths, {
     Output output = const .object(),
     Map<String, Map<String, String>> nativeSymbols = const {},
     Iterable<LinkInput> linkInputs = const [],
+    Map<String, String> environment = const {},
   }) async {
+    environment = Map.unmodifiable(environment);
     final inputs = linkInputs.toList();
     if (inputs.isNotEmpty &&
         output is! SharedLibraryOutput &&
@@ -61,6 +64,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     ) = await AnalysisSession(
       paths,
       includeDependencies: true,
+      environment: environment,
       sdk: DartSdk(sourceFiles),
       sources: sourceFiles,
       resources: [

@@ -8,8 +8,59 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 import '../support/native_assets.dart';
+import 'fixtures/environment_config.dart';
 
 void main() {
+  test(
+    'CLI preserves compilation declarations and rejects malformed input',
+    () async {
+      final errors = StringBuffer();
+      final command = CompilerCommand(StringBuffer(), errors);
+      final directory = (Directory(
+        'build/test',
+      )..createSync(recursive: true)).createTempSync('cli-environment-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final file = File.fromUri(directory.uri.resolve('program'))
+        ..writeAsStringSync('existing output');
+      const source = 'test/compiler/fixtures/environment.dart';
+      for (final declaration in ['-Dbroken', '--define=', '-D=value', '-D']) {
+        expect(await command.run([source, '-o', file.path, declaration]), 64);
+        expect(file.readAsStringSync(), 'existing output');
+      }
+      expect(
+        await command.run([
+          source,
+          '-o',
+          file.path,
+          '--kind',
+          'exe',
+          '-Dtext=replaced',
+          '--define',
+          'text=${environmentDefinitions['text']}',
+          '--define=number=0x2a',
+          '-D',
+          'enabled=false',
+          for (final MapEntry(:key, :value) in environmentDefinitions.entries)
+            if (!{'text', 'number', 'enabled'}.contains(key)) '-D$key=$value',
+        ]),
+        0,
+        reason: errors.toString(),
+      );
+      final result = await Process.run(file.path, []);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      final sdk = await Process.run(Platform.resolvedExecutable, [
+        for (final MapEntry(:key, :value) in environmentDefinitions.entries)
+          '-D$key=$value',
+        source,
+      ]);
+      expect(sdk.exitCode, 0, reason: '${sdk.stdout}\n${sdk.stderr}');
+      expect(
+        result.stdout,
+        'native\n${(sdk.stdout as String).split('\n').skip(1).join('\n')}',
+      );
+    },
+  );
+
   test('CLI reports usage errors and writes each native file kind', () async {
     final output = StringBuffer(), errors = StringBuffer();
     final command = CompilerCommand(output, errors);

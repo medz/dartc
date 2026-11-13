@@ -896,6 +896,8 @@ final class Bindings({
       member,
       requireClass,
       (declaration) => target(declaration, unit, site),
+      (type, entries) =>
+          _constantMap(type.typeArguments, entries, member.library, unit, site),
     );
     final declaredIntrinsic = supplied(element);
     ExecutableElement? memberOf(InterfaceElement? owner) => switch (element) {

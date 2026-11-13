@@ -8,7 +8,7 @@
 | --- | --- |
 | 编译单元、具名/无名 library、脚本标记 | analyzer 解析；转换库内声明，脚本标记不生成 IR。 |
 | import、as 前缀、显式/隐式 core | analyzer 解析；保留已解析声明身份，支持普通导入前缀。SDK API 的运行时实现另计。 |
-| 条件 import/export | 使用 analyzer 当前环境选择的库；尚无面向目标平台的环境配置接口。 |
+| 条件 import/export | `AnalysisSession(environment: ...)` 和 `Compiler.compile(environment: ...)` 的声明参与 URI 选择，按源码顺序选择首个匹配项；未匹配时使用默认 URI。目标平台内建的 `dart.library.*` 声明仍待补齐。 |
 | export、再导出、show/hide | analyzer 解析导出命名空间及组合器；引用保留原声明身份。不是原生符号导出。 |
 | 命名空间冲突与读写查找 | analyzer 拒绝歧义、不可见名称；getter/setter 引用复用声明身份。 |
 | deferred import | 支持每个源前缀独立的加载状态、loadLibrary 调用及提取、异步完成和重复加载。访问成员、常量、类型及构造器之前保留加载检查；检查早于实参和赋值右侧的求值。实际代码装载由后续执行及链接领域提供。 |
@@ -26,6 +26,14 @@ SDK 成员按已解析的声明生成普通调用、方法提取或扩展调用�
 [延迟导入对照](../test/frontend/lowering/deferred_imports_test.dart)覆盖未加载、请求已发出但尚未完成、加载完成和重复加载；两个前缀指向同一库时仍各自检查。`LoadLibrary` 返回代表加载完成的 Future，`CheckLibraryLoaded` 保留可抛错的读取效果。`loadLibrary` 的隐式函数保留普通调用和函数值身份。普通 extension 声明不能通过 deferred 导入，由 analyzer 检查。
 
 SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.new` 提取](../test/frontend/lowering/fixtures/deferred_unnamed_tearoff.dart)诊断为不是构造器引用；analyzer 14.7 接受后者。IR 对该用例保留已解析构造器及加载检查，并独立验证其结果，不将它计入 SDK 执行对照。
+
+## 编译环境声明
+
+`AnalysisSession` 在创建时保存 `environment` 的不可变快照；`Compiler.compile` 和 CLI `-DNAME=VALUE`、`--define NAME=VALUE` 将声明传给同一分析会话。CLI 保留空值及值中的等号、逗号、Unicode，重复名字以最后一项为准；格式错误在修改输出前失败。
+
+`String.fromEnvironment`、`int.fromEnvironment`、`bool.fromEnvironment` 和 `bool.hasEnvironment` 共用声明，支持 const、非 const 调用和构造器函数值。缺失或无法解析时保留默认值，空字符串仍算已声明；整数遵循 `int.tryParse`，布尔只识别精确的 `true`/`false`。不读取或合并操作系统环境变量。见[公开契约](https://dart.dev/libraries/core/environment-declarations)、[原生对照](../test/compiler/environment_test.dart)、[命令行验证](../test/compiler/command_test.dart)及[会话验证](../test/frontend/analysis/checked_libraries_test.dart)。
+
+声明也用于条件 import/export。主规范 URIs 条款允许工具只暴露部分编译环境用于 URI 选择；SDK 工具仅暴露 `dart.library.*`，dartc 使用调用方提供的完整声明表。这是工具配置范围的差异，不是 SDK 语义错误。见[语言规范](https://spec.dart.dev/DartLangSpecDraft.pdf)及 [SDK #34262](https://github.com/dart-lang/sdk/issues/34262)。
 
 ## 微任务、事件与终结回调
 

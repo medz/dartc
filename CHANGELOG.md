@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Configure compilation declarations through `Compiler.compile(environment: ...)` and CLI `-D`/`--define`. Constants, runtime environment constructors and conditional imports share the same values; malformed declarations leave existing outputs unchanged.
 - Call Dart implementations of `Allocator` with typed allocation syntax. Preserve target-native sizes, allocator defaults, evaluation order, null-aware calls and allocation failures.
 - Preserve target defaults when invoking redirecting constructor function values, including `Queue.new`, generic redirects and reordered named parameters. Keep the public callable signature and reject target-only arguments.
 

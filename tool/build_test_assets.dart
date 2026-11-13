@@ -39,6 +39,7 @@ import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/compiler/fixtures/random_entropy_assets.dart';
 import '../test/compiler/fixtures/native_finalizers_assets.dart';
 import '../test/compiler/fixtures/native_symbols_assets.dart';
+import '../test/compiler/fixtures/environment_config.dart';
 import '../test/support/native_assets.dart';
 import '../test/support/runtime.dart';
 
@@ -107,6 +108,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     ..._compilerLibraries,
     'entry',
     'allocators',
+    'environment',
     'descriptor_write',
     'futures',
     'async_functions',
@@ -216,6 +218,20 @@ Future<void> main(List<String> args) async {
           );
           await result.write(assets.file('compiler/entry_$name'));
         }
+      }
+    }
+
+    if (selected.contains('environment')) {
+      for (final (name, values) in [
+        ('default', const <String, String>{}),
+        ('configured', environmentDefinitions),
+      ]) {
+        final entry = await Compiler(target).compile(
+          ['test/compiler/fixtures/environment.dart'],
+          output: const .executable(),
+          environment: values,
+        );
+        await entry.write(assets.file('compiler/entry_environment_$name'));
       }
     }
 

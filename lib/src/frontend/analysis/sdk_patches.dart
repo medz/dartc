@@ -148,6 +148,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
           core,
           ...parts,
           '$runtime/core.dart',
+          '$runtime/environment.dart',
           '$runtime/list.dart',
           '$runtime/string.dart',
           '$runtime/integer.dart',
