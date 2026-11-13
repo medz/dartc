@@ -35,7 +35,14 @@ void main() {
       expect(module.imports, isEmpty);
       expect(
         module.symbols.map((s) => s.name),
-        containsAll(['capture', 'captureFrames', '.dartc.roots']),
+        containsAll([
+          heapRuntime.primitives.entries
+              .singleWhere((entry) => entry.value == .captureStackTrace)
+              .key
+              .name,
+          heapRuntime.captureStackTrace.name,
+          '.dartc.roots',
+        ]),
       );
     }
   });

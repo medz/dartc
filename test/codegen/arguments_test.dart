@@ -114,9 +114,10 @@ void main() {
   }
 
   test(
-    'incoming stack accesses reject offsets beyond their machine encoding',
+    'incoming stack accesses expand offsets beyond one load instruction',
     () {
       final generator = Arm64CodeGenerator(const Target(.linux, .arm64));
+      final sizes = <int>[];
       for (final count in [4102, 4103]) {
         final target = FunctionTarget(
           .parse('memory:stack-limit'),
@@ -129,26 +130,17 @@ void main() {
         final program = IrProgram([], [
           IrFunction(target, [entry]),
         ]);
-        if (count == 4102) {
-          expect(
-            generator
-                .generate(program, runtime: heapRuntime, definitions: [target])
-                .sections
-                .single
-                .bytes,
-            isNotEmpty,
-          );
-        } else {
-          expect(
-            () => generator.generate(
-              program,
-              runtime: heapRuntime,
-              definitions: [target],
-            ),
-            throwsRangeError,
-          );
-        }
+        sizes.add(
+          generator
+              .generate(program, runtime: heapRuntime, definitions: [target])
+              .sections
+              .single
+              .bytes
+              .length,
+        );
       }
+      expect(sizes.first, isPositive);
+      expect(sizes.last, greaterThan(sizes.first));
     },
   );
 }
