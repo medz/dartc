@@ -153,7 +153,7 @@ Queue、ListQueue 和 DoubleLinkedQueue 直接复用[官方队列实现](../sdk/
 
 DoubleLinkedQueue 的节点支持修改元素、前后插入与移除；forEachEntry 按公开契约允许修改当前节点，移除当前节点后继续访问调用前的后继。LinkedList 复用[官方侵入式链表](../sdk/std/lib/collection/linked_list.dart)，contains/remove 按节点身份判断，已归属其他链表的节点不能重复加入。unlink 和 clear 后节点可重新加入，首尾邻居、所属链表及迭代修改检测保留；节点、负载与迭代器经过分配压力后继续有效。
 
-重定向工厂的构造器函数值若省略目标独有的可选参数，生成桥接仍未补齐默认值；例如 Queue<int>.new 尚不能编译。直接构造不受此缺口影响。以上范围不代表全部 dart:collection API 已验收。
+Queue<int>.new 的构造器函数值保留重定向目标的可选参数默认值，可与直接构造一样创建空队列。以上范围不代表全部 dart:collection API 已验收。
 
 ## JSON 与 UTF-8
 

@@ -540,6 +540,9 @@ String collectionText(int mode) {
         source.remove(null);
         results.add('${queue.join(',')}|$rejected/$removed/${narrowed.single}');
       }
+      final factory = Queue<int>.new;
+      final empty = factory()..add(9);
+      results.add(empty.single.toString());
       return results.join(';');
     case 31:
       final results = <String>[];
