@@ -46,7 +46,12 @@ final class ProgramSelection(
     while (pending.isNotEmpty) {
       final (target, path) = pending.removeLast();
       if (!checked.add(target)) continue;
-      if (heap.runtime?.primitives.containsKey(target) == true) continue;
+      if (heap.runtime?.primitives[target] case final primitive?) {
+        if (primitive == .captureStackTrace) {
+          pending.add((heap.runtime!.captureStackTrace, [...path, target]));
+        }
+        continue;
+      }
       final body = functions[target];
       if (body == null ||
           target == heap.allocate ||

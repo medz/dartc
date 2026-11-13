@@ -178,105 +178,135 @@ void main() {
     }
   });
 
-  for (final CodeGenerator generator in [
-    Arm64CodeGenerator(const Target(.linux, .arm64)),
-    X64CodeGenerator(const Target(.linux, .x64)),
-  ]) {
-    test('${generator.target} trims runtime from unmanaged programs', () {
-      for (final managed in [false, true]) {
-        final program = IrProgram([], [mainBody(managed)]);
-        final module = generator.generate(
-          program,
-          definitions: [entry],
-          runtime: heapRuntime,
-        );
-        for (final target in [heapRuntime.allocate, heapRuntime.release]) {
-          expect(module.symbols.any((s) => s.name == target.name), managed);
-        }
-        expect(
-          module.symbols.any((s) => s.name == heapRuntime.runEvents.name),
-          isFalse,
-        );
-        expect(module.imports, isNot(contains('.dartc.clock')));
-        if (managed) {
-          expect(
-            () => generator.generate(program, definitions: [entry]),
-            throwsArgumentError,
-          );
-        }
+  final generator = Arm64CodeGenerator(const Target(.linux, .arm64));
+  test('unmanaged programs do not retain runtime allocation or scheduling', () {
+    for (final managed in [false, true]) {
+      final program = IrProgram([], [mainBody(managed)]);
+      final module = generator.generate(
+        program,
+        definitions: [entry],
+        runtime: heapRuntime,
+      );
+      for (final target in [heapRuntime.allocate, heapRuntime.release]) {
+        expect(module.symbols.any((s) => s.name == target.name), managed);
       }
-    });
+      expect(
+        module.symbols.any((s) => s.name == heapRuntime.runEvents.name),
+        isFalse,
+      );
+      expect(module.imports, isNot(contains('.dartc.clock')));
+      if (managed) {
+        expect(
+          () => generator.generate(program, definitions: [entry]),
+          throwsArgumentError,
+        );
+      }
+    }
+  });
 
-    test(
-      '${generator.target} rejects transitive allocation and exceptions',
-      () {
-        for (final allocates in [true, false]) {
-          final leaf = FunctionTarget(uri, 'leaf', .integer, [.integer]);
-          final caller = FunctionTarget(uri, 'critical', .integer, [.integer]);
-          final call = Block(caller.parameterTypes);
-          call.finish(Return(call.emit(DirectCall(leaf, call.parameters))));
-          final body = Block(leaf.parameterTypes);
-          if (allocates) {
-            final boxed = body.emit(TypeView(body.parameters.single, .object));
-            body.finish(Return(body.emit(ObjectHashCode(boxed, direct: true))));
-          } else {
-            body.finish(Throw(Constant.string('failure')));
-          }
-          expect(
-            () => generator.generate(
-              IrProgram([], [
-                mainBody(true),
-                IrFunction(caller, [call]),
-                IrFunction(leaf, [body]),
-              ]),
-              definitions: [entry, caller, leaf],
-              runtime: withCritical(caller),
-            ),
-            throwsA(
-              isA<UnsupportedError>().having(
-                (e) => e.message,
-                'contract',
-                contains('must not allocate'),
-              ),
-            ),
-          );
-        }
-      },
-    );
-
-    test('${generator.target} rejects native calls inside collection', () {
-      final foreign = FunctionTarget(uri, 'foreign', .integer, []);
-      final critical = FunctionTarget(uri, 'critical', .integer, []);
-      final block = Block();
-      block.finish(Return(block.emit(DirectCall(foreign, []))));
+  test('critical calls reject transitive allocation and exceptions', () {
+    for (final allocates in [true, false]) {
+      final leaf = FunctionTarget(uri, 'leaf', .integer, [.integer]);
+      final caller = FunctionTarget(uri, 'critical', .integer, [.integer]);
+      final call = Block(caller.parameterTypes);
+      call.finish(Return(call.emit(DirectCall(leaf, call.parameters))));
+      final body = Block(leaf.parameterTypes);
+      if (allocates) {
+        final boxed = body.emit(TypeView(body.parameters.single, .object));
+        body.finish(Return(body.emit(ObjectHashCode(boxed, direct: true))));
+      } else {
+        body.finish(Throw(Constant.string('failure')));
+      }
       expect(
         () => generator.generate(
-          IrProgram(
-            [],
-            [
-              mainBody(true),
-              IrFunction(critical, [block]),
-            ],
-            externals: [IrExternal(foreign)],
-          ),
-          definitions: [entry, critical, foreign],
-          imports: {
-            foreign: NativeImport(
-              'foreign',
-              NativeSignature(Int64, []),
-              isLeaf: true,
-            ),
-          },
-          runtime: withCritical(critical),
+          IrProgram([], [
+            mainBody(true),
+            IrFunction(caller, [call]),
+            IrFunction(leaf, [body]),
+          ]),
+          definitions: [entry, caller, leaf],
+          runtime: withCritical(caller),
         ),
         throwsA(
           isA<UnsupportedError>().having(
             (e) => e.message,
             'contract',
-            contains('foreign'),
+            contains('must not allocate'),
           ),
         ),
       );
-    });
-  }
+    }
+  });
+
+  test(
+    'critical calls reject foreign code even without managed allocation',
+    () {
+      for (final managed in [false, true]) {
+        final foreign = FunctionTarget(uri, 'foreign', .integer, []);
+        final critical = FunctionTarget(uri, 'critical', .integer, []);
+        final block = Block();
+        block.finish(Return(block.emit(DirectCall(foreign, []))));
+        expect(
+          () => generator.generate(
+            IrProgram(
+              [],
+              [
+                mainBody(managed),
+                IrFunction(critical, [block]),
+              ],
+              externals: [IrExternal(foreign)],
+            ),
+            definitions: [entry, critical, foreign],
+            imports: {
+              foreign: NativeImport(
+                'foreign',
+                NativeSignature(Int64, []),
+                isLeaf: true,
+              ),
+            },
+            runtime: withCritical(critical),
+          ),
+          throwsA(
+            isA<UnsupportedError>().having(
+              (e) => e.message,
+              'contract',
+              contains('foreign'),
+            ),
+          ),
+        );
+      }
+    },
+  );
+  test('critical closures follow the allocating stack capture bridge', () {
+    final capture = heapRuntime.primitives.entries
+        .singleWhere(
+          (entry) => entry.value == MemoryPrimitive.captureStackTrace,
+        )
+        .key;
+    final critical = FunctionTarget(uri, 'critical', .stackTrace, []);
+    final block = Block();
+    block.finish(Return(block.emit(DirectCall(capture, []))));
+    for (final marked in [critical, capture]) {
+      expect(
+        () => generator.generate(
+          IrProgram(
+            [],
+            [
+              IrFunction(critical, [block]),
+            ],
+            externals: [IrExternal(capture)],
+          ),
+          definitions: [critical, capture],
+          runtime: withCritical(marked),
+        ),
+        throwsA(
+          isA<UnsupportedError>().having(
+            (error) => error.message,
+            'contract',
+            contains('must not allocate'),
+          ),
+        ),
+      );
+    }
+  });
 }

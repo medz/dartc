@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Accept a single const primary constructor for ABI-specific integer classes. Reject extra constructors and members even when the analyzer misses them; retain mapping and other static checks.
+- Enforce non-allocating runtime call contracts in otherwise unmanaged modules and through the machine stack-capture bridge. Reject foreign calls and allocating stack walkers before native code generation.
 
 - Preserve user-defined `_name` fields in enums independently from their implicit names. Support field initializers, redirecting constructors, generic fields and imported nested constants without corrupting enum names or identity.
 - Run async generators, await-for loops and SDK streams in native programs. Preserve lazy subscriptions, pause/resume, cancellation, yield delegation, asynchronous cleanup and errors, listening Zones, generic events and live frame references. Reuse SDK broadcast controllers and stream transformations. Recover from a delegated listen failure so subsequent yields can resume.

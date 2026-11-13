@@ -331,12 +331,8 @@ base class ScalarCodeGenerator<R extends Object>(
       resolved = selection;
       break;
     }
-    if (resolved.managed) {
-      for (final function in runtime!.nonAllocating) {
-        if (resolved.functions.containsKey(function)) {
-          resolved.checkNonAllocating(function);
-        }
-      }
+    for (final function in runtime?.nonAllocating ?? const []) {
+      if (selected.contains(function)) resolved.checkNonAllocating(function);
     }
     final selection = resolved;
     final layouts = selection.layouts, heap = selection.heap;
