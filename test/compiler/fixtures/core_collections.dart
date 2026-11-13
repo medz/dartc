@@ -15,6 +15,14 @@ final class ChildLabel(super.value) extends Label {
   String toString() => '<${super.toString()}>';
 }
 
+final class LinkedItem(final int value) extends LinkedListEntry<LinkedItem> {
+  @override
+  bool operator ==(Object other) => other is LinkedItem && value == other.value;
+
+  @override
+  int get hashCode => value;
+}
+
 String describe(Object? value) => value.toString();
 String Function() formatter(Object? value) => value.toString;
 
@@ -458,6 +466,251 @@ String collectionText(int mode) {
         set.remove(key);
       }
       return '$allocations|$keys/$sum|${map.length}/${set.length}|${copy.length}/${copy.first}/${copy.last}';
+    case 29:
+      final results = <String>[];
+      for (final queue in <Queue<int?>>[
+        ListQueue<int?>(8),
+        DoubleLinkedQueue<int?>(),
+      ]) {
+        queue.addAll(List.generate(7, (i) => i));
+        for (var i = 0; i < 5; i++) {
+          queue.removeFirst();
+        }
+        queue.addAll([7, 8, 9, 10]);
+        queue.addFirst(4);
+        queue.addAll(List.generate(30, (i) => i + 11));
+        for (var i = 3; i >= 0; i--) {
+          queue.addFirst(i);
+        }
+        queue.add(null);
+        final removed = queue.removeLast();
+        final first = queue.removeFirst();
+        final last = queue.removeLast();
+        final found = queue.remove(20);
+        final missing = queue.remove(99);
+        queue.removeWhere((value) => value!.isEven);
+        queue.retainWhere((value) => value! % 3 != 0);
+        final copy = queue.toList(growable: false);
+        queue
+          ..clear()
+          ..addAll([null, 7, null]);
+        results.add(
+          '$removed/$first/$last/$found/$missing|$copy|'
+          '${queue.length}/${queue.first}/${queue.last}/${queue.elementAt(1)}',
+        );
+      }
+      return results.join(';');
+    case 30:
+      final results = <String>[];
+      for (final construct in <Queue<int> Function(Iterable<dynamic>)>[
+        Queue<int>.from,
+        ListQueue<int>.from,
+        DoubleLinkedQueue<int>.from,
+      ]) {
+        final queue = construct(<Object>[1, 2, 2].map((value) => value));
+        final view = queue.cast<Object?>();
+        view.addFirst(0);
+        view.addLast(3);
+        var rejected = 0;
+        try {
+          construct(<Object>[1, 'bad']);
+        } on TypeError {
+          rejected++;
+        }
+        try {
+          view.addLast('bad');
+        } on TypeError {
+          rejected++;
+        }
+        final source = Queue<Object?>.of([1, 'bad', null]);
+        final narrowed = Queue.castFrom<Object?, int>(source);
+        try {
+          narrowed.elementAt(1);
+        } on TypeError {
+          rejected++;
+        }
+        // Queue.castFrom passes Object? arguments through without a cast.
+        // ignore: collection_methods_unrelated_type
+        final removed = narrowed.remove('bad');
+        try {
+          narrowed.last;
+        } on TypeError {
+          rejected++;
+        }
+        source.remove(null);
+        results.add('${queue.join(',')}|$rejected/$removed/${narrowed.single}');
+      }
+      return results.join(';');
+    case 31:
+      final results = <String>[];
+      for (final queue in <Queue<int>>[
+        ListQueue<int>(),
+        DoubleLinkedQueue<int>(),
+      ]) {
+        var rejected = 0;
+        for (final read in <int Function()>[
+          () => queue.first,
+          () => queue.last,
+          () => queue.single,
+          queue.removeFirst,
+          queue.removeLast,
+        ]) {
+          try {
+            read();
+          } on StateError {
+            rejected++;
+          }
+        }
+        queue.addAll([1, 2, 3]);
+        final iterator = queue.iterator..moveNext();
+        queue.remove(2);
+        try {
+          iterator.moveNext();
+        } on ConcurrentModificationError {
+          rejected++;
+        }
+        try {
+          queue.single;
+        } on StateError {
+          rejected++;
+        }
+        for (final index in [-1, queue.length]) {
+          try {
+            queue.elementAt(index);
+          } on RangeError {
+            rejected++;
+          }
+        }
+        queue.removeLast();
+        results.add('$rejected/${queue.single}/${queue.length}');
+      }
+      return results.join('|');
+    case 32:
+      final queue = DoubleLinkedQueue<int>.of([1, 3]);
+      final first = queue.firstEntry()!;
+      first
+        ..append(2)
+        ..prepend(0)
+        ..element = 11;
+      queue.lastEntry()!.append(4);
+      final boundaries =
+          '${queue.firstEntry()!.previousEntry()}/'
+          '${queue.lastEntry()!.nextEntry()}/'
+          '${first.previousEntry()!.element}/${first.nextEntry()!.element}';
+      final visited = <int>[];
+      queue.forEachEntry((entry) {
+        visited.add(entry.element);
+        if (entry.element == 0) {
+          entry
+            ..prepend(-1)
+            ..append(5)
+            ..remove();
+        } else if (entry.element == 11) {
+          entry.append(12);
+        } else if (entry.element == 3) {
+          entry.remove();
+        }
+      });
+      final result = '$boundaries|$visited|${queue.toList()}/${queue.length}';
+      queue.clear();
+      final empty = '${queue.firstEntry()}/${queue.lastEntry()}';
+      queue.add(7);
+      return '$result|$empty/${queue.single}';
+    case 33:
+      final first = LinkedItem(1);
+      final equal = LinkedItem(1);
+      final list = LinkedList<LinkedItem>()..addAll([first, equal]);
+      first.insertBefore(LinkedItem(0));
+      equal
+        ..insertAfter(LinkedItem(3))
+        ..insertAfter(LinkedItem(2));
+      final before =
+          '${list.map((entry) => entry.value).toList()}|'
+          '${list.first.previous}/${list.last.next}/'
+          '${first.previous!.value}/${equal.next!.value}';
+      final identity =
+          '${first == equal}/${list.contains(LinkedItem(1))}/'
+          '${list.remove(LinkedItem(1))}/${list.contains(equal)}';
+      final other = LinkedList<LinkedItem>();
+      var rejected = false;
+      try {
+        other.add(equal);
+      } on StateError {
+        rejected = true;
+      }
+      equal.unlink();
+      final detached = '${equal.list}/${equal.previous}/${equal.next}';
+      other.addFirst(equal);
+      final moved = '${identical(equal.list, other)}/${other.single.value}';
+      final entries = list.toList();
+      list.clear();
+      final cleared = entries.every(
+        (entry) =>
+            entry.list == null && entry.next == null && entry.previous == null,
+      );
+      list.addAll(entries.reversed);
+      return '$before|$identity|$rejected/$detached/$moved/$cleared|'
+          '${list.map((entry) => entry.value).toList()}';
+    case 34:
+      final list = LinkedList<LinkedItem>();
+      var rejected = 0;
+      for (final read in <LinkedItem Function()>[
+        () => list.first,
+        () => list.last,
+        () => list.single,
+      ]) {
+        try {
+          read();
+        } on StateError {
+          rejected++;
+        }
+      }
+      list.addAll([LinkedItem(1), LinkedItem(2), LinkedItem(3)]);
+      final iterator = list.iterator..moveNext();
+      list.last.unlink();
+      try {
+        iterator.moveNext();
+      } on ConcurrentModificationError {
+        rejected++;
+      }
+      try {
+        // Exercise the callback modification check of LinkedList.forEach.
+        // ignore: avoid_function_literals_in_foreach_calls
+        list.forEach((entry) => entry.unlink());
+      } on ConcurrentModificationError {
+        rejected++;
+      }
+      final value = list.single.value;
+      final removed = list.remove(list.single);
+      final empty = list.iterator;
+      return '$rejected/$value/$removed/${list.isEmpty}/'
+          '${empty.moveNext()}/${empty.moveNext()}';
+    case 35:
+      final queue = ListQueue<List<int>>();
+      final linked = DoubleLinkedQueue<List<int>>();
+      final list = LinkedList<LinkedItem>();
+      for (var i = 0; i < 129; i++) {
+        queue.add([i]);
+        linked.add([i]);
+        list.add(LinkedItem(i));
+      }
+      final iterator = list.iterator..moveNext();
+      final entry = linked.firstEntry()!;
+      var allocations = 0;
+      for (var i = 0; i < 5000; i++) {
+        allocations += List<int>.filled(64, i).last;
+      }
+      var sum = iterator.current.value;
+      while (iterator.moveNext()) {
+        sum += iterator.current.value;
+      }
+      final first = entry.remove().single;
+      final last = list.last;
+      list.clear();
+      list.add(last);
+      return '$allocations|$sum/$first/${list.single.value}|'
+          '${queue.removeFirst().single}/${queue.removeLast().single}/'
+          '${linked.first.single}/${linked.last.single}';
     default:
       _calls = 0;
       final first = Label('first');

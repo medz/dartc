@@ -145,6 +145,14 @@ SplayTreeMap 与 SplayTreeSet 直接复用[官方 Dart 树实现](../sdk/std/lib
 
 [原生有序集合对照](../test/compiler/object_text_test.dart)覆盖工厂、构造器函数值、cast 写入检查、比较器相等性、putIfAbsent 回调修改、值更新及节点/副本/迭代器跨 GC 存活。查询导致的树旋转及替换已有值不会使键迭代失效，新增或删除键会被正在执行的迭代器检测。此范围不代表所有 dart:collection 类型均已验收。
 
+## 原生队列与链表
+
+Queue、ListQueue 和 DoubleLinkedQueue 直接复用[官方队列实现](../sdk/std/lib/collection/queue.dart)。[原生集合对照](../test/compiler/object_text_test.dart)覆盖两端增删、循环缓冲扩容、过滤、null 元素、工厂与 from 构造器函数值、cast 视图的读写检查、空访问和索引错误。cast 视图的 remove 接收 Object?，不按视图元素类型预先拒绝参数。迭代期间删除尚未访问的节点保留 SDK 的修改检测。
+
+DoubleLinkedQueue 的节点支持修改元素、前后插入与移除；forEachEntry 按公开契约允许修改当前节点，移除当前节点后继续访问调用前的后继。LinkedList 复用[官方侵入式链表](../sdk/std/lib/collection/linked_list.dart)，contains/remove 按节点身份判断，已归属其他链表的节点不能重复加入。unlink 和 clear 后节点可重新加入，首尾邻居、所属链表及迭代修改检测保留；节点、负载与迭代器经过分配压力后继续有效。
+
+重定向工厂的构造器函数值若省略目标独有的可选参数，生成桥接仍未补齐默认值；例如 Queue<int>.new 尚不能编译。直接构造不受此缺口影响。以上范围不代表全部 dart:collection API 已验收。
+
 ## JSON 与 UTF-8
 
 `jsonEncode`、`jsonDecode`、JsonEncoder 和 JsonDecoder 支持原生执行，保留数字、字符串转义、嵌套集合、重复键的后值、缩进、reviver 遍历顺序及 toEncodable/toJson 回调。非法文本抛出 FormatException；非字符串 Map 键、非有限数和无法转换的对象抛出 JsonUnsupportedObjectError，循环容器抛出 JsonCyclicError。支持分块 JSON 解码及 UTF-8 解码与 JSON 解码的组合转换。见[固定 SDK 契约](../sdk/std/lib/convert/json.dart)和[原生行为验证](../test/compiler/object_text_test.dart)。

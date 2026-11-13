@@ -161,6 +161,19 @@ void main() {
       expect(native.collection(mode), collections.collectionText(mode));
     });
   }
+  for (final (mode, name) in [
+    (29, 'wrapping, growth, filtering and nullable elements'),
+    (30, 'factories, constructor values and checked cast views'),
+    (31, 'empty access, bounds and iterator invalidation'),
+    (32, 'entry links and permitted entry callback mutation'),
+    (33, 'intrusive node identity, transfer and reuse after clear'),
+    (34, 'intrusive empty access and modification detection'),
+    (35, 'nodes, payloads and iterators survive collection'),
+  ]) {
+    test('queue and linked list $name', () {
+      expect(native.collection(mode), collections.collectionText(mode));
+    });
+  }
   test('NoSuchMethodError uses SDK formatting for methods and accessors', () {
     expect(native.collection(22), collections.collectionText(22));
   });
