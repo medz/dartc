@@ -1,3 +1,6 @@
+import 'dart:ffi' as ffi;
+
+import 'package:dartc/interop.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
@@ -7,6 +10,7 @@ import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/src/codegen/storage_access.dart';
+import 'package:dartc/src/codegen/native_invocation.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -16,6 +20,53 @@ void main() {
   setUpAll(prepareRuntime);
   late final layouts = ProgramLayout([], typeRuntime: heapRuntime.types);
   final members = MemberCalls(IrProgram([], []), {});
+
+  test(
+    'borrowed owners remain live through the selected native invocation',
+    () {
+      final target = FunctionTarget(uri, 'borrow', .voidType, [.object]);
+      final entry = Block(target.parameterTypes);
+      final owner = entry.parameters.single;
+      final before = entry.emit(
+        DirectCall(FunctionTarget(uri, 'collect', .voidType, []), []),
+      );
+      final symbol = NativeSymbolAddress(
+        NativeReference(
+          'test',
+          'borrow',
+          NativeFunctionType(
+            NativeSignature(ffi.Void, [ffi.Pointer<ffi.Void>]),
+          ),
+          isLeaf: true,
+        ),
+      );
+      entry.emit(symbol);
+      entry.emit(
+        NativeCall.symbol(
+          symbol,
+          FunctionType(.voidType, [
+            FfiTypes.pointerTypes[ffi.Pointer<ffi.Void>]!,
+          ]),
+          [const Constant.integer(0)],
+          borrowedOwners: {0: owner},
+        ),
+      );
+      entry.finish(Return());
+      final body = FunctionRepresentation(
+        IrFunction(target, [entry]),
+        layouts,
+        CheckedCasts(),
+        members,
+        HeapPlan(),
+      );
+      final call = body.instructions[entry]!
+          .whereType<NativeInvocation>()
+          .single;
+      final flow = FunctionLiveness(body, body.inputsOf, {before, call});
+      expect(flow.acrossCalls[before], contains(owner));
+      expect(flow.acrossCalls[call], contains(owner));
+    },
+  );
 
   test('trusted casts omit checks while retaining scalar boxing', () {
     for (final (source, result) in <(ValueType, ValueType)>[

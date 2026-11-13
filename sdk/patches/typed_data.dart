@@ -98,6 +98,13 @@ int _nativeAddress(TypedData data) =>
     ((data.buffer as _ByteBuffer)._data as _NativeData)._address +
     data.offsetInBytes;
 
+int _nativeListAddress(TypedData data, int index) {
+  final list = data as _TypedListBase;
+  return (list._typedData as _NativeData)._address +
+      list.offsetInBytes +
+      index * list.elementSizeInBytes;
+}
+
 ByteBuffer _nativeBuffer(
   Object owner,
   int address,

@@ -516,22 +516,28 @@ IrFunction nativeVariableBody(
   return IrFunction(target, [block]);
 }
 
-Value? Function(FunctionTarget, Block)? nativeFieldBody(
-  ExecutableElement element,
-  ClassType? owner,
-  FunctionTarget Function(ExecutableElement) bind,
-) {
+int? nativeFieldIndex(ExecutableElement element, ClassType? owner) {
   if (element is! PropertyAccessorElement ||
       owner?.nativeType is! NativeCompoundType) {
     return null;
   }
-  final native = owner!.nativeType as NativeCompoundType;
   final field = element.variable as FieldElement;
   final fields = (field.enclosingElement as InterfaceElement).fields
       .where((field) => !field.isStatic && !field.isOriginGetterSetter)
       .toList();
   final index = fields.indexOf(field);
-  if (index < 0) return null;
+  return index < 0 ? null : index;
+}
+
+Value? Function(FunctionTarget, Block)? nativeFieldBody(
+  ExecutableElement element,
+  ClassType? owner,
+  FunctionTarget Function(ExecutableElement) bind,
+) {
+  final index = nativeFieldIndex(element, owner);
+  if (index == null) return null;
+  final native = owner!.nativeType as NativeCompoundType;
+  final field = (element as PropertyAccessorElement).variable;
   final storage = native.fields[index].type;
   FunctionTarget? arrayConstructor, copyArray;
   if (storage is NativeArrayType) {

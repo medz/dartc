@@ -82,9 +82,12 @@ class Array<T extends NativeType> {
 
   int _addressAt(int index) {
     _checkIndex(index);
-    return _arrayStart(this) + index * _elementBytes;
+    return _arrayElementAddress(this, index);
   }
 }
+
+int _arrayElementAddress(Array<NativeType> array, int index) =>
+    _arrayStart(array) + index * array._elementBytes;
 
 @patch
 class _ArraySize<T extends NativeType> {

@@ -12,6 +12,90 @@ void main() {
   final pointer = Block([type]).parameters.single;
   const integer = Constant.integer(129), floating = Constant.floating(1.25);
 
+  test(
+    'borrowed addresses keep owners and reject invalid native boundaries',
+    () {
+      final native = NativeSignature(ffi.Int64, [
+        ffi.Pointer<ffi.Void>,
+        ffi.Int64,
+      ]);
+      final dart = FunctionType(.integer, [
+        FfiTypes.pointerTypes[ffi.Pointer<ffi.Void>]!,
+        .integer,
+      ]);
+      NativeSymbolAddress symbol({bool leaf = true}) => NativeSymbolAddress(
+        NativeReference(
+          'test',
+          'read',
+          NativeFunctionType(native),
+          isLeaf: leaf,
+        ),
+      );
+      final owner = Block([ValueType.object]).parameters.single;
+      final owners = <int, Value>{0: owner};
+      final pointer = symbol();
+      final call = NativeCall.symbol(pointer, dart, [
+        integer,
+        integer,
+      ], borrowedOwners: owners);
+      owners.clear();
+      expect(call.inputs, [pointer, integer, integer, owner]);
+      expect(() => call.borrowedOwners.clear(), throwsUnsupportedError);
+      for (final invalid in <Map<int, Value>>[
+        {-1: owner},
+        {2: owner},
+        {1: owner},
+        {0: integer},
+      ]) {
+        expect(
+          () => NativeCall.symbol(pointer, dart, [
+            integer,
+            integer,
+          ], borrowedOwners: invalid),
+          throwsArgumentError,
+        );
+      }
+      expect(
+        () => NativeCall.symbol(
+          symbol(leaf: false),
+          dart,
+          [integer, integer],
+          borrowedOwners: {0: owner},
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => NativeCall.symbol(
+          pointer,
+          dart,
+          [floating, integer],
+          borrowedOwners: {0: owner},
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => NativeCall.symbol(
+          pointer,
+          FunctionType(.floating, dart.parameters),
+          [integer, integer],
+          borrowedOwners: {0: owner},
+        ),
+        throwsArgumentError,
+      );
+      final block = Block()
+        ..emit(pointer)
+        ..emit(call)
+        ..finish(Return(integer));
+      expect(
+        () => IrFunction(
+          FunctionTarget(Uri.parse('memory:borrow'), 'read', .integer, []),
+          [block],
+        ),
+        throwsStateError,
+      );
+    },
+  );
+
   test('native Dart signatures retain scalar types and pointer variance', () {
     final pointer = FfiTypes.int64Pointer;
     final wider = FfiTypes.pointer.instantiate([FfiTypes.nativeType]);
@@ -61,6 +145,17 @@ void main() {
     final call = NativeCall(pointer, [value]);
     expect(call.type, same(pair));
     expect(call.signature.result, same(description));
+    final symbol = NativeSymbolAddress(
+      NativeReference(
+        'test',
+        'pair',
+        NativeFunctionType(NativeSignature.types(description, [description])),
+      ),
+    );
+    expect(
+      NativeCall.symbol(symbol, FunctionType(pair, [pair]), [value]).type,
+      same(pair),
+    );
     expect(
       () => NativeCall(pointer, [const Constant.integer(1)]),
       throwsArgumentError,

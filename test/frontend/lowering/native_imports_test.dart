@@ -6,6 +6,20 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'unused address expressions retain position and storage restrictions',
+    () async {
+      for (final fixture in ['escaped', 'non_leaf', 'scalar']) {
+        await expectLater(
+          AnalysisSession([
+            'test/frontend/lowering/fixtures/addresses/$fixture.dart',
+          ]).use(Lowering().lower),
+          throwsFormatException,
+          reason: fixture,
+        );
+      }
+    },
+  );
   test('native storage accessors retain symbol types without reading an address argument', () async {
     final result = await AnalysisSession([
       'test/compiler/fixtures/native_symbols.dart',

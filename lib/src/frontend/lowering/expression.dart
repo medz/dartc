@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
 import 'ffi.dart';
+import 'ffi_addresses.dart';
 import 'collection.dart';
 import 'function_context.dart';
 import 'operators.dart';
@@ -657,6 +658,22 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
             context.typeOf(expression.staticType!, expression) as ClassType,
           ),
         );
+      }
+      if (callee.isExternal &&
+          FfiAddressArguments.containsAddress(argumentList)) {
+        final target = context.bindings.target(callee, unit, expression);
+        final reference = context.bindings.nativeReferences[target];
+        if (reference == null || !reference.isLeaf) {
+          unsupported(
+            unit,
+            expression,
+            'address argument to a non-leaf native call',
+          );
+        }
+        return FfiAddressArguments(
+          context,
+          (e) => lowerExpression(context, e),
+        ).call(reference, target.signature, argumentList);
       }
       final args = context.arguments(
         argumentList,

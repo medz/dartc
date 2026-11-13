@@ -204,7 +204,7 @@ void writeFunction(
     DirectCall() =>
       'call ${symbol(op.target, op.ownerType)}${typeArgs(op.typeArguments)}(${op.inputs.map(value).join(', ')})',
     NativeCall() =>
-      'callNative${op.isLeaf ? ' leaf' : ''} ${value(op.pointer)}(${op.arguments.map(value).join(', ')})',
+      'callNative${op.isLeaf ? ' leaf' : ''} ${value(op.pointer)}(${op.arguments.map(value).join(', ')})${op.borrowedOwners.isEmpty ? '' : ' borrow ${op.borrowedOwners.entries.map((e) => '${e.key}:${value(e.value)}').join(', ')}'}',
   };
   String unwind(Jump? handler) =>
       handler == null ? '' : ' unwind ${edge(handler)}';

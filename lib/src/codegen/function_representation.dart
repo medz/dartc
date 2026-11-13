@@ -649,6 +649,7 @@ final class FunctionRepresentation(
           :final arguments,
           :final signature,
           :final isLeaf,
+          :final borrowedOwners,
         )) {
           if (signature.result is NativeCompoundType ||
               signature.parameters.any((type) => type is NativeCompoundType)) {
@@ -669,7 +670,9 @@ final class FunctionRepresentation(
             }
             final target = layouts.nativeCalls.target(signature);
             final call = DirectCall(target, [
-              _load(layouts.pointers.address, pointer, body),
+              pointer is NativeSymbolAddress
+                  ? pointer
+                  : _load(layouts.pointers.address, pointer, body),
               if (result != null)
                 _load(
                   layouts.native!.view(result.type as ClassType).address,
@@ -691,7 +694,11 @@ final class FunctionRepresentation(
             ]);
             invocations[call] = target;
             body.add(call);
-            for (final value in [pointer, ...arguments]) {
+            for (final value in [
+              pointer,
+              ...arguments,
+              ...borrowedOwners.values,
+            ]) {
               body.add(KeepAlive(value));
             }
             if (FfiTypes.isPointer(instruction.type)) {
@@ -711,7 +718,9 @@ final class FunctionRepresentation(
             continue;
           }
           final raw = NativeInvocation(
-            _load(layouts.pointers.address, pointer, body),
+            pointer is NativeSymbolAddress
+                ? pointer
+                : _load(layouts.pointers.address, pointer, body),
             [
               for (final value in arguments)
                 if (FfiTypes.isPointer(value.type))
@@ -723,6 +732,9 @@ final class FunctionRepresentation(
             isLeaf: isLeaf,
           );
           body.add(raw);
+          for (final owner in borrowedOwners.values) {
+            body.add(KeepAlive(owner));
+          }
           if (FfiTypes.isPointer(instruction.type)) {
             invocations[instruction] = heap.constructorFor(
               layouts.pointers.initializer,

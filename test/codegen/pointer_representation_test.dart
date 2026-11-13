@@ -1,4 +1,6 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/abi.dart';
+import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
@@ -78,7 +80,10 @@ void main() {
     final program = IrProgram([], [function], externals: externals);
     return FunctionRepresentation(
       function,
-      ProgramLayout([]),
+      ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
       CheckedCasts(),
       MemberCalls(program, {target}),
       HeapPlan(),

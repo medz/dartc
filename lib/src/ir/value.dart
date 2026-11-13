@@ -1735,12 +1735,12 @@ final class IntBinary(
   Iterable<Value> get inputs => [left, right];
 }
 
-/// A call through a typed native function pointer.
+/// A call through a typed native function pointer or a native symbol address.
 ///
 /// Arguments and results are Dart values. The native signature determines their
 /// boundary conversions, including integer truncation and float rounding.
 final class NativeCall._(
-  /// The address to invoke, retaining its `Pointer<NativeFunction<T>>` type.
+  /// A `Pointer<NativeFunction<T>>` value or [NativeSymbolAddress] of a function.
   final Value pointer,
 
   /// The evaluated Dart arguments in native parameter order.
@@ -1751,38 +1751,107 @@ final class NativeCall._(
 
   /// Whether the caller promises a short, nonblocking call without Dart callbacks.
   final bool isLeaf,
+
+  /// Owners of raw integer address arguments, keyed by argument position.
+  ///
+  /// Only leaf calls may borrow storage. The caller must derive each address
+  /// from its owner after argument evaluation; owners stay live through the call.
+  final Map<int, Value> borrowedOwners,
   super.type,
 ) extends Instruction {
-  factory(Value pointer, Iterable<Value> arguments, {bool isLeaf = false}) {
+  factory(
+    Value pointer,
+    Iterable<Value> arguments, {
+    bool isLeaf = false,
+    Map<int, Value> borrowedOwners = const {},
+  }) {
     if (!FfiTypes.isPointer(pointer.type)) {
       throw ArgumentError('A typed native function pointer is required.');
     }
     if (FfiTypes.describe(pointer.type) case NativePointerType(
       element: NativeFunctionType(:final signature),
     )) {
-      final values = List<Value>.unmodifiable(arguments);
       final declaration =
           (((pointer.type as ClassType).typeArguments.single as ClassType)
                   .typeArguments
                   .single
               as FunctionType);
-      checkArguments(
-        declaration.parameters.map(FfiTypes.dartValueType),
-        values,
-      );
-      return ._(
+      return _checked(
         pointer,
-        values,
+        arguments,
         signature,
+        FunctionType(
+          FfiTypes.dartValueType(declaration.result),
+          declaration.parameters.map(FfiTypes.dartValueType),
+        ),
         isLeaf,
-        FfiTypes.dartValueType(declaration.result),
+        borrowedOwners,
       );
     }
     throw ArgumentError('A typed native function pointer is required.');
   }
 
+  /// Calls a native symbol using its checked Dart signature, including nominal types.
+  factory symbol(
+    NativeSymbolAddress pointer,
+    FunctionType dartSignature,
+    Iterable<Value> arguments, {
+    Map<int, Value> borrowedOwners = const {},
+  }) {
+    final reference = pointer.reference;
+    if (reference.type case NativeFunctionType(:final signature)
+        when FfiTypes.canCall(signature, dartSignature)) {
+      return _checked(
+        pointer,
+        arguments,
+        signature,
+        dartSignature,
+        reference.isLeaf,
+        borrowedOwners,
+      );
+    }
+    throw ArgumentError(
+      'The native symbol requires a matching Dart signature.',
+    );
+  }
+
+  static NativeCall _checked(
+    Value pointer,
+    Iterable<Value> arguments,
+    NativeSignature signature,
+    FunctionType dartSignature,
+    bool isLeaf,
+    Map<int, Value> borrowedOwners,
+  ) {
+    final values = List<Value>.unmodifiable(arguments);
+    final owners = Map<int, Value>.unmodifiable(borrowedOwners);
+    for (final MapEntry(key: index, value: owner) in owners.entries) {
+      if (!isLeaf ||
+          index < 0 ||
+          index >= signature.parameters.length ||
+          signature.parameters[index] is! NativePointerType ||
+          !ValueType.object.accepts(owner.type) ||
+          owner.type == .integer ||
+          owner.type == .floating ||
+          owner.type == .boolean) {
+        throw ArgumentError(
+          'Borrowed addresses require a leaf pointer argument and a reference owner.',
+        );
+      }
+    }
+    checkArguments([
+      for (final (i, type) in dartSignature.parameters.indexed)
+        owners.containsKey(i) ? ValueType.integer : type,
+    ], values);
+    return ._(pointer, values, signature, isLeaf, owners, dartSignature.result);
+  }
+
   @override
-  Iterable<Value> get inputs => [pointer, ...arguments];
+  Iterable<Value> get inputs => [
+    pointer,
+    ...arguments,
+    ...borrowedOwners.values,
+  ];
 }
 
 /// A call to a statically bound function.

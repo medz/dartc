@@ -12,6 +12,8 @@ import '../test/codegen/fixtures/aliases.dart';
 import '../test/codegen/fixtures/native_calls.dart';
 import '../test/compiler/fixtures/native_imports_ffi.dart'
     show nativeImportSymbols;
+import '../test/compiler/fixtures/native_addresses_ffi.dart'
+    show nativeAddressSymbols;
 import '../test/compiler/fixtures/entry/assets.dart';
 import '../test/abi/fixtures/frames.dart';
 import '../test/abi/fixtures/floating_frames.dart';
@@ -72,6 +74,7 @@ const _compilerLibraries = {
   'native_floats',
   'native_function_pointers',
   'native_imports',
+  'native_addresses',
   'native_aggregates',
   'typed_data',
   'managed_objects',
@@ -278,6 +281,7 @@ Future<void> main(List<String> args) async {
         ['test/compiler/fixtures/$fixture.dart'],
         nativeSymbols: switch (fixture) {
           'native_imports' => nativeImportSymbols,
+          'native_addresses' => nativeAddressSymbols,
           'native_symbols' => nativeSymbols,
           _ => const {},
         },
@@ -303,16 +307,30 @@ Future<void> main(List<String> args) async {
       await assets
           .file('compiler/$fixture.a')
           .writeAsBytes(ArchiveWriter(format).encode([module]));
-      await shared([
-        module,
-        if (fixture == 'native_symbols') nativeSymbolsProvider(target),
-        if (fixture == 'native_imports')
-          format.decodeObject(
-            await assets
-                .file('compiler/native_function_pointers.o')
-                .readAsBytes(),
-          ),
-      ], library);
+      await shared(
+        [
+          module,
+          if (fixture == 'native_symbols') nativeSymbolsProvider(target),
+          if (fixture == 'native_imports')
+            format.decodeObject(
+              await assets
+                  .file('compiler/native_function_pointers.o')
+                  .readAsBytes(),
+            ),
+        ],
+        library,
+        dependencies: [
+          if (fixture == 'native_addresses')
+            .sharedLibrary(
+              target.operatingSystem == .macos
+                  ? '/usr/lib/libSystem.B.dylib'
+                  : 'libc.so.6',
+              symbols: {
+                target.nativeSymbol('memmove'): target.nativeSymbol('memmove'),
+              },
+            ),
+        ],
+      );
       if (fixture == 'native_symbols') {
         await shared([
           nativeSymbolsProvider(target),
