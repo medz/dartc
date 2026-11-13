@@ -348,6 +348,19 @@ final class Bindings({
     return source == null ? null : (source.resolvedUnit!, source.node);
   }
 
+  /// Maps a declaration or operation to its original source, including SDK patches.
+  SourceLocation? locationOf(ast.AstNode? site) {
+    if (site == null) return null;
+    final source = site.root as ast.CompilationUnit;
+    final location = source.lineInfo.getLocation(site.offset);
+    return sourceLocation?.call(source, site.offset) ??
+        (
+          uri: source.declaredFragment!.source.uri,
+          line: location.lineNumber,
+          column: location.columnNumber,
+        );
+  }
+
   Iterable<(ResolvedUnitResult, ast.AstNode)> fragmentsOf(
     InterfaceElement element,
   ) => element.fragments.map((fragment) => fragmentSource(fragment)!);
@@ -1008,6 +1021,9 @@ final class Bindings({
       redirectOwnerType: redirectOwnerType,
       enclosing: enclosing,
       sourceOffset: sourceOffset,
+      declarationLocation: locationOf(
+        enclosing == null ? fragmentSource(element.fragments.last)?.$2 : site,
+      ),
       captures: captures,
       awaiterCapture: awaiterCapture,
       covariantParameters: {...declarationFlags, ...classFlags},
@@ -1146,6 +1162,9 @@ final class Bindings({
               SetterElement() => .staticSetter,
               _ => .function,
             },
+      declarationLocation: locationOf(
+        fragmentSource(element.fragments.last)?.$2,
+      ),
       typeParameters: [...extensionParameters, ...source.typeParameters],
       optionalPositional: source.optionalPositional,
       namedParameters: source.namedParameters,

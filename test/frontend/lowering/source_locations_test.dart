@@ -36,6 +36,31 @@ void main() {
         function.sourceLocations[operation],
   ];
 
+  test('declaration positions retain local, part and SDK source units', () {
+    expect(function('callSites').target.declarationLocation, at(8, 1));
+    expect(
+      function('fromPart').target.declarationLocation,
+      at(3, 1, part: true),
+    );
+    expect(
+      program.externals
+          .singleWhere((e) => e.target.name == 'leaf')
+          .target
+          .declarationLocation,
+      at(5, 1),
+    );
+    final local = program.functions.singleWhere(
+      (f) => f.target.enclosing?.name == 'nested',
+    );
+    expect(local.target.declarationLocation, at(16, 12));
+    final sqrt = function('sqrt').target.declarationLocation!;
+    expect(
+      sqrt.uri.path,
+      endsWith('/sdk/std/lib/_internal/vm/lib/math_patch.dart'),
+    );
+    expect((sqrt.line, sqrt.column), (130, 1));
+  });
+
   test(
     'nested arguments and branch returns retain their distinct source sites',
     () {

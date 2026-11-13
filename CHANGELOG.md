@@ -3,6 +3,7 @@
 - Create `NativeCallable.isolateLocal` callbacks from Dart closures and method values. Preserve captured state through collection and reentry, release it on close, honor `keepIsolateAlive`, and use the declared exception result at the native boundary.
 - Expose native link dependencies on `Compilation` so object and archive consumers can retain required system libraries when linking separately.
 - Accept compatible optional parameters on FFI callback functions during analysis. Retain the original function type and all signature, exceptional-return and static-callback checks, including in unused code.
+- Include original declaration positions for pending async callbacks, including part files, SDK patches, generic and extension method values, constructor aliases and redirects. Ordinary instance method callbacks retain their later asynchronous parent frames.
 
 - Recover asynchronous parent frames through the SDK's Future listeners, completers, streams and annotated callback links. Include `await`/`yield` source positions and asynchronous gaps, preserve snapshots and rethrows across collection, and inspect captured links without invoking callbacks or late initializers.
 - Support DateTime calendar and epoch constructors, current time, local time zones, formatting, conversions, comparisons, arithmetic and copyWith through the SDK algorithms. Preserve DST and timestamp bounds; parse/tryParse still require regular expression matching.

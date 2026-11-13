@@ -12,6 +12,7 @@ final class ConstantData(
   final ProgramLayout layouts,
   final int symbolBase, {
   final bool stackTraces = false,
+  final ClassType? stackContext,
 }) {
   final symbols = <Symbol>[];
   final relocations = <Relocation>[];
@@ -265,8 +266,10 @@ final class ConstantData(
             metadata,
           ),
         );
-        // shortcut: pending callbacks have names only, add declaration spans for positions.
-        final description = frameDescription(closure.target);
+        final description = frameDescription(
+          closure.sourceTarget,
+          closure.sourceTarget.declarationLocation,
+        );
         if (description != null) {
           relocations.add(
             .address(
@@ -278,7 +281,9 @@ final class ConstantData(
         }
         final field =
             closure.instantiation?.origin ??
-            (closure.target.kind.isVirtual
+            (closure.target.kind.isVirtual &&
+                    stackContext != null &&
+                    closure.target.owner!.asInstanceOf(stackContext!) != null
                 ? closure.captures.first
                 : closure.target.awaiterCapture == null
                 ? null

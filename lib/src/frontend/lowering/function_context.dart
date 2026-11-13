@@ -35,15 +35,7 @@ final class FunctionContext(
   T withSource<T>(ast.AstNode? site, T Function() lower) {
     if (site == null) return lower();
     final previous = _sourceLocation;
-    final source = site.root as ast.CompilationUnit;
-    final location = source.lineInfo.getLocation(site.offset);
-    _sourceLocation =
-        bindings.sourceLocation?.call(source, site.offset) ??
-        (
-          uri: source.declaredFragment!.source.uri,
-          line: location.lineNumber,
-          column: location.columnNumber,
-        );
+    _sourceLocation = bindings.locationOf(site);
     try {
       return lower();
     } finally {

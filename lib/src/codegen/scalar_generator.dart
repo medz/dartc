@@ -397,6 +397,7 @@ base class ScalarCodeGenerator<R extends Object>(
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
       stackTraces: capture,
+      stackContext: runtime?.stackContext,
     );
     FunctionTarget? frameSource;
     void safepoint(

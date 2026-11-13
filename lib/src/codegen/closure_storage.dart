@@ -159,6 +159,7 @@ final class ClosureStorage(
         arguments,
         defaults,
         identity: (value.target, value.constructorAlias),
+        sourceTarget: value.target,
         identityArguments:
             constructor &&
                 value.constructorAlias == null &&
@@ -194,6 +195,7 @@ final class ClosureStorage(
       );
       specializations[generic] = ClosureShape(
         target: generic.target,
+        sourceTarget: generic.sourceTarget,
         signature: generic.signature.instantiate(
           generic.signature.typeParameters,
         ),
@@ -214,6 +216,7 @@ final class ClosureStorage(
     List<ValueType> typeArguments,
     Map<int, Constant> defaults, {
     Object? identity,
+    FunctionTarget? sourceTarget,
     List<ValueType> identityArguments = const [],
   }) {
     final index = closures.length + constants.length + methods.length;
@@ -247,6 +250,7 @@ final class ClosureStorage(
         : null;
     final shape = ClosureShape(
       target: target,
+      sourceTarget: sourceTarget ?? target,
       signature: signature,
       typeArguments: typeArguments,
       defaults: defaults,
@@ -384,6 +388,7 @@ final class ClosureStorage(
 
 final class ClosureShape({
   required final FunctionTarget target,
+  required final FunctionTarget sourceTarget,
   required final FunctionType signature,
   required final List<ValueType> typeArguments,
   required final Map<int, Constant> defaults,

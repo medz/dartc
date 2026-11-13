@@ -76,6 +76,25 @@ void main() {
     },
   );
 
+  test('declarations require original absolute source coordinates', () {
+    final location = (uri: Uri.parse('file:///part.dart'), line: 2, column: 3);
+    FunctionTarget declared(SourceLocation position) => FunctionTarget(
+      Uri.parse('file:///library.dart'),
+      'declared',
+      .voidType,
+      [],
+      declarationLocation: position,
+    );
+    expect(declared(location).declarationLocation, location);
+    for (final invalid in [
+      (uri: Uri.parse('part.dart'), line: 2, column: 3),
+      (uri: location.uri, line: 0, column: 3),
+      (uri: location.uri, line: 2, column: 0),
+    ]) {
+      expect(() => declared(invalid), throwsArgumentError);
+    }
+  });
+
   test('a branch-local value cannot escape through the other arm', () {
     final entry = Block(f.parameterTypes),
         yes = Block(),

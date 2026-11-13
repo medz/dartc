@@ -171,6 +171,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
       kind: .closure,
       enclosing: enclosing,
       sourceOffset: site.offset,
+      declarationLocation: executable.target.declarationLocation,
       captures: [application.receiverType],
       typeParameters: signature.typeParameters,
       optionalPositional: signature.optionalPositional,

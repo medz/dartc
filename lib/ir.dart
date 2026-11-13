@@ -7,9 +7,11 @@
 ///
 /// [IrProgram] checks references against the supplied class and callable
 /// declarations. [IrExternal] describes a callable implemented outside the
-/// graph using its Dart signature and defaults. [IrFunction.sourceLocations]
-/// associates instructions and terminating blocks with source URIs and one-based
-/// line and column coordinates. Inspect [Instruction.effects]
+/// graph using its Dart signature and defaults. [FunctionTarget.declarationLocation]
+/// preserves the original declaration position, including part files.
+/// [IrFunction.sourceLocations] associates instructions and terminating blocks
+/// with source URIs and one-based line and column coordinates.
+/// Inspect [Instruction.effects]
 /// for possible storage access, allocation, calls and exceptions.
 ///
 /// Generated [FunctionTarget] and [ClassType] definitions have a null library;
@@ -39,8 +41,7 @@ export 'src/ir/block.dart'
         Yield,
         YieldStream,
         Unreachable;
-export 'src/ir/function.dart'
-    show IrCallable, IrExternal, IrFunction, SourceLocation;
+export 'src/ir/function.dart' show IrCallable, IrExternal, IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/ffi_types.dart' show FfiTypes;
 export 'src/ir/signature.dart'
@@ -48,6 +49,7 @@ export 'src/ir/signature.dart'
         FunctionKind,
         FunctionBodyKind,
         FunctionTarget,
+        SourceLocation,
         DeferredImport,
         GlobalVariable,
         InstanceField,

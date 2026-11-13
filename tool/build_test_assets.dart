@@ -213,6 +213,11 @@ Future<void> main(List<String> args) async {
       ('async_functions', 'async_functions', 'entry_async_functions'),
       ('async_functions', 'async_error', 'entry_async_error'),
       ('async_stack_traces', 'async_stack_traces', 'entry_async_stack_traces'),
+      (
+        'async_stack_traces',
+        'callback_stack_locations',
+        'entry_callback_stack_locations',
+      ),
       ('sync_generators', 'sync_generators', 'entry_sync_generators'),
       ('sync_generators', 'sync_reentry', 'entry_sync_reentry'),
       ('async_generators', 'async_generators', 'entry_async_generators'),

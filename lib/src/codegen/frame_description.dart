@@ -1,6 +1,6 @@
 import 'package:dartc/ir.dart';
 
-/// Describes a source callable and optional original call site.
+/// Describes a source callable and optional original source position.
 String? frameDescription(FunctionTarget function, [SourceLocation? location]) {
   if (function.library == null) return null;
   String name(FunctionTarget target) {

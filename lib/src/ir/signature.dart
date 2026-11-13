@@ -1,5 +1,8 @@
 import 'type.dart';
 
+/// A source URI and one-based line and column for a declaration or operation.
+typedef SourceLocation = ({Uri uri, int line, int column});
+
 /// A deferred import's source prefix and the library it loads.
 ///
 /// Loading one prefix does not load another prefix for the same library.
@@ -146,6 +149,9 @@ final class FunctionTarget(
 
   /// The source offset of a local function. Synthesized functions can share an offset.
   final int? sourceOffset,
+
+  /// The original declaration or literal start, when a source position is known.
+  final SourceLocation? declarationLocation,
   Iterable<ValueType> captures = const [],
 
   /// The capture slot linking this lexical function to its asynchronous awaiter.
@@ -291,6 +297,12 @@ final class FunctionTarget(
   }
 
   this {
+    if (declarationLocation case final location?
+        when !location.uri.isAbsolute ||
+            location.line < 1 ||
+            location.column < 1) {
+      throw ArgumentError('Invalid declaration location for $name.');
+    }
     final ownerParameters =
         kind.isVirtual && owner != null && owner!.typeParameters.isNotEmpty
         ? owner!.typeParameters.toSet()

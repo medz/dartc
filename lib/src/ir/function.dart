@@ -6,9 +6,6 @@ import 'type.dart';
 import 'value.dart';
 import 'verify.dart';
 
-/// A source URI and one-based line and column for an executable operation.
-typedef SourceLocation = ({Uri uri, int line, int column});
-
 /// A callable supplied by the program, with a Dart signature and checked defaults.
 ///
 /// Verification seals all referenced type metadata against later initialization.
