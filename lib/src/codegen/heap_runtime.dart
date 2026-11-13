@@ -31,6 +31,7 @@ final class HeapRuntime(
   final FunctionTarget? floatingModulo,
   final AsyncRuntime? async,
   final SyncRuntime? sync,
+  final AsyncGeneratorRuntime? asyncGenerator,
   final TypeRuntime? types,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
@@ -107,7 +108,15 @@ final class HeapRuntime(
         throw ArgumentError('Invalid memory service: ${target.name}');
       }
     }
-    for (final target in [?sync?.create, ?sync?.yieldValue]) {
+    for (final target in [
+      ?sync?.create,
+      ?sync?.yieldValue,
+      ?asyncGenerator?.create,
+      ?asyncGenerator?.start,
+      ?asyncGenerator?.yieldValue,
+      ?asyncGenerator?.yieldStream,
+      ?asyncGenerator?.complete,
+    ]) {
       if (program.implementationOf(target) is! IrFunction) {
         throw ArgumentError(
           'Generator runtime entry requires a Dart body: ${target.name}',
@@ -197,6 +206,43 @@ final class SyncRuntime(
         yieldValue.signature !=
             FunctionType(.voidType, [.object, .object.nullable])) {
       throw ArgumentError('Invalid generator entry signature.');
+    }
+  }
+}
+
+/// SDK stream controller entries used by an async generator activation.
+final class AsyncGeneratorRuntime(
+  final FunctionTarget create,
+  final FunctionTarget start,
+  final FunctionTarget yieldValue,
+  final FunctionTarget yieldStream,
+  final FunctionTarget complete,
+) {
+  this {
+    for (final target in [create, start]) {
+      if (target.kind != .function || target.typeParameters.length != 1) {
+        throw ArgumentError('Invalid async generator entry: ${target.name}');
+      }
+      final t = target.typeParameters.single;
+      final signature = target == create
+          ? FunctionType(.object, [AsyncRuntime.callback], typeParameters: [t])
+          : FunctionType(CoreTypes.streamOf(t), [.object], typeParameters: [t]);
+      if (target.signature != signature) {
+        throw ArgumentError(
+          'Invalid async generator entry signature: ${target.name}',
+        );
+      }
+    }
+    for (final (target, signature) in [
+      (yieldValue, FunctionType(.boolean, [.object, .object.nullable])),
+      (yieldStream, FunctionType(.boolean, [.object, .object])),
+      (complete, FunctionType(.voidType, [.object, .object.nullable])),
+    ]) {
+      if (target.kind != .function || target.signature != signature) {
+        throw ArgumentError(
+          'Invalid async generator entry signature: ${target.name}',
+        );
+      }
     }
   }
 }

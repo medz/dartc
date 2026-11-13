@@ -100,6 +100,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'futures',
     'async_functions',
     'sync_generators',
+    'async_generators',
     'records',
     'enums',
   };
@@ -194,6 +195,12 @@ Future<void> main(List<String> args) async {
       ('async_functions', 'async_error', 'entry_async_error'),
       ('sync_generators', 'sync_generators', 'entry_sync_generators'),
       ('sync_generators', 'sync_reentry', 'entry_sync_reentry'),
+      ('async_generators', 'async_generators', 'entry_async_generators'),
+      (
+        'async_generators',
+        'async_generator_recovery',
+        'entry_async_generator_recovery',
+      ),
       ('records', 'records', 'entry_records'),
       ('enums', 'enums', 'entry_enums'),
     ]) {

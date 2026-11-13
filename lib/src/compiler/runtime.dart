@@ -164,6 +164,17 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
         AsyncRuntime(create, start, awaitValue, complete),
       _ => null,
     },
+    asyncGenerator: switch (annotations.entries) {
+      {
+        RuntimeRole.asyncStarCreate: final create,
+        RuntimeRole.asyncStarStart: final start,
+        RuntimeRole.asyncStarYield: final yieldValue,
+        RuntimeRole.asyncStarYieldStream: final yieldStream,
+        RuntimeRole.asyncStarReturn: final complete,
+      } =>
+        AsyncGeneratorRuntime(create, start, yieldValue, yieldStream, complete),
+      _ => null,
+    },
     sync: switch (annotations.entries) {
       {
         RuntimeRole.syncCreate: final create,

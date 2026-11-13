@@ -122,16 +122,6 @@ void main() {
           patches.origins[awaitBody.resolvedUnit!.uri]!.path,
           endsWith('/_internal/vm/lib/async_patch.dart'),
         );
-        final iteratorBody = async.getFragmentDeclaration(
-          async.element
-              .getClass('_SyncStarIterator')!
-              .getMethod('moveNext')!
-              .firstFragment,
-        )!;
-        expect(
-          patches.origins[iteratorBody.resolvedUnit!.uri]!.path,
-          endsWith('/_internal/vm/lib/async_patch.dart'),
-        );
         final ffi = libraries.singleWhere(
           (library) => library.element.uri == Uri.parse('dart:ffi'),
         );

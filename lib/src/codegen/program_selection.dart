@@ -80,7 +80,10 @@ final class ProgramSelection(
       final runtime =
           heap.runtime ??
           (throw UnsupportedError('Suspension runtime unavailable.'));
-      if (frame.synchronous ? runtime.sync == null : runtime.async == null) {
+      if (frame.synchronous
+          ? runtime.sync == null
+          : runtime.async == null ||
+                frame.streaming && runtime.asyncGenerator == null) {
         throw UnsupportedError(
           'Missing runtime entries for ${function.bodyKind}.',
         );

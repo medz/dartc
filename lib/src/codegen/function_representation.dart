@@ -2042,6 +2042,14 @@ final class FunctionRepresentation(
         ),
         final end => end,
       };
+      if (ends[block] case final YieldStream end) {
+        ends[block] = YieldStream(
+          end.stream,
+          edge(end.onResume),
+          onCancel: edge(end.onCancel),
+          onThrow: end.onThrow == null ? null : edge(end.onThrow!),
+        );
+      }
       if (ends[block] case final Yield end) {
         final suspended = Yield(
           end.value,

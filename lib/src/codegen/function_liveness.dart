@@ -64,6 +64,8 @@ final class FunctionLiveness(
         }
       }
       switch (end) {
+        case YieldStream(:final stream):
+          read(stream);
         case Yield(:final value):
           read(body.operandsForYield[end] ?? value);
         case Await(:final operand):
@@ -81,8 +83,6 @@ final class FunctionLiveness(
             Unreachable() ||
             ExhaustivenessFailure():
           break;
-        default:
-          throw UnsupportedError('Native terminator: ${end.runtimeType}');
       }
       for (final value in extraInputs?.call(end) ?? const <Value>[]) {
         read(value);

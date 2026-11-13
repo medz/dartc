@@ -1,5 +1,6 @@
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/stack_trace.dart' as traces;
+import '../runtime/memory.dart';
 import '../../lib/runtime/contracts.dart' as runtime;
 
 @patch
@@ -124,4 +125,42 @@ class _GuardedSyncStarIterator<T> extends _SyncStarIterator<T> {
       _running = false;
     }
   }
+}
+
+@patch
+_fatal(dynamic msg) => Memory.fail();
+
+@runtime.RuntimeEntry(.asyncStarCreate)
+Object _asyncStarCreate<T>(void Function(Object?, Object?, StackTrace?) step) =>
+    _SuspendState(_SuspendState._initAsyncStar<T>()!, step);
+
+@runtime.RuntimeEntry(.asyncStarStart)
+Stream<T> _asyncStarStart<T>(Object state) =>
+    (state as _SuspendState)._yieldAsyncStar(null) as Stream<T>;
+
+@runtime.RuntimeEntry(.asyncStarYield)
+bool _asyncStarYield(Object state, Object? value) =>
+    ((state as _SuspendState)._functionData
+            as _AsyncStarStreamController<dynamic>)
+        .add(value);
+
+@runtime.RuntimeEntry(.asyncStarYieldStream)
+bool _asyncStarYieldStream(Object state, Object stream) {
+  final controller =
+      (state as _SuspendState)._functionData
+          as _AsyncStarStreamController<dynamic>;
+  try {
+    return controller.addStream(stream as Stream<dynamic>);
+  } catch (_) {
+    // The VM leaves isAdding set when listen throws, blocking later yields.
+    controller.isAdding = false;
+    rethrow;
+  }
+}
+
+@runtime.RuntimeEntry(.asyncStarReturn)
+void _asyncStarReturn(Object state, Object? value) {
+  final activation = state as _SuspendState;
+  activation._step = null;
+  _SuspendState._returnAsyncStar(activation, value);
 }

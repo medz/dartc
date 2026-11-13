@@ -61,7 +61,11 @@ base class SelectedFunction(
     ExhaustivenessFailure(:final onThrow) => [?onThrow],
     Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
     Yield(:final onResume, :final onCancel) => [onResume, ?onCancel],
+    YieldStream(:final onResume, :final onCancel, :final onThrow) => [
+      onResume,
+      onCancel,
+      ?onThrow,
+    ],
     Return() || Unreachable() => const [],
-    _ => block.successors,
   };
 }

@@ -12,8 +12,7 @@ final class SuspensionFunctions(Iterable<IrFunction> functions) {
 
   this {
     for (final function in functions) {
-      if (function.bodyKind == .asynchronous ||
-          function.bodyKind == .syncGenerator) {
+      if (function.bodyKind != .synchronous) {
         frames[function.target] = SuspensionFrame(function, frames.length);
       }
     }
@@ -32,6 +31,7 @@ final class SuspensionFunctions(Iterable<IrFunction> functions) {
 final class SuspensionFrame(final IrFunction source, int index) {
   final type = ClassType(null, 'SuspensionFrame$index');
   bool get synchronous => source.bodyKind == .syncGenerator;
+  bool get streaming => source.bodyKind == .asyncGenerator;
   late final state = InstanceField(type, 'state', .integer);
   late final task = InstanceField(type, 'task', .object.nullable);
   late final resume = FunctionTarget(
@@ -75,7 +75,9 @@ final class SuspensionFrame(final IrFunction source, int index) {
     final saved = {
       ...body.entryParameters,
       for (final block in body.blocks)
-        if (body.ends[block] is Await || body.ends[block] is Yield)
+        if (body.ends[block] is Await ||
+            body.ends[block] is Yield ||
+            body.ends[block] is YieldStream)
           ...flow.liveOut[block]!,
     };
     for (final value in saved) {
@@ -239,7 +241,7 @@ final class SuspensionFrame(final IrFunction source, int index) {
           } else {
             result.ends[block] = const Return(Constant.nullValue());
           }
-        case Yield():
+        case Yield() when synchronous:
           final value = reload(body.operandsForYield[end]!, into);
           suspend(transfer(end.onResume).target, into, block);
           final call = DirectCall(runtime.sync!.yieldValue, [
@@ -249,17 +251,68 @@ final class SuspensionFrame(final IrFunction source, int index) {
           result.invocations[call] = runtime.sync!.yieldValue;
           into.add(call);
           result.ends[block] = const Return(Constant.boolean(true));
+        case Yield() || YieldStream():
+          final (operand, onResume, onCancel, onThrow, target) = switch (end) {
+            Yield(:final onResume, :final onCancel) => (
+              body.operandsForYield[end]!,
+              onResume,
+              onCancel!,
+              null,
+              runtime.asyncGenerator!.yieldValue,
+            ),
+            YieldStream(
+              :final stream,
+              :final onResume,
+              :final onCancel,
+              :final onThrow,
+            ) =>
+              (
+                stream,
+                onResume,
+                onCancel,
+                onThrow,
+                runtime.asyncGenerator!.yieldStream,
+              ),
+            _ => throw StateError('Expected a generator suspension.'),
+          };
+          final continuation = result.addBlock();
+          // Yield callbacks carry the SDK controller's cancellation flag.
+          final cancelled = UncheckedCast(entry.parameters[1], .boolean);
+          result.instructions[continuation]!.add(cancelled);
+          result.ends[continuation] = Branch(
+            cancelled,
+            transfer(onCancel),
+            transfer(onResume),
+          );
+          final value = reload(operand, into);
+          suspend(continuation, into, block);
+          final activation = StorageRead(task, frame, type: .object);
+          into.add(activation);
+          final call = DirectCall(target, [activation, value]);
+          result.invocations[call] = target;
+          into.add(call);
+          final done = result.addBlock();
+          result.ends[done] = const Return(Constant.nullValue());
+          final after = onThrow == null ? block : result.addBlock();
+          result.ends[after] = Branch(call, transfer(onCancel), Jump(done));
+          if (onThrow != null) {
+            result.ends[block] = Invoke(
+              call,
+              onReturn: Jump(after),
+              onThrow: transfer(onThrow),
+            );
+          }
         case Return() when synchronous:
           result.ends[block] = const Return(Constant.boolean(false));
         case Return(:final value):
           final returned = reload(value ?? const Constant.nullValue(), into);
           final activation = StorageRead(task, frame, type: .object);
           into.add(activation);
-          final call = DirectCall(runtime.async!.complete, [
-            activation,
-            returned,
-          ]);
-          result.invocations[call] = runtime.async!.complete;
+          final complete = streaming
+              ? runtime.asyncGenerator!.complete
+              : runtime.async!.complete;
+          final call = DirectCall(complete, [activation, returned]);
+          result.invocations[call] = complete;
           into.add(call);
           result.ends[block] = const Return(Constant.nullValue());
         case final Jump edge:
@@ -315,23 +368,20 @@ final class SuspensionFrame(final IrFunction source, int index) {
       );
       return IrFunction(source.target, [entry], defaults: source.defaults);
     }
+    final create = streaming
+        ? runtime.asyncGenerator!.create
+        : runtime.async!.create;
+    final start = streaming
+        ? runtime.asyncGenerator!.start
+        : runtime.async!.start;
+    final element = streaming ? source.yieldType! : source.completionType!;
     final activation = entry.emit(
-      DirectCall(
-        runtime.async!.create,
-        [callback],
-        typeArguments: [source.completionType!],
-      ),
+      DirectCall(create, [callback], typeArguments: [element]),
     );
     entry.emit(StoreField(task, frame, activation));
     entry.finish(
       Return(
-        entry.emit(
-          DirectCall(
-            runtime.async!.start,
-            [activation],
-            typeArguments: [source.completionType!],
-          ),
-        ),
+        entry.emit(DirectCall(start, [activation], typeArguments: [element])),
       ),
     );
     return IrFunction(source.target, [entry], defaults: source.defaults);
