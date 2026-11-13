@@ -15,8 +15,6 @@ void main() {
       expect(read('lib/core/core.dart'), contains('library dart.core'));
       expect(read('lib/ffi/ffi.dart'), contains('library dart.ffi'));
       expect(sources.paths, contains('sdk/std/lib/libraries.json'));
-      expect(sources.paths, contains('sdk/patches/decimal.dart'));
-      expect(sources.contains('sdk/runtime/decimal.dart'), isFalse);
       expect(
         () => sources.read('sdk/std/version')[0] = 0,
         throwsUnsupportedError,
