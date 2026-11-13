@@ -64,17 +64,17 @@ class Array<T extends NativeType> {
     : _nativeOwner = owner,
       super._fromTypedDataBase(Pointer<Void>.fromAddress(address), 0);
 
-  int _addressAt(int index) {
-    final length = _shape.first;
-    if (index < 0 || index >= length) {
-      throw IndexError.withLength(
-        index,
-        length,
-        indexable: this,
-        name: 'index',
-      );
+  int get _size => _shape.first;
+
+  void _checkIndex(int index) {
+    if (index < 0 || index >= _size) {
+      throw IndexError.withLength(index, _size, indexable: this, name: 'index');
     }
-    return (_typedDataBase as Pointer<Void>).address + index * _elementBytes;
+  }
+
+  int _addressAt(int index) {
+    _checkIndex(index);
+    return _arrayStart(this) + index * _elementBytes;
   }
 }
 
@@ -110,7 +110,10 @@ void _copyArray(Array<NativeType> target, Array<NativeType> source) {
 int _arrayAddress(Array<NativeType> value, int index) =>
     value._addressAt(index);
 
-int _arrayLength(Array<NativeType> value) => value._shape.first;
+int _arrayStart(Array<NativeType> value) =>
+    (value._typedDataBase as Pointer<Void>).address;
+
+int _arrayLength(Array<NativeType> value) => value._size;
 
 void _arrayStore<T extends NativeType>(
   Array<Array<T>> target,

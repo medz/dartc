@@ -126,6 +126,7 @@ Value? lowerFfi(
   Value Function(Instruction) emit, {
   ValueType? result,
   FunctionTarget Function(ExecutableElement)? bind,
+  Value Function(ClassType array, bool store)? arrayAccess,
   Map<String, Value> named = const {},
 }) {
   final library = member.library;
@@ -209,6 +210,23 @@ Value? lowerFfi(
   if (access is! ExtensionElement) return null;
   final array = library.getClass('Array');
   if (bind != null &&
+      arrayAccess != null &&
+      access == library.getExtension('AbiSpecificIntegerArray') &&
+      member == access.getGetter('elements')) {
+    final receiver = operands.single;
+    final type = receiver.type as ClassType;
+    final constructor = bind(
+      library.getClass('_AbiSpecificIntegerArrayList')!.unnamedConstructor!,
+    );
+    return emit(
+      Construct(constructor, [
+        receiver,
+        arrayAccess(type, false),
+        arrayAccess(type, true),
+      ], instantiatedType: constructor.owner!.instantiate(type.typeArguments)),
+    );
+  }
+  if (bind != null &&
       member == access.getGetter('elements') &&
       access.extendedType is dart.InterfaceType &&
       (access.extendedType as dart.InterfaceType).element == array &&
@@ -221,10 +239,7 @@ Value? lowerFfi(
       ]),
     );
     final address = emit(
-      DirectCall(bind(library.getTopLevelFunction('_arrayAddress')!), [
-        receiver,
-        const Constant.integer(0),
-      ]),
+      DirectCall(bind(library.getTopLevelFunction('_arrayStart')!), [receiver]),
     );
     final bytes = emit(
       NativeSize(

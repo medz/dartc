@@ -22,7 +22,47 @@ final class LocalClosure(
 /// Resolves captures through intervening functions before their SSA graphs are built.
 final class ClosurePlan() extends GeneralizingAstVisitor<void> {
   final functions = <Element, LocalClosure>{};
-  final adapters = <(FunctionTarget, ast.AstNode), IrFunction>{};
+  final adapters = <(FunctionTarget, ast.AstNode, String), IrFunction>{};
+
+  /// Supplies target-typed memory access to the SDK's checked array list view.
+  FunctionTarget nativeArrayAccess(
+    FunctionTarget enclosing,
+    ast.AstNode site,
+    ClassType array,
+    FunctionTarget address, {
+    required bool store,
+  }) {
+    final name = store ? '<array-store>' : '<array-load>';
+    final declaration = (enclosing, site, name);
+    if (adapters[declaration] case final body?) return body.target;
+    final target = FunctionTarget(
+      enclosing.library,
+      name,
+      .integer,
+      [array, .integer, if (store) .integer],
+      kind: .closure,
+      enclosing: enclosing,
+      sourceOffset: site.offset,
+    );
+    final entry = Block(target.parameterTypes);
+    final arguments = entry.parameters.skip(target.argumentOffset).toList();
+    final storage = FfiTypes.describe(array.typeArguments.single);
+    final offset = entry.emit(
+      IntBinary(.multiply, arguments[1], entry.emit(NativeSize(storage))),
+    );
+    final pointer = entry.emit(
+      IntBinary(.add, entry.emit(DirectCall(address, [arguments[0]])), offset),
+    );
+    final access = entry.emit(
+      store
+          ? StoreNative(pointer, storage, arguments[2])
+          : LoadNative(pointer, storage),
+    );
+    entry.emit(KeepAlive(arguments[0]));
+    entry.finish(Return(store ? arguments[2] : access));
+    adapters[declaration] = IrFunction(target, [entry]);
+    return target;
+  }
 
   /// Captures a native address in an ordinary Dart function with a fixed signature.
   FunctionTarget nativeFunction(
@@ -32,7 +72,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     FunctionType signature, {
     required bool isLeaf,
   }) {
-    final declaration = (enclosing, site);
+    final declaration = (enclosing, site, '<native-function>');
     if (adapters[declaration] case final body?) return body.target;
     if (signature.freeTypeParameters.isNotEmpty ||
         signature.typeParameters.isNotEmpty ||
@@ -76,7 +116,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     ast.AstNode site,
     List<ValueType> defaultTemplates,
   ) {
-    final declaration = (enclosing, site);
+    final declaration = (enclosing, site, '<extension-tearoff>');
     if (adapters[declaration] case final body?) return body.target;
     final executable = application.executable;
     // Extraction may occur inside this same method's body. Reuse capture-free

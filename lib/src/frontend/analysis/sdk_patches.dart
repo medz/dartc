@@ -38,7 +38,10 @@ final class SdkPatches(final OverlayResourceProvider files) {
     _apply(
       library('ffi'),
       [ffi, if (runtime != null) '$runtime/ffi.dart'],
-      classes: const {'_ArraySize'},
+      classes: {
+        '_ArraySize',
+        if (runtime != null) '_AbiSpecificIntegerArrayList',
+      },
     );
     if (runtime != null) {
       final core = patches('core')
@@ -243,6 +246,11 @@ final class SdkPatches(final OverlayResourceProvider files) {
       ...implementations,
     ];
     final units = {for (final path in paths) path: _parse(path)};
+    bool included(String path, CompilationUnitMember declaration) =>
+        classes == null ||
+        !_official.contains(path) ||
+        declaration is ClassDeclaration &&
+            classes.contains(declaration.namePart.typeName.lexeme);
     bool replaced(String path, CompilationUnitMember declaration) =>
         (_official.contains(path) || !implementations.contains(path)) &&
         declaration is ClassDeclaration &&
@@ -266,7 +274,9 @@ final class SdkPatches(final OverlayResourceProvider files) {
     final functions = <(String, String?), (String, FunctionDeclaration)>{};
     for (final MapEntry(key: path, value: syntax) in units.entries) {
       for (final declaration in syntax.declarations) {
-        if (replaced(path, declaration)) continue;
+        if (!included(path, declaration) || replaced(path, declaration)) {
+          continue;
+        }
         final classMembers = switch (declaration) {
           ClassDeclaration() => (
             declaration.namePart.typeName.lexeme,
@@ -439,14 +449,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
       }
       edit(path, 0, 0, "part of '$ownerUri';\n");
       for (final declaration in syntax.declarations) {
-        if (replaced(path, declaration)) {
-          edit(path, declaration.offset, declaration.end, '');
-          continue;
-        }
-        if (classes != null &&
-            _official.contains(path) &&
-            (declaration is! ClassDeclaration ||
-                !classes.contains(declaration.namePart.typeName.lexeme))) {
+        if (!included(path, declaration) || replaced(path, declaration)) {
           edit(path, declaration.offset, declaration.end, '');
           continue;
         }

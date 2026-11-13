@@ -261,6 +261,24 @@ final class FunctionContext(
             .instantiate(application.typeArguments)
             .result,
         bind: (member) => bindings.target(member, unit, site),
+        arrayAccess: (array, store) => emit(
+          MakeClosure(
+            _closures.nativeArrayAccess(
+              target,
+              site,
+              array,
+              bindings.target(
+                application.executable.declaration.library.getTopLevelFunction(
+                  '_arrayStart',
+                )!,
+                unit,
+                site,
+              ),
+              store: store,
+            ),
+            [],
+          ),
+        ),
         named: args.named,
       );
       if (value != null) return normal(value);

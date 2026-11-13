@@ -34,6 +34,24 @@ final class AbiIntegers() {
         Int64 Function(Pointer<IntegerState>, Int64),
         int Function(Pointer<IntegerState>, int)
       >('update');
+  late final arrayList = _library
+      .lookupFunction<
+        Int64 Function(Pointer<IntegerState>, Int64),
+        int Function(Pointer<IntegerState>, int)
+      >('arrayList');
+  late final arrayListFailure = _library
+      .lookupFunction<
+        Bool Function(Pointer<IntegerState>, Int32),
+        bool Function(Pointer<IntegerState>, int)
+      >('arrayListFailure');
+  late final retainArrayList = _library
+      .lookupFunction<Void Function(Int64), void Function(int)>(
+        'retainArrayList',
+      );
+  late final readRetainedArrayList = _library
+      .lookupFunction<Int64 Function(Int32), int Function(int)>(
+        'readRetainedArrayList',
+      );
   late final invoke = _library
       .lookupFunction<
         Int64 Function(Pointer<NativeFunction<Callback>>, Int64),

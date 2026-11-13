@@ -95,4 +95,36 @@ void main() {
       expect(written, bytes);
     },
   );
+
+  test('ABI array lists share storage and enforce fixed-length contracts', () {
+    final state = library.memory.cast<sdk.IntegerState>();
+    final bytes = library.memory.cast<Uint8>().asTypedList(64);
+    for (final value in [-129, 127, 65535]) {
+      bytes.fillRange(0, bytes.length, 0xa5);
+      final actual = library.arrayList(state, value);
+      final written = bytes.toList();
+      bytes.fillRange(0, bytes.length, 0xa5);
+      expect(actual, sdk.arrayList(state, value));
+      expect(written, bytes);
+    }
+    for (var mode = 0; mode < 6; mode++) {
+      final before = bytes.toList();
+      expect(library.arrayListFailure(state, mode), isTrue, reason: '$mode');
+      expect(bytes, before);
+      expect(sdk.arrayListFailure(state, mode), isTrue, reason: 'SDK: $mode');
+    }
+  });
+
+  test('escaped ABI array lists retain managed storage through collection', () {
+    for (final value in [-129, 127, 65535]) {
+      library.retainArrayList(value);
+      sdk.retainArrayList(value);
+      for (final count in [0, 40000]) {
+        expect(
+          library.readRetainedArrayList(count),
+          sdk.readRetainedArrayList(count),
+        );
+      }
+    }
+  });
 }
