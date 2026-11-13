@@ -868,6 +868,7 @@ final class Bindings({
     FunctionTarget? enclosing,
     int? sourceOffset,
     Iterable<ValueType> captures = const [],
+    int? awaiterCapture,
   }) {
     if (isExtensionOwner(element.enclosingElement)) {
       return extensionExecutable(element, unit, site)!.target;
@@ -1008,6 +1009,7 @@ final class Bindings({
       enclosing: enclosing,
       sourceOffset: sourceOffset,
       captures: captures,
+      awaiterCapture: awaiterCapture,
       covariantParameters: {...declarationFlags, ...classFlags},
       isAbstract:
           intrinsic == null &&

@@ -2,6 +2,7 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart' as dart;
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
@@ -299,6 +300,22 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
             : type;
       }
 
+      int? awaiterCapture;
+      for (final (index, capture) in fn.captures.indexed) {
+        if (capture is! VariableElement) continue;
+        for (final annotation in capture.metadata.annotations) {
+          final value = annotation.computeConstantValue();
+          if (value?.type case dart.InterfaceType(element: final type)
+              when type.library.isDartCore &&
+                  type == type.library.getClass('pragma') &&
+                  value!.getField('name')?.toStringValue() ==
+                      'vm:awaiter-link') {
+            // The VM selects the last marked variable in capture order.
+            awaiterCapture = index;
+          }
+        }
+      }
+
       fn.target = switch (fn.element) {
         final LocalFunctionElement element => bindings.target(
           element,
@@ -307,6 +324,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
           enclosing: enclosing,
           sourceOffset: fn.syntax.offset,
           captures: fn.captures.map(slot),
+          awaiterCapture: awaiterCapture,
         ),
         final LocalVariableElement element => FunctionTarget(
           root.library,
@@ -319,6 +337,7 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
           enclosing: enclosing,
           sourceOffset: fn.syntax.offset,
           captures: fn.captures.map(slot),
+          awaiterCapture: awaiterCapture,
         ),
         _ => throw StateError('Unexpected lexical body.'),
       };

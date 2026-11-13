@@ -148,6 +148,9 @@ final class FunctionTarget(
   final int? sourceOffset,
   Iterable<ValueType> captures = const [],
 
+  /// The capture slot linking this lexical function to its asynchronous awaiter.
+  final int? awaiterCapture,
+
   /// The constructor named by a redirecting factory declaration.
   final FunctionTarget? redirect,
 
@@ -331,6 +334,12 @@ final class FunctionTarget(
       throw ArgumentError(
         'Only lexical functions have an enclosing function and captures.',
       );
+    }
+    if (awaiterCapture != null &&
+        (kind != .closure ||
+            awaiterCapture! < 0 ||
+            awaiterCapture! >= this.captures.length)) {
+      throw ArgumentError('Invalid awaiter capture slot.');
     }
     if (this.covariantParameters.any(
       (slot) =>
