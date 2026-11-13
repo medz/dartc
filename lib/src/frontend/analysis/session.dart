@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
@@ -260,6 +261,7 @@ final class CheckedLibraries._(
         );
       }
     }
+    unit.unit.accept(_NullableInstantiations(unit));
     _constants.check(unit, errors);
   }
 
@@ -310,5 +312,21 @@ extension CheckedSources on CheckedLibraries {
       }
       return result;
     });
+  }
+}
+
+final class _NullableInstantiations(final ResolvedUnitResult unit)
+    extends RecursiveAstVisitor<void> {
+  @override
+  void visitFunctionReference(FunctionReference node) {
+    // shortcut: analyzer 14.7 extends null-shorting here, remove when it follows the accepted language rule.
+    if (node.staticType?.nullabilitySuffix == .question) {
+      throw FormatException(
+        '${unit.uri}: Explicit instantiation requires a non-null generic function.',
+        unit.content,
+        node.offset,
+      );
+    }
+    super.visitFunctionReference(node);
   }
 }

@@ -104,7 +104,11 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     FunctionType signature, {
     required bool isLeaf,
   }) {
-    final declaration = (enclosing, site, '<native-function>');
+    final declaration = (
+      enclosing,
+      site,
+      isLeaf ? '<native-leaf-function>' : '<native-function>',
+    );
     if (adapters[declaration] case final body?) return body.target;
     if (signature.freeTypeParameters.isNotEmpty ||
         signature.typeParameters.isNotEmpty ||
@@ -146,8 +150,9 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     FunctionTarget enclosing,
     ExtensionApplication application,
     ast.AstNode site,
-    List<ValueType> defaultTemplates,
-  ) {
+    List<ValueType> defaultTemplates, {
+    FunctionTarget? nativeTypeCheck,
+  }) {
     final declaration = (enclosing, site, '<extension-tearoff>');
     if (adapters[declaration] case final body?) return body.target;
     final executable = application.executable;
@@ -171,22 +176,72 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
       namedParameters: signature.namedParameters,
     );
     final entry = Block(target.parameterTypes);
-    final result = entry.emit(
-      DirectCall(
-        executable.target,
-        [entry.parameters[1], ...entry.parameters.skip(target.argumentOffset)],
-        typeArguments: [
-          ...application.typeArguments,
-          ...signature.typeParameters,
-        ],
-      ),
-    );
-    entry.finish(
-      result.type == ValueType.never ? Unreachable(result) : Return(result),
-    );
+    final blocks = [entry];
+    if (nativeTypeCheck != null) {
+      if (application.receiverType case ClassType(
+        typeArguments: [ClassType(typeArguments: [final FunctionType native])],
+      )) {
+        final representation = FunctionType(
+          FfiTypes.dartValueType(native.result),
+          native.parameters.map(FfiTypes.dartValueType),
+        );
+        entry.emit(
+          DirectCall(nativeTypeCheck, [
+            entry.emit(ReifyType(signature.result)),
+            TypeConstant(representation),
+          ]),
+        );
+        final leaf = Block(), ordinary = Block();
+        entry.finish(
+          Branch(
+            entry.parameters[target.argumentOffset +
+                signature.named['isLeaf']!.slot],
+            Jump(leaf),
+            Jump(ordinary),
+          ),
+        );
+        for (final (block, isLeaf) in [(leaf, true), (ordinary, false)]) {
+          final closure = block.emit(
+            MakeClosure(
+              nativeFunction(
+                target,
+                site,
+                application.receiverType,
+                representation,
+                isLeaf: isLeaf,
+              ),
+              [entry.parameters[1]],
+            ),
+          );
+          block.finish(Return(block.emit(TypeCast(closure, signature.result))));
+          blocks.add(block);
+        }
+      } else {
+        throw UnsupportedError(
+          'asFunction requires a static native function type.',
+        );
+      }
+    } else {
+      final result = entry.emit(
+        DirectCall(
+          executable.target,
+          [
+            entry.parameters[1],
+            ...entry.parameters.skip(target.argumentOffset),
+          ],
+          typeArguments: [
+            ...application.typeArguments,
+            ...signature.typeParameters,
+          ],
+        ),
+      );
+      entry.finish(
+        result.type == ValueType.never ? Unreachable(result) : Return(result),
+      );
+    }
     adapters[declaration] = IrFunction(
       target,
-      [entry],
+      blocks,
       defaults: {
         for (final entry in bindings.defaults(executable.target).entries)
           entry.key - executable.sourceParameterOffset: entry.value,

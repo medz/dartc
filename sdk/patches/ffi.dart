@@ -1,6 +1,7 @@
 import 'dart:_internal' show checkValidWeakTarget;
 
 import '../runtime/memory.dart';
+import '../runtime/type_info.dart';
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/finalization.dart' as finalization;
 
@@ -152,4 +153,45 @@ final class _NestedArrayList<T extends NativeType>(final Array<Array<T>> _array)
   @override
   void operator []=(int index, Array<T> value) =>
       _arrayStore(_array, index, value);
+}
+
+void _checkAsFunctionType(Type requested, Type representation) {
+  final actual = TypeInfo.of(requested), expected = TypeInfo.of(representation);
+  final shape = actual.signature;
+  var valid =
+      actual.kind == expected.kind &&
+      !actual.allowsNull &&
+      shape != null &&
+      shape.binders == 0 &&
+      shape.named == null &&
+      shape.required == shape.positional &&
+      shape.positional == expected.signature!.positional;
+  if (valid) {
+    final pointer = TypeInfo.of(Pointer);
+    var result = true;
+    for (var a = actual.parts, b = expected.parts; b != null; b = b.tail) {
+      if (a == null) {
+        valid = false;
+        break;
+      }
+      final source = a.head, target = b.head;
+      valid = target.kind == pointer.kind && target.shape == pointer.shape
+          ? source.kind == pointer.kind &&
+                source.shape == pointer.shape &&
+                (result
+                    ? target.isSubtypeOf(source)
+                    : source.isSubtypeOf(target))
+          : source == target;
+      if (!valid) break;
+      a = a.tail;
+      result = false;
+    }
+  }
+  if (!valid) {
+    throw ArgumentError.value(
+      requested,
+      'DF',
+      'Incompatible native function representation',
+    );
+  }
 }

@@ -35,6 +35,8 @@
 
 内建 Symbol 的完整文本格式不承诺与 Dart VM 一致；原生检查验证直接调用、方法提取与插值使用相同派发结果，并保留用户重写的文本。
 
+显式实例化要求非空的泛型函数值，`receiver?.method<T>` 仍是静态错误，包括未使用的声明。可以先提取 `receiver?.method`，再用 `value?.call<T>()` 进行空感知调用；已提升为非空的函数值和返回可空值的函数仍可实例化。analyzer 14.7 对部分链式实例化提前扩展了空短路，dartc 按当前规则补上拒绝检查；支持该语法的[上游问题 #4817](https://github.com/dart-lang/language/issues/4817)及[提案 #4816](https://github.com/dart-lang/language/pull/4816)尚未合并。见[静态验证](../test/frontend/analysis/nullable_instantiations_test.dart)。
+
 ## 规范依据
 
 [主规范 §17](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md)、[空感知元素](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md)、[点简写](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md)、[Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)。

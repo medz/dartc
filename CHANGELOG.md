@@ -1,6 +1,8 @@
 ## Unreleased
 
 - Support variable-length inline FFI arrays, including nested dimensions, declared minimum sizes and caller-supplied tail storage. Array list views expose the declared minimum; nested fixed dimensions retain bounds checks, and managed tail views keep their storage alive.
+- Extract and invoke `asFunction` method values for closed native signatures, including generic, specialized, dynamic and nullable calls. Preserve captured pointers through collection, select leaf calls from the supplied argument, and reject incompatible Dart representations before creating a native closure.
+- Reject explicit instantiation of nullable generic function values, including unused null-aware method extractions that analyzer 14.7 accepts ahead of the language specification. Preserve promoted function values and legal null-aware `call<T>()` invocations.
 
 - Resolve constant `identical` calls between integers and doubles using native type identity. Preserve contextual doubles and same-type identity, and apply the result to defaults, assertions, types and duplicate-key checks.
 - Use fixed FFI Array list views for booleans, pointers, structs, unions and nested arrays. Writes share native storage; struct and union elements remain mutable through unmodifiable lists. Escaped elements and views keep their managed storage alive.

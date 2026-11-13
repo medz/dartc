@@ -129,7 +129,10 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         }
         continue;
       }
-      if (runtime.primitives.containsKey(target)) continue;
+      if (runtime.primitives.containsKey(target) ||
+          target == runtime.types?.supertypes) {
+        continue;
+      }
       final reference = imports[target];
       if (reference?.type case NativeFunctionType(:final signature)
           when function is IrExternal) {

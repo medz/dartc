@@ -76,4 +76,33 @@ void main() {
       expect(native.indirect(echo, pointer, 40000), 1);
     }
   });
+  test(
+    'asFunction method values preserve captures, specialization and GC roots',
+    () {
+      final provider = NativeAssets(Target.host())
+          .open('compiler/native_function_pointers');
+      addTearDown(provider.close);
+      final echo = provider.lookup<NativeFunction<sdk.EchoNative>>('opaque');
+      for (final count in [0, 40000]) {
+        for (var mode = 0; mode < 8; mode++) {
+          expect(
+            native.functionValues(echo, Pointer.fromAddress(64), mode, count),
+            1,
+            reason: 'mode $mode, churn $count',
+          );
+        }
+      }
+      expect(native.functionValues(nullptr, nullptr, 5, 0), 2);
+    },
+  );
+
+  test(
+    'indirect asFunction rejects incompatible signatures before native calls',
+    () {
+      expect(native.invalidFunctionType(0), 0);
+      for (var mode = 1; mode <= 12; mode++) {
+        expect(native.invalidFunctionType(mode), 1, reason: 'signature $mode');
+      }
+    },
+  );
 }

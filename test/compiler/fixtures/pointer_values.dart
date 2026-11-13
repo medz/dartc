@@ -133,6 +133,105 @@ int pointerCasts(Pointer<Void> pointer, int count) {
   churn(count);
   if (view == pointer && view.runtimeType == Pointer<Never>) flags |= 32;
   final custom = Caster();
+  Caster? maybeCaster = pointer.address == 0 ? null : custom;
+  final method = maybeCaster?.cast;
+  if (method?.call<int>() != (pointer.address == 0 ? null : 7)) return -1;
   if (custom.cast<int>() == 7 && custom.cast<double>() == 7) flags |= 64;
   return flags;
+}
+
+typedef NativeBinder = F Function<F extends Function>({bool isLeaf});
+
+NativeBinder retainBinder(Pointer<NativeFunction<EchoNative>> pointer) =>
+    pointer.asFunction;
+
+F invokeBinder<F extends Function>(NativeBinder bind, bool leaf) =>
+    bind<F>(isLeaf: leaf);
+
+@Export<
+  Int64 Function(
+    Pointer<NativeFunction<EchoNative>>,
+    Pointer<Void>,
+    Int64,
+    Int64,
+  )
+>()
+int asFunctionValues(
+  Pointer<NativeFunction<EchoNative>> pointer,
+  Pointer<Void> value,
+  int mode,
+  int count,
+) {
+  final bind = retainBinder(pointer);
+  final specialized = pointer.asFunction<EchoDart>;
+  final explicit = NativeFunctionPointer<EchoNative>(pointer).asFunction;
+  Pointer<NativeFunction<EchoNative>>? nullable = pointer.address == 0
+      ? null
+      : pointer;
+  final optional = nullable?.asFunction;
+  final dynamic dynamicBind = bind;
+  pointer = Pointer.fromAddress(0);
+  churn(count);
+  try {
+    if (mode == 6) {
+      final call = bind<Pointer<NativeType> Function(Pointer<Never>)>();
+      churn(count);
+      return call(value.cast<Never>()) == value ? 1 : 0;
+    }
+    final call = switch (mode) {
+      0 => bind<EchoDart>(),
+      1 => specialized(),
+      2 => invokeBinder<EchoDart>(bind, count != 0),
+      3 => dynamicBind<EchoDart>(isLeaf: count != 0) as EchoDart,
+      4 => explicit<EchoDart>(isLeaf: true),
+      5 => optional?.call<EchoDart>(),
+      _ => bind<EchoDart>.call(isLeaf: false),
+    };
+    if (call == null) return 2;
+    churn(count);
+    return call(value) == value ? 1 : 0;
+  } on UnsupportedError {
+    return -1;
+  }
+}
+
+@Export<Int64 Function(Int64)>()
+int invalidFunctionType(int mode) {
+  final bind = Pointer<NativeFunction<Int32 Function(Int32)>>.fromAddress(0)
+      .asFunction;
+  try {
+    switch (mode) {
+      case 0:
+        bind<int Function(int)>();
+      case 1:
+        bind<int Function(int?)>();
+      case 2:
+        bind<num Function(int)>();
+      case 3:
+        bind<void Function(int)>();
+      case 4:
+        bind<int Function(num)>();
+      case 5:
+        bind<double Function(double)>();
+      case 6:
+        bind<int Function(int, {int? extra})>();
+      case 7:
+        bind<int Function([int])>();
+      case 8:
+        bind<int Function<T>(int)>();
+      case 9:
+        bind<Function>();
+      case 10:
+        bind<int Function()>();
+      case 11:
+        bind<int? Function(int)>();
+      default:
+        bind();
+    }
+    return 0;
+  } on ArgumentError {
+    return 1;
+  } on UnsupportedError {
+    return -1;
+  }
 }

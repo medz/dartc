@@ -39,5 +39,25 @@ final class PointerValues() {
         int Function(Pointer<NativeFunction<EchoNative>>, Pointer<Void>, int)
       >('indirectPointer');
 
+  late final functionValues = _library
+      .lookupFunction<
+        Int64 Function(
+          Pointer<NativeFunction<EchoNative>>,
+          Pointer<Void>,
+          Int64,
+          Int64,
+        ),
+        int Function(
+          Pointer<NativeFunction<EchoNative>>,
+          Pointer<Void>,
+          int,
+          int,
+        )
+      >('asFunctionValues');
+  late final invalidFunctionType = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'invalidFunctionType',
+      );
+
   void close() => _library.close();
 }

@@ -219,6 +219,15 @@ final class FunctionContext(
           extensionTearOffDefaults(application.executable.declaration),
           site,
         ),
+        nativeTypeCheck: isAsFunction(application.executable.declaration)
+            ? bindings.target(
+                application.executable.declaration.library.getTopLevelFunction(
+                  '_checkAsFunctionType',
+                )!,
+                unit,
+                site,
+              )
+            : null,
       ),
       [receiver],
     ),
