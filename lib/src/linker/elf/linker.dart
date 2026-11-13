@@ -38,15 +38,18 @@ final class ElfLinker(@override final Target target) implements Linker {
     final unit = LinkUnit(Elf(target), inputs, name, entry: entry),
         sections = unit.sections;
     final start = entry == null ? null : unit.entryPoint(entry);
-    if (start != null && unit.libraries.isNotEmpty) {
-      throw UnsupportedError(
-        'Linux executables currently require static link inputs.',
-      );
-    }
-    final rebases = start == null
+    final pie = start != null && unit.libraries.isNotEmpty;
+    final relocatable = start == null || pie;
+    final interpreter = pie
+        ? ascii.encode(switch (target.architecture) {
+            .arm64 => '/lib/ld-linux-aarch64.so.1\u0000',
+            .x64 => '/lib64/ld-linux-x86-64.so.2\u0000',
+          })
+        : const <int>[];
+    final rebases = relocatable
         ? unit.rebases
         : const <({int section, int offset, int target})>[];
-    final relocateConstants = start == null && unit.hasReadOnlyFixups;
+    final relocateConstants = relocatable && unit.hasReadOnlyFixups;
     final relocationCount = unit.bindings.length + rebases.length;
     final symbols = unit.symbols.where((symbol) => symbol.exported).toList();
     final finalizers = sections.indexWhere((s) => s.kind == .finalizers);
@@ -56,6 +59,7 @@ final class ElfLinker(@override final Target target) implements Linker {
     );
     final programCount =
         3 +
+        (pie ? 2 : 0) +
         (hasConstants ? 1 : 0) +
         (writable ? 1 : 0) +
         (relocateConstants ? 1 : 0);
@@ -63,10 +67,11 @@ final class ElfLinker(@override final Target target) implements Linker {
     for (final section in sections) {
       if (section.alignment > page) page = section.alignment;
     }
-    final imageBase = start == null ? 0 : (0x400000 + page - 1) & -page;
+    final imageBase = relocatable ? 0 : (0x400000 + page - 1) & -page;
     final offsets = List.filled(sections.length, 0),
         addresses = List.filled(sections.length, 0);
-    var cursor = (64 + programCount * 56 + 15) & ~15;
+    final interpreterOffset = 64 + programCount * 56;
+    var cursor = (interpreterOffset + interpreter.length + 15) & ~15;
     void place(SectionKind kind) {
       for (final (i, section) in sections.indexed) {
         if (section.kind != kind) continue;
@@ -109,7 +114,9 @@ final class ElfLinker(@override final Target target) implements Linker {
     final relocationSize = relocationCount * 24;
     final dynamicOffset = relocationOffset + relocationSize;
     final dynamicSize =
-        (7 +
+        (6 +
+            (start == null ? 1 : 0) +
+            (pie ? 1 : 0) +
             dependencies.length +
             (relocationCount == 0 ? 0 : 3) +
             (finalizers < 0 ? 0 : 2)) *
@@ -131,6 +138,7 @@ final class ElfLinker(@override final Target target) implements Linker {
       '.hash',
       '.dynamic',
       if (relocationCount != 0) '.rela.dyn',
+      if (pie) '.interp',
     ];
     final nameBytes = <int>[], nameOffsets = <int>[];
     for (final name in sectionNames) {
@@ -147,7 +155,7 @@ final class ElfLinker(@override final Target target) implements Linker {
         bytes = data.buffer.asUint8List();
     data.writeElf64Header(
       architecture: target.architecture,
-      type: start == null ? 3 : 2,
+      type: relocatable ? 3 : 2,
       entryAddress: start == null ? 0 : addresses[start.section] + start.offset,
       sectionOffset: sectionOffset,
       sectionCount: sectionNames.length,
@@ -155,6 +163,7 @@ final class ElfLinker(@override final Target target) implements Linker {
       programCount: programCount,
     );
     unit.writeSections(data, offsets, addresses);
+    bytes.setAll(interpreterOffset, interpreter);
     bytes.setAll(stringOffset, strings);
     bytes.setAll(nameOffset, nameBytes);
     for (final (i, symbol) in symbols.indexed) {
@@ -279,6 +288,15 @@ final class ElfLinker(@override final Target target) implements Linker {
         entrySize: 24,
       );
     }
+    if (pie) {
+      section(
+        sectionNames.length - 1,
+        1,
+        2,
+        interpreterOffset,
+        interpreter.length,
+      );
+    }
     void segment(
       int index,
       int type,
@@ -300,8 +318,20 @@ final class ElfLinker(@override final Target target) implements Linker {
     }
 
     final executableEnd = hasConstants ? textEnd : readOnlyEnd;
-    segment(0, 1, 5, 0, executableEnd, executableEnd, page);
-    var next = 1;
+    var next = 0;
+    if (pie) {
+      segment(next++, 6, 4, 64, programCount * 56, programCount * 56, 8);
+      segment(
+        next++,
+        3,
+        4,
+        interpreterOffset,
+        interpreter.length,
+        interpreter.length,
+        1,
+      );
+    }
+    segment(next++, 1, 5, 0, executableEnd, executableEnd, page);
     if (hasConstants) {
       segment(
         next++,
@@ -357,7 +387,8 @@ final class ElfLinker(@override final Target target) implements Linker {
       (6, imageBase + symbolOffset),
       (10, strings.length),
       (11, 24),
-      (14, sonameOffset),
+      if (start == null) (14, sonameOffset),
+      if (pie) (0x6ffffffb, 0x08000000),
       for (final dependency in dependencies) (1, dependency),
       if (relocationCount != 0) ...[
         (7, relocationOffset),

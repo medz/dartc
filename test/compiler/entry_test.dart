@@ -20,6 +20,7 @@ void main() {
         ('status', 47),
         ('exported', 47),
         ('math', 73),
+        if (Platform.isLinux) ('dynamic', 0),
       ]) {
         final file = assets.file('compiler/entry_$name');
         expect(file.statSync().mode & 0x40, isNot(0));
@@ -39,6 +40,23 @@ void main() {
       }
     },
   );
+
+  if (Platform.isLinux) {
+    test(
+      'dynamic executable rejects unavailable dependencies before main',
+      () async {
+        final result = await Process.run(
+          assets.file('compiler/entry_missing').absolute.path,
+          [],
+          includeParentEnvironment: false,
+          environment: {'PATH': ''},
+        );
+        expect(result.exitCode, isNot(0));
+        expect(result.stdout, isEmpty);
+        expect(result.stderr, contains('libdartc_missing_dependency.so'));
+      },
+    );
+  }
 
   test(
     'unsupported entries and unused static errors fail compilation',

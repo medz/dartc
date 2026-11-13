@@ -164,6 +164,19 @@ Future<void> main(List<String> args) async {
         );
         await result.write(assets.file('compiler/entry_$fixture'));
       }
+      if (target.operatingSystem == .linux) {
+        for (final (name, library) in [
+          ('dynamic', 'libc.so.6'),
+          ('missing', 'libdartc_missing_dependency.so'),
+        ]) {
+          final result = await Compiler(target).compile(
+            ['test/compiler/fixtures/entry/return.dart'],
+            output: const .executable(),
+            linkInputs: [.sharedLibrary(library)],
+          );
+          await result.write(assets.file('compiler/entry_$name'));
+        }
+      }
     }
 
     for (final (fixture, source, output) in [

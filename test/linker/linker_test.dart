@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartc/object.dart';
@@ -86,12 +87,46 @@ void main() {
           );
         }
         if (os == .linux) {
+          final image = linker.linkExecutable([
+            .object(module),
+            .sharedLibrary('libc.so.6'),
+          ], entry: 'entry');
+          final data = ByteData.sublistView(image);
+          expect(data.getUint16(16, .little), 3);
+          final count = data.getUint16(56, .little);
+          final headers = [for (var i = 0; i < count; i++) 64 + i * 56];
+          expect(headers.take(3).map((at) => data.getUint32(at, .little)), [
+            6,
+            3,
+            1,
+          ]);
+          expect(data.getUint64(64 + 16, .little), 64);
+          expect(data.getUint64(64 + 32, .little), count * 56);
+          final interp = data.getUint64(headers[1] + 8, .little);
+          final length = data.getUint64(headers[1] + 32, .little);
           expect(
-            () => linker.linkExecutable([
-              .object(module),
-              .sharedLibrary('libc.so.6'),
-            ], entry: 'entry'),
-            throwsUnsupportedError,
+            ascii.decode(image.sublist(interp, interp + length)),
+            arch == .arm64
+                ? '/lib/ld-linux-aarch64.so.1\u0000'
+                : '/lib64/ld-linux-x86-64.so.2\u0000',
+          );
+          final entry = data.getUint64(24, .little);
+          expect(image.sublist(entry, entry + code.length), code);
+          final dynamicHeader = headers.singleWhere(
+            (at) => data.getUint32(at, .little) == 2,
+          );
+          final dynamic = data.getUint64(dynamicHeader + 8, .little);
+          final size = data.getUint64(dynamicHeader + 32, .little);
+          final tags = {
+            for (var at = dynamic; at < dynamic + size; at += 16)
+              data.getUint64(at, .little): data.getUint64(at + 8, .little),
+          };
+          expect(tags[0x6ffffffb], 0x08000000);
+          expect(tags.containsKey(14), isFalse);
+          final needed = tags[5]! + tags[1]!;
+          expect(
+            ascii.decode(image.sublist(needed, image.indexOf(0, needed))),
+            'libc.so.6',
           );
         }
       });

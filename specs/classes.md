@@ -39,7 +39,7 @@
 
 普通类的原生方法、getter/setter 和运算符按实际接收者选择实现，支持抽象接口、继承与 mixin；super 保留直接选择的实现。省略参数采用实际实现的默认值，命名实参保持源码求值顺序。协变形参和方法类型实参按接收者的实际类环境检查，失败在执行方法体前抛出 TypeError；检查与方法体共享 catch/finally 清理路径。返回值在声明表示与调用方表示之间转换，装箱值参与回收。见[原生成员调用与 SDK 对照](../test/compiler/member_calls_test.dart)。
 
-原生成员选择限于同一封闭程序中构造或常量提供的类实例；不接收其他模块提供的托管对象。runtimeType 重写及 Type 相等见[类型行为范围](types.md#原生泛型调用与-type-值)，方法提取、Never 形参及 void 返回视图见[函数](functions.md)。普通 Object.toString 调用、可空接收者及绑定方法值保留用户重写、super 和 null 行为。数字、字符串、List/Set/Map、StringBuffer 与 ArgumentError/RangeError/StateError/UnsupportedError 的格式化已接通，见[原生格式化与集合对照](../test/compiler/object_text_test.dart)。Type 的文本表示和同一封闭程序内的 dynamic/noSuchMethod 派发已接通；record 原生表示、跨模块托管实例及未实现的 SDK 成员仍有缺口。
+原生成员选择限于同一封闭程序中构造或常量提供的类实例；不接收其他模块提供的托管对象。runtimeType 重写及 Type 相等见[类型行为范围](types.md#原生泛型调用与-type-值)，方法提取、Never 形参及 void 返回视图见[函数](functions.md)。普通 Object.toString 调用、可空接收者及绑定方法值保留用户重写、super 和 null 行为。数字、字符串、List/Set/Map、StringBuffer 与 ArgumentError/RangeError/StateError/UnsupportedError 的格式化已接通，见[原生格式化与集合对照](../test/compiler/object_text_test.dart)。Type 的文本表示和同一封闭程序内的 dynamic/noSuchMethod 派发已接通；record 的原生字段、结构相等/哈希、文本与 GC 存活见[原生验证](../test/compiler/records_test.dart)；跨模块托管实例及未实现的 SDK 成员仍有缺口。
 
 同步原生入口内支持对象分配与不可达对象回收，保留引用别名及循环引用。含引用全局槽的模块跨入口保留堆，同模块、同线程的同步原生回调重入共享堆及 GC 根，包括暂停的外层栈帧。没有引用全局槽时，入口及重入仍使用各自的独立堆，返回即释放。持久堆在 dartc 链接的共享库卸载时释放，独立程序退出前显式释放，见[模块清理与卸载](libraries.md#模块清理与卸载)。并发调用、跨线程调用、跨模块托管值 ABI 及异步执行尚未实现。同步异常传播与清理见[原生异常范围](statements.md#原生异常与清理)。分配失败目前仍作为未捕获错误终止进程；可捕获的 `OutOfMemoryError` 尚未实现。
 

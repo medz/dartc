@@ -9,7 +9,7 @@
 - 索引更新分别在读取和写入时检查 key 类型；`??=` 的非空结果不执行 setter key 检查。
 - 空感知访问和级联跳过后续索引、getter、右值、运算符和 setter。
 - getter 返回函数的调用先执行 getter，再计算调用实参；这与普通虚方法查找路径分开。
-- record 扩展内无前缀的位置/命名字段读取、函数字段调用及闭包捕获；包括泛型 record 上界和空感知调用。lowering 复用 record 字段及普通函数调用，原生 record 存储仍待实现。
+- record 扩展内无前缀的位置/命名字段读取、函数字段调用及闭包捕获；包括泛型 record 上界和空感知调用。lowering 复用 record 字段及普通函数调用；原生 record 存储、动态字段与函数值调用见[原生验证](../test/compiler/records_test.dart)。
 - 对象模式 extension getter，包括通配字段和候选分支缓存；关系模式包括可空接收者。静态 extension 调用的缓存键包含声明和结构化类型实参，避免不同选择错误共享结果。
 
 [SDK 差分样本](../test/frontend/lowering/fixtures/extension_access.dart)覆盖结果、异常和副作用；[测试](../test/frontend/lowering/extension_access_test.dart)单独标明下述规范顺序检查。

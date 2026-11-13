@@ -14,8 +14,10 @@ abstract interface class Linker() {
   /// [entry] includes platform decoration and selects archive members just like
   /// an unresolved reference. Linux enters with the kernel's initial stack;
   /// macOS calls it through `LC_MAIN` and uses its integer return as exit status.
-  /// Linux currently requires all symbols to resolve statically. macOS supports
-  /// the same dynamic dependencies as [linkSharedLibrary].
+  /// Shared-library inputs use the same bindings as [linkSharedLibrary]. Linux
+  /// emits a position-independent executable with the target GNU dynamic loader
+  /// when such inputs are present; static-only inputs need no dynamic loader.
+  /// The entry owns process shutdown, including native library finalization.
   Uint8List linkExecutable(Iterable<LinkInput> inputs, {required String entry});
 
   /// Resolves definitions and returns immutable bytes ready to load or write.

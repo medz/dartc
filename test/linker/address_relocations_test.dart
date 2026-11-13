@@ -15,14 +15,16 @@ void main() {
       final Linker linker = os == .macos
           ? MachOLinker(target)
           : ElfLinker(target);
-      for (final executable in [false, true]) {
+      for (final kind in ['shared', 'static', if (os == .linux) 'pie']) {
+        final executable = kind != 'shared', pie = kind == 'pie';
         test(
-          '$target absolute addresses and protection, executable=$executable',
+          '$target absolute address relocations and read-only protection, output=$kind',
           () {
             final entry = functions(target, {'entry': 0});
             final inputs = <LinkInput>[
               .object(entry),
               .object(constantAddressTable(target)),
+              if (pie) .sharedLibrary('libc.so.6'),
             ];
             final image = executable
                 ? linker.linkExecutable(
@@ -66,10 +68,13 @@ void main() {
                   );
                 }
                 if (type == 1 && data.getUint64(at + 8, .little) == offset) {
-                  expect(data.getUint32(at + 4, .little), executable ? 4 : 6);
+                  expect(
+                    data.getUint32(at + 4, .little),
+                    executable && !pie ? 4 : 6,
+                  );
                 }
               }
-              expect(relro, !executable);
+              expect(relro, !executable || pie);
             }
             expect(offset, isNotNull);
             expect(data.getUint64(offset!, .little), address! + 16);
