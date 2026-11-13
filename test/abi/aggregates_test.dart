@@ -25,6 +25,48 @@ void main() {
     NativeField('value', real),
   ], packing: 1);
 
+  test('variable array dimensions contribute only their declared minimum', () {
+    final empty = NativeArrayType(real, 0, variableLength: true);
+    final initial = NativeArrayType(real, 1, variableLength: true);
+    final rows = NativeArrayType(
+      NativeArrayType(real, 2),
+      0,
+      variableLength: true,
+    );
+    for (final array in [empty, initial, rows]) {
+      final value = NativeCompoundType('Samples', [
+        NativeField('tag', NativeScalarType(Uint8)),
+        NativeField('values', array),
+      ]);
+      for (final target in [
+        const Target(.macos, .arm64),
+        const Target(.linux, .arm64),
+        const Target(.linux, .x64),
+      ]) {
+        final storage = NativeLayout(target).of(value);
+        expect(storage.offsets, [0, 8]);
+        expect(storage.alignment, 8);
+        expect(storage.size, array == initial ? 16 : 8);
+      }
+      expect(
+        () => NativeCompoundType('Invalid', [
+          NativeField('values', array),
+          NativeField('tag', integer),
+        ]),
+        throwsArgumentError,
+      );
+    }
+    expect(rows.declaration('rows'), 'double rows[][2]');
+    expect(initial.declaration('values'), 'double values[1]');
+    expect(initial, isNot(NativeArrayType(real, 1)));
+    expect(() => NativeArrayType(real, 0), throwsArgumentError);
+    expect(
+      () => NativeArrayType(real, -1, variableLength: true),
+      throwsArgumentError,
+    );
+    expect(() => NativeArrayType(empty, 2), throwsArgumentError);
+  });
+
   test('native storage retains nested arrays, unions, packing and recursive pointers', () {
     for (final target in [
       const Target(.macos, .arm64),
@@ -57,6 +99,17 @@ void main() {
   test('AAPCS64 separates homogeneous floats, word aggregates and indirect results', () {
     for (final os in [OperatingSystem.macos, OperatingSystem.linux]) {
       final abi = Arm64Abi(Target(os, .arm64));
+      final flexible = NativeCompoundType('Samples', [
+        NativeField('bias', real),
+        NativeField('values', NativeArrayType(real, 0, variableLength: true)),
+      ]);
+      final prefix = abi.classify(NativeSignature.types(flexible, [flexible]));
+      for (final location in [prefix.result, prefix.parameters.single]) {
+        expect(
+          (location as RegisterAggregate).parts.map((part) => part.register),
+          [arm.Register.x0],
+        );
+      }
       final call = abi.classify(
         NativeSignature.types(point, [mixed, point, large]),
       );

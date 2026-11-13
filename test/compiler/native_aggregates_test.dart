@@ -37,10 +37,11 @@ void main() {
     expect(native.union(choice).value, -1.25);
   });
   test('typed native states remain independent across calls', () {
-    final first = native.createState(), second = native.createState();
+    final first = native.allocate<Mixed>(sizeOf<Mixed>());
+    final second = native.allocate<Mixed>(sizeOf<Mixed>());
     addTearDown(() {
-      native.freeState(first);
-      native.freeState(second);
+      native.free(first);
+      native.free(second);
     });
     for (var i = 0; i < 50; i++) {
       native.accumulate(first, 0.5);
@@ -187,6 +188,62 @@ void main() {
           expect(result.pointers[0].address, 0x1234);
           expect(result.flags[0], isTrue);
         }
+      }
+    },
+  );
+
+  test(
+    'variable array tails share caller storage beyond the declared minimum',
+    () {
+      const count = 4;
+      final rows = native.allocate<VariableRows>(
+        sizeOf<VariableRows>() + count * 2 * sizeOf<Double>(),
+      );
+      final points = native.allocate<VariablePoints>(
+        sizeOf<VariablePoints>() + (count - 1) * sizeOf<Point>(),
+      );
+      final grid = native.allocate<VariableGrid>(
+        sizeOf<VariableGrid>() + (count - 1) * 6 * sizeOf<Int16>(),
+      );
+      addTearDown(() {
+        native.free(rows);
+        native.free(points);
+        native.free(grid);
+      });
+      rows.ref.bias = 1.25;
+      grid.ref.bias = 17;
+      for (var i = 0; i < count; i++) {
+        rows.ref.rows[i][0] = i + 0.5;
+        rows.ref.rows[i][1] = -i - 0.25;
+        points.ref.points[i]
+          ..x = i.toDouble()
+          ..y = -i.toDouble();
+        for (var j = 0; j < 2; j++) {
+          for (var k = 0; k < 3; k++) {
+            grid.ref.rows[i][j][k] = i * 100 + j * 10 + k;
+          }
+        }
+      }
+      expect(native.sumVariableRows(rows, count), 2.25);
+      expect(native.sumVariableGrid(grid, count), sumVariableGrid(grid, count));
+      native.shiftVariablePoints(points, count, 0.75);
+      for (var i = 0; i < count; i++) {
+        expect(
+          (points.ref.points[i].x, points.ref.points[i].y),
+          (i + 0.75, -i - 0.75),
+        );
+      }
+      expect(native.callVariablePrefix(native.variablePrefix, rows), 1.5);
+      expect(rows.ref.bias, 1.25);
+    },
+  );
+
+  test(
+    'variable array rows retain fixed inner bounds and their managed owner',
+    () {
+      for (final seed in [-3.5, 12.25]) {
+        expect(native.retainVariableRow(seed), isTrue);
+        expect(native.readVariableRow(40000), seed);
       }
     },
   );

@@ -61,16 +61,17 @@ void main() {
   );
 
   test(
-    'unused asFunction declarations retain signature and constant obligations',
+    'unused FFI declarations retain signature, constant and layout obligations',
     () async {
-      var consumed = false;
-      await expectLater(
-        AnalysisSession([
-          'test/frontend/lowering/fixtures/invalid_ffi_functions.dart',
-        ]).use((_) => consumed = true),
-        throwsFormatException,
-      );
-      expect(consumed, isFalse);
+      for (final name in ['invalid_ffi_functions', 'invalid_variable_array']) {
+        var consumed = false;
+        await expectLater(
+          AnalysisSession(['test/frontend/lowering/fixtures/$name.dart'])
+              .use((_) => consumed = true),
+          throwsFormatException,
+        );
+        expect(consumed, isFalse);
+      }
     },
   );
 

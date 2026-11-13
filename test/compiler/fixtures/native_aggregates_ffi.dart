@@ -110,27 +110,61 @@ final class NativeAggregates() {
       .lookupFunction<Arrays Function(Int32), Arrays Function(int)>(
         'readArrayViews',
       );
+  late final sumVariableRows = _library
+      .lookupFunction<
+        Double Function(Pointer<VariableRows>, Int32),
+        double Function(Pointer<VariableRows>, int)
+      >('sumVariableRows');
+  late final variablePrefix = _library.lookup<NativeFunction<VariablePrefix>>(
+    'changeVariablePrefix',
+  );
+  late final callVariablePrefix = _library
+      .lookupFunction<
+        Double Function(
+          Pointer<NativeFunction<VariablePrefix>>,
+          Pointer<VariableRows>,
+        ),
+        double Function(
+          Pointer<NativeFunction<VariablePrefix>>,
+          Pointer<VariableRows>,
+        )
+      >('callVariablePrefix');
+  late final shiftVariablePoints = _library
+      .lookupFunction<
+        Void Function(Pointer<VariablePoints>, Int32, Double),
+        void Function(Pointer<VariablePoints>, int, double)
+      >('shiftVariablePoints');
+  late final sumVariableGrid = _library
+      .lookupFunction<
+        Int64 Function(Pointer<VariableGrid>, Int32),
+        int Function(Pointer<VariableGrid>, int)
+      >('sumVariableGrid');
+  late final retainVariableRow = _library
+      .lookupFunction<Bool Function(Double), bool Function(double)>(
+        'retainVariableRow',
+      );
+  late final readVariableRow = _library
+      .lookupFunction<Double Function(Int32), double Function(int)>(
+        'readVariableRow',
+      );
   late final _allocate = _process
       .lookupFunction<
-        Pointer<Void> Function(IntPtr),
-        Pointer<Void> Function(int)
-      >('malloc');
+        Pointer<Void> Function(IntPtr, IntPtr),
+        Pointer<Void> Function(int, int)
+      >('calloc');
   late final _free = _process
       .lookupFunction<
         Void Function(Pointer<Void>),
         void Function(Pointer<Void>)
       >('free');
-  Pointer<Mixed> createState() {
-    final value = _allocate(sizeOf<Mixed>()).cast<Mixed>();
+  Pointer<T> allocate<T extends NativeType>(int bytes) {
+    final value = _allocate(1, bytes).cast<T>();
     if (value == nullptr) {
       throw StateError('Cannot allocate native fixture storage.');
     }
-    value.ref
-      ..tag = 0
-      ..value = 0;
     return value;
   }
 
-  void freeState(Pointer<Mixed> state) => _free(state.cast());
+  void free(Pointer<NativeType> state) => _free(state.cast());
   void close() => _library.close();
 }

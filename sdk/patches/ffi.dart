@@ -59,14 +59,21 @@ class Array<T extends NativeType> {
   final Object _nativeOwner;
   final List<int> _shape;
   final int _elementBytes;
+  final bool _variableLength;
 
-  Array._view(Object owner, int address, this._shape, this._elementBytes)
-    : _nativeOwner = owner,
+  Array._view(
+    Object owner,
+    int address,
+    this._shape,
+    this._elementBytes,
+    this._variableLength,
+  ) : _nativeOwner = owner,
       super._fromTypedDataBase(Pointer<Void>.fromAddress(address), 0);
 
   int get _size => _shape.first;
 
   void _checkIndex(int index) {
+    if (_variableLength) return;
     if (index < 0 || index >= _size) {
       throw IndexError.withLength(index, _size, indexable: this, name: 'index');
     }
@@ -94,6 +101,7 @@ Array<T> _arraySlice<T extends NativeType>(Array<Array<T>> array, int index) {
     address,
     shape,
     array._elementBytes ~/ shape.first,
+    false,
   );
 }
 
@@ -114,6 +122,17 @@ int _arrayStart(Array<NativeType> value) =>
     (value._typedDataBase as Pointer<Void>).address;
 
 int _arrayLength(Array<NativeType> value) => value._size;
+
+Array<T> _fixedArray<T extends NativeType>(Array<T> array) =>
+    array._variableLength
+    ? Array<T>._view(
+        array,
+        _arrayStart(array),
+        array._shape,
+        array._elementBytes,
+        false,
+      )
+    : array;
 
 void _arrayStore<T extends NativeType>(
   Array<Array<T>> target,

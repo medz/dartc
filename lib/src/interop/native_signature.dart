@@ -147,7 +147,7 @@ sealed class const NativeTypeRef() {
     NativeOpaqueType(name: final tag) =>
       'struct $tag${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativeArrayType(:final element, :final length) => element.declaration(
-      '$name[$length]',
+      '$name[${length == 0 ? '' : length}]',
       abi: abi,
     ),
   };
@@ -274,6 +274,11 @@ final class NativeCompoundType.declare(
         )) {
       throw ArgumentError('Expected distinct, sized native fields.');
     }
+    for (final field in values.take(values.length - 1)) {
+      if (field.type case NativeArrayType(variableLength: true)) {
+        throw ArgumentError('A variable-length array must be the last field.');
+      }
+    }
     _fields = values;
   }
 
@@ -287,14 +292,23 @@ final class NativeCompoundType.declare(
   }
 }
 
-/// A fixed-size inline native array, used inside compound fields.
-final class NativeArrayType(final NativeTypeRef element, final int length)
-    extends NativeTypeRef {
+/// Inline native array storage, used inside compound fields.
+///
+/// For [variableLength] arrays, [length] is the minimum storage included in
+/// the enclosing layout. Additional storage is supplied by the caller.
+final class NativeArrayType(
+  final NativeTypeRef element,
+  final int length, {
+  final bool variableLength = false,
+}) extends NativeTypeRef {
   this {
-    if (!element.isSized || length <= 0) {
+    if (!element.isSized || length < (variableLength ? 0 : 1)) {
       throw ArgumentError(
-        'Expected a sized native array element and positive length.',
+        'Expected sized array elements, positive fixed dimensions and a nonnegative variable dimension.',
       );
+    }
+    if (element case NativeArrayType(variableLength: true)) {
+      throw ArgumentError('Only the outermost array dimension can vary.');
     }
   }
 
@@ -302,10 +316,11 @@ final class NativeArrayType(final NativeTypeRef element, final int length)
   bool operator ==(Object other) =>
       other is NativeArrayType &&
       element == other.element &&
-      length == other.length;
+      length == other.length &&
+      variableLength == other.variableLength;
 
   @override
-  int get hashCode => Object.hash(element, length);
+  int get hashCode => Object.hash(element, length, variableLength);
 }
 
 /// A native type usable through pointers without exposing its storage layout.

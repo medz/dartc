@@ -256,6 +256,13 @@ Value? lowerFfi(
       _ => (null, <ValueType>[], <Value>[]),
     };
     if (name != null) {
+      arguments[0] = emit(
+        DirectCall(
+          bind(library.getTopLevelFunction('_fixedArray')!),
+          [receiver],
+          typeArguments: [element],
+        ),
+      );
       final constructor = bind(library.getClass(name)!.unnamedConstructor!);
       return emit(
         Construct(
@@ -559,6 +566,7 @@ Value? Function(FunctionTarget, Block)? nativeFieldBody(
             address,
             SequenceConstant(CoreTypes.listOf(.integer), dimensions),
             block.emit(NativeSize(storage.element)),
+            Constant.boolean(storage.variableLength),
           ], instantiatedType: type),
         );
       }

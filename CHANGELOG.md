@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Support variable-length inline FFI arrays, including nested dimensions, declared minimum sizes and caller-supplied tail storage. Array list views expose the declared minimum; nested fixed dimensions retain bounds checks, and managed tail views keep their storage alive.
+
 - Resolve constant `identical` calls between integers and doubles using native type identity. Preserve contextual doubles and same-type identity, and apply the result to defaults, assertions, types and duplicate-key checks.
 - Use fixed FFI Array list views for booleans, pointers, structs, unions and nested arrays. Writes share native storage; struct and union elements remain mutable through unmodifiable lists. Escaped elements and views keep their managed storage alive.
 

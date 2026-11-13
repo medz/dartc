@@ -2,6 +2,7 @@
 // ignore_for_file: use_primary_constructors
 
 import 'dart:ffi';
+import 'dart:typed_data';
 
 import 'package:dartc/interop.dart';
 
@@ -295,4 +296,112 @@ Arrays readArrayViews(int count) {
   result.pointers[0] = _escapedPointers![0];
   result.flags[0] = _escapedFlags![0];
   return result;
+}
+
+final class VariableRows extends Struct {
+  @Double()
+  external double bias;
+  @Array.variable(2)
+  external Array<Array<Double>> rows;
+}
+
+final class VariablePoints extends Struct {
+  @Uint8()
+  external int tag;
+  @Array.variableWithVariableDimension(1)
+  external Array<Point> points;
+}
+
+final class VariableGrid extends Struct {
+  @Int64()
+  external int bias;
+  @Array.variableMulti([2, 3], variableDimension: 1)
+  external Array<Array<Array<Int16>>> rows;
+}
+
+@Export<Double Function(Pointer<VariableRows>, Int32)>()
+double sumVariableRows(Pointer<VariableRows> pointer, int count) {
+  final value = pointer.ref;
+  var result = value.bias;
+  for (var row = 0; row < count; row++) {
+    result += value.rows[row][0] + value.rows[row][1];
+  }
+  return result;
+}
+
+@Export<VariableRows Function(VariableRows)>()
+VariableRows changeVariablePrefix(VariableRows value) {
+  value.bias += 0.25;
+  return value;
+}
+
+typedef VariablePrefix = VariableRows Function(VariableRows);
+
+@Export<
+  Double Function(
+    Pointer<NativeFunction<VariablePrefix>>,
+    Pointer<VariableRows>,
+  )
+>()
+double callVariablePrefix(
+  Pointer<NativeFunction<VariablePrefix>> callback,
+  Pointer<VariableRows> pointer,
+) => callback.asFunction<VariablePrefix>()(pointer.ref).bias;
+
+@Export<Void Function(Pointer<VariablePoints>, Int32, Double)>()
+void shiftVariablePoints(
+  Pointer<VariablePoints> pointer,
+  int count,
+  double delta,
+) {
+  for (var i = 0; i < count; i++) {
+    final point = pointer.ref.points[i];
+    point.x += delta;
+    point.y -= delta;
+  }
+}
+
+@Export<Int64 Function(Pointer<VariableGrid>, Int32)>()
+int sumVariableGrid(Pointer<VariableGrid> pointer, int count) {
+  var sum = pointer.ref.bias;
+  for (var i = 0; i < count; i++) {
+    for (var j = 0; j < 2; j++) {
+      for (var k = 0; k < 3; k++) {
+        sum += pointer.ref.rows[i][j][k];
+      }
+    }
+  }
+  return sum;
+}
+
+Array<Double>? _variableRow;
+
+@Export<Bool Function(Double)>()
+bool retainVariableRow(double seed) {
+  // Keep the rejected inner index within allocated storage if bounds fail.
+  final bytes = Uint8List(sizeOf<VariableRows>() + 5 * sizeOf<Double>());
+  final value = Struct.create<VariableRows>(bytes);
+  _variableRow = value.rows[1]..[0] = seed;
+  var rejected = 0;
+  for (final index in [-1, 2]) {
+    try {
+      _variableRow![index];
+    } on RangeError {
+      rejected++;
+    }
+  }
+  try {
+    value.rows.elements[0];
+  } on RangeError {
+    rejected++;
+  }
+  return rejected == 3 && value.rows.elements.isEmpty;
+}
+
+@Export<Double Function(Int32)>()
+double readVariableRow(int count) {
+  for (var i = 0; i < count; i++) {
+    Struct.create<Arrays>().integers[0] = i;
+  }
+  return _variableRow![0];
 }

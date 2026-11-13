@@ -2143,19 +2143,26 @@ final class Bindings({
                       (value.type as dart.InterfaceType).element.name ==
                           '_ArraySize',
                 );
-                final sizes =
-                    dimensions
-                        .getField('dimensions')
-                        ?.toListValue()
-                        ?.map((v) => v.toIntValue()!)
-                        .toList() ??
-                    [
-                      for (var i = 1; i <= 5; i++)
-                        ?dimensions.getField('dimension$i')?.toIntValue(),
-                    ];
+                final variableDimension = dimensions
+                    .getField('variableDimension')
+                    ?.toIntValue();
+                final nested = dimensions
+                    .getField('dimensions')
+                    ?.toListValue()
+                    ?.map((v) => v.toIntValue()!)
+                    .toList();
+                final sizes = [
+                  if (nested != null) ...[
+                    ?variableDimension,
+                    ...nested,
+                  ] else
+                    for (var i = 1; i <= 5; i++)
+                      ?dimensions.getField('dimension$i')?.toIntValue(),
+                ];
                 return NativeArrayType(
                   nativeField(sourceType.typeArguments.single, depth + 1),
                   sizes[depth],
+                  variableLength: depth == 0 && variableDimension != null,
                 );
               }
               return FfiTypes.describe(
