@@ -324,6 +324,26 @@ final class Assembler() {
     _bytes.add([if (target.index >= 8) 0x41, 0xff, 0xe0 | (target.index & 7)]);
   }
 
+  /// Loads this instruction's address plus [offset], preserving flags.
+  void relativeAddress(Register destination, int offset) {
+    final displacement = offset - 7;
+    RangeError.checkValueInInterval(
+      displacement,
+      -0x80000000,
+      0x7fffffff,
+      'offset',
+    );
+    _bytes.add([
+      0x48 | (destination.index >> 3) << 2,
+      0x8d,
+      0x05 | (destination.index & 7) << 3,
+      displacement & 255,
+      (displacement >> 8) & 255,
+      (displacement >> 16) & 255,
+      (displacement >> 24) & 255,
+    ]);
+  }
+
   /// Loads an unresolved RIP-relative address without changing flags.
   Fixup address(Register destination) {
     final fixup = Fixup(length + 3, .x64Address32);

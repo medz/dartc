@@ -4,6 +4,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/assembler/arm64.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/runtime/contracts.dart';
 
 import 'function_emitter.dart';
 import 'binary_encoding.dart';
@@ -74,6 +75,63 @@ final class _Arm64Emitter(
   Register currentThread() {
     _systemCall(178, 372);
     return .x0;
+  }
+
+  @override
+  Register get callbackRegister => .x17;
+
+  @override
+  Uint8List callbackTrampoline() {
+    assembler
+      ..relativeAddress(.x17, 0)
+      ..loadImmediate(.x16, NativeCallbackLayout.entry)
+      ..add(.x16, .x17, .x16)
+      ..load(.x16, .x16, 0)
+      ..branchRegister(.x16);
+    final slot = Uint8List(NativeCallbackLayout.slotBytes);
+    slot.setRange(0, position, finish());
+    return slot;
+  }
+
+  @override
+  Uint8List flushInstructions() {
+    final done = assembler.label();
+    assembler
+      ..branchZero(.x1, done)
+      ..add(.x1, .x0, .x1)
+      ..cacheGeometry(.x9);
+    for (final instructionCache in [false, true]) {
+      final loop = assembler.label(), finished = assembler.label();
+      assembler
+        ..loadImmediate(.x10, instructionCache ? 0 : 16)
+        ..shiftRightUnsigned(.x10, .x9, .x10)
+        ..loadImmediate(.x11, 15)
+        ..bitAnd(.x10, .x10, .x11)
+        ..loadImmediate(.x11, 4)
+        ..shiftLeft(.x11, .x11, .x10)
+        ..loadImmediate(.x12, 0)
+        ..subtract(.x12, .x12, .x11)
+        ..bitAnd(.x12, .x0, .x12)
+        ..bind(loop);
+      if (instructionCache) {
+        assembler.invalidateInstructionCache(.x12);
+      } else {
+        assembler.cleanDataCache(.x12);
+      }
+      assembler.add(.x12, .x12, .x11);
+      comparison(.lessThan).emit(Register.x13, Register.x12, Register.x1);
+      assembler
+        ..branchZero(.x13, finished)
+        ..branch(loop)
+        ..bind(finished)
+        ..dataSynchronizationBarrier();
+    }
+    assembler
+      ..instructionSynchronizationBarrier()
+      ..bind(done)
+      ..loadImmediate(.x8, 0)
+      ..ret();
+    return finish();
   }
 
   @override

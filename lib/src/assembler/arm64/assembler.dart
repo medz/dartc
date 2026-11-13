@@ -307,6 +307,42 @@ final class Assembler() {
     _word(0xd61f0000 | target.index << 5);
   }
 
+  /// Loads this instruction's address plus [offset], preserving flags.
+  void relativeAddress(Register destination, int offset) {
+    _general(destination);
+    RangeError.checkValueInInterval(offset, -0x100000, 0xfffff, 'offset');
+    _word(
+      0x10000000 |
+          (offset & 3) << 29 |
+          ((offset >> 2) & 0x7ffff) << 5 |
+          destination.index,
+    );
+  }
+
+  /// Reads the cache line geometry available to user-mode code.
+  void cacheGeometry(Register destination) {
+    _general(destination);
+    _word(0xd53b0020 | destination.index);
+  }
+
+  /// Cleans one data cache line to the point of unification.
+  void cleanDataCache(Register address) {
+    _general(address);
+    _word(0xd50b7b20 | address.index);
+  }
+
+  /// Invalidates one instruction cache line to the point of unification.
+  void invalidateInstructionCache(Register address) {
+    _general(address);
+    _word(0xd50b7520 | address.index);
+  }
+
+  /// Completes inner-shareable data accesses and cache maintenance.
+  void dataSynchronizationBarrier() => _word(0xd5033b9f);
+
+  /// Makes completed instruction-cache maintenance visible to instruction fetch.
+  void instructionSynchronizationBarrier() => _word(0xd5033fdf);
+
   /// Loads the 4 KiB page of an unresolved address, preserving flags.
   Fixup pageAddress(Register destination) {
     _general(destination);

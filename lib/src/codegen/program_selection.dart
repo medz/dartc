@@ -24,7 +24,7 @@ final class ProgramSelection(
   final GlobalStorage globals,
   final InstanceStorage instances, {
   SuspensionFunctions? suspensions,
-  final Map<NativeCallbackAddress, FunctionTarget> callbacks = const {},
+  final Map<NativeCallbackEntry, FunctionTarget> callbacks = const {},
 }) {
   final suspensions = suspensions ?? SuspensionFunctions(const []);
   final functions = <FunctionTarget, SelectedFunction>{};
@@ -135,7 +135,7 @@ final class ProgramSelection(
                 layouts.strings.callFor(instruction) ??
                 globals.callFor(instruction) ??
                 switch (instruction) {
-                  NativeCallbackAddress() => callbacks[instruction],
+                  NativeCallbackEntry() => callbacks[instruction],
                   DirectCall(:final target) => target,
                   TypeCast() ||
                   NullCheck() => casts.targetFor(instruction, layouts).target,

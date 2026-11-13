@@ -4,6 +4,33 @@ import '../runtime/memory.dart';
 import '../runtime/type_info.dart';
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/finalization.dart' as finalization;
+import '../runtime/native_callbacks.dart' as callbacks;
+
+NativeCallable<T> _newNativeCallable<T extends Function>(
+  Function callback,
+  int entry,
+) {
+  final address = callbacks.register(entry, callback);
+  try {
+    final result = _NativeCallableIsolateLocal<T>(Pointer.fromAddress(address));
+    allocator.events().keepCallbackAlive(1);
+    return result;
+  } catch (_) {
+    callbacks.unregister(address);
+    rethrow;
+  }
+}
+
+Function _nativeCallableTarget(int address) => callbacks.target(address);
+
+@patch
+void _deleteNativeCallable<NS extends NativeFunction>(Pointer<NS> pointer) =>
+    callbacks.unregister(pointer.address);
+
+@patch
+void _updateNativeCallableKeepIsolateAliveCounter<NS extends NativeFunction>(
+  int delta,
+) => allocator.events().keepCallbackAlive(delta);
 
 @patch
 class NativeFinalizer {

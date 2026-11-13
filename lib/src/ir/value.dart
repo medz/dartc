@@ -513,7 +513,7 @@ sealed class Instruction(super.type) extends Value {
   /// Calls include all effects their callees could have. Allocation describes
   /// the operation itself; temporary boxes and GC safepoints depend on the backend.
   Set<Effect> get effects => switch (this) {
-    NativeCallbackAddress() => const {.readsStorage, .writesStorage},
+    NativeCallbackEntry() => const {.readsStorage, .writesStorage},
     ObjectHashCode(direct: true) => _bindOnce,
     ObjectRuntimeType(direct: true) => const {.readsStorage},
     ObjectClassName() => const {.readsStorage},
@@ -647,15 +647,12 @@ final class NativeSymbolAddress(final NativeReference reference)
   Iterable<Value> get inputs => const [];
 }
 
-/// Binds a static Dart callback to the current thread and returns its native entry.
-///
-/// The entry lives until the owning module is unloaded. An escaping exception
-/// returns [exceptionalReturn], or zeroed native storage for pointers and structs.
-final class NativeCallbackAddress(
-  final FunctionTarget function,
-  FunctionType nativeType, {
+/// A typed native entry whose escaping exceptions return a declared value.
+sealed class NativeCallbackEntry(
+  FunctionType nativeType,
+  final FunctionType callbackType,
   final Constant? exceptionalReturn,
-}) extends Instruction {
+) extends Instruction {
   final NativeSignature signature = (FfiTypes.describe(
     FfiTypes.nativeFunction.instantiate([nativeType]),
   ) as NativeFunctionType).signature;
@@ -665,13 +662,10 @@ final class NativeCallbackAddress(
   );
 
   this : super(.integer) {
-    final type = function.signature;
-    if (function.kind != .function ||
-        function.typeParameters.isNotEmpty ||
-        type.optionalPositional != 0 ||
-        type.named.isNotEmpty ||
-        type.parameters.length != dartSignature.parameters.length) {
-      throw ArgumentError('Expected a matching static callback.');
+    final type = callbackType;
+    if (type.typeParameters.isNotEmpty ||
+        !type.acceptsShape(dartSignature.parameters.length, const [])) {
+      throw ArgumentError('Expected a matching callback.');
     }
     for (final (native, expected, actual, result) in [
       (signature.result, dartSignature.result, type.result, true),
@@ -702,6 +696,37 @@ final class NativeCallbackAddress(
 
   @override
   Iterable<Value> get inputs => const [];
+}
+
+/// Binds a static callback to the current thread until its module is unloaded.
+final class NativeCallbackAddress(
+  final FunctionTarget function,
+  FunctionType nativeType, {
+  Constant? exceptionalReturn,
+}) extends NativeCallbackEntry {
+  this : super(nativeType, function.signature, exceptionalReturn) {
+    if (function.kind != .function || function.typeParameters.isNotEmpty) {
+      throw ArgumentError('Expected a nongeneric static callback.');
+    }
+  }
+}
+
+/// Returns a closure entry entered through a registered native trampoline.
+///
+/// [lookup] retrieves the live function for the trampoline address. The caller
+/// registers that function and owns the trampoline's lifetime.
+final class NativeClosureEntryAddress(
+  final FunctionTarget lookup,
+  FunctionType callbackType,
+  FunctionType nativeType, {
+  Constant? exceptionalReturn,
+}) extends NativeCallbackEntry {
+  this : super(nativeType, callbackType, exceptionalReturn) {
+    if (lookup.kind != .function ||
+        lookup.signature != FunctionType(.function, [.integer])) {
+      throw ArgumentError('Expected an address-to-function callback lookup.');
+    }
+  }
 }
 
 /// Observes a reference's current address; null has address zero.

@@ -6,9 +6,10 @@ import 'package:dartc/runtime/contracts.dart';
 
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/target.dart';
 
 /// Binds the bundled runtime's external memory operations to trusted IR.
-HeapRuntime bindRuntime(LoweringResult lowered) {
+HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
   var program = lowered.program;
   final annotations = lowered.runtime;
   final bodies = <IrFunction>[];
@@ -21,6 +22,27 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     final args = block.parameters;
     final Value? value;
     switch (operation) {
+      case .copyExecutable:
+        final implementation =
+            annotations.entries[targetPlatform.operatingSystem == .macos
+                ? RuntimeRole.copyExecutableMacos
+                : RuntimeRole.copyExecutableLinux];
+        if (implementation == null ||
+            target.signature !=
+                FunctionType(.boolean, [.integer, .integer, .integer]) ||
+            implementation.signature != target.signature) {
+          throw ArgumentError('Invalid executable memory contract.');
+        }
+        value = block.emit(DirectCall(implementation, args));
+      case .currentThread:
+        primitives[target] = .currentThread;
+        continue;
+      case .callbackTemplate:
+        primitives[target] = .callbackTemplate;
+        continue;
+      case .flushInstructions:
+        primitives[target] = .flushInstructions;
+        continue;
       case .instantiateClosure:
         if (target.kind != .function ||
             target.typeParameters.isNotEmpty ||

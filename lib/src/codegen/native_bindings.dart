@@ -14,7 +14,7 @@ final class NativeBindings(
   final exports = <FunctionTarget, NativeExport>{};
   final callbacks =
       <
-        NativeCallbackAddress,
+        NativeCallbackEntry,
         ({FunctionTarget address, FunctionTarget target})
       >{};
   final _functions = <IrFunction>[];
@@ -53,18 +53,37 @@ final class NativeBindings(
     )) {
       for (final block in body.blocks) {
         for (final instruction
-            in block.instructions.whereType<NativeCallbackAddress>()) {
+            in block.instructions.whereType<NativeCallbackEntry>()) {
           final signature = instruction.dartSignature;
           final target = FunctionTarget(
             null,
             'callback${callbacks.length}',
             signature.result,
-            signature.parameters,
+            [
+              if (instruction is NativeClosureEntryAddress) ValueType.integer,
+              ...signature.parameters,
+            ],
           );
           final entry = Block(target.parameterTypes);
-          final result = entry.emit(
-            DirectCall(instruction.function, entry.parameters),
-          );
+          final result = entry.emit(switch (instruction) {
+            NativeCallbackAddress(:final function) => DirectCall(
+              function,
+              function.signature.bind(
+                entry.parameters,
+                {},
+                (i) => source.implementationOf(function)!.defaults[i]!,
+              ),
+            ),
+            NativeClosureEntryAddress(:final lookup) => FunctionCall(
+              entry.emit(
+                UncheckedCast(
+                  entry.emit(DirectCall(lookup, [entry.parameters.first])),
+                  instruction.callbackType,
+                ),
+              ),
+              entry.parameters.skip(1),
+            ),
+          });
           entry.finish(
             result.type == .never
                 ? Unreachable(result)

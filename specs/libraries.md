@@ -91,7 +91,8 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 | --- | --- |
 | 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`IntPtr`、`UintPtr`、`Bool`、`Float`、`Double`、`Pointer<T>` 和 Struct/Union 按值传递。对应 Dart `int`、`bool`、`double`、保留元素类型的指针及原聚合声明类型；`Void` 只用于结果。指针可嵌套并指向 NativeFunction 或 Opaque。聚合按输出目标分类到整数/浮点寄存器、栈或间接存储，保留按值复制；不把 Dart 对象引用当作 C 地址。 |
 | 函数与不透明指针 | `Pointer<NativeFunction<T>>`、`Pointer<Void>` 及所支持类型的多级指针可作为参数和结果、从地址构造、读取地址及比较；普通 Dart 调用、分支和循环保留地址及语义类型，头文件保留嵌套函数指针声明。相等只取决于地址，不同元素类型不影响指针相等。Void 和 NativeFunction 不具有元素存储大小；指向它们的指针具有存储大小，支持存入和读出指针槽。静态原生回调见下方 `Pointer.fromFunction`。 |
-| `Pointer.fromFunction` | 非泛型顶层函数和静态方法可生成原生回调，支持常量别名及上述标量、指针、Struct/Union 签名；Void 忽略 Dart 返回值，指针和聚合按调用方向检查兼容性。标量异常返回使用声明的常量，指针及聚合异常返回零值；异常不会穿越原生栈。回调在模块卸载前有效，保留托管状态及同线程重入时的 GC 根；错误 OS 线程在进入堆前终止进程。未使用代码同样拒绝捕获闭包和泛型函数实例化。`NativeCallable` 创建、close 和跨线程调度尚未接通。 |
+| `Pointer.fromFunction` | 非泛型顶层函数和静态方法可生成原生回调，支持常量别名及上述标量、指针、Struct/Union 签名；Void 忽略 Dart 返回值，指针和聚合按调用方向检查兼容性。标量异常返回使用声明的常量，指针及聚合异常返回零值；异常不会穿越原生栈。回调在模块卸载前有效，保留托管状态及同线程重入时的 GC 根；错误 OS 线程在进入堆前终止进程。未使用代码同样拒绝捕获闭包和泛型函数实例化。 |
+| `NativeCallable.isolateLocal` | 捕获闭包、顶层函数和方法值可生成同线程原生回调，签名与异常返回遵循上述规则。登记保留闭包直到 `close()`；关闭可重复，正在执行的调用仍保留自身状态。关闭后读取 `nativeFunction` 抛出 StateError，继续调用此前保存的原生指针属于未定义行为。默认保持进程存活，`keepIsolateAlive = false` 或关闭解除保活；动态库的同步入口不等待仍存活的回调。`listener`、`isolateGroupBound` 和跨线程调度仍待实现。 |
 | 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号、上述标量签名及 `isLeaf`。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；指针类型允许兼容的参数收窄和结果扩大。调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。跨线程调用及持久托管句柄仍未接通。 |
 | `@Native` | 支持顶层和静态 external 函数、变量及 getter；变量支持上述标量、指针、Struct/Union，共享实际原生存储，赋值保留宽度转换与按值复制，final/getter 禁止重绑定。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针、Struct/Union 和 void 结果推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared/executable 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。Native.addressOf 保留原生函数或数据符号的真实地址，取地址不调用函数或读取字段；支持静态链接与共享库地址重定位。自动资产发现、运行时 resolver/进程回退查找、实例接收者及完整 FFI 类型仍未接通。当前后端支持同步入口内不逃逸的托管对象；`isLeaf` 保留声明承诺，跨线程及异步托管调用转换仍未实现。 |
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端支持同步标量/指针调用和入口内对象存活；支持从闭包发起调用，跨线程托管调用协议尚未接通。 |
@@ -173,6 +174,8 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 [原生回调验证](../test/compiler/native_callbacks_test.dart)覆盖逃逸后的调用、异常返回、同线程重入与 GC、混合寄存器/栈参数、指针别名、聚合复制和异线程拒绝。调用约束见 [Pointer.fromFunction](https://api.dart.dev/dart-ffi/Pointer/fromFunction.html)。
 
+[闭包回调验证](../test/compiler/native_callables_test.dart)覆盖独立捕获、跨页登记、关闭后释放捕获、调用中关闭及重入、异常和聚合返回、错误线程拒绝，以及进程保活和定时器关闭。生命周期依据 [NativeCallable.isolateLocal](https://api.dart.dev/dart-ffi/NativeCallable/NativeCallable.isolateLocal.html)。
+
 ### FFI 对照差异
 
 [Array API](https://api.dart.dev/dart-ffi/Array/Array.variable.html) 规定只有最外层维度可变。固定 SDK 3.14.0 的 VM 将该标志传给内层数组，未拒绝固定内层的越界索引；dartc 保留内层 RangeError 检查。
@@ -191,6 +194,6 @@ ARM64 上，固定 SDK 3.14.0 把带零长度浮点尾数组的浮点前缀结�
 
 [主规范 §19、§6.3](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[语言版本与包配置 v2](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/package-config-file-v2.md)、[通配前缀](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md#imports)、[StackTrace API](https://api.dart.dev/stable/3.13.7/dart-core/StackTrace-class.html)。
 
-[聚合互操作验证](../test/compiler/native_aggregates_test.dart)以官方 SDK FFI 客户端检查同质浮点、混合字段、大结构体间接返回、Union、packed 字段、类型化状态、嵌套视图存活、浮点寄存器耗尽，以及原生函数指针进入 SDK 回调。调用 SDK 提供的回调不表示 dartc 已实现 `NativeCallable` 回调创建。
+[聚合互操作验证](../test/compiler/native_aggregates_test.dart)以官方 SDK FFI 客户端检查同质浮点、混合字段、大结构体间接返回、Union、packed 字段、类型化状态、嵌套视图存活、浮点寄存器耗尽，以及原生函数指针进入 SDK 回调。
 
 [TypedData 与共享原生视图验证](../test/compiler/typed_data_test.dart)覆盖宽度截断、钳位、浮点精度与位模式、字节序、重叠转换、同一原生地址的独立视图、只读缓冲、元素偏移、长度溢出及 GC 存活。

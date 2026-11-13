@@ -8,6 +8,7 @@ import 'memory.dart';
 import 'native_objects.dart';
 import 'object_memory.dart';
 import 'roots.dart';
+import 'native_callbacks.dart' as callbacks;
 
 /// Owns allocation policy while the heap owns reachability and reclamation.
 final class Allocator(
@@ -149,11 +150,13 @@ EventLoop events() => _allocator(Memory.context()).events;
 
 /// Runs pending work while the entry frame and heap are still available.
 @RuntimeEntry(.runEvents)
-void runEvents(int context) {
+void runEvents(int context, bool waitForCallbacks) {
   final allocator = Memory.objectAt<Allocator?>(
     Memory.read(context + RuntimeContext.heap),
   );
-  if (allocator != null) allocator.events.run();
+  if (allocator != null) {
+    allocator.events.run(waitForCallbacks: waitForCallbacks);
+  }
 }
 
 /// Releases the user heap before destroying its control storage.
@@ -163,6 +166,7 @@ void release(int context) {
     Memory.read(context + RuntimeContext.heap),
   );
   try {
+    callbacks.release();
     if (allocator != null) allocator.heap.close();
   } finally {
     releaseControl(context);

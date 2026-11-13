@@ -181,10 +181,12 @@ void main() {
         ),
       );
       if (!valid) {
-        expect(() => bindRuntime(result), throwsArgumentError);
+        expect(() => bindRuntime(result, Target.host()), throwsArgumentError);
       } else {
-        final body =
-            bindRuntime(result).program.implementationOf(target) as IrFunction;
+        final body = bindRuntime(
+          result,
+          Target.host(),
+        ).program.implementationOf(target) as IrFunction;
         expect(body.blocks.single.instructions.single, isA<UncheckedCast>());
       }
     }

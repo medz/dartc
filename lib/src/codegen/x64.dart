@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/runtime/contracts.dart';
 import 'package:dartc/assembler/x64.dart';
 
 import 'function_emitter.dart';
@@ -62,6 +63,28 @@ final class _X64Emitter(
   Register currentThread() {
     _systemCall(186, 372);
     return .rax;
+  }
+
+  @override
+  Register get callbackRegister => .r10;
+
+  @override
+  Uint8List callbackTrampoline() {
+    assembler
+      ..relativeAddress(.r10, 0)
+      ..load(.r11, .r10, NativeCallbackLayout.entry)
+      ..jumpRegister(.r11);
+    final slot = Uint8List(NativeCallbackLayout.slotBytes);
+    slot.setRange(0, position, finish());
+    return slot;
+  }
+
+  @override
+  Uint8List flushInstructions() {
+    assembler
+      ..loadImmediate(failureRegister, 0)
+      ..ret();
+    return finish();
   }
 
   @override

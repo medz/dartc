@@ -147,6 +147,20 @@ void main() {
         ], isEmpty);
         final analyzed = {for (final unit in units) unit.uri};
         expect(analyzed, containsAll(patches.origins.keys));
+        final ffi = libraries.singleWhere(
+          (library) => library.element.uri == Uri.parse('dart:ffi'),
+        );
+        final close = ffi.getFragmentDeclaration(
+          ffi.element
+              .getClass('_NativeCallableBase')!
+              .getMethod('close')!
+              .fragments
+              .last,
+        )!;
+        expect(
+          patches.origins[close.resolvedUnit!.uri]!.path,
+          endsWith('/vm/lib/ffi_patch.dart'),
+        );
         final internal = libraries.singleWhere(
           (library) => library.element.uri == Uri.parse('dart:_internal'),
         );

@@ -4,16 +4,17 @@ import 'dart:typed_data';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/runtime/contracts.dart';
 
 import 'function_emitter.dart';
 
-/// The machine entry protocol for a static, thread-bound native callback.
+/// The machine entry protocol for a thread-bound native callback.
 final class NativeCallback<R extends Object>(
   final FunctionEmitter<R> emitter,
-  final NativeCallbackAddress definition,
+  final NativeCallbackEntry definition,
   final void Function(Fixup) owner,
 ) {
-  void checkThread({bool bind = false}) {
+  void checkThread({bool bind = false, int? addressSlot}) {
     final current = emitter.currentThread();
     final clobbered = emitter.convention
         .classify(NativeSignature(Int64, []))
@@ -27,7 +28,19 @@ final class NativeCallback<R extends Object>(
           clobbered.contains(r),
     );
     final address = scratch.first, previous = scratch.skip(1).first;
-    emitter.address(address, owner);
+    final identified = emitter.label();
+    emitter.loadImmediate(previous, 0);
+    emitter.comparison(.lessOrEqual).emit(previous, current, previous);
+    emitter.jumpIfZero(previous, identified);
+    emitter.abort(70);
+    emitter.bind(identified);
+    if (definition is NativeClosureEntryAddress) {
+      emitter.loadStack(address, addressSlot!);
+      emitter.loadImmediate(previous, NativeCallbackLayout.thread);
+      emitter.add.emit(address, address, previous);
+    } else {
+      emitter.address(address, owner);
+    }
     emitter.loadMemory(previous, address, bytes: 8, signed: false);
     final valid = emitter.label();
     if (bind) emitter.jumpIfZero(previous, valid);
@@ -39,7 +52,7 @@ final class NativeCallback<R extends Object>(
   }
 
   Uint8List address(void Function(Fixup) entry) {
-    checkThread(bind: true);
+    if (definition is NativeCallbackAddress) checkThread(bind: true);
     final result = emitter.convention
         .classify(NativeSignature(Int64, []))
         .resultRegister!;

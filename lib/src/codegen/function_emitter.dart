@@ -56,6 +56,15 @@ abstract interface class FunctionEmitter<R>() {
   /// Reads the OS thread identity, clobbering native caller-saved registers.
   R currentThread();
 
+  /// The scratch register carrying a native closure trampoline's identity.
+  R get callbackRegister;
+
+  /// Encodes one position-independent native trampoline, including slot padding.
+  Uint8List callbackTrampoline();
+
+  /// Publishes instructions for (address, bytes) and returns to Dart.
+  Uint8List flushInstructions();
+
   /// Generates the internal (byte size) -> address-or-zero mapping primitive.
   Uint8List mapMemory();
 

@@ -39,6 +39,8 @@ enum RuntimeRole() {
   typeParameter,
   typeShift,
   typeAt,
+  copyExecutableMacos,
+  copyExecutableLinux,
 }
 
 /// Binds an external declaration to one trusted machine operation.
@@ -76,6 +78,19 @@ enum MemoryOperation() {
   captureStackTrace,
   uncheckedCast,
   instantiateClosure,
+  currentThread,
+  callbackTemplate,
+  copyExecutable,
+  flushInstructions,
+}
+
+/// The position-independent native entry page and its adjacent metadata page.
+abstract final class NativeCallbackLayout() {
+  static const pageBytes = 65536;
+  static const slotBytes = 32;
+  static const slotCount = pageBytes ~/ slotBytes;
+  static const entry = pageBytes;
+  static const thread = pageBytes + 8;
 }
 
 /// Marks the runtime interface whose receivers provide asynchronous stack links.

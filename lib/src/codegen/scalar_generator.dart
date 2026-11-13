@@ -8,6 +8,7 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/runtime/contracts.dart' show NativeCallbackLayout;
 
 import 'code_generator.dart';
 import 'function_emitter.dart';
@@ -357,11 +358,12 @@ base class ScalarCodeGenerator<R extends Object>(
     final nativeCalls = <(int, Fixup, int)>[];
     final nativeAddresses = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
-    final callbackOwners = <NativeCallbackAddress, List<(int, Fixup)>>{};
-    final callbackAddresses = <NativeCallbackAddress, List<(int, Fixup)>>{};
+    final callbackOwners = <NativeCallbackEntry, List<(int, Fixup)>>{};
+    final callbackAddresses = <NativeCallbackEntry, List<(int, Fixup)>>{};
+    final callbackTemplates = <(int, Fixup)>[];
     NativeCallback<R> callbackEntry(
       FunctionEmitter<R> emitter,
-      NativeCallbackAddress callback,
+      NativeCallbackEntry callback,
     ) => NativeCallback(
       emitter,
       callback,
@@ -556,6 +558,7 @@ base class ScalarCodeGenerator<R extends Object>(
                 );
                 nativeCalls.add((code.length, fixup, symbol));
               },
+              (fixup) => callbackTemplates.add((code.length, fixup)),
             )
           : binding != null
           ? NativeAdapter(emitter).generate(
@@ -720,6 +723,37 @@ base class ScalarCodeGenerator<R extends Object>(
       Section.code(code.takeBytes()),
       if (constants.symbols.isNotEmpty) constants.finish(),
     ];
+    if (callbackTemplates.isNotEmpty) {
+      final trampoline = _createFunction().callbackTrampoline();
+      final page = Uint8List(NativeCallbackLayout.pageBytes);
+      for (var at = 0; at < page.length; at += trampoline.length) {
+        page.setRange(at, at + trampoline.length, trampoline);
+      }
+      for (final (start, fixup) in callbackTemplates) {
+        relocations.add(
+          .instruction(0, start + fixup.offset, fixup.encoding, symbols.length),
+        );
+      }
+      symbols.add(
+        .new(
+          '.callbackTemplate',
+          sections.length,
+          0,
+          page.length,
+          binding: .local,
+        ),
+      );
+      sections.add(
+        Section.code(
+          page,
+          alignment: target.operatingSystem == .macos
+              ? target.architecture == .arm64
+                    ? 16384
+                    : 4096
+              : NativeCallbackLayout.pageBytes,
+        ),
+      );
+    }
     for (final uses in callbackOwners.values) {
       for (final (start, fixup) in uses) {
         relocations.add(

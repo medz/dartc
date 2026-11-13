@@ -284,6 +284,52 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       if (expression is ast.InstanceCreationExpression) {
         context.checkDeferred(expression.constructorName.type);
       }
+      if (ctor.library.uri == Uri.parse('dart:ffi') &&
+          ctor.enclosingElement == ctor.library.getClass('NativeCallable') &&
+          ctor.name == 'isolateLocal') {
+        final args = context.arguments(
+          argumentList,
+          (e) => lowerExpression(context, e),
+        );
+        if (args == null) return null;
+        final callback = args.positional.single;
+        if (callback.type is! FunctionType) {
+          unsupported(unit, expression, 'untyped native callback');
+        }
+        final fallback = argumentList.arguments
+            .whereType<ast.NamedArgument>()
+            .firstOrNull;
+        final type =
+            context.typeOf(expression.staticType!, expression) as ClassType;
+        final entry = context.emit(
+          NativeClosureEntryAddress(
+            context.bindings.target(
+              ctor.library.getTopLevelFunction('_nativeCallableTarget')!,
+              unit,
+              expression,
+            ),
+            callback.type as FunctionType,
+            type.typeArguments.single as FunctionType,
+            exceptionalReturn: fallback == null
+                ? null
+                : context.bindings.constantExpression(
+                    unit,
+                    fallback.argumentExpression,
+                  ),
+          ),
+        );
+        return context.emit(
+          DirectCall(
+            context.bindings.target(
+              ctor.library.getTopLevelFunction('_newNativeCallable')!,
+              unit,
+              expression,
+            ),
+            [callback, entry],
+            typeArguments: type.typeArguments,
+          ),
+        );
+      }
       if (ffiClass(ctor.enclosingElement) == FfiTypes.pointer) {
         final args = context.arguments(
           argumentList,

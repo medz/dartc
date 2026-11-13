@@ -6,9 +6,20 @@ import 'memory.dart';
 
 /// Runs SDK microtasks before each finalization event at an idle Dart boundary.
 final class EventLoop(final FinalizationQueue finalizers) {
+  // Darwin select rejects timeouts above this number of seconds.
+  static const _maximumSleepSeconds = 100000000;
   void Function()? _microtasks;
   _Timer? _timers;
   bool _running = false;
+  int _liveCallbacks = 0;
+
+  /// Counts native callbacks that prevent process shutdown.
+  void keepCallbackAlive(int delta) {
+    if (_liveCallbacks + delta < 0) {
+      throw StateError('Unbalanced callback lifetime.');
+    }
+    _liveCallbacks += delta;
+  }
 
   void scheduleMicrotasks(void Function() drain) => _microtasks = drain;
 
@@ -64,7 +75,7 @@ final class EventLoop(final FinalizationQueue finalizers) {
     timer._callback = null;
   }
 
-  void run() {
+  void run({bool waitForCallbacks = false}) {
     if (_running) return;
     _running = true;
     try {
@@ -75,13 +86,17 @@ final class EventLoop(final FinalizationQueue finalizers) {
         }
         if (finalizers.deliverNext()) continue;
         final timer = _timers;
-        if (timer == null) return;
+        if (timer == null) {
+          if (!waitForCallbacks || _liveCallbacks == 0) return;
+          Memory.sleep(_maximumSleepSeconds, 0);
+          continue;
+        }
         final now = Memory.clock() ~/ 1000;
         final remaining = timer._deadline - now;
         if (remaining > 0) {
           final seconds = remaining ~/ 1000000;
           Memory.sleep(
-            seconds > 0x7fffffff ? 0x7fffffff : seconds,
+            seconds > _maximumSleepSeconds ? _maximumSleepSeconds : seconds,
             (remaining % 1000000) * 1000,
           );
           continue;

@@ -8,6 +8,21 @@ final class ByteStorage() {
 
 /// Trusted machine capabilities; callers own bounds, alignment and lifetimes.
 abstract final class Memory() {
+  @Primitive(.currentThread)
+  external static int currentThread();
+
+  /// The read-only executable page used by native closure trampolines.
+  @Primitive(.callbackTemplate)
+  external static int callbackTemplate();
+
+  /// Installs a read-only executable copy in reserved, page-aligned storage.
+  @Primitive(.copyExecutable)
+  external static bool copyExecutable(int destination, int source, int bytes);
+
+  /// Publishes completed instruction writes before executing the region.
+  @Primitive(.flushInstructions)
+  external static void flushInstructions(int address, int bytes);
+
   @Primitive(.float32FromBits)
   external static double float32FromBits(int bits);
   @Primitive(.float64FromBits)

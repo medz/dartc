@@ -154,13 +154,17 @@ final class HeapEntry<R extends Object>(
         emitter.jump(finished);
         emitter.bind(outermost);
       }
-      final argument =
-          emitter.convention
-                  .classify(NativeSignature(Void, [Int64]))
-                  .parameters
-                  .single
-              as RegisterArgument<R>;
-      emitter.move(argument.register, emitter.heapRegister);
+      final arguments = emitter.convention
+          .classify(NativeSignature(Void, [Int64, Bool]))
+          .parameters;
+      emitter.move(
+        (arguments[0] as RegisterArgument<R>).register,
+        emitter.heapRegister,
+      );
+      emitter.loadImmediate(
+        (arguments[1] as RegisterArgument<R>).register,
+        release ? 1 : 0,
+      );
       call(emitter.call(), events);
       safepoint(emitter.position);
       emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);

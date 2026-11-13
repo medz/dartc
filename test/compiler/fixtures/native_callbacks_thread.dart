@@ -2,10 +2,12 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'native_callbacks_ffi.dart';
+import 'native_callables_ffi.dart';
 
-void main() {
+void main(List<String> arguments) {
   final native = NativeCallbacks();
-  final callback = native.thread();
+  final callable = arguments.contains('closure') ? NativeCallables() : null;
+  final callback = callable?.thread() ?? native.thread();
   final system = DynamicLibrary.process();
   final create = system
       .lookupFunction<
@@ -32,5 +34,6 @@ void main() {
   if (create(thread, nullptr, callback, nullptr) != 0) exit(2);
   join(thread.value, nullptr);
   native.free(thread.cast());
+  callable?.close();
   native.close();
 }

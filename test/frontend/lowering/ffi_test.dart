@@ -68,6 +68,7 @@ void main() {
         'invalid_variable_array',
         'invalid_ffi_callback',
         'invalid_ffi_generic_callback',
+        'invalid_ffi_callable',
       ]) {
         var consumed = false;
         await expectLater(

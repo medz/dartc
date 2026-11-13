@@ -82,7 +82,26 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     void Function(int, StackRoots) safepoint,
     void Function(Fixup, int) codeAddress,
     void Function(Fixup) systemClock,
+    void Function(Fixup) callbackTemplate,
   ) {
+    if (runtime?.primitives[target] == MemoryPrimitive.flushInstructions) {
+      return emitter.flushInstructions();
+    }
+    if (runtime?.primitives[target]
+        case MemoryPrimitive.currentThread ||
+            MemoryPrimitive.callbackTemplate) {
+      if (runtime!.primitives[target] == MemoryPrimitive.currentThread) {
+        emitter.currentThread();
+      } else {
+        final result = emitter.convention
+            .classify(NativeSignature(Int64, []))
+            .resultRegister!;
+        emitter.address(result, callbackTemplate);
+      }
+      emitter.loadImmediate(emitter.failureRegister, 0);
+      emitter.ret();
+      return emitter.finish();
+    }
     if (runtime?.primitives[target] == MemoryPrimitive.map) {
       return emitter.mapMemory();
     }

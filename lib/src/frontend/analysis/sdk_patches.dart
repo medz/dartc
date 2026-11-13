@@ -62,9 +62,13 @@ final class SdkPatches(final OverlayResourceProvider files) {
     _apply(
       library('ffi'),
       [ffi, if (runtime != null) '$runtime/ffi.dart'],
-      classes: {
+      declarations: {
         '_ArraySize',
         if (runtime != null) ...{
+          '_NativeCallableBase',
+          '_NativeCallableIsolateLocal',
+          '_deleteNativeCallable',
+          '_updateNativeCallableKeepIsolateAliveCounter',
           '_AbiSpecificIntegerArrayList',
           '_BoolArrayList',
           '_PointerArrayList',
@@ -255,7 +259,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
   void _apply(
     String libraryPath,
     List<String> implementations, {
-    Set<String>? classes,
+    Set<String>? declarations,
     Set<String> storageClasses = const {},
   }) {
     final library = files.getFile(libraryPath);
@@ -282,10 +286,13 @@ final class SdkPatches(final OverlayResourceProvider files) {
     ];
     final units = {for (final path in paths) path: _parse(path)};
     bool included(String path, CompilationUnitMember declaration) =>
-        classes == null ||
+        declarations == null ||
         !_official.contains(path) ||
-        declaration is ClassDeclaration &&
-            classes.contains(declaration.namePart.typeName.lexeme);
+        declarations.contains(switch (declaration) {
+          ClassDeclaration() => declaration.namePart.typeName.lexeme,
+          FunctionDeclaration() => declaration.name.lexeme,
+          _ => null,
+        });
     bool replaced(String path, CompilationUnitMember declaration) =>
         (_official.contains(path) || !implementations.contains(path)) &&
         declaration is ClassDeclaration &&

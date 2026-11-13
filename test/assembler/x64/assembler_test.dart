@@ -4,6 +4,38 @@ import 'package:dartc/assembler/x64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'relative addresses use the instruction start and validate displacement',
+    () {
+      final assembler = Assembler()
+        ..relativeAddress(.r10, 0)
+        ..relativeAddress(.rax, 7);
+      expect(assembler.finish(), [
+        0x4c,
+        0x8d,
+        0x15,
+        0xf9,
+        0xff,
+        0xff,
+        0xff,
+        0x48,
+        0x8d,
+        0x05,
+        0,
+        0,
+        0,
+        0,
+      ]);
+      final invalid = Assembler();
+      expect(
+        () => invalid.relativeAddress(.rax, -0x80000000),
+        throwsRangeError,
+      );
+      expect(() => invalid.relativeAddress(.rax, 0x80000007), throwsRangeError);
+      expect(invalid.finish(), isEmpty);
+    },
+  );
+
   test('variable shifts encode CL counts and extended registers', () {
     final assembler = Assembler()
       ..shiftLeft(.rax)

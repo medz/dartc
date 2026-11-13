@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
-import 'package:dartc/ir.dart' show ScalarConstant;
+import 'package:dartc/ir.dart' show ScalarConstant, NativeClosureEntryAddress;
 
 import 'function_emitter.dart';
 import 'heap_entry.dart';
@@ -160,7 +160,16 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
   }) {
     final storage = NativeLayout(emitter.convention.target);
     final native = emitter.convention.classify(signature);
-    final bridge = bridgeSignature(signature);
+    final compoundResult = signature.result is NativeCompoundType;
+    final closureCallback = callback?.definition is NativeClosureEntryAddress;
+    var bridge = bridgeSignature(signature);
+    if (closureCallback) {
+      bridge = NativeSignature.types(bridge.result, [
+        if (compoundResult) bridge.parameters.first,
+        NativeScalarType(Int64),
+        ...bridge.parameters.skip(compoundResult ? 1 : 0),
+      ]);
+    }
     final body = emitter.convention.classify(
       indirectCall == null
           ? bridge
@@ -169,9 +178,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
               ...bridge.parameters,
             ]),
     );
-    final compoundResult = signature.result is NativeCompoundType;
     final callShift = indirectCall == null ? 0 : 1;
-    final shift = callShift + (compoundResult ? 1 : 0);
+    final shift =
+        callShift + (compoundResult ? 1 : 0) + (closureCallback ? 1 : 0);
     final destination = intoDart ? body : native;
     var bytes = 0;
     int reserve(int size) {
@@ -189,6 +198,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     );
     final resultPointer = reserve(8);
     final callPointer = indirectCall == null ? null : reserve(8);
+    final callbackPointer = closureCallback ? reserve(8) : null;
     final frame = intoDart && heap != null
         ? heap.frame(destination.stackBytes, extraBytes: bytes)
         : emitter.convention.frameLayout(
@@ -284,6 +294,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     }
 
     emitter.prologue(frame);
+    if (callbackPointer != null) {
+      emitter.storeStack(emitter.callbackRegister, base + callbackPointer);
+    }
     if (callPointer != null) {
       readScalar(body.parameters.first, address);
       emitter.storeStack(address, base + callPointer);
@@ -329,7 +342,9 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         emitter.storeStack(register, slot);
       }
     }
-    callback?.checkThread();
+    callback?.checkThread(
+      addressSlot: callbackPointer == null ? null : base + callbackPointer,
+    );
     if (intoDart) heap?.enter(frame);
     if (!intoDart) {
       for (final (i, type) in signature.parameters.indexed) {
@@ -343,6 +358,10 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     final parked = !intoDart && heap?.persistent == true
         ? HeapEntry.park(emitter, address)
         : const <Fixup>[];
+    if (callbackPointer != null) {
+      emitter.loadStack(address, base + callbackPointer);
+      writeScalar(body.parameters[compoundResult ? 1 : 0], address);
+    }
     if (compoundResult) {
       if (intoDart) {
         emitter.stackAddress(address, base + resultSlot);

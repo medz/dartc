@@ -69,6 +69,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         'sdk/patches/remainder.dart',
         'sdk/runtime/console.dart',
         'sdk/runtime/stack_trace.dart',
+        'sdk/runtime/executable_memory.dart',
       ],
     ).use((input) async {
       final lowered = await Lowering().lower(input);
@@ -79,7 +80,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
             if (!input.resources.containsValue(library))
               for (final unit in library.units) File(unit.path).absolute.uri,
         ],
-        bindRuntime(lowered),
+        bindRuntime(lowered, target),
       );
     });
     final (program: _, :exports, :imports, :entryPoint, runtime: _) = lowered;
@@ -206,6 +207,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       header.toString(),
       sources,
       output is ExecutableOutput,
+      inputs,
     );
   }
 }
@@ -218,9 +220,15 @@ final class Compilation._(
   final String header,
   Iterable<Uri> sources,
   final bool _executable,
+  Iterable<LinkInput> dependencies,
 ) {
   /// Immutable final bytes, including any required linking and signing.
   final Uint8List bytes = bytes.asUnmodifiableView();
+
+  /// Native libraries needed when linking an object or archive output.
+  ///
+  /// Already linked into shared-library and executable outputs.
+  final List<LinkInput> dependencies = .unmodifiable(dependencies);
 
   final List<Uri> _sources = .unmodifiable(sources);
 

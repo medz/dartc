@@ -316,9 +316,13 @@ FunctionReferences verifyCallable(
         (implicitMembers ??= {}).add(member);
       }
       switch (op) {
-        case NativeCallbackAddress(:final function):
-          (callees ??= {}).add(function);
+        case NativeCallbackEntry():
+          (callees ??= {}).add(switch (op) {
+            NativeCallbackAddress(:final function) => function,
+            NativeClosureEntryAddress(:final lookup) => lookup,
+          });
           checkTypeScope(op.dartSignature);
+          checkTypeScope(op.callbackType);
         case ReifyType() || ObjectRuntimeType():
           (instantiatedClasses ??= {}).addAll(TypeMetadata.fields.keys);
         case LoadLibrary(:final reference) ||

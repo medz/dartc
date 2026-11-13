@@ -78,6 +78,7 @@ const _compilerLibraries = {
   'native_addresses',
   'native_callbacks',
   'native_callbacks_plain',
+  'native_callables',
   'native_aggregates',
   'typed_data',
   'managed_objects',
@@ -230,6 +231,17 @@ Future<void> main(List<String> args) async {
       ('stopwatch', 'stopwatch', 'entry_stopwatch'),
       ('date_time', 'date_time', 'entry_date_time'),
       ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
+      ('native_callables', 'native_callables', 'entry_native_callables'),
+      (
+        'native_callables',
+        'native_callables_alive',
+        'entry_native_callables_alive',
+      ),
+      (
+        'native_callables',
+        'native_callables_idle',
+        'entry_native_callables_idle',
+      ),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([
@@ -354,6 +366,7 @@ Future<void> main(List<String> args) async {
         ],
         library,
         dependencies: [
+          ...result.dependencies,
           if (fixture == 'native_addresses')
             .sharedLibrary(
               target.operatingSystem == .macos

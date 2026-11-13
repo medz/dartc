@@ -4,6 +4,41 @@ import 'package:dartc/assembler/arm64.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'relative addresses and cache publication encode user-mode operations',
+    () {
+      final assembler = Assembler()
+        ..relativeAddress(.x17, 0)
+        ..relativeAddress(.x0, -4)
+        ..cacheGeometry(.x9)
+        ..cleanDataCache(.x10)
+        ..invalidateInstructionCache(.x11)
+        ..dataSynchronizationBarrier()
+        ..instructionSynchronizationBarrier();
+      final bytes = ByteData.sublistView(assembler.finish());
+      expect(
+        [
+          for (var offset = 0; offset < bytes.lengthInBytes; offset += 4)
+            bytes.getUint32(offset, .little),
+        ],
+        [
+          0x10000011,
+          0x10ffffe0,
+          0xd53b0029,
+          0xd50b7b2a,
+          0xd50b752b,
+          0xd5033b9f,
+          0xd5033fdf,
+        ],
+      );
+      final invalid = Assembler();
+      expect(() => invalid.relativeAddress(.x0, -0x100001), throwsRangeError);
+      expect(() => invalid.relativeAddress(.x0, 0x100000), throwsRangeError);
+      expect(() => invalid.relativeAddress(.sp, 0), throwsArgumentError);
+      expect(invalid.finish(), isEmpty);
+    },
+  );
+
   test('variable shifts encode distinct signed and unsigned operations', () {
     final assembler = Assembler()
       ..shiftLeft(.x0, .x1, .x2)

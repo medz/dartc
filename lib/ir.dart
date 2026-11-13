@@ -66,7 +66,9 @@ export 'src/ir/type.dart'
         PromotedTypeParameterType;
 export 'src/ir/value.dart'
     show
+        NativeCallbackEntry,
         NativeCallbackAddress,
+        NativeClosureEntryAddress,
         NativeSymbolAddress,
         AwaitResult,
         LoadLibrary,

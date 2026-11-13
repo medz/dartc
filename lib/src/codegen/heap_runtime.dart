@@ -13,6 +13,9 @@ enum MemoryPrimitive() {
   clock,
   sleep,
   captureStackTrace,
+  currentThread,
+  callbackTemplate,
+  flushInstructions,
 }
 
 /// Source program and entry contracts used by managed code generation.
@@ -64,7 +67,7 @@ final class HeapRuntime(
       (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
       (isOutOfMemory, FunctionType(.boolean, [.object])),
       (release, FunctionType(.voidType, [.integer])),
-      (runEvents, FunctionType(.voidType, [.integer])),
+      (runEvents, FunctionType(.voidType, [.integer, .boolean])),
       (eventAccess, FunctionType(eventAccess.returnType, [])),
       (copyBytes, FunctionType(.voidType, [.integer, .integer, .integer])),
       (captureStackTrace, FunctionType(.stackTrace, [.integer, .integer])),
@@ -111,6 +114,8 @@ final class HeapRuntime(
         .clock => FunctionType(.integer, []),
         .sleep => FunctionType(.voidType, [.integer, .integer]),
         .captureStackTrace => FunctionType(.stackTrace, []),
+        .currentThread || .callbackTemplate => FunctionType(.integer, []),
+        .flushInstructions => FunctionType(.voidType, [.integer, .integer]),
       };
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||

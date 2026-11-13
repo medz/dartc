@@ -1821,7 +1821,7 @@ final class IrInterpreter(
             NativeView() ||
             NativeAddress() ||
             NativeSymbolAddress() ||
-            NativeCallbackAddress() ||
+            NativeCallbackEntry() ||
             NativeSize() ||
             NativeFieldOffset() ||
             CopyNative():

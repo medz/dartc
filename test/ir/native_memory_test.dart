@@ -61,6 +61,43 @@ void main() {
     },
   );
 
+  test('closure callback entries retain a typed lookup and reject mismatched entries', () {
+    final lookup = FunctionTarget(null, 'lookup', .function, [.integer]);
+    final native = FunctionType(FfiTypes.scalarTypes[ffi.Int64]!, [
+      FfiTypes.scalarTypes[ffi.Int64]!,
+    ]);
+    final callback = NativeClosureEntryAddress(
+      lookup,
+      FunctionType(.integer, [.integer]),
+      native,
+      exceptionalReturn: const Constant.integer(-1),
+    );
+    final block = Block();
+    block.finish(Return(block.emit(callback)));
+    final factory = IrFunction(FunctionTarget(null, 'entry', .integer, []), [
+      block,
+    ]);
+    expect(factory.callees, contains(lookup));
+    expect(
+      () => NativeClosureEntryAddress(
+        FunctionTarget(null, 'invalid', .integer, [.integer]),
+        callback.callbackType,
+        native,
+        exceptionalReturn: const Constant.integer(-1),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => NativeClosureEntryAddress(
+        lookup,
+        FunctionType(.integer, [.floating]),
+        native,
+        exceptionalReturn: const Constant.integer(-1),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test(
     'abstract compound views expose addresses without becoming allocatable',
     () {
