@@ -106,6 +106,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
   const available = {
     ..._compilerLibraries,
     'entry',
+    'allocators',
     'descriptor_write',
     'futures',
     'async_functions',
@@ -220,6 +221,7 @@ Future<void> main(List<String> args) async {
 
     for (final (fixture, source, output) in [
       ('managed_objects', 'managed_objects', 'entry_managed'),
+      ('allocators', 'allocators', 'entry_allocators'),
       ('lists', 'lists_overflow', 'entry_lists_overflow'),
       ('managed_globals', 'managed_globals', 'entry_managed_globals'),
       ('exceptions', 'exceptions', 'entry_exception'),

@@ -199,6 +199,12 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 [闭包回调验证](../test/compiler/native_callables_test.dart)覆盖独立捕获、跨页登记、关闭后释放捕获、调用中关闭及重入、异常和聚合返回、错误线程拒绝，以及进程保活和定时器关闭。生命周期依据 [NativeCallable.isolateLocal](https://api.dart.dev/dart-ffi/NativeCallable/NativeCallable.isolateLocal.html)。
 
+### 原生分配器
+
+直接调用 `allocator<T>(count)`、`allocator.call<T>(count)` 和显式 `AllocatorAlloc(allocator).call<T>(count)` 按目标布局计算 `sizeOf<T>() * count`，再虚调用用户实现的 `allocate<T>`；省略 count 时使用 1，不指定 alignment，保留实现自己的缺省值。分配、失败处理和释放由普通 Dart 分配器实现负责；支持标量、ABI 整数、指针和 Struct/Union。
+
+接收者和 count 各求值一次，保持源顺序及空感知调用的短路。T 必须是编译期确定的原生类型，未使用代码仍检查此约束；提取 `AllocatorAlloc.call` 方法值尚未接通。契约见 [AllocatorAlloc.call](https://api.dart.dev/dart-ffi/AllocatorAlloc/call.html)，[原生验证](../test/compiler/allocators_test.dart)覆盖真实分配、共享读写、finally 释放及失败传播。
+
 ### 可变参数
 
 `VarArgs<(...)>` 可作为原生签名的最后一个参数，其位置记录字段依次展开为 Dart 实参；不接受命名记录字段、非末尾标记或非具体记录类型。`VarArgs<()>` 表示这次调用没有额外参数，仍保留可变参数调用约定。每个签名描述一次调用的实际类型与数量；传入其他形状时须另建绑定。契约见 [VarArgs](https://api.dart.dev/dart-ffi/VarArgs-class.html)。

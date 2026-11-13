@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Call Dart implementations of `Allocator` with typed allocation syntax. Preserve target-native sizes, allocator defaults, evaluation order, null-aware calls and allocation failures.
 - Pass OS command-line arguments to synchronous and async `main`, preserving fixed writable lists, optional/named defaults, a null second argument and references across collection. Decode UTF-8 through the SDK, preserve leading U+FEFF characters and reject malformed bytes before invoking main.
 - Call variadic native functions with `VarArgs`, including empty tails, mixed scalar and pointer arguments, aggregates, callbacks and native exports. Preserve platform stack rules and floating-register counts; require explicitly promoted native types and emit C ellipses in headers.
 - Project runtime types directly onto the requested superclass or interface, avoiding repeated ancestor traversal and unrelated metadata allocation during type checks, including constant Map and Expando lookups. Preserve generic substitution, nested function binders and diamond inheritance.

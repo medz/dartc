@@ -325,37 +325,36 @@ final class FunctionContext(
       }
       unsupported(unit, site, 'asFunction Dart function type');
     }
-    if (memberTypes.isEmpty) {
-      final value = lowerFfi(
-        application.executable.declaration,
-        [receiver, ...args.positional],
-        emit,
-        result: application.executable.target.signature
-            .instantiate(application.typeArguments)
-            .result,
-        bind: (member) => bindings.target(member, unit, site),
-        arrayAccess: (array, store) {
-          final accessor = _closures.nativeArrayAccess(
-            target,
+    final value = lowerFfi(
+      application.executable.declaration,
+      [receiver, ...args.positional],
+      emit,
+      result: application.executable.target.signature.instantiate([
+        ...application.typeArguments,
+        ...memberTypes,
+      ]).result,
+      bind: (member) => bindings.target(member, unit, site),
+      arrayAccess: (array, store) {
+        final accessor = _closures.nativeArrayAccess(
+          target,
+          site,
+          array,
+          bindings.target(
+            application.executable.declaration.library.getTopLevelFunction(
+              '_arrayStart',
+            )!,
+            unit,
             site,
-            array,
-            bindings.target(
-              application.executable.declaration.library.getTopLevelFunction(
-                '_arrayStart',
-              )!,
-              unit,
-              site,
-            ),
-            store: store,
-          );
-          return emit(
-            MakeClosure(accessor, [if (accessor.captures.isNotEmpty) receiver]),
-          );
-        },
-        named: args.named,
-      );
-      if (value != null) return normal(value);
-    }
+          ),
+          store: store,
+        );
+        return emit(
+          MakeClosure(accessor, [if (accessor.captures.isNotEmpty) receiver]),
+        );
+      },
+      named: args.named,
+    );
+    if (value != null) return normal(value);
     final callee = application.executable.target;
     return normal(
       emit(

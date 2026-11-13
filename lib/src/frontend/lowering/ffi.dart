@@ -114,6 +114,28 @@ Value? lowerFfi(
   Value scalar(Value value, ValueType type) =>
       value.type == type ? value : emit(TypeView(value, type));
   member = member.baseElement;
+  if (bind != null &&
+      member == library.getExtension('AllocatorAlloc')?.getMethod('call') &&
+      result is ClassType) {
+    final element = result.typeArguments.single;
+    final bytes = emit(
+      IntBinary(
+        .multiply,
+        emit(NativeSize(FfiTypes.describe(element))),
+        operands.elementAtOrNull(1) ?? const Constant.integer(1),
+      ),
+    );
+    return emit(
+      InstanceCall(
+        bind(library.getClass('Allocator')!.getMethod('allocate')!),
+        operands.first,
+        [bytes],
+        const {},
+        null,
+        [element],
+      ),
+    );
+  }
   LibraryElement typedData() => library.fragments
       .expand((fragment) => fragment.importedLibraries)
       .firstWhere((library) => library.uri == Uri.parse('dart:typed_data'));

@@ -69,6 +69,7 @@ void main() {
     () async {
       for (final name in [
         'invalid_ffi_functions',
+        'invalid_ffi_allocation',
         'invalid_ffi_lookup',
         'invalid_ffi_lookup_inferred',
         'invalid_variable_array',
