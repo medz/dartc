@@ -7,7 +7,7 @@
 | null、bool、整数、double、字符串 | 支持这五种字面量，包括最小有符号 int、整数在 double 上下文中的解释和负零。 |
 | 普通、raw、多行、插值与相邻字符串 | 支持普通、raw、多行、运行时插值与相邻拼接；保留插值表达式和 toString 的求值顺序、虚派发及异常。见[字符串样本](../test/frontend/lowering/fixtures/strings.dart)。 |
 | Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有字面量以名称和定义库保留身份，同库 part 共享身份，跨库同名与字符串构造的 Symbol 不相等。常量折叠、集合键、默认参数和 Invocation 使用相同身份，见[原生验证](../test/compiler/symbols_test.dart)。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/compiler/fixtures/public_symbols.dart)。 |
-| Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
+| Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。不保证空参数集合在不同调用间共享身份，也不固定其内部实现类型。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
 | Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/frontend/lowering/fixtures/records.dart)。 |
 | 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled/of/from/generate/unmodifiable 和 length setter。支持 const List 的内容和规范身份；原生集合范围见下文。 |
 | Set、Map 字面量 | 支持可变类型化字面量、插入顺序、重复项处理及用户相等和 hashCode。支持 Set 的 length/add/addAll、Map 的 length/索引读写/containsKey/entries，以及 MapEntry 的普通与 const 构造、key/value。支持 const Set/Map；完整 SDK API 待实现。 |

@@ -1,6 +1,7 @@
 import 'package:test/test.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
 
 import 'fixtures/typed_forwarders_private_use.dart' as private_sdk;
 import 'fixture_comparison.dart';
@@ -9,7 +10,10 @@ import 'fixtures/typed_forwarders.dart' as sdk;
 void main() {
   late FixtureComparison fixture;
   setUpAll(() async {
-    fixture = await FixtureComparison.load('typed_forwarders');
+    fixture = await FixtureComparison.load(
+      'typed_forwarders',
+      sources: await SdkSources.load(),
+    );
   });
   test('typed and dynamic bodies receive full bound Invocation arguments', () {
     for (var form = 0; form < 14; form++) {
@@ -108,13 +112,6 @@ void main() {
     expect(tear.method, same(original.target));
   });
 
-  test('typed mirror canonical symbols and empty identities differ from raw fallback', () {
-    for (var form = 0; form < 5; form++) {
-      fixture.compare('forwardIdentities', [
-        form,
-      ], () => sdk.forwardIdentities(form));
-    }
-  });
   test('typed mirror positional, type and named snapshots are immutable', () {
     for (var form = 0; form < 5; form++) {
       for (var operation = 0; operation < 5; operation++) {

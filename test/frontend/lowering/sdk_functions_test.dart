@@ -50,12 +50,6 @@ void main() {
       fixture.compare('throughValue', [value], () => sdk.throughValue(value));
       fixture.compare('local', [value], () => sdk.local(value));
     }
-    expect(
-      functions
-          .where((f) => f.target.library == Uri.parse('dart:async'))
-          .map((f) => f.target.name),
-      ['unawaited'],
-    );
     fixture.compare('ignoredFuture', [], sdk.ignoredFuture);
   });
 

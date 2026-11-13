@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 import '../../support/ir_interpreter.dart';
@@ -13,6 +14,7 @@ void main() {
   setUpAll(() async {
     sourceProgram = (await FixtureComparison.load(
       'covariant_forwarder_sources',
+      sources: await SdkSources.load(),
     )).program;
   });
 

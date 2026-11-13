@@ -269,26 +269,6 @@ Invocation forwardIdentityCall(ForwardBox<num> box, int form) {
   return box.last!;
 }
 
-String forwardIdentities(int form) {
-  final box = ForwardBox<num>(7);
-  final first = forwardIdentityCall(box, form);
-  final second = forwardIdentityCall(box, form);
-  final symbol = form == 0
-      ? #property
-      : form == 1
-      ? #optional
-      : form == 2
-      ? #generic
-      : form == 3
-      ? #named
-      : #absent;
-  return '${identical(first.memberName, symbol)}:${identical(first.memberName, second.memberName)}:'
-      '${identical(first.typeArguments, const <Type>[])}:${identical(first.typeArguments, second.typeArguments)}:'
-      '${identical(first.positionalArguments, const <dynamic>[])}:${identical(first.positionalArguments, const <Object?>[])}:'
-      '${identical(first.positionalArguments, second.positionalArguments)}:'
-      '${identical(first.namedArguments, const <Symbol, Object?>{})}:${identical(first.namedArguments, second.namedArguments)}';
-}
-
 int forwardImmutability(int form, int operation) {
   final box = ForwardBox<num>(7);
   final invocation = forwardIdentityCall(box, form);

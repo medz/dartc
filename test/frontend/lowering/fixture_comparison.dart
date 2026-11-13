@@ -1,5 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/frontend.dart';
+import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 import '../../support/ir_interpreter.dart';
@@ -7,9 +8,15 @@ import 'fixtures/effects.dart' as effects;
 
 /// Compares a lowered fixture with the SDK, including failures and effect order.
 final class FixtureComparison(final IrProgram program) {
-  static Future<FixtureComparison> load(String fixture) async => .new(
-    await AnalysisSession(['test/frontend/lowering/fixtures/$fixture.dart'])
-        .use((input) async => (await Lowering().lower(input)).program),
+  static Future<FixtureComparison> load(
+    String fixture, {
+    SdkSources? sources,
+  }) async => .new(
+    await AnalysisSession(
+      ['test/frontend/lowering/fixtures/$fixture.dart'],
+      sdk: sources == null ? null : DartSdk(sources),
+      sources: sources,
+    ).use((input) async => (await Lowering().lower(input)).program),
   );
 
   static final _effects = Uri.base.resolve(

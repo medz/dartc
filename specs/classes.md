@@ -61,6 +61,6 @@ GC 关键入口的 `NonAllocating` 调用闭包在生成原生代码前检查，
 
 [主规范 §10–§16](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[主构造器](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md)、[构造器提取](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md)、[增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md)。
 
-Typed forwarder 的 Invocation 与动态缺失回退及公开工厂分开建模：成员/命名键使用规范化 Symbol，命名实参按声明顺序排列；空位置列表为 const<dynamic>[]，命名 Map 每次创建，集合不可修改。沿用 SDK 3.13.7 的可观察身份，不将其声明为跨 SDK 保证。见[转发样本](../test/frontend/lowering/fixtures/typed_forwarders.dart)。
+Typed forwarder 的 Invocation 与动态缺失回退及公开工厂分开建模：成员/命名键保留 Symbol 值与私有库身份，命名实参按声明顺序排列，参数集合不可修改。空集合的对象身份和内部实现类型不作为兼容要求。见[转发样本](../test/frontend/lowering/fixtures/typed_forwarders.dart)。
 
 跨库私有转发通过真实 SDK NoSuchMethodError.withInvocation 工厂和普通 Throw 构造错误，保持类型检查先于函数体、错误身份和异常传播。派发选择器保留原声明库，生成错误的 Invocation Symbol 按 SDK 3.13.7 使用目标体所属库；动态错误形状回退仍使用调用选择器身份。多个库的同名私有成员可以共存。见[跨库转发样本](../test/frontend/lowering/fixtures/private_forwarders.dart)。

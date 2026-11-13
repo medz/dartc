@@ -1,3 +1,4 @@
+import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
@@ -6,7 +7,12 @@ import 'fixtures/invocations.dart' as sdk;
 void main() {
   group('public Invocation objects', () {
     late FixtureComparison fixture;
-    setUpAll(() async => fixture = await FixtureComparison.load('invocations'));
+    setUpAll(() async {
+      fixture = await FixtureComparison.load(
+        'invocations',
+        sources: await SdkSources.load(),
+      );
+    });
 
     for (final (name, expected) in <(String, Object? Function())>[
       ('invocationTearoffIdentity', sdk.invocationTearoffIdentity),
@@ -73,23 +79,6 @@ void main() {
         fixture.compare('invocationNamedOrder', [
           generic,
         ], () => sdk.invocationNamedOrder(generic));
-      }
-    });
-
-    test('collection copies and canonical empties match the pinned SDK', () {
-      for (var kind = 0; kind < 4; kind++) {
-        for (var inputKind = 0; inputKind < 5; inputKind++) {
-          fixture.compare('invocationCollectionIdentity', [
-            kind,
-            inputKind,
-          ], () => sdk.invocationCollectionIdentity(kind, inputKind));
-        }
-        for (final empty in [false, true]) {
-          fixture.compare('invocationCollectionTypes', [
-            kind,
-            empty,
-          ], () => sdk.invocationCollectionTypes(kind, empty));
-        }
       }
     });
 

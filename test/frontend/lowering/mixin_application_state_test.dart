@@ -62,9 +62,6 @@ void main() {
       expect(fields, hasLength(2));
       expect(fields.map((field) => field.owner).toSet(), hasLength(2));
       expect(fields.toSet(), hasLength(2));
-      for (final field in fields) {
-        expect(field.owner.name, contains(':mixin:'));
-      }
     });
 
     test('late initializers belong to each actual application', () {

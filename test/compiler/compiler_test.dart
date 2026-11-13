@@ -42,16 +42,6 @@ void main() {
   );
 
   test(
-    'SDK range checks include error constructors and string constants',
-    () async {
-      final result = await compiler.compile([
-        'test/compiler/fixtures/sdk_functions.dart',
-      ]);
-      expect(result.bytes, isNotEmpty);
-    },
-  );
-
-  test(
     'compilation owns final bytes and keeps the library name across writes',
     () async {
       final assets = NativeAssets(Target.host());

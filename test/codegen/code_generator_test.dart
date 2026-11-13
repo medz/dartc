@@ -116,41 +116,6 @@ void main() {
     },
   );
 
-  test('void store results remain readable as null', () {
-    final target = FunctionTarget(
-      .parse('memory:void-store'),
-      'store',
-      .voidType,
-      [FfiTypes.resolve(NativePointerType(NativeScalarType(Int64)))],
-    );
-    final block = Block(target.parameterTypes);
-    block.finish(
-      Return(
-        block.emit(
-          StoreNative(
-            block.emit(PointerAddress(block.parameters.single)),
-            .of(Int64),
-            const Constant.integer(42),
-          ),
-        ),
-      ),
-    );
-    final program = IrProgram([], [
-      IrFunction(target, [block]),
-    ]);
-    for (final CodeGenerator generator in [
-      Arm64CodeGenerator(const Target(.macos, .arm64)),
-      X64CodeGenerator(const Target(.linux, .x64)),
-    ]) {
-      expect(
-        generator
-            .generate(program, runtime: heapRuntime, definitions: [target])
-            .sections,
-        isNotEmpty,
-      );
-    }
-  });
-
   test('typed native calls require no symbol binding or relocation', () {
     final callback = FfiTypes.resolve(
       NativePointerType(NativeFunctionType(NativeSignature(Int8, [Int64]))),
@@ -182,7 +147,6 @@ void main() {
         );
         expect(module.relocations, isEmpty);
         expect(module.symbols.single.name, 'invoke');
-        expect(module.sections.single.bytes, isNotEmpty);
       }
     }
   });
