@@ -406,4 +406,183 @@ void main() {
       expect(native.convert('%', .uriDecodeComponent), 'argument');
     },
   );
+
+  test('URI objects preserve components, normalization and parse failures', () {
+    for (final source in [
+      '',
+      'a/./b/../c',
+      '../a/../../b?x=1&x=2#f',
+      'HTTP://user:pass@Example.COM:80/a/../b?x=1&x=2#F',
+      'https://example.com:443?',
+      '//example.com/a%2Fb/%E4%B8%AD?empty=&flag&=ignored#',
+      'http://[2001:db8::1]:8080/a',
+      'file:///tmp/a%20b',
+      'mailto:user@example.com',
+      'https://example.com/%7e/%2E%2E/a%2fb',
+      '/a b/é/🙂?q=a+b',
+      'http://[::1',
+      'http://example.com:abc',
+      '1invalid:part',
+      'http://[1::2::3]/',
+      'https://example.com/?bad=%FF',
+    ]) {
+      for (var mode = 0; mode < 3; mode++) {
+        compareConversion(source, .uriObject, mode);
+      }
+    }
+    final normalized = jsonDecode(
+      native.convert('HTTP://Example.COM:80/a/../b?x=1&x=2#F', .uriObject),
+    ) as List;
+    expect(normalized.first, 'http://example.com/b?x=1&x=2#F');
+    expect(normalized[16], {
+      'x': ['1', '2'],
+    });
+    expect(normalized[17], 'http://example.com');
+    expect(normalized.sublist(20), [true, true]);
+    expect(native.convert('http://[::1', .uriObject, 1), 'null');
+  });
+
+  test('URI objects construct, replace and snapshot encoded components', () {
+    for (final authority in [
+      'EXAMPLE.COM',
+      '[2001:db8::1]',
+      'user:pass@example.com:8080',
+      'bad:port',
+      '[::1',
+    ]) {
+      for (var mode = 0; mode < 4; mode++) {
+        compareConversion(authority, .uriBuild, mode);
+      }
+    }
+    expect(
+      jsonDecode(native.convert('EXAMPLE.COM', .uriBuild))[0],
+      'https://a:b@example.com/a%20b/%F0%9F%99%82?q=a+b&q=c%2Bd&flag#f%20%23',
+    );
+  });
+
+  test('URI objects resolve relative references and remove dot segments', () {
+    const base = 'http://a/b/c/d;p?q';
+    const references = {
+      'g:h': 'g:h',
+      'g': 'http://a/b/c/g',
+      './g': 'http://a/b/c/g',
+      'g/': 'http://a/b/c/g/',
+      '/g': 'http://a/g',
+      '//g': 'http://g',
+      '?y': 'http://a/b/c/d;p?y',
+      'g?y': 'http://a/b/c/g?y',
+      '#s': 'http://a/b/c/d;p?q#s',
+      'g?y#s': 'http://a/b/c/g?y#s',
+      ';x': 'http://a/b/c/;x',
+      '': 'http://a/b/c/d;p?q',
+      '.': 'http://a/b/c/',
+      '..': 'http://a/b/',
+      '../g': 'http://a/b/g',
+      '../..': 'http://a/',
+      '../../g': 'http://a/g',
+      '../../../g': 'http://a/g',
+      '/./g': 'http://a/g',
+      '/../g': 'http://a/g',
+      'g/./h': 'http://a/b/c/g/h',
+      'g/../h': 'http://a/b/c/h',
+      'g?y/../x': 'http://a/b/c/g?y/../x',
+      'g#s/../x': 'http://a/b/c/g#s/../x',
+    };
+    for (final entry in references.entries) {
+      final input = jsonEncode([base, entry.key]);
+      for (var mode = 0; mode < 2; mode++) {
+        expect(native.convert(input, .uriResolve, mode), entry.value);
+      }
+    }
+    for (final base in ['', '../a/b', 'a:b/c', '//host/a/b']) {
+      for (final reference in ['', '..', '../c', '?q', '#f', 'a:b']) {
+        for (var mode = 0; mode < 2; mode++) {
+          compareConversion(jsonEncode([base, reference]), .uriResolve, mode);
+        }
+      }
+    }
+  });
+
+  test('URI objects retain data encodings, parameters and malformed input', () {
+    for (final source in ['', 'Hello, world!', 'π 中文🙂', '\u0000\r\n']) {
+      for (var mode = 0; mode < 5; mode++) {
+        compareConversion(source, .uriData, mode);
+      }
+    }
+    for (final source in [
+      'data:,Hello%2C%20world!',
+      'data:text/plain;charset=utf-8,%CF%80',
+      'data:text/plain;charset=utf-8;base64,z4A=',
+      'data:;base64,SGVsbG8=',
+      'data:text/plain;a=x%20y,b?c',
+      'data:text/plain;charset=unknown,hello',
+      'data:text/plain;base64,SGVsbG8',
+      'data:text/plain;base64,=',
+      'data:,bad%FF',
+      'data:text/plain;broken,hello',
+      'data:text/plain',
+      'https://example.com/',
+      'data://host/text,hello',
+      'data:,hello#fragment',
+    ]) {
+      compareConversion(source, .uriData, 5);
+      compareConversion(source, .uriData, 6);
+    }
+    expect(native.convert('π', .uriData, 4), 'argument');
+    expect(
+      jsonDecode(native.convert('π', .uriData, 1))[0],
+      'data:;charset=utf-8;name=a%20b;base64,z4A=',
+    );
+  });
+
+  test('URI objects parse IPv4 and IPv6 addresses with range boundaries', () {
+    for (final source in [
+      '0.0.0.0',
+      '127.0.0.1',
+      '255.255.255.255',
+      '256.1.2.3',
+      '01.2.3.4',
+      '1.2.3',
+      '1.2.3.4.5',
+      '-1.2.3.4',
+      '',
+    ]) {
+      compareConversion(source, .uriAddress);
+      compareConversion(source, .uriAddress, 1);
+    }
+    for (final source in [
+      '::',
+      '::1',
+      '2001:db8::1',
+      'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff',
+      '::ffff:192.0.2.1',
+      '1:2:3:4:5:6:7:8',
+      '1::2::3',
+      '12345::',
+      '1:2:3:4:5:6:7',
+      '::ffff:256.1.2.3',
+      '',
+      ':',
+    ]) {
+      compareConversion(source, .uriAddress, 2);
+      compareConversion(source, .uriAddress, 3);
+    }
+    expect(native.convert('127.0.0.1', .uriAddress), '[127,0,0,1]');
+    expect(native.convert('01.2.3.4', .uriAddress), startsWith('format:'));
+  });
+
+  test(
+    'URI objects keep immutable views, method values and cached data alive',
+    () {
+      const source = 'https://example.com/a/b?x=1&x=2#f';
+      final text = native.convert(source, .uriLifetime);
+      expect(text, conversion.conversionText(source, .uriLifetime, 0));
+      final result = jsonDecode(text) as List;
+      expect(result[0], [true, true, true, true]);
+      expect(result.sublist(1, 4), ['a', true, 'b']);
+      expect(result[6], 'retained');
+      expect(result[7], 'https://example.com/next');
+      expect(result[8], source);
+    },
+  );
 }

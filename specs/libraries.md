@@ -59,11 +59,17 @@ RegExp.escape 复用[官方 Dart 实现](../sdk/std/lib/_internal/vm/lib/regexp_
 
 官方 Dart 的正则封装与匹配结果类已纳入源码，实际解析、编译和匹配内核尚未接通；构造 RegExp 和执行匹配仍不可用。
 
-## URI 编解码
+## URI
 
 `Uri.encodeComponent`、`encodeQueryComponent`、`encodeFull` 及对应的 decode 方法支持原生执行和函数值调用；编码直接复用固定 SDK 的 [uri_encode_patch.dart](../sdk/std/lib/_internal/vm_shared/lib/uri_encode_patch.dart)，解码与 `splitQueryString` 复用 [core/uri.dart](../sdk/std/lib/core/uri.dart)。component、query 和 full 保留各自的字符集合，query 将空格与加号按表单规则转换；查询参数拆分保留 SDK 的重复键、无值键与空键规则。
 
-UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生对照](../test/compiler/object_text_test.dart)，包括控制字符、孤立代理项、非法百分号和非法字节序列。错误仍以 ArgumentError 或 FormatException 传播。URI 对象的完整构造、解析、路径处理和 `Uri.base` 尚未接通，仍依赖 RegExp 与平台环境能力；上述编解码范围不代表完整 Uri 支持。
+UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生对照](../test/compiler/object_text_test.dart)，包括控制字符、孤立代理项、非法百分号和非法字节序列。错误仍以 ArgumentError 或 FormatException 传播。
+
+Uri 的构造、构造器函数值、parse/tryParse、replace、resolve/resolveUri、路径规范化、片段移除、字段读取和相等/哈希复用官方 Dart 正文。查询多值、编码后的路径段、默认端口、IPv4/IPv6、相对引用和错误位置已验证；路径与查询视图保持不可修改，方法值、视图和缓存数据在分配压力后仍可用。
+
+数据 URI 的字符串/字节构造、解析、MIME/charset 参数、Base64 与百分号编码同样复用 UriData。默认字符集是 ASCII；非 ASCII 文本需指定合适的 Encoding，未知字符集和畸形内容保留对应错误。
+
+文件路径转换仍缺 Windows 路径检查所需的 RegExp，以及默认平台选择；Uri.base 的平台环境接点尚未接通。这些缺口不影响上述一般 URI 与数据 URI 路径。
 
 ## 动态库加载
 
