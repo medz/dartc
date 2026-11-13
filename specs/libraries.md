@@ -15,7 +15,7 @@
 | part、URI/具名 part of | 读取官方 analyzer 返回的库单元，在转换前检查所有单元的 error 诊断。 |
 | 相对、file:、package: URI | 支持源码导入 URI 的 analyzer 解析；API 输入仍为文件路径。 |
 | package configuration v2 | 使用首个输入库的包上下文，保留 package URI 身份并检查包语言版本。 |
-| main 入口 | `LoweringResult.entryPoint` 保留首个库导出命名空间中的 main 声明身份，包括再导出。原生支持同步及 async 入口，包括命令行参数，正常结束退出码为 0，返回值不作为进程退出码。返回后处理微任务、定时器和终结事件，未捕获的异步错误到达进程边界；环境与完整进程生命周期待实现。 |
+| main 入口 | `LoweringResult.entryPoint` 保留首个库导出命名空间中的 main 声明身份，包括再导出。原生支持同步及 async 入口，包括命令行参数，事件处理正常结束后读取 dart:io 的 exitCode（默认 0），main 返回值不作为进程退出码。返回后处理微任务、定时器和终结事件，未捕获的异步错误到达进程边界；环境与完整进程生命周期待实现。 |
 | StackTrace API | 同步原生 throw 与 `StackTrace.current` 捕获调用链，包括原生回调重入前的暂停帧；catch/rethrow 保留关联轨迹。`StackTrace.fromString`、`empty` 与文本读取可用；捕获轨迹按调用顺序输出函数名及实际源码单元的 URI、行、列，包含 part、所属类及外层局部函数。恢复执行的 async/生成器帧保留源函数及调用点；生成的机器帧保留地址；跨暂停点沿 SDK Future/listener、Completer、StreamIterator 和委托 Stream 的等待关系恢复父帧，输出 await/yield 位置及异步间隔。闭包链接支持可变捕获、实例方法提取和带 vm:awaiter-link 的 Zone 包装，不执行用户回调或 late 初始化器，并终止循环链接。未开始运行的源码回调显示原始声明位置，包括 part、SDK 增补、泛型/方法值和构造器重定向与别名；普通实例方法回调保留后续等待者。生成的无源码适配器保留名称；没有等待链接的自定义包装不能恢复隐藏的父帧。见[异步父栈验证](../test/compiler/async_stack_traces_test.dart)。`Error.stackTrace` 读取首次抛出的轨迹；`Error.throwWithStackTrace` 在首次抛错时记录传入轨迹，后续抛错不覆盖；记录不调用用户覆盖的 getter，仅实现 Error 接口的类不获得隐藏存储。见[原生异常验证](../test/compiler/exceptions_test.dart)。 |
 | isolate、消息端口与 spawn | 调用保留普通 SDK 导入；isolate 的创建、消息调度及线程进入协议待开发。 |
 
@@ -109,9 +109,11 @@ pow、sin/cos/tan、asin/acos/atan、atan2、exp/log 和 sqrt 复用固定 SDK �
 
 ## 独立程序入口
 
+`exitCode`、`exit` 和 `sleep` 复用官方 `dart:io/process.dart` 正文。状态保存在普通 Dart 静态变量中，setter/getter 保留有符号 32 位值，macOS/Linux 的进程状态取低八位；待处理事件中的最后一次赋值影响正常结束状态，未捕获异常不使用这个正常状态。`exit` 保留 IOOverrides 拦截；未拦截时立即终止，不执行 finally、后续事件或堆清理。`sleep` 保留 Duration 换算和负时长检查，使用单调时钟在被信号中断后继续等待，等待期间不派发 Dart 事件。见[进程生命周期对照](../test/compiler/process_lifecycle_test.dart)及 [exit 公开契约](https://api.dart.dev/dart-io/exit.html)。跨 isolate/模块共享状态仍依赖对应生命周期支持。
+
 入口选择遵循主规范的 Scripts 条款，使用根库导出命名空间中的 main，不按依赖遍历顺序查找同名函数。`Compiler.compile(output: const Output.executable())` 和 CLI `--kind exe` 接通现有标量函数的独立执行。整个输入依赖图先完成静态检查，未使用代码的错误仍拒绝编译。
 
-同步及 async 入口可调用当前已接通的 Dart 函数和显式绑定的原生函数。事件队列正常排空后退出码为 0；main 的 Dart 返回值不作为进程退出码。main 返回后先处理微任务，再执行终结和定时事件；每个事件结束后重新处理微任务，直到队列为空才释放堆。定时器使用单调时钟及平台等待，取消的定时器不再保活。返回 Future 的入口及 async main 使用同一事件队列；未捕获的异步错误使进程失败。只有未完成 Future 而没有待执行事件时，不额外保活进程。I/O 事件源和跨线程唤醒仍是实现缺口。
+同步及 async 入口可调用当前已接通的 Dart 函数和显式绑定的原生函数。事件队列正常排空后读取 dart:io 的 exitCode；默认值为 0，main 的 Dart 返回值不作为进程退出码。main 返回后先处理微任务，再执行终结和定时事件；每个事件结束后重新处理微任务，直到队列为空才释放堆。定时器使用单调时钟及平台等待，取消的定时器不再保活。返回 Future 的入口及 async main 使用同一事件队列；未捕获的异步错误使进程失败。只有未完成 Future 而没有待执行事件时，不额外保活进程。I/O 事件源和跨线程唤醒仍是实现缺口。
 
 Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器；提供 `LinkInput.sharedLibrary` 时生成 PIE，由目标 GNU 动态加载器解析函数、数据地址及装载重定位，只读地址表在重定位后受 RELRO 保护。缺失依赖或符号在装载时失败，见[入口执行验证](../test/compiler/entry_test.dart)与[重定位验证](../test/linker/address_relocations_test.dart)。动态入口不改变现有进程退出协议；原生库终结、musl 加载器及无加载器的静态 PIE 尚未接通。macOS 输出使用 LC_MAIN、系统 dyld 和 ad-hoc 签名，并支持显式动态库依赖。macOS x64 具有结构检查，尚无该目标的实际执行证据。
 

@@ -1,5 +1,44 @@
 import 'dart:ffi' as ffi;
 
+import '../../lib/runtime/contracts.dart';
+import '../runtime/memory.dart';
+
+int _exitStatus = 0;
+
+@RuntimeEntry(.processExitCode)
+int _readExitCode() => _exitStatus;
+
+@patch
+class _ProcessUtils {
+  @patch
+  static Never _exit(int status) {
+    _exitProcess(status);
+    throw StateError('Process termination returned');
+  }
+
+  @patch
+  static void _setExitCode(int status) => _exitStatus = status.toSigned(32);
+
+  @patch
+  static int _getExitCode() => _readExitCode();
+
+  @patch
+  static void _sleep(int millis) {
+    final started = Memory.clock();
+    var remaining = millis;
+    while (remaining > 0) {
+      Memory.sleep(remaining ~/ 1000, remaining % 1000 * 1000000);
+      // Signals may end a system wait before the requested duration.
+      remaining = millis - (Memory.clock() - started) ~/ 1000000;
+    }
+  }
+}
+
+// FFI represents the non-returning C function with Void, not Dart Never.
+@SystemNative()
+@ffi.Native<ffi.Void Function(ffi.Int)>(symbol: '_Exit')
+external void _exitProcess(int status);
+
 @patch
 class _Platform {
   @patch

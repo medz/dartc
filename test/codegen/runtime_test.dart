@@ -17,8 +17,18 @@ void main() {
   final uri = Uri.parse('memory:runtime-contract');
   final entry = FunctionTarget(uri, 'entry', .integer, []);
 
-  HeapRuntime withCritical(FunctionTarget function) => HeapRuntime(
-    heapRuntime.program,
+  HeapRuntime withCritical(
+    FunctionTarget function, {
+    IrFunction? processStatus,
+  }) => HeapRuntime(
+    processStatus == null
+        ? heapRuntime.program
+        : IrProgram(
+            heapRuntime.program.classes,
+            [...heapRuntime.program.functions, processStatus],
+            globals: heapRuntime.program.globals,
+            externals: heapRuntime.program.externals,
+          ),
     types: heapRuntime.types,
     invocation: heapRuntime.invocation,
     dispatchFailure: heapRuntime.dispatchFailure,
@@ -28,6 +38,7 @@ void main() {
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
     eventAccess: heapRuntime.eventAccess,
+    processExitCode: processStatus?.target,
     copyBytes: heapRuntime.copyBytes,
     captureStackTrace: heapRuntime.captureStackTrace,
     recordError: heapRuntime.recordError,
@@ -222,6 +233,31 @@ void main() {
   });
 
   final generator = Arm64CodeGenerator(const Target(.linux, .arm64));
+  test('an unmanaged process still calls its final status provider', () {
+    final status = FunctionTarget(uri, 'processStatus', .integer, []);
+    final block = Block()..finish(Return(const Constant.integer(43)));
+    final module = generator.generate(
+      IrProgram([], [mainBody(false)]),
+      definitions: [entry, status],
+      runtime: withCritical(status, processStatus: IrFunction(status, [block])),
+      entryPoint: (function: entry, symbol: 'start'),
+    );
+    final index = module.symbols.indexWhere(
+      (symbol) => symbol.name == status.name,
+    );
+    final start = module.symbols.singleWhere(
+      (symbol) => symbol.name == 'start',
+    );
+    expect(
+      module.relocations.where(
+        (relocation) =>
+            relocation.symbol == index &&
+            relocation.offset >= start.offset &&
+            relocation.offset < start.offset + start.size!,
+      ),
+      hasLength(1),
+    );
+  });
   test('unmanaged programs do not retain runtime allocation or scheduling', () {
     for (final managed in [false, true]) {
       final program = IrProgram([], [mainBody(managed)]);

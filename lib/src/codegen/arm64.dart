@@ -28,7 +28,10 @@ final class _Arm64Emitter(
   int get position => assembler.length;
 
   @override
-  Uint8List start(void Function() body, FrameLayout<CpuRegister>? frame) {
+  Uint8List start(
+    CpuRegister? Function() body,
+    FrameLayout<CpuRegister>? frame,
+  ) {
     if (convention.target.operatingSystem == .macos) {
       extendInteger(Register.x0, bytes: 4, signed: true);
     } else {
@@ -45,12 +48,16 @@ final class _Arm64Emitter(
           )
         : null;
     if (frame != null) convention.emitPrologue(assembler, frame);
-    body();
-    if (convention.target.operatingSystem == .macos) {
+    final status = body();
+    if (status == null) {
       assembler.loadImmediate(.x0, 0);
+    } else {
+      move(Register.x0, status);
+    }
+    if (convention.target.operatingSystem == .macos) {
       convention.emitEpilogue(assembler, frame!);
     } else {
-      abort(0);
+      _systemCall(94, 1);
     }
     return assembler.finish();
   }

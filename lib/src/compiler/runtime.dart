@@ -239,6 +239,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     release: release,
     runEvents: runEvents,
     eventAccess: eventAccess,
+    processExitCode: annotations.entries[RuntimeRole.processExitCode],
     copyBytes: copyBytes,
     captureStackTrace: captureStackTrace,
     stackContext: annotations.stackContext,

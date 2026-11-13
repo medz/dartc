@@ -111,6 +111,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'allocators',
     'environment',
     'assertions',
+    'process_lifecycle',
     'descriptor_write',
     'futures',
     'async_functions',
@@ -302,6 +303,8 @@ Future<void> main(List<String> args) async {
         'platform_environment',
         'entry_platform_environment',
       ),
+      ('process_lifecycle', 'process_lifecycle', 'entry_process_lifecycle'),
+      ('process_lifecycle', 'process_status_only', 'entry_process_status_only'),
       ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
       ('native_callables', 'native_callables', 'entry_native_callables'),
       (

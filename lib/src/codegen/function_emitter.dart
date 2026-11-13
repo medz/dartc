@@ -35,8 +35,8 @@ abstract interface class FunctionEmitter<R>() {
   /// The calling rules for the explicit output platform.
   CallingConvention<R> get convention;
 
-  /// Supplies argc/argv in integer argument registers, runs the body and exits.
-  Uint8List start(void Function() body, FrameLayout<R>? frame);
+  /// Supplies argc/argv, runs the body and exits with its returned status or zero.
+  Uint8List start(R? Function() body, FrameLayout<R>? frame);
 
   /// The callee-saved register holding this native activation's managed heap.
   R get heapRegister;

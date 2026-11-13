@@ -136,7 +136,18 @@ final class HeapEntry<R extends Object>(
     return addresses;
   }
 
-  void leave(FrameLayout<R> frame, R? result, {bool release = false}) {
+  void leave(
+    FrameLayout<R> frame,
+    R? result, {
+    bool release = false,
+    FunctionTarget? processExitCode,
+  }) {
+    assert(processExitCode == null || release && result == null);
+    final statusRegister = processExitCode == null
+        ? null
+        : emitter.convention
+              .classify(NativeSignature(Int64, []))
+              .resultRegister!;
     if (result != null) emitter.storeStack(result, frame.localOffset + _result);
     emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
     if (runEvents case final events?) {
@@ -168,6 +179,18 @@ final class HeapEntry<R extends Object>(
       call(emitter.call(), events);
       safepoint(emitter.position);
       emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
+      emitter.bind(finished);
+    }
+    if (processExitCode != null) {
+      final ready = emitter.label(), finished = emitter.label();
+      emitter.loadStack(emitter.failureRegister, frame.localOffset + _failure);
+      emitter.jumpIfZero(emitter.failureRegister, ready);
+      emitter.jump(finished);
+      emitter.bind(ready);
+      call(emitter.call(), processExitCode);
+      safepoint(emitter.position);
+      emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
+      emitter.storeStack(statusRegister!, frame.localOffset + _result);
       emitter.bind(finished);
     }
     final successful = emitter.label();
@@ -221,7 +244,9 @@ final class HeapEntry<R extends Object>(
     emitter.bind(thrown);
     emitter.reportFailure(uncaught, uncaughtMessage.length);
     emitter.bind(returned);
-    if (result != null) emitter.loadStack(result, frame.localOffset + _result);
+    if (result ?? statusRegister case final register?) {
+      emitter.loadStack(register, frame.localOffset + _result);
+    }
   }
 
   /// Unlinks this entry after callbacks and heap release have finished.

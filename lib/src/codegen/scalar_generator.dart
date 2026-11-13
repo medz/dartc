@@ -703,12 +703,25 @@ base class ScalarCodeGenerator<R extends Object>(
       final emitter = _createFunction();
       final context = entry(emitter);
       final frame = context?.frame(0);
+      final exitCode = runtime?.processExitCode;
+      if (exitCode != null && !selected.contains(exitCode)) {
+        throw ArgumentError('Missing process exit status definition.');
+      }
       final bytes = emitter.start(() {
         if (context != null) context.enter(frame!);
         final fixup = emitter.call();
         call(fixup, function);
         safepoint(emitter.position, StackRoots(0, 0, []));
-        if (context != null) context.leave(frame!, null, release: true);
+        if (context != null) {
+          context.leave(frame!, null, release: true, processExitCode: exitCode);
+        } else if (exitCode != null) {
+          call(emitter.call(), exitCode);
+        }
+        return exitCode == null
+            ? null
+            : emitter.convention
+                  .classify(NativeSignature(Int64, []))
+                  .resultRegister;
       }, frame);
       symbols.add(.new(symbol, 0, code.length, bytes.length));
       code.add(bytes);

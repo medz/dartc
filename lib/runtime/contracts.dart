@@ -44,6 +44,7 @@ enum RuntimeRole() {
   processMain,
   patternMatchFailure,
   assertionFailure,
+  processExitCode,
 }
 
 /// Binds an external declaration to one trusted machine operation.

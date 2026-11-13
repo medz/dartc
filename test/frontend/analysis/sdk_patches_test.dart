@@ -154,6 +154,12 @@ void main() {
           (library) => library.element.uri == Uri.parse('dart:io'),
         );
         final platform = io.element.getClass('_Platform')!;
+        for (final name in ['exit', 'sleep']) {
+          final body = io.getFragmentDeclaration(
+            io.element.getTopLevelFunction(name)!.fragments.last,
+          )!;
+          expect(body.resolvedUnit!.uri, Uri.parse('dart:io/process.dart'));
+        }
         final environment = io.getFragmentDeclaration(
           platform.getGetter('environment')!.fragments.last,
         )!;

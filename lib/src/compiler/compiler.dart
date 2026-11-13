@@ -156,7 +156,10 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .x64 => X64CodeGenerator(target),
     };
     final definitions = program.reachableFrom(
-      [...exports.keys, if (output is ExecutableOutput) entry!],
+      [
+        ...exports.keys,
+        if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
+      ],
       instantiatedTypes: [
         if (exports.values.any(
               (export) => export.signature.parameters.any(

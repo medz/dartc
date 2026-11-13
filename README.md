@@ -90,7 +90,7 @@ dartc bin/main.dart --kind exe -o app
 
 Assertions are disabled by default. Use `--enable-asserts` or `Compiler.compile(enableAssertions: true)` to retain assertion checks and failure messages.
 
-Entry points can be synchronous or async, with optional command-line arguments. Normal completion exits with status zero; the Dart return value is discarded.
+Entry points can be synchronous or async, with optional command-line arguments. Normal completion uses `dart:io`'s `exitCode` after pending events finish, defaulting to zero; the Dart return value is discarded. `exit(code)` terminates immediately, while `sleep(duration)` blocks event delivery for the requested duration.
 
 Pass compilation declarations for `String.fromEnvironment`, `int.fromEnvironment`, `bool.fromEnvironment` and `bool.hasEnvironment`:
 

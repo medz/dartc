@@ -28,7 +28,10 @@ final class _X64Emitter(
   int get position => assembler.length;
 
   @override
-  Uint8List start(void Function() body, FrameLayout<CpuRegister>? frame) {
+  Uint8List start(
+    CpuRegister? Function() body,
+    FrameLayout<CpuRegister>? frame,
+  ) {
     final mac = convention.target.operatingSystem == .macos;
     if (mac) {
       extendInteger(Register.rdi, bytes: 4, signed: true);
@@ -54,12 +57,17 @@ final class _X64Emitter(
       }
       convention.emitPrologue(assembler, frame);
     }
-    body();
+    final status = body();
+    final result = mac ? Register.rax : Register.rdi;
+    if (status == null) {
+      assembler.loadImmediate(result, 0);
+    } else {
+      move(result, status);
+    }
     if (mac) {
-      assembler.loadImmediate(.rax, 0);
       convention.emitEpilogue(assembler, frame!);
     } else {
-      abort(0);
+      _systemCall(231, 1);
     }
     return assembler.finish();
   }
