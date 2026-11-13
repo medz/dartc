@@ -11,6 +11,57 @@ void main() {
   final pointer = PointerFromAddress(address, FfiTypes.int64Pointer);
 
   test(
+    'callback contracts reject missing exceptions and incompatible signatures',
+    () {
+      final type = FunctionType(FfiTypes.scalarTypes[ffi.Int64]!, [
+        FfiTypes.scalarTypes[ffi.Int64]!,
+      ]);
+      final function = FunctionTarget(null, 'callback', .integer, [.integer]);
+      expect(() => NativeCallbackAddress(function, type), throwsArgumentError);
+      expect(
+        () => NativeCallbackAddress(
+          function,
+          type,
+          exceptionalReturn: const Constant.floating(1),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => NativeCallbackAddress(
+          function,
+          FunctionType(FfiTypes.scalarTypes[ffi.Double]!, type.parameters),
+          exceptionalReturn: const Constant.floating(0),
+        ),
+        throwsArgumentError,
+      );
+      final voidType = FunctionType(FfiTypes.voidType, type.parameters);
+      expect(
+        () => NativeCallbackAddress(
+          function,
+          voidType,
+          exceptionalReturn: const Constant.integer(0),
+        ),
+        throwsArgumentError,
+      );
+      final callback = NativeCallbackAddress(
+        function,
+        type,
+        exceptionalReturn: const Constant.integer(-1),
+      );
+      final block = Block();
+      block.finish(Return(block.emit(callback)));
+      final factory = IrFunction(FunctionTarget(null, 'create', .integer, []), [
+        block,
+      ]);
+      expect(factory.callees, contains(function));
+      expect(
+        NativeCallbackAddress(function, voidType).dartSignature.result,
+        ValueType.voidType,
+      );
+    },
+  );
+
+  test(
     'abstract compound views expose addresses without becoming allocatable',
     () {
       for (final type in [FfiTypes.struct, FfiTypes.union]) {

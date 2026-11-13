@@ -678,6 +678,37 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           (e) => lowerExpression(context, e),
         ).call(reference, target.signature, argumentList);
       }
+      if (callee.library.uri == Uri.parse('dart:ffi') &&
+          callee ==
+              callee.library.getClass('Pointer')?.getMethod('fromFunction')) {
+        final values = argumentList.arguments
+            .map(
+              (argument) => context.bindings.constantExpression(
+                unit,
+                argument.argumentExpression,
+              ),
+            )
+            .toList();
+        final function = values.first;
+        final fallback = values.length == 2 ? values.last : null;
+        if (function is! FunctionConstant ||
+            fallback != null && fallback is! ScalarConstant) {
+          unsupported(unit, expression, 'non-constant native callback');
+        }
+        return context.emit(
+          PointerFromAddress(
+            context.emit(
+              NativeCallbackAddress(
+                function.target,
+                context.typeOf(typeArgumentTypes!.single, expression)
+                    as FunctionType,
+                exceptionalReturn: fallback,
+              ),
+            ),
+            context.typeOf(expression.staticType!, expression) as ClassType,
+          ),
+        );
+      }
       final args = context.arguments(
         argumentList,
         (e) => lowerExpression(context, e),

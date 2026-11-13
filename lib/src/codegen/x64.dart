@@ -59,6 +59,12 @@ final class _X64Emitter(
   Register get heapRegister => .r15;
 
   @override
+  Register currentThread() {
+    _systemCall(186, 372);
+    return .rax;
+  }
+
+  @override
   Register get failureRegister => .r11;
 
   @override

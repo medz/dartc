@@ -513,6 +513,7 @@ sealed class Instruction(super.type) extends Value {
   /// Calls include all effects their callees could have. Allocation describes
   /// the operation itself; temporary boxes and GC safepoints depend on the backend.
   Set<Effect> get effects => switch (this) {
+    NativeCallbackAddress() => const {.readsStorage, .writesStorage},
     ObjectHashCode(direct: true) => _bindOnce,
     ObjectRuntimeType(direct: true) => const {.readsStorage},
     ObjectClassName() => const {.readsStorage},
@@ -641,6 +642,63 @@ sealed class Instruction(super.type) extends Value {
 final class NativeSymbolAddress(final NativeReference reference)
     extends Instruction {
   this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Binds a static Dart callback to the current thread and returns its native entry.
+///
+/// The entry lives until the owning module is unloaded. An escaping exception
+/// returns [exceptionalReturn], or zeroed native storage for pointers and structs.
+final class NativeCallbackAddress(
+  final FunctionTarget function,
+  FunctionType nativeType, {
+  final Constant? exceptionalReturn,
+}) extends Instruction {
+  final NativeSignature signature = (FfiTypes.describe(
+    FfiTypes.nativeFunction.instantiate([nativeType]),
+  ) as NativeFunctionType).signature;
+  final FunctionType dartSignature = FunctionType(
+    FfiTypes.dartValueType(nativeType.result),
+    nativeType.parameters.map(FfiTypes.dartValueType),
+  );
+
+  this : super(.integer) {
+    final type = function.signature;
+    if (function.kind != .function ||
+        function.typeParameters.isNotEmpty ||
+        type.optionalPositional != 0 ||
+        type.named.isNotEmpty ||
+        type.parameters.length != dartSignature.parameters.length) {
+      throw ArgumentError('Expected a matching static callback.');
+    }
+    for (final (native, expected, actual, result) in [
+      (signature.result, dartSignature.result, type.result, true),
+      for (final (i, parameter) in signature.parameters.indexed)
+        (parameter, dartSignature.parameters[i], type.parameters[i], false),
+    ]) {
+      final compatible =
+          native is NativePointerType || native is NativeCompoundType
+          ? result
+                ? expected.accepts(actual)
+                : actual.accepts(expected)
+          : native.isVoid && result || expected == actual;
+      if (!compatible) {
+        throw ArgumentError('Incompatible native callback signature.');
+      }
+    }
+    final implicit =
+        signature.result.isVoid ||
+        signature.result is NativePointerType ||
+        signature.result is NativeCompoundType;
+    if (implicit
+        ? exceptionalReturn != null
+        : exceptionalReturn is! ScalarConstant ||
+              !dartSignature.result.accepts(exceptionalReturn!.type)) {
+      throw ArgumentError('Invalid callback exceptional return.');
+    }
+  }
 
   @override
   Iterable<Value> get inputs => const [];

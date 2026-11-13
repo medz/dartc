@@ -71,6 +71,12 @@ final class _Arm64Emitter(
   }
 
   @override
+  Register currentThread() {
+    _systemCall(178, 372);
+    return .x0;
+  }
+
+  @override
   Uint8List mapMemory() {
     final done = assembler.label();
     final mac = convention.target.operatingSystem == .macos;

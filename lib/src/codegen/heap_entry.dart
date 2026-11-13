@@ -69,7 +69,11 @@ final class HeapEntry<R extends Object>(
         emitter.failureRegister,
         frame.localOffset + RuntimeContext.suspendedPc,
       );
-      emitter.address(emitter.failureRegister, globals!);
+      if (globals case final address?) {
+        emitter.address(emitter.failureRegister, address);
+      } else {
+        emitter.loadImmediate(emitter.failureRegister, 0);
+      }
       emitter.storeMemory(
         emitter.failureRegister,
         emitter.heapRegister,

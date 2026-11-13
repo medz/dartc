@@ -131,6 +131,8 @@ void writeFunction(
     NativeSize() => 'nativeSize ${op.nativeType}',
     NativeSymbolAddress(:final reference) =>
       'nativeSymbol ${reference.assetId}::${reference.symbol}',
+    NativeCallbackAddress() =>
+      'nativeCallback ${symbol(op.function)} ${op.signature} onError=${op.exceptionalReturn == null ? "zero" : value(op.exceptionalReturn!)}',
     NativeFieldOffset() => 'nativeFieldOffset ${op.owner} ${op.index}',
     CopyNative() =>
       'copyNative ${op.nativeType} ${value(op.destination)}, ${value(op.source)}',

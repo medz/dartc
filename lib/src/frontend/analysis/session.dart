@@ -278,7 +278,7 @@ final class CheckedLibraries._(
         );
       }
     }
-    unit.unit.accept(_NullableInstantiations(unit));
+    unit.unit.accept(_SourceObligations(unit, _constants));
     _constants.check(unit, errors);
   }
 
@@ -332,8 +332,34 @@ extension CheckedSources on CheckedLibraries {
   }
 }
 
-final class _NullableInstantiations(final ResolvedUnitResult unit)
-    extends RecursiveAstVisitor<void> {
+final class _SourceObligations(
+  final ResolvedUnitResult unit,
+  final ConstantEvaluation constants,
+) extends RecursiveAstVisitor<void> {
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    final method = node.methodName.element;
+    if (method is MethodElement &&
+        method.library.uri == Uri.parse('dart:ffi') &&
+        method ==
+            method.library.getClass('Pointer')?.getMethod('fromFunction') &&
+        node.argumentList.arguments.isNotEmpty) {
+      final source = node.argumentList.arguments.first.argumentExpression;
+      final target = constants.expression(unit, source)?.toFunctionValue();
+      // Analyzer checks the signature but leaves the static callback check to the VM.
+      if (!(target is TopLevelFunctionElement ||
+              target is MethodElement && target.isStatic) ||
+          target!.typeParameters.isNotEmpty) {
+        throw FormatException(
+          '${unit.uri}: Pointer.fromFunction requires a non-generic static or top-level function.',
+          unit.content,
+          source.offset,
+        );
+      }
+    }
+    super.visitMethodInvocation(node);
+  }
+
   @override
   void visitFunctionReference(FunctionReference node) {
     // shortcut: analyzer 14.7 extends null-shorting here, remove when it follows the accepted language rule.

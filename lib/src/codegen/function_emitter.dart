@@ -53,6 +53,9 @@ abstract interface class FunctionEmitter<R>() {
   /// Forms a body-SP-relative address without reading the stack.
   void stackAddress(R destination, int offset);
 
+  /// Reads the OS thread identity, clobbering native caller-saved registers.
+  R currentThread();
+
   /// Generates the internal (byte size) -> address-or-zero mapping primitive.
   Uint8List mapMemory();
 

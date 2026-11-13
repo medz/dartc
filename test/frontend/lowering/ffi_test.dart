@@ -63,7 +63,12 @@ void main() {
   test(
     'unused FFI declarations retain signature, constant and layout obligations',
     () async {
-      for (final name in ['invalid_ffi_functions', 'invalid_variable_array']) {
+      for (final name in [
+        'invalid_ffi_functions',
+        'invalid_variable_array',
+        'invalid_ffi_callback',
+        'invalid_ffi_generic_callback',
+      ]) {
         var consumed = false;
         await expectLater(
           AnalysisSession(['test/frontend/lowering/fixtures/$name.dart'])

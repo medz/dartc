@@ -4,9 +4,11 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
+import 'package:dartc/ir.dart' show ScalarConstant;
 
 import 'function_emitter.dart';
 import 'heap_entry.dart';
+import 'native_callback.dart';
 
 /// Converts native scalar and aggregate calls to internal value locations.
 final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
@@ -18,14 +20,19 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     HeapEntry<R>? heap,
     void Function(Fixup, int)? codeAddress,
     void Function(int, FrameLayout<R>)? indirectCall,
+    NativeCallback<R>? callback,
   }) {
+    if (callback != null && !intoDart) {
+      throw ArgumentError('A callback requires an incoming native boundary.');
+    }
     signature = NativeSignature.types(
       signature.result.resolveAbi(emitter.convention.target.abi),
       signature.parameters.map(
         (type) => type.resolveAbi(emitter.convention.target.abi),
       ),
     );
-    if (indirectCall != null ||
+    if (callback != null ||
+        indirectCall != null ||
         signature.result is NativeCompoundType ||
         signature.parameters.any((type) => type is NativeCompoundType)) {
       return _aggregate(
@@ -35,6 +42,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         heap: heap,
         codeAddress: codeAddress,
         indirectCall: indirectCall,
+        callback: callback,
       );
     }
     final native = emitter.convention.classify(signature);
@@ -148,6 +156,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     HeapEntry<R>? heap,
     void Function(Fixup, int)? codeAddress,
     void Function(int, FrameLayout<R>)? indirectCall,
+    NativeCallback<R>? callback,
   }) {
     final storage = NativeLayout(emitter.convention.target);
     final native = emitter.convention.classify(signature);
@@ -320,6 +329,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         emitter.storeStack(register, slot);
       }
     }
+    callback?.checkThread();
     if (intoDart) heap?.enter(frame);
     if (!intoDart) {
       for (final (i, type) in signature.parameters.indexed) {
@@ -386,6 +396,31 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     }
     for (final fixup in parked) {
       codeAddress!(fixup, emitter.position);
+    }
+    if (callback != null) {
+      final returned = emitter.label();
+      emitter.jumpIfZero(emitter.failureRegister, returned);
+      if (compoundResult) {
+        emitter.loadImmediate(address, 0);
+        for (var offset = 0; offset < storage.of(signature.result).size;) {
+          final count = width(storage.of(signature.result).size - offset);
+          emitter.storeStack(address, base + resultSlot + offset, bytes: count);
+          offset += count;
+        }
+      } else if (!signature.result.isVoid) {
+        final value =
+            (callback.definition.exceptionalReturn as ScalarConstant?)?.value;
+        final bits = switch (value) {
+          double() => (ByteData(8)..setFloat64(0, value)).getInt64(0),
+          int() => value,
+          bool() => value ? 1 : 0,
+          _ => 0,
+        };
+        emitter.loadImmediate(address, bits);
+        emitter.move(body.resultRegister!, address);
+      }
+      emitter.loadImmediate(emitter.failureRegister, 0);
+      emitter.bind(returned);
     }
     if (intoDart) heap?.leave(frame, body.resultRegister);
     if (compoundResult) {

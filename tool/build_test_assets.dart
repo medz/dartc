@@ -75,6 +75,8 @@ const _compilerLibraries = {
   'native_function_pointers',
   'native_imports',
   'native_addresses',
+  'native_callbacks',
+  'native_callbacks_plain',
   'native_aggregates',
   'typed_data',
   'managed_objects',
@@ -113,6 +115,9 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'text_conversion',
   };
   final selected = names.toSet();
+  if (selected.contains('native_callbacks')) {
+    selected.add('native_callbacks_plain');
+  }
   final unknown = selected.difference(available);
   if (unknown.isNotEmpty) {
     throw ArgumentError('Unknown compiler fixtures: ${unknown.join(', ')}');

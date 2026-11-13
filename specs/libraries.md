@@ -70,8 +70,9 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 | 项目 | 当前原生范围与缺口 |
 | --- | --- |
 | 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`IntPtr`、`UintPtr`、`Bool`、`Float`、`Double`、`Pointer<T>` 和 Struct/Union 按值传递。对应 Dart `int`、`bool`、`double`、保留元素类型的指针及原聚合声明类型；`Void` 只用于结果。指针可嵌套并指向 NativeFunction 或 Opaque。聚合按输出目标分类到整数/浮点寄存器、栈或间接存储，保留按值复制；不把 Dart 对象引用当作 C 地址。 |
-| 函数与不透明指针 | `Pointer<NativeFunction<T>>`、`Pointer<Void>` 及所支持类型的多级指针可作为参数和结果、从地址构造、读取地址及比较；普通 Dart 调用、分支和循环保留地址及语义类型，头文件保留嵌套函数指针声明。相等只取决于地址，不同元素类型不影响指针相等。Void 和 NativeFunction 不具有元素存储大小；指向它们的指针具有存储大小，支持存入和读出指针槽。生成原生回调尚未接通。 |
-| 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号、上述标量签名及 `isLeaf`。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；指针类型允许兼容的参数收窄和结果扩大。调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。从 Dart 函数生成原生回调、跨线程调用及持久托管句柄仍未接通。 |
+| 函数与不透明指针 | `Pointer<NativeFunction<T>>`、`Pointer<Void>` 及所支持类型的多级指针可作为参数和结果、从地址构造、读取地址及比较；普通 Dart 调用、分支和循环保留地址及语义类型，头文件保留嵌套函数指针声明。相等只取决于地址，不同元素类型不影响指针相等。Void 和 NativeFunction 不具有元素存储大小；指向它们的指针具有存储大小，支持存入和读出指针槽。静态原生回调见下方 `Pointer.fromFunction`。 |
+| `Pointer.fromFunction` | 非泛型顶层函数和静态方法可生成原生回调，支持常量别名及上述标量、指针、Struct/Union 签名；Void 忽略 Dart 返回值，指针和聚合按调用方向检查兼容性。标量异常返回使用声明的常量，指针及聚合异常返回零值；异常不会穿越原生栈。回调在模块卸载前有效，保留托管状态及同线程重入时的 GC 根；错误 OS 线程在进入堆前终止进程。未使用代码同样拒绝捕获闭包和泛型函数实例化。`NativeCallable` 创建、close 和跨线程调度尚未接通。 |
+| 已绑定原生调用 | 独立 `CodeGenerator.generate` API 接受以 `IrExternal.target` 为键的 `imports`，由 `NativeImport` 明确原生符号、上述标量签名及 `isLeaf`。Dart 参数在出站边界转换，原生结果按宽度/精度转换回 Dart 值；指针类型允许兼容的参数收窄和结果扩大。调用者存活值及写入副作用保留，参数遵循目标平台寄存器和栈布局。绑定必须匹配外部声明，缺失或不匹配均报错；原生实现由链接输入提供。跨线程调用及持久托管句柄仍未接通。 |
 | `@Native` | 支持顶层和静态 external 函数、变量及 getter；变量支持上述标量、指针、Struct/Union，共享实际原生存储，赋值保留宽度转换与按值复制，final/getter 禁止重绑定。前端按 SDK 声明身份保留资产 ID、符号、原生签名及 `isLeaf`，支持常量别名；缺省资产依次取 `DefaultAsset` 和所属库 URI，part 使用所属库默认值，缺省符号采用声明名。省略类型实参时支持从指针、Struct/Union 和 void 结果推断。`LoweringResult.imports` 交付按声明身份绑定的 `NativeReference`；`Compiler.compile(nativeSymbols: ...)` 按资产 ID 与请求符号查找显式链接符号，shared/executable 输出由 `linkInputs` 提供实现，object/archive 输出保留未决引用。未使用声明仍检查静态义务，未引用的合法导入不要求绑定。Native.addressOf 保留原生函数或数据符号的真实地址，取地址不调用函数或读取字段；支持静态链接与共享库地址重定位。自动资产发现、运行时 resolver/进程回退查找、实例接收者及完整 FFI 类型仍未接通。当前后端支持同步入口内不逃逸的托管对象；`isLeaf` 保留声明承诺，跨线程及异步托管调用转换仍未实现。 |
 | 间接原生调用 | 独立 IR/CodeGenerator API 支持 `NativeCall`，从 `Pointer<NativeFunction<T>>` 的完整类型推导签名并检查 Dart 实参；参数和结果执行上述原生边界转换，函数地址通过寄存器调用，无须符号绑定。地址和其他活跃值经过寄存器覆盖、栈传参、分支及循环保持有效。IR 保留 `isLeaf` 承诺，当前后端支持同步标量/指针调用和入口内对象存活；支持从闭包发起调用，跨线程托管调用协议尚未接通。 |
 | `asFunction` | 前端按 `dart:ffi` 声明身份将调用转换成捕获当时指针值的普通闭包 IR，其函数体执行 `NativeCall`。支持显式/推断 Dart 函数类型、显式 extension override、空参数/void 结果、上述标量和指针签名及兼容的指针返回类型扩大；直接调用的 `isLeaf` 按常量参数求值，默认 false。返回的函数可经普通 IR 的返回、局部变量、集合、分支、循环、动态调用及嵌套闭包使用。同名用户方法仍是普通调用。已接通同步闭包的原生调用，保留捕获指针、参数及返回对象经过回收后的地址与身份；原生 ABI 接点传递原始地址。支持已闭合原生签名的 `asFunction` 方法提取、泛型或已实例化的函数值、显式 extension override、dynamic 调用和可空方法值。间接调用在创建原生闭包前核对请求的 Dart 函数类型，不兼容的标量、参数形状或指针方差抛出 ArgumentError；`isLeaf` 可由方法值的调用参数选择，默认 false。Dart 原生回调创建及跨线程协议仍待接通。 |
@@ -150,6 +151,8 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 [原生控制流对照](../test/compiler/control_flow_test.dart)覆盖整数边界比较、布尔辅助函数、短路副作用、循环的零次/一次/多次执行、嵌套循环及标签转移、循环变量轮换和递归返回。[图交接验证](../test/codegen/native_test.dart)覆盖同目标的不同边参数、乱序块布局和空块；[控制流编码验证](../test/codegen/control_flow_test.dart)检查不返回的循环。[同步异常对照](../test/compiler/exceptions_test.dart)覆盖捕获、重抛、构造器失败、finally 的完成替换及未捕获异常退出。
 
+[原生回调验证](../test/compiler/native_callbacks_test.dart)覆盖逃逸后的调用、异常返回、同线程重入与 GC、混合寄存器/栈参数、指针别名、聚合复制和异线程拒绝。调用约束见 [Pointer.fromFunction](https://api.dart.dev/dart-ffi/Pointer/fromFunction.html)。
+
 ### FFI 对照差异
 
 [Array API](https://api.dart.dev/dart-ffi/Array/Array.variable.html) 规定只有最外层维度可变。固定 SDK 3.14.0 的 VM 将该标志传给内层数组，未拒绝固定内层的越界索引；dartc 保留内层 RangeError 检查。
@@ -160,7 +163,7 @@ ARM64 上，固定 SDK 3.14.0 把带零长度浮点尾数组的浮点前缀结�
 
 `Section.finalizers` 保存八字节对齐的清理函数地址槽，每个零值槽必须有一个指向模块局部代码的 `Relocation.address`。清理函数使用目标平台的无参数、无返回值原生 ABI，不是 Dart 调用 ABI。对象文件、归档及对象读取保留这些引用；ELF 共享库通过 `.fini_array` 注册清理。Mach-O 原始对象保留传统终止函数节，但宿主装载器不能仅凭该元数据保证卸载调用；dartc 的共享库链接器将其转换为装载时的 `__cxa_atexit` 注册。将原始 Mach-O 对象交给外部系统链接器不在卸载保证范围内。
 
-含引用全局槽的模块跨同步入口保留托管堆，由 dartc 链接的共享库在实际卸载时释放；关闭一个仍有其他装载引用的句柄不会提前清理。无引用全局槽的模块仍在每次入口返回时释放堆。独立程序显式释放堆再退出，不生成清理指针节；可执行文件链接拒绝包含该节的对象及已选归档成员。此生命周期不提供并发调用、跨线程调用或跨模块托管值 ABI。
+含引用全局槽的模块跨同步入口保留托管堆，由 dartc 链接的共享库在实际卸载时释放；关闭一个仍有其他装载引用的句柄不会提前清理。声明原生回调的模块也保留堆至卸载；其余无引用全局槽的模块在每次入口返回时释放堆。独立程序显式释放堆再退出，不生成清理指针节；可执行文件链接拒绝包含该节的对象及已选归档成员。此生命周期不提供并发调用、跨线程调用或跨模块托管值 ABI。
 
 [清理节契约](../test/object/finalizers_test.dart)和[链接契约](../test/linker/finalizers_test.dart)检查格式、引用及可执行文件拒绝；[卸载验证](../test/linker/finalizers_native_test.dart)覆盖最后一个句柄关闭、归档成员与重新装载。[托管全局验证](../test/compiler/managed_globals_test.dart)覆盖跨入口回收、别名、循环、可空和 num 存储，以及 final/late 和失败或递归初始化语义。平台执行范围仍以上表为准。
 

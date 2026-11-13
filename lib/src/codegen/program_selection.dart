@@ -24,6 +24,7 @@ final class ProgramSelection(
   final GlobalStorage globals,
   final InstanceStorage instances, {
   SuspensionFunctions? suspensions,
+  final Map<NativeCallbackAddress, FunctionTarget> callbacks = const {},
 }) {
   final suspensions = suspensions ?? SuspensionFunctions(const []);
   final functions = <FunctionTarget, SelectedFunction>{};
@@ -124,6 +125,7 @@ final class ProgramSelection(
                 layouts.strings.callFor(instruction) ??
                 globals.callFor(instruction) ??
                 switch (instruction) {
+                  NativeCallbackAddress() => callbacks[instruction],
                   DirectCall(:final target) => target,
                   TypeCast() ||
                   NullCheck() => casts.targetFor(instruction, layouts).target,
@@ -206,6 +208,7 @@ final class ProgramSelection(
         ? heap.primitives.intersection({...calls, heap.invalid})
         : {if (calls.contains(heap.invalid)) heap.invalid};
     final missing = calls.difference({
+      ...callbacks.values,
       ...functions.keys,
       ...primitives,
       ...layouts.nativeCalls.signatures.keys,

@@ -15,6 +15,7 @@ import 'program_selection.dart';
 import 'scalar_function.dart';
 import 'native_adapter.dart';
 import 'native_bindings.dart';
+import 'native_callback.dart';
 import 'program_layout.dart';
 import 'constant_data.dart';
 import 'stack_maps.dart';
@@ -112,10 +113,14 @@ base class ScalarCodeGenerator<R extends Object>(
         }.values,
       );
     }
-    final bindings = NativeBindings(program, imports, exports);
+    final bindings = NativeBindings(program, imports, exports, selected);
     program = bindings.program;
     imports = bindings.imports;
     exports = bindings.exports;
+    final callbacks = bindings.callbacks;
+    final callbackGetters = {
+      for (final entry in callbacks.entries) entry.value.address: entry.key,
+    };
     selected.addAll(bindings.definitions);
     selected.addAll(program.reachableFrom(selected));
     final sourceProgram = program;
@@ -281,7 +286,9 @@ base class ScalarCodeGenerator<R extends Object>(
               program.implementationOf(target)?.referencedClasses ?? const [],
         ),
       );
-      final persistent = !globals.isEmpty && globals.hasReferences(layouts);
+      final persistent =
+          callbacks.isNotEmpty ||
+          !globals.isEmpty && globals.hasReferences(layouts);
       final selection = ProgramSelection(
         layouts,
         heap,
@@ -292,11 +299,15 @@ base class ScalarCodeGenerator<R extends Object>(
         globals,
         instances,
         suspensions: suspensions,
+        callbacks: {
+          for (final entry in callbacks.entries) entry.key: entry.value.address,
+        },
       );
       for (final declaration in selected) {
         final function = program.implementationOf(declaration);
         final binding = imports[declaration];
         if (binding != null ||
+            callbackGetters.containsKey(declaration) ||
             declaration == globals.address ||
             heap.primitives.contains(declaration)) {
           continue;
@@ -337,12 +348,24 @@ base class ScalarCodeGenerator<R extends Object>(
     final selection = resolved;
     final layouts = selection.layouts, heap = selection.heap;
     final globals = selection.globals, traces = selection.traces;
-    final persistent = !globals.isEmpty && globals.hasReferences(layouts);
+    final persistent =
+        callbacks.isNotEmpty ||
+        !globals.isEmpty && globals.hasReferences(layouts);
     final relocations = <Relocation>[];
     final symbolNames = <String, int>{};
     final nativeCalls = <(int, Fixup, int)>[];
     final nativeAddresses = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
+    final callbackOwners = <NativeCallbackAddress, List<(int, Fixup)>>{};
+    final callbackAddresses = <NativeCallbackAddress, List<(int, Fixup)>>{};
+    NativeCallback<R> callbackEntry(
+      FunctionEmitter<R> emitter,
+      NativeCallbackAddress callback,
+    ) => NativeCallback(
+      emitter,
+      callback,
+      (fixup) => (callbackOwners[callback] ??= []).add((code.length, fixup)),
+    );
     final functions = {
       for (final body in selection.functions.values)
         body.target: ScalarFunction(body, _createFunction()),
@@ -367,6 +390,7 @@ base class ScalarCodeGenerator<R extends Object>(
     final constants = ConstantData(
       layouts,
       selected.length +
+          callbacks.length +
           exports.values.where((e) => needsEntry(e.signature)).length +
           (entryPoint == null ? 0 : 1),
     );
@@ -427,7 +451,7 @@ base class ScalarCodeGenerator<R extends Object>(
             context: persistent
                 ? (fixup) => contextAddresses.add((code.length, fixup))
                 : null,
-            globals: persistent
+            globals: persistent && !globals.isEmpty
                 ? (fixup) => globalAddresses.add((code.length, fixup))
                 : null,
           );
@@ -486,6 +510,13 @@ base class ScalarCodeGenerator<R extends Object>(
                   [],
                 ),
               ),
+            )
+          : callbackGetters.containsKey(declaration)
+          ? callbackEntry(emitter, callbackGetters[declaration]!).address(
+              (fixup) =>
+                  (callbackAddresses[callbackGetters[declaration]!] ??= []).add(
+                    (code.length, fixup),
+                  ),
             )
           : primitives.contains(declaration)
           ? heap.emit(
@@ -598,6 +629,36 @@ base class ScalarCodeGenerator<R extends Object>(
       code.add(bytes);
     }
     frameName = null;
+    for (final callback in callbacks.entries) {
+      code.add(Uint8List((-code.length) & 15));
+      final emitter = _createFunction();
+      final bytes = NativeAdapter(emitter).generate(
+        callback.key.signature,
+        (fixup, position, frame) {
+          call(fixup, callback.value.target);
+          safepoint(position, StackRoots(0, 0, []));
+        },
+        intoDart: true,
+        heap: entry(emitter),
+        callback: callbackEntry(emitter, callback.key),
+      );
+      for (final (start, fixup)
+          in callbackAddresses[callback.key] ?? const <(int, Fixup)>[]) {
+        relocations.add(
+          .instruction(0, start + fixup.offset, fixup.encoding, symbols.length),
+        );
+      }
+      symbols.add(
+        .new(
+          '.callback${symbols.length}',
+          0,
+          code.length,
+          bytes.length,
+          binding: .local,
+        ),
+      );
+      code.add(bytes);
+    }
     for (final MapEntry(:key, :value) in exports.entries) {
       if (!needsEntry(value.signature)) continue;
       code.add(Uint8List((-code.length) & 15));
@@ -656,11 +717,30 @@ base class ScalarCodeGenerator<R extends Object>(
     final globalType = globals.isEmpty
         ? null
         : constants.addressOf(layouts.types.constant(globals.declaration.type));
+    assert(symbols.length == constants.symbolBase);
     symbols.addAll(constants.symbols);
     final sections = [
       Section.code(code.takeBytes()),
       if (constants.symbols.isNotEmpty) constants.finish(),
     ];
+    for (final uses in callbackOwners.values) {
+      for (final (start, fixup) in uses) {
+        relocations.add(
+          .instruction(0, start + fixup.offset, fixup.encoding, symbols.length),
+        );
+      }
+      symbols.add(
+        .new(
+          '.callbackThread${symbols.length}',
+          sections.length,
+          0,
+          8,
+          kind: .data,
+          binding: .local,
+        ),
+      );
+      sections.add(Section.zeroFill(8, alignment: 8));
+    }
     if (globalData != null) {
       final symbol = symbols.length, section = sections.length;
       symbols.add(

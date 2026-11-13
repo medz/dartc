@@ -6,11 +6,17 @@ final class NativeBindings(
   IrProgram source,
   Map<FunctionTarget, NativeImport> sourceImports,
   Map<FunctionTarget, NativeExport> sourceExports,
+  Set<FunctionTarget> selected,
 ) {
   late final IrProgram program;
   final definitions = <FunctionTarget>{};
   final imports = <FunctionTarget, NativeImport>{};
   final exports = <FunctionTarget, NativeExport>{};
+  final callbacks =
+      <
+        NativeCallbackAddress,
+        ({FunctionTarget address, FunctionTarget target})
+      >{};
   final _functions = <IrFunction>[];
 
   this {
@@ -41,6 +47,47 @@ final class NativeBindings(
               ? _bridge(target, intoDart: true)
               : target] =
           binding;
+    }
+    for (final body in source.functions.where(
+      (f) => selected.contains(f.target),
+    )) {
+      for (final block in body.blocks) {
+        for (final instruction
+            in block.instructions.whereType<NativeCallbackAddress>()) {
+          final signature = instruction.dartSignature;
+          final target = FunctionTarget(
+            null,
+            'callback${callbacks.length}',
+            signature.result,
+            signature.parameters,
+          );
+          final entry = Block(target.parameterTypes);
+          final result = entry.emit(
+            DirectCall(instruction.function, entry.parameters),
+          );
+          entry.finish(
+            result.type == .never
+                ? Unreachable(result)
+                : Return(signature.result == .voidType ? null : result),
+          );
+          _functions.add(IrFunction(target, [entry]));
+          definitions.add(target);
+          final address = FunctionTarget(
+            null,
+            'callbackAddress${callbacks.length}',
+            .integer,
+            [],
+          );
+          definitions.add(address);
+          externals.add(IrExternal(address));
+          callbacks[instruction] = (
+            address: address,
+            target: _needsBridge(instruction.signature)
+                ? _bridge(target, intoDart: true)
+                : target,
+          );
+        }
+      }
     }
     program = _functions.isEmpty
         ? source
