@@ -3,6 +3,7 @@ library;
 
 import 'package:test/test.dart';
 
+import 'fixtures/function_values.dart' as sdk;
 import 'fixtures/function_values_ffi.dart';
 
 void main() {
@@ -37,6 +38,15 @@ void main() {
       expect(native.constructorIdentity(count), 11111);
     }
   });
+  test(
+    'redirected constructor values retain defaults and public argument names',
+    () {
+      for (final count in [0, 40000]) {
+        expect(sdk.constructorDefaults(count), 1);
+        expect(native.constructorDefaults(count), 1);
+      }
+    },
+  );
   test('indirect void calls and exceptions preserve effects and cleanup', () {
     for (final count in [0, 40000]) {
       expect(native.effects(count), 123409);

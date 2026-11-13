@@ -28,6 +28,11 @@ final class FunctionValues() {
         'constructorIdentity',
       );
 
+  late final constructorDefaults = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'constructorDefaults',
+      );
+
   late final effects = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('effects');
 

@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
@@ -79,11 +80,31 @@ typedef RenameBox<T> = Box<T>;
 typedef NumericBox<T extends num> = Box<T>;
 
 abstract class Ticket() {
-  factory create({int value}) = Product;
+  factory create({int value, int factor}) = Product;
+  factory promoted() = Product.promoted;
   int get value;
+  int get total;
 }
 
-class Product({@override final int value = 6}) implements Ticket;
+class Product({
+  final int factor = 3,
+  final int extra = 5,
+  @override final int value = 6,
+}) implements Ticket {
+  factory promoted([int factor = 9]) => Product(factor: factor);
+
+  @override
+  int get total => value * factor + extra;
+}
+
+abstract class ValueBox<T>() {
+  factory make(T value) = ConcreteValue<T>;
+  T get value;
+  int get extra;
+}
+
+class ConcreteValue<T>(@override final T value, [@override final int extra = 7])
+    implements ValueBox<T>;
 
 @Export<Int64 Function(Int64)>()
 int constructors(int count) {
@@ -111,6 +132,41 @@ int constructorIdentity(int count) {
       (Ticket.create != Product.new ? 100 : 0) +
       (Box.new == RenameBox.new ? 1000 : 0) +
       (Box.new != NumericBox.new ? 10000 : 0);
+}
+
+@Export<Int64 Function(Int64)>()
+int constructorDefaults(int count) {
+  final queueFactory = Queue<int>.new;
+  final generic = ValueBox.make;
+  final specialized = ValueBox<int>.make;
+  final ticketFactory = Ticket.create;
+  final promotedFactory = Ticket.promoted;
+  final dynamic dynamicFactory = ticketFactory;
+  collect(count);
+  final queue = queueFactory()..addAll([2, 3]);
+  final first = generic<String>('kept'), second = specialized(11);
+  final supplied = ticketFactory(value: 4, factor: 2);
+  final omitted = ticketFactory();
+  final promoted = promotedFactory();
+  final Ticket dynamicTicket = dynamicFactory(value: 8);
+  collect(count);
+  try {
+    dynamicFactory(extra: 99);
+    return -1;
+  } on NoSuchMethodError {
+    return queue.removeFirst() == 2 &&
+            queue.single == 3 &&
+            first.value == 'kept' &&
+            first.extra == 7 &&
+            second.value == 11 &&
+            second.extra == 7 &&
+            supplied.total == 13 &&
+            omitted.total == 23 &&
+            promoted.total == 59 &&
+            dynamicTicket.total == 29
+        ? 1
+        : 0;
+  }
 }
 
 int events = 0;

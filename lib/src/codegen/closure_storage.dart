@@ -109,7 +109,7 @@ final class ClosureStorage(
           ? original
           : original.instantiate(value.typeArguments!);
       var target = value.target.implementation;
-      final defaults = defaultsOf(target);
+      var defaults = defaultsOf(target);
       List<ValueType> arguments = value.typeArguments ?? target.typeParameters;
       if (target.kind == .initializer || target.kind == .factory) {
         final applied = value.target.resolveConstruction(
@@ -125,17 +125,34 @@ final class ClosureStorage(
           namedParameters: signature.namedParameters,
         );
         final block = Block(bridge.parameterTypes);
+        final destination = applied.target.signature;
+        final inputs = destination.bind<Value>(
+          block.parameters.take(signature.positionalCount).toList(),
+          {
+            for (final MapEntry(:key, :value) in signature.named.entries)
+              key: block.parameters[value.slot],
+          },
+          (i) => defaults[i]!,
+        );
+        // Redirects can expose fewer parameters and a different named order.
+        defaults = {
+          for (
+            var i = signature.requiredPositional;
+            i < signature.positionalCount;
+            i++
+          )
+            i: defaults[i]!,
+          for (final MapEntry(:key, :value) in signature.named.entries)
+            if (!value.required)
+              value.slot: defaults[destination.named[key]!.slot]!,
+        };
         final call = applied.target.kind == .initializer
             ? Construct(
                 applied.target,
-                block.parameters,
+                inputs,
                 instantiatedType: applied.ownerType,
               )
-            : DirectCall(
-                applied.target,
-                block.parameters,
-                ownerType: applied.ownerType,
-              );
+            : DirectCall(applied.target, inputs, ownerType: applied.ownerType);
         block.finish(Return(block.emit(call)));
         _functions.add(IrFunction(bridge, [block], defaults: defaults));
         target = bridge;
