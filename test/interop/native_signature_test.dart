@@ -4,6 +4,32 @@ import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'ABI integer mappings reject non-integer storage and require a target',
+    () {
+      for (final type in [Bool, Float, Double, IntPtr, Void]) {
+        expect(
+          () => NativeAbiIntegerType(
+            Uri.parse('package:example/types.dart'),
+            'Integer',
+            {Abi.macosArm64: NativeScalarType(type)},
+          ),
+          throwsArgumentError,
+        );
+      }
+      final mapping = {Abi.macosArm64: NativeScalarType(Int8)};
+      final type = NativeAbiIntegerType(
+        Uri.parse('package:example/types.dart'),
+        'Integer',
+        mapping,
+      );
+      mapping.clear();
+      expect(type.resolveAbi(Abi.macosArm64), NativeScalarType(Int8));
+      expect(() => type.resolveAbi(Abi.linuxArm64), throwsUnsupportedError);
+      expect(() => type.declaration('value'), throwsArgumentError);
+      expect(type.declaration('value', abi: Abi.macosArm64), 'int8_t value');
+    },
+  );
   test('nested function pointers retain complete types and C declarators', () {
     final callback = NativePointerType(
       NativeFunctionType(NativeSignature(Int64, [Int8])),

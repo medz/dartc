@@ -26,8 +26,11 @@ final class NativeSignature.types(
   }
 
   /// Formats a C function declarator, including nested pointer types.
-  String declaration(String name) => result.declaration(
-    '$name(${parameters.isEmpty ? 'void' : parameters.map((p) => p.declaration('')).join(', ')})',
+  ///
+  /// [abi] is required when a declaration contains an ABI-specific integer.
+  String declaration(String name, {Abi? abi}) => result.declaration(
+    '$name(${parameters.isEmpty ? 'void' : parameters.map((p) => p.declaration('', abi: abi)).join(', ')})',
+    abi: abi,
   );
 
   @override
@@ -54,6 +57,16 @@ sealed class const NativeTypeRef() {
     return NativeScalarType(type);
   }
 
+  /// Selects an ABI-specific integer's storage, leaving other types unchanged.
+  NativeTypeRef resolveAbi(Abi abi) => switch (this) {
+    NativeAbiIntegerType(:final mapping) =>
+      mapping[abi] ?? (throw UnsupportedError('No $abi mapping for $this.')),
+    _ => this,
+  };
+
+  /// Whether this is scalar storage, including an unresolved ABI integer.
+  bool get isScalar => this is NativeScalarType || this is NativeAbiIntegerType;
+
   /// Whether this is the native void marker.
   bool get isVoid => switch (this) {
     NativeScalarType(:final type) => type == Void,
@@ -79,6 +92,7 @@ sealed class const NativeTypeRef() {
   /// Whether the type describes complete storage rather than an opaque marker.
   bool get isSized => switch (this) {
     NativeScalarType() => !isVoid,
+    NativeAbiIntegerType() => true,
     NativePointerType() || NativeCompoundType() || NativeArrayType() => true,
     NativeFunctionType() || NativeOpaqueType() => false,
   };
@@ -100,29 +114,41 @@ sealed class const NativeTypeRef() {
     ),
     NativeCompoundType() ||
     NativeArrayType() ||
+    NativeAbiIntegerType() ||
     NativeOpaqueType() => throw UnsupportedError(
-      'Native aggregate storage requires a target layout.',
+      'Native aggregate or ABI-dependent storage requires a target layout.',
     ),
   };
 
   /// Formats a C declarator with [name], or an unnamed type when it is empty.
-  String declaration(String name) => switch (this) {
+  ///
+  /// ABI-specific integers require [abi] and use its fixed-width C type.
+  String declaration(String name, {Abi? abi}) => switch (this) {
+    NativeAbiIntegerType() =>
+      abi == null
+          ? throw ArgumentError('An ABI is required for $this.')
+          : resolveAbi(abi).declaration(name),
     NativeScalarType(:final type) =>
       '${type.cType}${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativePointerType(element: final NativeFunctionType function) =>
-      function.declaration('(*$name)'),
+      function.declaration('(*$name)', abi: abi),
     NativePointerType(element: final NativeArrayType array) =>
-      array.declaration('(*$name)'),
+      array.declaration('(*$name)', abi: abi),
     NativePointerType(:final element) => element.declaration(
       '*${name.isEmpty ? '' : ' '}$name',
+      abi: abi,
     ),
-    NativeFunctionType(:final signature) => signature.declaration(name),
+    NativeFunctionType(:final signature) => signature.declaration(
+      name,
+      abi: abi,
+    ),
     NativeCompoundType(name: final tag, :final isUnion) =>
       '${isUnion ? 'union' : 'struct'} $tag${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativeOpaqueType(name: final tag) =>
       'struct $tag${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativeArrayType(:final element, :final length) => element.declaration(
       '$name[$length]',
+      abi: abi,
     ),
   };
 
@@ -144,6 +170,39 @@ final class NativeScalarType(final Type type) extends NativeTypeRef {
 
   @override
   int get hashCode => type.hashCode;
+}
+
+/// A source-declared ABI integer whose mapping supplies fixed-width storage.
+///
+/// Its Dart identity is preserved even when two declarations have equal mappings.
+final class NativeAbiIntegerType(
+  final Uri library,
+  final String name,
+  Map<Abi, NativeScalarType> mapping,
+) extends NativeTypeRef {
+  /// The immutable mapping from the declaration's `AbiSpecificIntegerMapping`.
+  final Map<Abi, NativeScalarType> mapping = .unmodifiable(mapping);
+
+  this {
+    if (name.isEmpty ||
+        mapping.values.any(
+          (value) => !{
+            Int8,
+            Uint8,
+            Int16,
+            Uint16,
+            Int32,
+            Uint32,
+            Int64,
+            Uint64,
+          }.contains(value.type),
+        )) {
+      throw ArgumentError('ABI mappings require fixed-width integer types.');
+    }
+  }
+
+  @override
+  String toString() => '$library::$name';
 }
 
 /// A `dart:ffi` pointer retaining its complete native element type.

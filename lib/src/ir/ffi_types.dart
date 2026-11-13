@@ -122,6 +122,7 @@ abstract final class FfiTypes() {
     ]),
     NativeCompoundType() ||
     NativeArrayType() ||
+    NativeAbiIntegerType() ||
     NativeOpaqueType() => throw UnsupportedError(
       'A source native declaration must be bound before use.',
     ),
@@ -156,16 +157,19 @@ abstract final class FfiTypes() {
     throw UnsupportedError('Native declaration: ${type.dartName}');
   }
 
-  /// The pointee size on supported 64-bit targets, or null if unsized.
-  static int? pointerElementSize(ValueType type) {
-    if (type is ClassType && type.declaration == pointer) {
-      final element = type.typeArguments.single;
-      if (isPointer(element)) return (ffi.Pointer<ffi.Void>).nativeSize;
-      for (final MapEntry(:key, :value) in scalarTypes.entries) {
-        if (element == value) return key.nativeSize;
-      }
+  /// The sized pointee storage, retaining ABI-dependent integer mappings.
+  ///
+  /// Pointer slots have pointer-sized storage even when their element is generic.
+  static NativeTypeRef? pointerElement(ValueType type) {
+    if (!isPointer(type)) return null;
+    final argument = (type as ClassType).typeArguments.single;
+    if (isPointer(argument)) return NativeTypeRef.of(ffi.Pointer<ffi.Void>);
+    try {
+      final element = describe(argument);
+      return element.isSized ? element : null;
+    } on UnsupportedError {
+      return null;
     }
-    return null;
   }
 
   /// The Dart value type corresponding to a supported native signature type.
@@ -173,7 +177,7 @@ abstract final class FfiTypes() {
     NativeScalarType() when native.isVoid => .voidType,
     NativeScalarType() when native.isBoolean => .boolean,
     NativeScalarType() when native.isFloating => .floating,
-    NativeScalarType() => .integer,
+    NativeScalarType() || NativeAbiIntegerType() => .integer,
     NativePointerType() => resolve(native),
     NativeFunctionType() => throw UnsupportedError(
       'A native function requires a pointer.',

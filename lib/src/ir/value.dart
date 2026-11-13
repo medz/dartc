@@ -800,7 +800,7 @@ final class KeepAlive(final Value value) extends Instruction {
 final class PointerOffset(final Value pointer, final Value index)
     extends Instruction {
   this : super(pointer.type) {
-    if (FfiTypes.pointerElementSize(pointer.type) == null ||
+    if (FfiTypes.pointerElement(pointer.type) == null ||
         index.type != .integer) {
       throw ArgumentError(
         'Expected a pointer to sized native storage and integer index.',
@@ -815,10 +815,10 @@ final class PointerOffset(final Value pointer, final Value index)
 ///
 /// The caller must keep the storage alive, aligned and readable. Invalid native
 /// memory access is not a Dart exception and is not checked by this operation.
-final class LoadNative(final Value address, final NativeScalarType nativeType)
+final class LoadNative(final Value address, final NativeTypeRef nativeType)
     extends Instruction {
   this : super(FfiTypes.valueType(nativeType)) {
-    if (address.type != .integer || nativeType.isVoid) {
+    if (address.type != .integer || !nativeType.isScalar || nativeType.isVoid) {
       throw ArgumentError(
         'Expected an integer address and sized native scalar.',
       );
@@ -834,11 +834,12 @@ final class LoadNative(final Value address, final NativeScalarType nativeType)
 /// observable through every alias, even when its result is unused.
 final class StoreNative(
   final Value address,
-  final NativeScalarType nativeType,
+  final NativeTypeRef nativeType,
   final Value value,
 ) extends Instruction {
   this : super(.voidType) {
     if (address.type != .integer ||
+        !nativeType.isScalar ||
         nativeType.isVoid ||
         value.type != FfiTypes.valueType(nativeType)) {
       throw ArgumentError(

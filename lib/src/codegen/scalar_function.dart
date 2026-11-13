@@ -442,8 +442,11 @@ final class ScalarFunction<R extends Object>(
           emitter.loadMemory(destination, source, bytes: 8, signed: false);
           allocation.define(instruction, destination);
         } else if (instruction
-            case StoreNative(:final nativeType) ||
-                StoreObjectData(:final nativeType)) {
+            case StoreNative(nativeType: final NativeTypeRef storageType) ||
+                StoreObjectData(nativeType: final NativeTypeRef storageType)) {
+          final nativeType = storageType.resolveAbi(
+            emitter.convention.target.abi,
+          );
           final offset = instruction is StoreObjectData
               ? instruction.byteOffset
               : null;
@@ -473,8 +476,11 @@ final class ScalarFunction<R extends Object>(
           }
           emptyResult(instruction);
         } else if (instruction
-            case LoadNative(:final nativeType) ||
-                LoadObjectData(:final nativeType)) {
+            case LoadNative(nativeType: final NativeTypeRef storageType) ||
+                LoadObjectData(nativeType: final NativeTypeRef storageType)) {
+          final nativeType = storageType.resolveAbi(
+            emitter.convention.target.abi,
+          );
           final offset = instruction is LoadObjectData
               ? instruction.byteOffset
               : null;

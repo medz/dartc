@@ -8,6 +8,27 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'register arguments still require an integer mapping for the target',
+    () {
+      final type = NativeAbiIntegerType(
+        Uri.parse('package:example/types.dart'),
+        'Integer',
+        {Abi.macosArm64: NativeScalarType(Int8)},
+      );
+      final signature = NativeSignature.types(NativeScalarType(Void), [type]);
+      expect(
+        Arm64Abi(const Target(.macos, .arm64)).classify(signature).parameters,
+        hasLength(1),
+      );
+      for (final abi in <CallingConvention<Object>>[
+        Arm64Abi(const Target(.linux, .arm64)),
+        X64Abi(const Target(.linux, .x64)),
+      ]) {
+        expect(() => abi.classify(signature), throwsUnsupportedError);
+      }
+    },
+  );
   test('ARM64 frames address saved registers beyond the scaled-load range', () {
     final abi = Arm64Abi(const Target(.macos, .arm64));
     final frame = abi.frameLayout(

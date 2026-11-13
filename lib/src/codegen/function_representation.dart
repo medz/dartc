@@ -571,7 +571,9 @@ final class FunctionRepresentation(
               .multiply,
               offset.index,
               Constant.integer(
-                FfiTypes.pointerElementSize(offset.pointer.type)!,
+                layouts.native!.layout
+                    .of(FfiTypes.pointerElement(offset.pointer.type)!)
+                    .size,
               ),
             );
             address = IntBinary(.add, base, bytes);

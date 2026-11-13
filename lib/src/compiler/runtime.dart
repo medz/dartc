@@ -85,9 +85,9 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
         primitives[target] = .captureStackTrace;
         continue;
       case .read:
-        value = block.emit(LoadNative(args.single, .new(Int64)));
+        value = block.emit(LoadNative(args.single, .of(Int64)));
       case .readByte:
-        value = block.emit(LoadNative(args.single, .new(Uint8)));
+        value = block.emit(LoadNative(args.single, .of(Uint8)));
       case .allocatePayload:
         value = block.emit(
           NewPayload(target.returnType as ClassType, args.single),
@@ -105,10 +105,10 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       case .float64FromBits || .float64Bits:
         value = block.emit(FloatBitCast(args.single));
       case .write:
-        block.emit(StoreNative(args.first, .new(Int64), args.last));
+        block.emit(StoreNative(args.first, .of(Int64), args.last));
         value = null;
       case .writeByte:
-        block.emit(StoreNative(args.first, .new(Uint8), args.last));
+        block.emit(StoreNative(args.first, .of(Uint8), args.last));
         value = null;
       case .addressOf:
         value = block.emit(ReferenceAddress(args.single));

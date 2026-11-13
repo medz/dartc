@@ -19,6 +19,12 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     void Function(Fixup, int)? codeAddress,
     void Function(int, FrameLayout<R>)? indirectCall,
   }) {
+    signature = NativeSignature.types(
+      signature.result.resolveAbi(emitter.convention.target.abi),
+      signature.parameters.map(
+        (type) => type.resolveAbi(emitter.convention.target.abi),
+      ),
+    );
     if (indirectCall != null ||
         signature.result is NativeCompoundType ||
         signature.parameters.any((type) => type is NativeCompoundType)) {
@@ -431,6 +437,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
 
   /// Converts one scalar in place at a native call boundary.
   void convert(R register, NativeTypeRef type, {required bool intoDart}) {
+    type = type.resolveAbi(emitter.convention.target.abi);
     if (type.integerLayout case final integer? when integer.bytes < 8) {
       emitter.extendInteger(
         register,

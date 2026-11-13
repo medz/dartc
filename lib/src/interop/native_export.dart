@@ -1,3 +1,5 @@
+import 'dart:ffi' show Abi;
+
 import 'native_signature.dart';
 import 'c_identifier.dart';
 
@@ -8,7 +10,9 @@ final class NativeExport(final String symbol, final NativeSignature signature) {
   }
 
   /// Writes a C prototype retaining scalar, pointer and native function types.
-  void writeDeclaration(StringSink output) {
-    output.writeln('${signature.declaration(symbol)};');
+  ///
+  /// [abi] selects storage for ABI-specific integers in the signature.
+  void writeDeclaration(StringSink output, {Abi? abi}) {
+    output.writeln('${signature.declaration(symbol, abi: abi)};');
   }
 }

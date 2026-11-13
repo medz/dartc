@@ -1974,7 +1974,7 @@ final class Bindings({
       }
     }
     final parameters = registerTypeParameters(element.typeParameters);
-    NativeTypeRef? native;
+    NativeTypeRef? native = abiInteger(element);
     final nativeParent = element.supertype?.element;
     if (nativeParent?.library.uri.toString() == 'dart:ffi') {
       if (nativeParent == nativeParent!.library.getClass('Struct') ||
@@ -2167,9 +2167,17 @@ final class Bindings({
                 .where(
                   (value) =>
                       value.type is dart.InterfaceType &&
-                      FfiTypes.scalarTypes.containsValue(
-                        ffiClass((value.type as dart.InterfaceType).element),
-                      ),
+                      (FfiTypes.scalarTypes.containsValue(
+                            ffiClass(
+                              (value.type as dart.InterfaceType).element,
+                            ),
+                          ) ||
+                          (valueType(
+                                value.type!,
+                                sourceUnit,
+                                variable,
+                              ) as ClassType).nativeType
+                              is NativeAbiIntegerType),
                 )
                 .firstOrNull;
             fields.add(

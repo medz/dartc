@@ -129,7 +129,7 @@ void main() {
         block.emit(
           StoreNative(
             block.emit(PointerAddress(block.parameters.single)),
-            .new(Int64),
+            .of(Int64),
             const Constant.integer(42),
           ),
         ),

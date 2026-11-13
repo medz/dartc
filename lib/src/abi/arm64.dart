@@ -47,6 +47,7 @@ final class Arm64Abi(@override final Target target)
       NativeTypeRef type, {
       bool result = false,
     }) {
+      type = type.resolveAbi(target.abi);
       if (type is NativeCompoundType) {
         final layout = storage.of(type);
         final hfa = storage.homogeneous(type);

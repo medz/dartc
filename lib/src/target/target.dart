@@ -26,6 +26,14 @@ final class const Target(
     final abi => throw UnsupportedError('Unsupported host: $abi'),
   };
 
+  /// The FFI ABI of the output, independent of the compiler's host.
+  ffi.Abi get abi => switch ((operatingSystem, architecture)) {
+    (.macos, .arm64) => ffi.Abi.macosArm64,
+    (.macos, .x64) => ffi.Abi.macosX64,
+    (.linux, .arm64) => ffi.Abi.linuxArm64,
+    (.linux, .x64) => ffi.Abi.linuxX64,
+  };
+
   /// Parses a platform name such as `linux-arm64`.
   factory parse(String value) {
     for (final os in OperatingSystem.values) {

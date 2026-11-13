@@ -174,7 +174,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       }.linkSharedLibrary([.object(object), ...inputs], name: name),
     };
     final header = StringBuffer();
-    NativeExports(exports.values).writeHeader(header);
+    NativeExports(exports.values).writeHeader(header, abi: target.abi);
     return Compilation._(
       bytes,
       header.toString(),

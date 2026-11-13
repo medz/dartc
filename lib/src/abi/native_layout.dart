@@ -74,6 +74,8 @@ final class NativeLayout(final Target target) {
 
   NativeStorage _layout(NativeTypeRef type, Set<NativeCompoundType> active) {
     switch (type) {
+      case NativeAbiIntegerType():
+        return _layout(type.resolveAbi(target.abi), active);
       case NativeScalarType() || NativePointerType():
         return NativeStorage._(type.nativeSize, type.nativeSize);
       case NativeArrayType(:final element, :final length):

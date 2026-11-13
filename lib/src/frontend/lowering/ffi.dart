@@ -7,6 +7,38 @@ import 'package:dartc/interop.dart';
 
 final _library = Uri.parse('dart:ffi');
 
+NativeAbiIntegerType? abiInteger(InterfaceElement element) {
+  final parent = element.supertype?.element;
+  if (parent?.library.uri != _library ||
+      parent != parent!.library.getClass('AbiSpecificInteger')) {
+    return null;
+  }
+  for (final annotation in element.metadata.annotations) {
+    final value = annotation.computeConstantValue();
+    if (value?.type case dart.InterfaceType(element: final annotationClass)
+        when annotationClass ==
+            parent.library.getClass('AbiSpecificIntegerMapping')) {
+      final mapping = <ffi.Abi, NativeScalarType>{};
+      for (final entry in value!.getField('mapping')!.toMapValue()!.entries) {
+        final os = entry.key!
+            .getField('_os')!
+            .getField('_name')!
+            .toStringValue();
+        final architecture = entry.key!
+            .getField('_architecture')!
+            .getField('_name')!
+            .toStringValue();
+        final abi = ffi.Abi.values.firstWhere(
+          (abi) => abi.toString() == '${os}_$architecture',
+        );
+        mapping[abi] = nativeType(entry.value!.type!) as NativeScalarType;
+      }
+      return NativeAbiIntegerType(element.library.uri, element.name!, mapping);
+    }
+  }
+  throw ArgumentError('Missing AbiSpecificIntegerMapping on ${element.name}.');
+}
+
 bool isAsFunction(ExecutableElement member) =>
     member.library.uri == _library &&
     member.baseElement ==
@@ -66,6 +98,7 @@ NativeTypeRef nativeType(
         }
       }
     }
+    if (abiInteger(type.element) case final integer?) return integer;
   }
   throw UnsupportedError('Native signature type: $type');
 }
@@ -284,9 +317,13 @@ Value? lowerFfi(
     }
   }
   final pointerElements = access == library.getExtension('PointerPointer');
-  NativeScalarType? storage;
+  NativeTypeRef? storage;
   if (pointerElements) {
     storage = NativeScalarType(ffi.Uint64);
+  } else if (access == library.getExtension('AbiSpecificIntegerPointer')) {
+    storage = FfiTypes.describe(
+      (operands.first.type as ClassType).typeArguments.single,
+    );
   } else {
     for (final MapEntry(key: native, value: type)
         in FfiTypes.scalarTypes.entries) {
@@ -385,7 +422,9 @@ Value? lowerFfi(
       IntBinary(
         .multiply,
         scalar(operands[1], .integer),
-        Constant.integer(storage.nativeSize),
+        storage is NativeAbiIntegerType
+            ? emit(NativeSize(storage))
+            : Constant.integer(storage.nativeSize),
       ),
     );
     final address = emit(
@@ -491,7 +530,8 @@ Value _load(
   Value owner,
   Value Function(Instruction) emit,
 ) => switch (storage) {
-  NativeScalarType() => emit(LoadNative(address, storage)),
+  NativeScalarType() ||
+  NativeAbiIntegerType() => emit(LoadNative(address, storage)),
   NativePointerType() => emit(
     PointerFromAddress(
       emit(LoadNative(address, NativeScalarType(ffi.Uint64))),
@@ -511,7 +551,8 @@ Value _store(
   Value Function(Instruction) emit,
 ) {
   final result = switch (storage) {
-    NativeScalarType() => emit(StoreNative(address, storage, value)),
+    NativeScalarType() ||
+    NativeAbiIntegerType() => emit(StoreNative(address, storage, value)),
     NativePointerType() => emit(
       StoreNative(
         address,

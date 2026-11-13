@@ -68,6 +68,7 @@ const _compilerLibraries = {
   'mixed_numeric',
   'math',
   'native_integers',
+  'abi_integers',
   'native_floats',
   'native_function_pointers',
   'native_imports',
@@ -277,6 +278,7 @@ Future<void> main(List<String> args) async {
           'doubles' ||
           'mixed_numeric' ||
           'native_integers' ||
+          'abi_integers' ||
           'native_floats' ||
           'native_function_pointers' ||
           'native_imports' ||
@@ -329,6 +331,7 @@ Future<void> main(List<String> args) async {
       'exceptions': 'pointer',
       'type_checks': 'pointer',
       'native_integers': 'integer',
+      'abi_integers': 'integer',
       'native_floats': 'float',
       'pointer_arithmetic': 'index',
     };

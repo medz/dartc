@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dartc/ir.dart';
+import 'package:dartc/abi.dart';
+import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 import 'numeric_order.dart';
@@ -1826,7 +1828,9 @@ final class IrInterpreter(
         case PointerAddress(:final pointer):
           values[op] = (read(pointer) as ffi.Pointer).address;
         case PointerOffset(:final pointer, :final index):
-          final size = FfiTypes.pointerElementSize(op.type)!;
+          final size = NativeLayout(Target.host())
+              .of(FfiTypes.pointerElement(op.type)!)
+              .size;
           values[op] = ffi.Pointer<ffi.Void>.fromAddress(
             (read(pointer) as ffi.Pointer).address +
                 (read(index) as int) * size,
@@ -1849,7 +1853,8 @@ final class IrInterpreter(
           throw UnsupportedError(
             'Managed physical storage requires native execution.',
           );
-        case LoadNative(:final address, nativeType: final native):
+        case LoadNative(:final address, nativeType: final storage):
+          final native = storage.resolveAbi(ffi.Abi.current());
           final data = _nativeData(
             ffi.Pointer<ffi.Void>.fromAddress(read(address) as int),
             native.nativeSize,
@@ -1875,9 +1880,10 @@ final class IrInterpreter(
           };
         case StoreNative(
           :final address,
-          nativeType: final native,
+          nativeType: final storage,
           :final value,
         ):
+          final native = storage.resolveAbi(ffi.Abi.current());
           final data = _nativeData(
             ffi.Pointer<ffi.Void>.fromAddress(read(address) as int),
             native.nativeSize,

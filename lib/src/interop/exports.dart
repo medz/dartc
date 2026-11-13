@@ -1,3 +1,5 @@
+import 'dart:ffi' show Abi;
+
 import 'native_export.dart';
 import 'c_identifier.dart';
 import 'native_signature.dart';
@@ -17,7 +19,9 @@ final class NativeExports(Iterable<NativeExport> functions) {
   }
 
   /// Writes declarations usable from both C and C++.
-  void writeHeader(StringSink output) {
+  ///
+  /// [abi] is required for declarations containing ABI-specific integers.
+  void writeHeader(StringSink output, {Abi? abi}) {
     final compounds = <NativeCompoundType>[];
     final declarations = <String, NativeTypeRef>{};
     final visited = <NativeTypeRef>{};
@@ -62,7 +66,7 @@ final class NativeExports(Iterable<NativeExport> functions) {
           signature.parameters.forEach(collect);
         case NativeOpaqueType():
           collect(type, pointer: true);
-        case NativeScalarType():
+        case NativeScalarType() || NativeAbiIntegerType():
           break;
       }
     }
@@ -88,14 +92,14 @@ final class NativeExports(Iterable<NativeExport> functions) {
       }
       output.writeln('${type.declaration('')} {');
       for (final field in type.fields) {
-        output.writeln('  ${field.type.declaration(field.name)};');
+        output.writeln('  ${field.type.declaration(field.name, abi: abi)};');
       }
       output.writeln('};');
       if (type.packing != null) output.writeln('#pragma pack(pop)');
     }
     if (declarations.isNotEmpty) output.writeln();
     for (final function in functions) {
-      function.writeDeclaration(output);
+      function.writeDeclaration(output, abi: abi);
     }
     output.writeln('\n#ifdef __cplusplus\n}\n#endif');
   }

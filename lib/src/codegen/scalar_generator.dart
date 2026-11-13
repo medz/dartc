@@ -168,7 +168,7 @@ base class ScalarCodeGenerator<R extends Object>(
       // Codegen materializes these instances without source constructor calls.
       final instantiatedTypes = [
         ...TypeMetadata.fields.keys,
-        if (constantLists) lists.type,
+        if (constantLists) ...[lists.type, lists.buffer],
       ];
       final records = RecordStorage(
         program.classes,
@@ -762,6 +762,6 @@ base class ScalarCodeGenerator<R extends Object>(
         (t) =>
             t is NativeCompoundType ||
             t.isSinglePrecision ||
-            (t.integerLayout?.bytes ?? 8) < 8,
+            (t.resolveAbi(target.abi).integerLayout?.bytes ?? 8) < 8,
       );
 }

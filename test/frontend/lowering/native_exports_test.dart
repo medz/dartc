@@ -24,7 +24,12 @@ void main() {
         target,
         same(
           result.program.functions
-              .singleWhere((f) => f.target.name == 'add')
+              .singleWhere(
+                (f) =>
+                    f.target.library == target.library &&
+                    f.target.owner == null &&
+                    f.target.name == 'add',
+              )
               .target,
         ),
       );

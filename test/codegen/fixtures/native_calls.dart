@@ -152,7 +152,7 @@ List<ObjectModule> nativeCalls(Target target) {
             returned.emit(
               LoadNative(
                 returned.emit(PointerAddress(parameters.first)),
-                .new(Int64),
+                .of(Int64),
               ),
             ),
           ),

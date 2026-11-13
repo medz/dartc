@@ -11,6 +11,7 @@ export 'src/interop/native_signature.dart'
         NativeSignature,
         NativeTypeRef,
         NativeScalarType,
+        NativeAbiIntegerType,
         NativePointerType,
         NativeFunctionType,
         NativeField,
