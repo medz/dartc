@@ -39,7 +39,6 @@ import '../test/compiler/fixtures/managed_objects_assets.dart';
 import '../test/compiler/fixtures/random_entropy_assets.dart';
 import '../test/compiler/fixtures/native_finalizers_assets.dart';
 import '../test/compiler/fixtures/native_symbols_assets.dart';
-import '../test/compiler/fixtures/platform_time_assets.dart';
 import '../test/support/native_assets.dart';
 import '../test/support/runtime.dart';
 
@@ -116,7 +115,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'bigint',
     'text_conversion',
     'stopwatch',
-    'platform_time',
+    'date_time',
     'regexp_escape',
   };
   final selected = names.toSet();
@@ -227,6 +226,7 @@ Future<void> main(List<String> args) async {
       ('bigint', 'bigint', 'entry_bigint'),
       ('text_conversion', 'text_conversion', 'entry_text_conversion'),
       ('stopwatch', 'stopwatch', 'entry_stopwatch'),
+      ('date_time', 'date_time', 'entry_date_time'),
       ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
     ]) {
       if (!selected.contains(fixture)) continue;
@@ -235,7 +235,6 @@ Future<void> main(List<String> args) async {
       ], output: const .executable());
       await entry.write(assets.file('compiler/$output'));
     }
-    if (selected.contains('platform_time')) await buildPlatformTime(target);
     if (target == const Target(.linux, .arm64) &&
         selected.contains('math_random')) {
       for (final source in ['random_unavailable', 'random_source_lost']) {

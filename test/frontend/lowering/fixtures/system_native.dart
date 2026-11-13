@@ -6,4 +6,7 @@ import 'package:dartc/runtime/contracts.dart';
 @Native<Int Function()>(symbol: 'getpid')
 external int processId();
 
-void main() => processId();
+void main() {
+  processId();
+  DateTime.now();
+}

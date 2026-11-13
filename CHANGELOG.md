@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Support DateTime calendar and epoch constructors, current time, local time zones, formatting, conversions, comparisons, arithmetic and copyWith through the SDK algorithms. Preserve DST and timestamp bounds; parse/tryParse still require regular expression matching.
+- Bind native annotations from transitive SDK and runtime libraries before lowering their callers, including leaf address arguments and trusted system functions.
+
 - Support RegExp.escape through the official SDK implementation, preserving literal UTF-16 data, function values and dynamic argument checks. Regular expression matching remains unavailable.
 
 - Create native callbacks with `Pointer.fromFunction` for static Dart functions, including scalar, pointer and struct signatures. Preserve state and GC roots across synchronous reentry, return the specified exception value, and reject calls from another OS thread.

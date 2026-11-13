@@ -56,7 +56,12 @@ final class Lowering({final bool enableAssertions = false}) {
       }
     }
     final native = NativeBindings(bindings);
-    input.libraries.forEach(native.bind);
+    for (final library in libraries) {
+      if (input.libraries.contains(library) ||
+          input.runtimeSources.contains(library.element.uri)) {
+        native.bind(library);
+      }
+    }
     final functions = <IrCallable>[];
     final classes = <IrClass>[];
     for (final unit in input.libraries.expand((library) => library.units)) {

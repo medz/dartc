@@ -7,6 +7,7 @@ import '../runtime/finalization.dart' as finalization;
 import '../runtime/memory.dart';
 import '../runtime/type_info.dart' as metadata;
 import '../runtime/stack_trace.dart' as traces;
+import 'date_time.dart' as dates;
 
 @patch
 class Finalizer<T> {
@@ -63,6 +64,20 @@ class Error {
 class StackTrace {
   @patch
   static StackTrace get current => traces.currentStackTrace();
+}
+
+@patch
+class DateTime {
+  @patch
+  static int _getCurrentMicros() => dates.currentTimeMicros();
+
+  @patch
+  static String _timeZoneNameForClampedSeconds(int secondsSinceEpoch) =>
+      dates.timeZoneName(secondsSinceEpoch);
+
+  @patch
+  static int _timeZoneOffsetInSecondsForClampedSeconds(int secondsSinceEpoch) =>
+      dates.timeZoneOffsetInSeconds(secondsSinceEpoch);
 }
 
 @patch

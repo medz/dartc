@@ -16,11 +16,11 @@ void main() {
     'Asia/Shanghai',
     'Australia/Lord_Howe',
   ]) {
-    test('platform time matches clock and zone rules for $zone', () async {
+    test('DateTime matches calendar, clock and zone rules for $zone', () async {
       final before = DateTime.now().microsecondsSinceEpoch;
       final native = await Process.run(
         NativeAssets(Target.host())
-            .file('compiler/entry_platform_time')
+            .file('compiler/entry_date_time')
             .absolute
             .path,
         [],
@@ -31,14 +31,19 @@ void main() {
       expect(native.exitCode, 0, reason: '${native.stdout}\n${native.stderr}');
       expect(native.stderr, isEmpty);
       final lines = const LineSplitter().convert(native.stdout as String);
-      expect(int.parse(lines.first), inInclusiveRange(before, after));
+      for (final instant in lines.take(2)) {
+        expect(int.parse(instant), inInclusiveRange(before, after));
+      }
       final sdk = await Process.run(
         Platform.resolvedExecutable,
-        ['test/compiler/fixtures/platform_time_sdk.dart'],
+        ['test/compiler/fixtures/date_time.dart'],
         environment: {'TZ': zone},
       );
       expect(sdk.exitCode, 0, reason: '${sdk.stdout}\n${sdk.stderr}');
-      expect(lines.skip(1), const LineSplitter().convert(sdk.stdout as String));
+      expect(
+        lines.skip(2),
+        const LineSplitter().convert(sdk.stdout as String).skip(2),
+      );
     });
   }
 }
