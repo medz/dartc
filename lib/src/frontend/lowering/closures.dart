@@ -287,14 +287,16 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     switch (node) {
       case ast.SimpleIdentifier(:final element):
         _use(element);
+        // Record getters have a resolved type but no declaration element.
         if (_current != null &&
             !node.isQualified &&
             !node.inDeclarationContext() &&
-            element is ExecutableElement &&
-            element is! ConstructorElement &&
-            !element.isStatic &&
-            (isClassLike(element.enclosingElement) ||
-                isExtensionOwner(element.enclosingElement))) {
+            (element == null && node.staticType != null ||
+                element is ExecutableElement &&
+                    element is! ConstructorElement &&
+                    !element.isStatic &&
+                    (isClassLike(element.enclosingElement) ||
+                        isExtensionOwner(element.enclosingElement)))) {
           _useReceiver();
         }
       case ast.ThisExpression() || ast.SuperExpression():

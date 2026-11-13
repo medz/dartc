@@ -1,12 +1,75 @@
 import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
+import '../support/ir_interpreter.dart';
+
 TypeParameterType parameter(String name, [ValueType? bound]) =>
     TypeParameterType(name)
       ..initializeBound(bound ?? ValueType.object.nullable);
 
 void main() {
   final library = Uri.parse('memory:generic-functions');
+  test('instance-driven instantiation retains actual arguments and bounds', () {
+    final t = parameter('T', .number), u = parameter('U');
+    final owner = ClassType(library, 'Box', typeParameters: [u]);
+    final identity = FunctionTarget(
+      library,
+      'identity',
+      t,
+      [t],
+      typeParameters: [t],
+    );
+    final body = Block(identity.parameterTypes);
+    body.finish(Return(body.parameters.single));
+    final generic = FunctionConstant(identity);
+    for (final actual in [ValueType.integer, ValueType.string]) {
+      final target = FunctionTarget(library, 'apply', .boolean, []);
+      final entry = Block();
+      final value = entry.emit(
+        TypeView(
+          ObjectConstant(owner.instantiate([actual]), {}),
+          owner.instantiate([.object]),
+        ),
+      );
+      final applied = entry.emit(
+        InstantiateFunctionFrom(generic, value, owner),
+      );
+      entry.finish(
+        Return(
+          entry.emit(TypeTest(applied, FunctionType(.integer, [.integer]))),
+        ),
+      );
+      final function = IrFunction(target, [entry]);
+      final runner = IrInterpreter(
+        IrProgram(
+          [IrClass(owner, [])],
+          [
+            IrFunction(identity, [body]),
+            function,
+          ],
+        ),
+        {},
+      );
+      if (actual == ValueType.integer) {
+        expect(runner.run(function, []), isTrue);
+      } else {
+        expect(() => runner.run(function, []), throwsA(isA<TypeError>()));
+      }
+      expect(
+        () => InstantiateFunctionFrom(
+          generic,
+          value,
+          owner.instantiate([actual]),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () =>
+            InstantiateFunctionFrom(generic, const Constant.integer(1), owner),
+        throwsArgumentError,
+      );
+    }
+  });
   test('call sites use the same type arguments they retain', () {
     final t = parameter('T');
     final function = FunctionTarget(library, 'f', t, [], typeParameters: [t]);

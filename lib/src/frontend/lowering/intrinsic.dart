@@ -251,7 +251,9 @@ Value? Function(FunctionTarget, Block)? intrinsicFor(
         Construct(bind(units.unnamedConstructor!), entry.parameters),
       );
     }
-    if (element == string.getGetter('length')) {
+    if (element == string.getGetter('length') ||
+        element ==
+            element.library.getClass('_StringBase')?.getGetter('length')) {
       return (target, entry) =>
           entry.emit(StringLength(entry.parameters.single));
     }

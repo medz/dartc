@@ -22,18 +22,14 @@ void main() {
     ('sdkStorageString', sdk.sdkStorageString),
     ('sdkStoragePattern', sdk.sdkStoragePattern),
     ('recordString', sdk.recordString),
+    ('setString', sdk.setString),
+    ('mapString', sdk.mapString),
   ]) {
     test('$name matches the Dart SDK', () {
       fixture.compare(name, [], expected);
     });
   }
-  for (final name in [
-    'functionString',
-    'setString',
-    'mapString',
-    'listString',
-    'errorString',
-  ]) {
+  for (final name in ['functionString', 'listString', 'errorString']) {
     test('$name rejects an unmodeled representation', () {
       final entry = fixture.program.functions.singleWhere(
         (function) => function.target.name == name,

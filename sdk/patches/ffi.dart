@@ -44,16 +44,14 @@ final class _NativeFinalizer(
 
 void _attachPointerFinalizer(
   Pointer<NativeFinalizerFunction>? callback,
-  TypedData data,
+  Finalizable owner,
   Pointer pointer,
   Pointer<Void>? token,
+  int byteLength,
 ) {
   if (callback == null) return;
-  NativeFinalizer(callback).attach(
-    data.buffer as Finalizable,
-    token ?? pointer.cast<Void>(),
-    externalSize: data.lengthInBytes,
-  );
+  NativeFinalizer(callback)
+      .attach(owner, token ?? pointer.cast<Void>(), externalSize: byteLength);
 }
 
 @patch

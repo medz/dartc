@@ -22,6 +22,7 @@ void main() {
         ('genericDotConstructor', sdk.genericDotConstructor),
         ('genericInterfaceTests', sdk.genericInterfaceTests),
         ('genericInterfacePattern', sdk.genericInterfacePattern),
+        ('genericTextJoin', sdk.genericTextJoin),
       ]) {
         fixture.compare(name, [seed], () => function(seed));
       }

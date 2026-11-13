@@ -1,196 +1,123 @@
-import 'dart:collection' show ListBase;
-import 'dart:_internal' show FixedLengthListMixin, UnmodifiableListBase;
-
-import '../../lib/layout/memory.dart';
-
-import '../../lib/runtime/contracts.dart' as runtime;
-import '../runtime/memory.dart';
+import 'dart:_internal' show ListData, NativeList;
 
 @patch
 class List<E> {
+  // A literal here would call this factory again during native construction.
   @patch
-  factory List.empty({bool growable}) => _NativeList<E>.empty(growable);
-
-  @patch
-  factory List.filled(int length, E fill, {bool growable}) =>
-      _NativeList<E>.filled(length, fill, growable);
-
-  @patch
-  factory List.from(Iterable<Object?> elements, {bool growable}) =>
-      _NativeList<E>.from(elements, growable);
-
-  @patch
-  factory List.of(Iterable<E> elements, {bool growable}) =>
-      _NativeList<E>.from(elements, growable);
-
-  @patch
-  factory List.generate(
-    int length,
-    E Function(int) generator, {
-    bool growable,
-  }) {
-    RangeError.checkNotNegative(length);
-    final result = _NativeList<E>.empty(true);
-    for (var i = 0; i < length; i++) {
-      result.add(generator(i));
-    }
-    return growable ? result : _FixedList<E>(result._length, result._data);
-  }
-
-  @patch
-  factory List.unmodifiable(Iterable elements) {
-    final copy = _NativeList<E>.from(elements, true);
-    return _ConstantList<E>(copy._length, copy._data);
-  }
+  factory List.empty({bool growable}) =>
+      growable ? _GrowableList<E>.empty() : _List<E>(0);
 }
 
-@runtime.ReferencePayload()
-final class _ListData {
-  @runtime.Primitive(.allocatePayload)
-  external static _ListData _allocate(int bytes);
+@patch
+abstract class _Array<E>._storage(
+  final int _storageLength,
+  final ListData _storageData,
+) implements NativeList<E> {
+  @patch
+  int get length => _storageLength;
 
-  static _ListData create(int length) {
-    const maximum = (0x1ffffffffffffff8 - ObjectHeader.fieldsOffset) ~/ 8;
-    return _allocate(length > maximum ? -1 : length * 8);
-  }
-
-  int get capacity =>
-      (Memory.read(Memory.addressOf(this) + ObjectHeader.sizeOffset) -
-          ObjectHeader.fieldsOffset) ~/
-      8;
-
-  Object? operator [](int index) =>
-      Memory.readReference(this, ObjectHeader.fieldsOffset + index * 8);
-
-  void operator []=(int index, Object? value) =>
-      Memory.writeReference(this, ObjectHeader.fieldsOffset + index * 8, value);
-}
-
-base class _NativeList<E>(int length, _ListData data) extends ListBase<E> {
-  int _length = length;
-  _ListData _data = data;
-
-  factory empty(bool growable) => growable
-      ? .new(0, _ListData.create(0))
-      : _FixedList<E>(0, _ListData.create(0));
-
-  factory filled(int length, E fill, bool growable) {
-    RangeError.checkNotNegative(length);
-    final data = _ListData.create(length);
-    for (var i = 0; i < length; i++) {
-      data[i] = fill;
-    }
-    return growable ? .new(length, data) : _FixedList<E>(length, data);
-  }
-
-  factory from(Iterable<Object?> elements, bool growable) {
-    final result = _NativeList<E>.empty(true);
-    for (final element in elements) {
-      result.add(element as E);
-    }
-    return growable ? result : _FixedList<E>(result._length, result._data);
-  }
-
-  @override
-  int get length => _length;
-
-  @override
-  set length(int value) {
-    RangeError.checkNotNegative(value);
-    if (value > _length) {
-      null as E;
-      _reserve(value);
-    } else {
-      for (var i = value; i < _length; i++) {
-        _data[i] = null;
-      }
-    }
-    _length = value;
-  }
-
-  @override
+  @patch
   E operator [](int index) {
-    _checkIndex(index);
-    return _data[index] as E;
+    _checkStorageIndex(index);
+    return _storageData[index] as E;
   }
 
-  @override
-  void operator []=(int index, E value) {
-    _checkIndex(index);
-    _data[index] = value;
-  }
-
-  void _checkIndex(int index) {
-    if (index < 0 || index >= _length) {
+  void _checkStorageIndex(int index) {
+    if (index < 0 || index >= length) {
       throw IndexError.withLength(
         index,
-        _length,
+        length,
         indexable: this,
         name: 'index',
       );
     }
   }
 
-  void _reserve(int required) {
-    final capacity = _data.capacity;
-    if (required <= capacity) return;
-    final grown = capacity * 2 + 4;
-    final data = _ListData.create(required > grown ? required : grown);
-    for (var i = 0; i < _length; i++) {
-      data[i] = _data[i];
-    }
-    _data = data;
-  }
+  @patch
+  _List _sliceInternal(int start, int count, bool needsTypeArgument) =>
+      needsTypeArgument
+      ? _List<E>.generate(count, (i) => this[start + i])
+      : _List<dynamic>.generate(count, (i) => this[start + i]);
 
   @override
-  void add(E value) {
-    _reserve(_length + 1);
-    _data[_length++] = value;
-  }
+  NativeList<E> toFixedLength() => this;
 
   @override
-  void addAll(Iterable<E> values) {
-    if (identical(values, this)) {
-      if (isEmpty) return;
-      throw ConcurrentModificationError(this);
-    }
-    var expected = _length;
-    for (final value in values) {
-      if (_length != expected) throw ConcurrentModificationError(this);
-      add(value);
-      expected++;
-    }
-  }
+  NativeList<E> toUnmodifiable() =>
+      NativeList<E>.unmodifiable(length, _storageData);
 }
 
-final class _FixedList<E>(int length, _ListData data)
-    extends _NativeList<E>
-    with FixedLengthListMixin<E> {
-  this : super(length, data);
+@patch
+class _List<E> {
+  _List._storage(int length, ListData data) : super._storage(length, data);
+
+  @patch
+  factory _List(length) => _List<E>._storage(
+    RangeError.checkNotNegative(length as int, 'length'),
+    ListData.create(length),
+  );
+
+  @patch
+  void _setIndexed(int index, E value) {
+    _checkStorageIndex(index);
+    _storageData[index] = value;
+  }
+
+  @patch
+  void setRange(int start, int end, Iterable<E> iterable, [int skipCount]) =>
+      // The generic SDK path rejects negative skips and insufficient input.
+      super.setRange(start, end, iterable, skipCount);
 }
 
-@runtime.ConstantListStorage('_length', '_data', 'spread')
-final class _ConstantList<E>(final int _length, final _ListData _data)
-    extends UnmodifiableListBase<E> {
-  @override
-  int get length => _length;
+@patch
+class _GrowableList<T>._storage(var _List _storageData)
+    implements NativeList<T> {
+  int _storageLength = 0;
+  static final _List _emptyStorage = _List(0);
 
-  @override
-  E operator [](int index) {
-    if (index < 0 || index >= _length) {
+  @patch
+  factory _GrowableList._withData(_List data) => ._storage(data);
+
+  @patch
+  int get _capacity => _storageData.length;
+  @patch
+  int get length => _storageLength;
+  @patch
+  void _setLength(int new_length) => _storageLength =
+      RangeError.checkValueInInterval(new_length, 0, _capacity, 'length');
+  @patch
+  void _setData(_List array) => _storageData = array;
+  @patch
+  static _List get _emptyList => _emptyStorage;
+
+  void _checkStorageIndex(int index) {
+    if (index < 0 || index >= length) {
       throw IndexError.withLength(
         index,
-        _length,
+        length,
         indexable: this,
         name: 'index',
       );
     }
-    return _data[index] as E;
   }
 
-  static void spread<T>(List<T> target, Iterable<Object?> source) {
-    for (final value in source) {
-      target.add(value as T);
-    }
+  @patch
+  T operator [](int index) {
+    _checkStorageIndex(index);
+    return _storageData[index] as T;
   }
+
+  @patch
+  void _setIndexed(int index, Object? value) {
+    _checkStorageIndex(index);
+    _storageData[index] = value;
+  }
+
+  @override
+  NativeList<T> toFixedLength() =>
+      _List<T>._storage(length, _storageData._storageData);
+
+  @override
+  NativeList<T> toUnmodifiable() =>
+      NativeList<T>.unmodifiable(length, _storageData._storageData);
 }

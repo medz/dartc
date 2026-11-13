@@ -25,6 +25,7 @@ void main() {
     ('implicitSetterStatement', sdk.implicitSetterStatement),
     ('repeatedOperator', sdk.repeatedOperator),
     ('implicitGenericOperators', sdk.implicitGenericOperators),
+    ('recordMembers', sdk.recordMembers),
   ]) {
     test('$name matches SDK values and effects', () {
       for (final seed in [-1, 0, 3]) {
@@ -34,6 +35,10 @@ void main() {
   }
   test('null-aware and if-null access preserves skipped effects', () {
     for (final absent in [false, true]) {
+      fixture.compare('optionalRecordCall', [
+        absent,
+        3,
+      ], () => sdk.optionalRecordCall(absent, 3));
       for (final empty in [false, true]) {
         fixture.compare('nullableAssignments', [
           absent,

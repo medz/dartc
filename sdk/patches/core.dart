@@ -6,16 +6,7 @@ import '../../lib/runtime/contracts.dart' as runtime;
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/finalization.dart' as finalization;
 import '../runtime/type_info.dart' as metadata;
-
-@patch
-class Map<K, V> {
-  @patch
-  factory Map() => collection.LinkedHashMap<K, V>();
-
-  @patch
-  factory Map.unmodifiable(Map<dynamic, dynamic> other) =>
-      collection.UnmodifiableMapView<K, V>(Map<K, V>.from(other));
-}
+import '../runtime/stack_trace.dart' as traces;
 
 @runtime.ConstantMapStorage('_keys', '_values')
 final class const _ConstantMap<K, V>(final List<K> _keys, final List<V> _values)
@@ -82,28 +73,20 @@ class Object {
 @patch
 class Error {
   @patch
+  StackTrace? get stackTrace => traces.errorTrace(this);
+
+  @patch
   static String _objectToString(Object object) =>
       "Instance of '" + object._className + "'";
 
   @patch
-  static String _stringToSafeString(String string) {
-    final result = StringBuffer('"');
-    for (final unit in string.codeUnits) {
-      result.write(switch (unit) {
-        8 => r'\b',
-        9 => r'\t',
-        10 => r'\n',
-        12 => r'\f',
-        13 => r'\r',
-        34 => r'\"',
-        92 => r'\\',
-        < 32 => r'\u' + unit.toRadixString(16).padLeft(4, '0'),
-        _ => String.fromCharCode(unit),
-      });
-    }
-    result.write('"');
-    return result.toString();
-  }
+  static String _stringToSafeString(String string) => json.encode(string);
+}
+
+@patch
+class StackTrace {
+  @patch
+  static StackTrace get current => traces.currentStackTrace();
 }
 
 @patch

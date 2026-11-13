@@ -396,6 +396,9 @@ int _iterationTrace = 0;
 
 final class _Sequence(final int failure) implements Iterable<int> {
   @override
+  Type get runtimeType => throw StateError('runtimeType must not be read');
+
+  @override
   int get length => 2;
   @override
   int elementAt(int index) => index + 1;

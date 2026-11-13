@@ -2137,6 +2137,15 @@ final class IrInterpreter(
         case InstantiateFunction(:final function, :final typeArguments):
           final value = read(function) as _FunctionValue;
           values[op] = value.instantiate(typeArguments.map(resolve).toList());
+        case InstantiateFunctionFrom(
+          :final function,
+          :final instance,
+          :final declaration,
+        ):
+          final type = _runtimeValueType(read(instance)) as ClassType;
+          values[op] = (read(function) as _FunctionValue).instantiate(
+            type.asInstanceOf(declaration)!.typeArguments,
+          );
         case MakeInvocation(
           :final selector,
           :final positional,
@@ -2285,7 +2294,7 @@ final class IrInterpreter(
               negated;
         case TypeCast(:final operand, :final type):
           values[op] = checkType(type, read(operand), cast: true);
-        case TypeView(:final operand):
+        case TypeView(:final operand) || UncheckedCast(:final operand):
           values[op] = read(operand);
         case NullCheck(:final operand):
           values[op] = read(operand)!;
@@ -2778,6 +2787,10 @@ final class _FunctionValue(
   final (Uri, String)? constructorAlias,
   final List<ValueType>? constructorTypeArguments,
 ]) {
+  @override
+  String toString() =>
+      throw UnsupportedError('Unmodeled fixture function formatting');
+
   FunctionType get genericSignature =>
       constructorSignature ??
       target.tearOffSignature(

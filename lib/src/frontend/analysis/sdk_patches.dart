@@ -22,6 +22,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
     ) as Map<String, dynamic>;
     final libraries =
         manifest['vm_common']['libraries'] as Map<String, dynamic>;
+    _registerLibraries(sdk, libraries);
     String library(String name) =>
         root.resolve(libraries[name]['uri']).toFilePath();
     List<String> patches(String name) => switch (libraries[name]['patches']) {
@@ -47,8 +48,12 @@ final class SdkPatches(final OverlayResourceProvider files) {
         'expando_patch.dart',
         'weak_property.dart',
         'double.dart',
+        'double_patch.dart',
         'integers.dart',
+        'array.dart',
+        'growable_array.dart',
         'string_patch.dart',
+        'record_patch.dart',
       };
       final parts = [
         for (final part in _parse(core).directives.whereType<PartDirective>())
@@ -58,6 +63,13 @@ final class SdkPatches(final OverlayResourceProvider files) {
             .singleWhere((path) => path.endsWith('/bool_patch.dart')),
         patches('core')
             .singleWhere((path) => path.endsWith('/bigint_patch.dart')),
+        patches('core')
+            .singleWhere((path) => path.endsWith('/integers_patch.dart')),
+        patches('core')
+            .singleWhere((path) => path.endsWith('/string_buffer_patch.dart')),
+        patches('core')
+            .singleWhere((path) => path.endsWith('/array_patch.dart')),
+        patches('core').singleWhere((path) => path.endsWith('/map_patch.dart')),
       ];
       if (selected.isNotEmpty) {
         throw FormatException(
@@ -65,37 +77,59 @@ final class SdkPatches(final OverlayResourceProvider files) {
         );
       }
       _official.addAll([core, ...parts]);
-      _apply(library('core'), [
-        core,
-        ...parts,
-        '$runtime/core.dart',
-        '$runtime/list.dart',
-        '$runtime/string.dart',
-        '$runtime/integer.dart',
-        '$runtime/double.dart',
-      ]);
+      _apply(
+        library('core'),
+        [
+          core,
+          ...parts,
+          '$runtime/core.dart',
+          '$runtime/list.dart',
+          '$runtime/string.dart',
+          '$runtime/integer.dart',
+          '$runtime/double.dart',
+          '$runtime/record.dart',
+        ],
+        storageClasses: const {'_OneByteString', '_TwoByteString'},
+      );
       final internal = patches('_internal')
           .singleWhere((path) => path.endsWith('/internal_patch.dart'));
       _official.add(internal);
       _apply(library('_internal'), [
         internal,
-        files
-            .getFile(internal)
-            .toUri()
-            .resolve('class_id_fasta.dart')
-            .toFilePath(),
+        '$runtime/class_id.dart',
         patches('_internal').singleWhere(
           (path) => path.endsWith('/check_valid_weak_target_patch.dart'),
         ),
         '$runtime/internal.dart',
+        '$runtime/list_storage.dart',
         '$runtime/print.dart',
       ]);
-      _apply(library('async'), ['$runtime/async.dart', '$runtime/timer.dart']);
-      _apply(library('typed_data'), ['$runtime/typed_data.dart']);
+      final async = patches('async')
+          .singleWhere((path) => path.endsWith('/async_patch.dart'));
+      _official.add(async);
+      _apply(library('async'), [
+        async,
+        '$runtime/async.dart',
+        '$runtime/timer.dart',
+      ]);
+      final typedData = patches('typed_data').single;
+      _official.add(typedData);
+      _apply(library('typed_data'), [typedData, '$runtime/typed_data.dart']);
       final collection = patches('collection')
           .singleWhere((path) => path.endsWith('/collection_patch.dart'));
-      _official.add(collection);
-      _apply(library('collection'), [collection, '$runtime/collection.dart']);
+      final hashes = patches('collection')
+          .singleWhere((path) => path.endsWith('/hash_factories.dart'));
+      _official.addAll([collection, hashes]);
+      _apply(library('collection'), [
+        collection,
+        hashes,
+        '$runtime/collection.dart',
+      ]);
+      _apply(library('_compact_hash'), ['$runtime/compact_hash.dart']);
+      final convert = patches('convert')
+          .singleWhere((path) => path.endsWith('/convert_patch.dart'));
+      _official.add(convert);
+      _apply(library('convert'), [convert, '$runtime/convert.dart']);
       _apply(library('_vm'), ['$runtime/vm.dart']);
     }
 
@@ -113,6 +147,8 @@ final class SdkPatches(final OverlayResourceProvider files) {
         '_internal',
         'async',
         'collection',
+        '_compact_hash',
+        'convert',
         'typed_data',
         '_vm',
       ],
@@ -127,10 +163,48 @@ final class SdkPatches(final OverlayResourceProvider files) {
     );
   }
 
+  void _registerLibraries(String sdk, Map<String, dynamic> libraries) {
+    final path = '$sdk/lib/_internal/sdk_library_metadata/lib/libraries.dart';
+    final declarations = _parse(path).declarations
+        .whereType<TopLevelVariableDeclaration>()
+        .expand((node) => node.variables.variables);
+    final table =
+        declarations
+                .singleWhere((v) => v.name.lexeme == 'libraries')
+                .initializer
+            as SetOrMapLiteral;
+    final existing = {
+      for (final entry in table.elements.whereType<MapLiteralEntry>())
+        (entry.key as StringLiteral).stringValue,
+    };
+    // Analyzer metadata omits backend-only libraries present in the VM manifest.
+    final missing = [
+      for (final MapEntry(key: name, value: info) in libraries.entries)
+        if (name.startsWith('_') && !existing.contains(name))
+          '${jsonEncode(name)}: const LibraryInfo(${jsonEncode(info['uri'])}, '
+              'categories: "Server", implementation: true, documented: false, '
+              'platforms: VM_PLATFORM),',
+    ];
+    if (missing.isEmpty) return;
+    files.setOverlay(
+      path,
+      content: files
+          .getFile(path)
+          .readAsStringSync()
+          .replaceRange(
+            table.leftBracket.end,
+            table.leftBracket.end,
+            '\n${missing.join('\n')}\n',
+          ),
+      modificationStamp: 0,
+    );
+  }
+
   void _apply(
     String libraryPath,
     List<String> implementations, {
     Set<String>? classes,
+    Set<String> storageClasses = const {},
   }) {
     final library = files.getFile(libraryPath);
     final libraryUri = library.toUri();
@@ -155,6 +229,23 @@ final class SdkPatches(final OverlayResourceProvider files) {
       ...implementations,
     ];
     final units = {for (final path in paths) path: _parse(path)};
+    bool replaced(String path, CompilationUnitMember declaration) =>
+        _official.contains(path) &&
+        declaration is ClassDeclaration &&
+        storageClasses.contains(declaration.namePart.typeName.lexeme);
+    for (final name in storageClasses) {
+      final definitions = [
+        for (final path in implementations.where((p) => !_official.contains(p)))
+          ...units[path]!.declarations.whereType<ClassDeclaration>().where(
+            (declaration) =>
+                declaration.namePart.typeName.lexeme == name &&
+                !_patched(declaration),
+          ),
+      ];
+      if (!name.startsWith('_') || definitions.length != 1) {
+        throw FormatException('SDK storage implementation unavailable: $name');
+      }
+    }
     final replacements = {
       for (final path in implementations.where((p) => !_official.contains(p)))
         for (final declaration
@@ -170,17 +261,43 @@ final class SdkPatches(final OverlayResourceProvider files) {
               })
                 (declaration.namePart.typeName.lexeme, _memberKey(member)),
     };
-    final originals = <String, (String, ClassDeclaration)>{};
+    final originals = <String, ClassDeclaration>{};
+    final mixins = <String, MixinDeclaration>{};
+    final members = <(String, (String?, String)), (String, ClassMember)>{};
     final functions = <(String, String?), (String, FunctionDeclaration)>{};
     for (final MapEntry(key: path, value: syntax) in units.entries) {
       for (final declaration in syntax.declarations) {
+        if (replaced(path, declaration)) continue;
+        final classMembers = switch (declaration) {
+          ClassDeclaration() => (
+            declaration.namePart.typeName.lexeme,
+            declaration.body.members,
+          ),
+          MixinDeclaration() => (
+            declaration.name.lexeme,
+            declaration.body.members,
+          ),
+          _ => null,
+        };
+        if (classMembers case (final name, final declarations)) {
+          for (final member in declarations.where((m) => !_patched(m))) {
+            if (_memberKey(member) case final key?) {
+              final identity = (name, key);
+              if (members.containsKey(identity)) {
+                throw FormatException(
+                  'Duplicate SDK member: $path:${member.offset}',
+                );
+              }
+              members[identity] = (path, member);
+            }
+          }
+        }
         if (_patched(declaration)) continue;
         switch (declaration) {
           case ClassDeclaration():
-            originals[declaration.namePart.typeName.lexeme] = (
-              path,
-              declaration,
-            );
+            originals[declaration.namePart.typeName.lexeme] = declaration;
+          case MixinDeclaration():
+            mixins[declaration.name.lexeme] = declaration;
           case FunctionDeclaration():
             functions[(
               declaration.name.lexeme,
@@ -209,7 +326,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
       for (var i = 0; i < pending.length; i++) {
         final name = pending[i];
         if (!visited.add(name)) continue;
-        final parent = originals[name]?.$2;
+        final parent = originals[name];
         if (parent == null) continue;
         if (parent.body.members.any(
           (m) =>
@@ -240,7 +357,11 @@ final class SdkPatches(final OverlayResourceProvider files) {
       edit(path, start, start, 'augment $modifiers');
     }
 
-    void allowImplementation(String path, AnnotatedNode declaration) {
+    void allowImplementation(
+      String path,
+      AnnotatedNode declaration, {
+      bool externalBody = false,
+    }) {
       final external = switch (declaration) {
         ConstructorDeclaration(:final externalKeyword) ||
         MethodDeclaration(:final externalKeyword) ||
@@ -248,9 +369,15 @@ final class SdkPatches(final OverlayResourceProvider files) {
         _ => null,
       };
       if (external == null) {
-        // Internal platform bodies can depend on VM-specific representations.
-        if (ownerUri == Uri.parse('dart:_internal') &&
-            declaration is MethodDeclaration) {
+        if (externalBody) {
+          throw FormatException(
+            'Cannot replace a Dart body with an external: $path',
+          );
+        }
+        // Retain the declared type when replacing a platform implementation.
+        if (declaration is MethodDeclaration &&
+            (ownerUri == Uri.parse('dart:_internal') ||
+                _official.contains(path))) {
           edit(path, declaration.body.offset, declaration.body.end, ';');
           return;
         }
@@ -288,6 +415,10 @@ final class SdkPatches(final OverlayResourceProvider files) {
       }
       edit(path, 0, 0, "part of '$ownerUri';\n");
       for (final declaration in syntax.declarations) {
+        if (replaced(path, declaration)) {
+          edit(path, declaration.offset, declaration.end, '');
+          continue;
+        }
         if (classes != null &&
             _official.contains(path) &&
             (declaration is! ClassDeclaration ||
@@ -300,8 +431,35 @@ final class SdkPatches(final OverlayResourceProvider files) {
           continue;
         }
         switch (declaration) {
+          case MixinDeclaration():
+            final name = declaration.name.lexeme;
+            final owner = mixins[name];
+            if (owner == null ||
+                !name.startsWith('_') ||
+                declaration.onClause != null ||
+                declaration.implementsClause != null) {
+              throw FormatException('SDK mixin unavailable or changed: $path');
+            }
+            augment(
+              path,
+              declaration,
+              owner.baseKeyword == null ? '' : 'base ',
+            );
+            for (final member in declaration.body.members) {
+              if (!_patched(member)) {
+                _checkPrivate(member, path);
+                continue;
+              }
+              final (ownerPath, original) =
+                  members[(name, _memberKey(member))] ??
+                  (throw FormatException(
+                    'SDK mixin member unavailable: $path',
+                  ));
+              augment(path, member);
+              allowImplementation(ownerPath, original);
+            }
           case ClassDeclaration():
-            final (ownerPath, owner) =
+            final owner =
                 originals[declaration.namePart.typeName.lexeme] ??
                 (throw FormatException('SDK class unavailable: $path'));
             final interfaces = declaration.implementsClause;
@@ -324,7 +482,10 @@ final class SdkPatches(final OverlayResourceProvider files) {
             for (final member in declaration.body.members.where(
               (m) => !_patched(m),
             )) {
-              if (!inheritsMember(owner, member)) _checkPrivate(member, path);
+              if (!owner.namePart.typeName.lexeme.startsWith('_') &&
+                  !inheritsMember(owner, member)) {
+                _checkPrivate(member, path);
+              }
             }
             final modifiers = [
               if (declaration.abstractKeyword == null) owner.abstractKeyword,
@@ -349,16 +510,14 @@ final class SdkPatches(final OverlayResourceProvider files) {
                 edit(path, member.offset, member.end, '');
                 continue;
               }
-              final target = owner.body.members
-                  .where(
-                    (candidate) => _memberKey(candidate) == _memberKey(member),
-                  )
-                  .singleOrNull;
-              if (target == null) {
-                throw FormatException(
-                  'SDK member unavailable: $path:${member.offset}',
-                );
-              }
+              final (ownerPath, target) =
+                  members[(
+                    declaration.namePart.typeName.lexeme,
+                    _memberKey(member),
+                  )] ??
+                  (throw FormatException(
+                    'SDK member unavailable: $path:${member.offset}',
+                  ));
               final isExternal = switch (member) {
                 ConstructorDeclaration(:final externalKeyword) ||
                 MethodDeclaration(
@@ -366,23 +525,164 @@ final class SdkPatches(final OverlayResourceProvider files) {
                 ) => externalKeyword != null,
                 _ => false,
               };
-              if (isExternal) {
+              if (isExternal && _official.contains(path)) {
                 // VM linkage metadata supplies no Dart body; retain the SDK declaration.
                 edit(path, member.offset, member.end, '');
                 continue;
               }
               augment(path, member);
-              allowImplementation(ownerPath, target);
+              allowImplementation(ownerPath, target, externalBody: isExternal);
               if (_official.contains(path)) {
                 final parameters = switch (member) {
-                  ConstructorDeclaration(:final parameters) =>
-                    parameters.parameters,
-                  MethodDeclaration(:final parameters) =>
-                    parameters?.parameters ?? const <FormalParameter>[],
-                  _ => const <FormalParameter>[],
+                  ConstructorDeclaration(:final parameters) => parameters,
+                  MethodDeclaration(:final parameters) => parameters,
+                  _ => null,
                 };
+                if (parameters == null) continue;
+                final targetParameters = switch (target) {
+                  ConstructorDeclaration(:final parameters) => parameters,
+                  MethodDeclaration(:final parameters) => parameters,
+                  _ => null,
+                };
+                final positional =
+                    targetParameters?.parameters
+                        .where((p) => p.isPositional)
+                        .toList() ??
+                    <FormalParameter>[];
+                // VM patches may rename positional parameters, which callers bind by position.
+                for (final (i, p)
+                    in parameters.parameters
+                        .where((p) => p.isPositional)
+                        .indexed) {
+                  if (i >= positional.length) break;
+                  final name = p.name, originalName = positional[i].name;
+                  final body = switch (member) {
+                    ConstructorDeclaration(:final body) ||
+                    MethodDeclaration(:final body) => body,
+                    _ => null,
+                  };
+                  final implementationType = p is RegularFormalParameter
+                      ? p.type
+                      : null;
+                  final originalParameter = positional[i];
+                  final originalType =
+                      originalParameter is RegularFormalParameter
+                      ? originalParameter.type
+                      : null;
+                  if (name != null &&
+                      originalName != null &&
+                      body is BlockFunctionBody &&
+                      implementationType is NamedType &&
+                      originalType is NamedType &&
+                      implementationType.name.lexeme ==
+                          originalType.name.lexeme &&
+                      implementationType.typeArguments == null &&
+                      (originalType.typeArguments?.arguments.any(
+                            (type) => type.toSource() != 'dynamic',
+                          ) ??
+                          false)) {
+                    var argument = '_sdkArgument$i';
+                    while (member.toSource().contains(argument)) {
+                      argument += '_';
+                    }
+                    // Retain the public type and the VM body's raw implementation view.
+                    edit(
+                      path,
+                      implementationType.offset,
+                      implementationType.end,
+                      originalType.toSource(),
+                    );
+                    edit(path, name.offset, name.end, argument);
+                    edit(
+                      ownerPath,
+                      originalName.offset,
+                      originalName.end,
+                      argument,
+                    );
+                    edit(
+                      path,
+                      body.block.leftBracket.end,
+                      body.block.leftBracket.end,
+                      '\nfinal ${implementationType.toSource()} ${name.lexeme} = $argument;\n',
+                    );
+                    continue;
+                  }
+                  if (name != null &&
+                      originalName != null &&
+                      name.lexeme != '_' &&
+                      name.lexeme != originalName.lexeme) {
+                    edit(
+                      ownerPath,
+                      originalName.offset,
+                      originalName.end,
+                      name.lexeme,
+                    );
+                  }
+                }
+                final extras =
+                    member is MethodDeclaration && target is MethodDeclaration
+                    ? parameters.parameters
+                          .where(
+                            (p) =>
+                                p.isNamed &&
+                                !target.parameters!.parameters.any(
+                                  (t) =>
+                                      t.isNamed &&
+                                      t.name?.lexeme == p.name?.lexeme,
+                                ),
+                          )
+                          .toSet()
+                    : <FormalParameter>{};
+                if (extras.isNotEmpty) {
+                  if (member is! MethodDeclaration ||
+                      member.body is! BlockFunctionBody ||
+                      extras.any(
+                        (p) =>
+                            p is! RegularFormalParameter ||
+                            !p.isOptionalNamed ||
+                            p.defaultClause != null,
+                      )) {
+                    throw FormatException(
+                      'Unsupported SDK implementation parameters: $path:${member.offset}',
+                    );
+                  }
+                  // Implementation-only optional parameters are never supplied by the public API.
+                  final locals = [
+                    for (final p in extras)
+                      '${p.type?.toSource() ?? 'dynamic'}${p.functionTypedSuffix == null ? '' : ' Function${p.functionTypedSuffix!.toSource()}'} ${p.name!.lexeme} = null;',
+                  ];
+                  final body = member.body as BlockFunctionBody;
+                  edit(
+                    path,
+                    body.block.leftBracket.end,
+                    body.block.leftBracket.end,
+                    '\n${locals.join('\n')}',
+                  );
+                  String spelling(FormalParameter p) => files
+                      .getFile(path)
+                      .readAsStringSync()
+                      .substring(p.offset, p.defaultClause?.offset ?? p.end);
+                  final kept = parameters.parameters.where(
+                    (p) => !extras.contains(p),
+                  );
+                  final optional = kept
+                      .where((p) => !p.isRequiredPositional)
+                      .toList();
+                  final parts = [
+                    ...kept.where((p) => p.isRequiredPositional).map(spelling),
+                    if (optional.isNotEmpty)
+                      '${optional.first.isNamed ? '{' : '['}${optional.map(spelling).join(', ')}${optional.first.isNamed ? '}' : ']'}',
+                  ];
+                  edit(
+                    path,
+                    parameters.offset,
+                    parameters.end,
+                    '(${parts.join(', ')})',
+                  );
+                  continue;
+                }
                 // The public SDK declaration owns defaults repeated by VM patches.
-                for (final parameter in parameters) {
+                for (final parameter in parameters.parameters) {
                   if (parameter.defaultClause case final clause?) {
                     edit(path, clause.offset, clause.end, '');
                   }
@@ -390,18 +690,28 @@ final class SdkPatches(final OverlayResourceProvider files) {
               }
             }
           case FunctionDeclaration():
-            if (declaration.externalKeyword != null) {
+            if (declaration.externalKeyword != null &&
+                _official.contains(path)) {
               edit(path, declaration.offset, declaration.end, '');
               continue;
             }
-            augment(path, declaration);
             final (ownerPath, owner) =
                 functions[(
                   declaration.name.lexeme,
                   declaration.propertyKeyword?.lexeme,
                 )] ??
                 (throw FormatException('SDK function unavailable: $path'));
-            allowImplementation(ownerPath, owner);
+            if (_official.contains(path) && owner.externalKeyword == null) {
+              // Keep an existing Dart body instead of a VM-only specialization.
+              edit(path, declaration.offset, declaration.end, '');
+              continue;
+            }
+            augment(path, declaration);
+            allowImplementation(
+              ownerPath,
+              owner,
+              externalBody: declaration.externalKeyword != null,
+            );
           default:
             throw FormatException('Unsupported SDK augmentation: $path');
         }
@@ -450,7 +760,10 @@ bool _patched(AnnotatedNode node) =>
   ConstructorDeclaration(:final name) => (name?.lexeme, 'constructor'),
   MethodDeclaration(:final name, :final propertyKeyword) => (
     name.lexeme,
-    propertyKeyword?.lexeme ?? 'method',
+    propertyKeyword?.lexeme ??
+        (member.isOperator && member.parameters!.parameters.isEmpty
+            ? 'unary'
+            : 'method'),
   ),
   _ => null,
 };
@@ -460,6 +773,8 @@ void _checkPrivate(AnnotatedNode node, String path) {
     ClassDeclaration(:final namePart) ||
     EnumDeclaration(:final namePart) => [namePart.typeName.lexeme],
     FunctionDeclaration(:final name) ||
+    MixinDeclaration(:final name) ||
+    TypeAlias(:final name) ||
     MethodDeclaration(:final name) => [name.lexeme],
     TopLevelVariableDeclaration(:final variables) ||
     FieldDeclaration(

@@ -12,7 +12,7 @@ Future<LoweringResult> prepareRuntime([String? source]) async {
     includeDependencies: true,
     sdk: DartSdk(archive),
     sources: archive,
-    resources: ['sdk/runtime/allocator.dart'],
+    resources: ['sdk/runtime/allocator.dart', 'sdk/runtime/stack_trace.dart'],
   ).use((input) async {
     final result = await Lowering().lower(input);
     heapRuntime = bindRuntime(result);

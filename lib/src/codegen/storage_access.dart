@@ -12,9 +12,9 @@ sealed class StorageAccess(
   Iterable<Value> get inputs;
 }
 
-final class StorageRead(InstanceField field, Value receiver)
+final class StorageRead(InstanceField field, Value receiver, {ValueType? type})
     extends StorageAccess {
-  this : super(field, receiver, field.type);
+  this : super(field, receiver, type ?? field.type);
 
   @override
   Iterable<Value> get inputs => [receiver];

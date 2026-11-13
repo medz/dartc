@@ -20,29 +20,11 @@ IrClass lowerClass(
   List<IrCallable> functions, {
   IrClass? application,
 }) {
-  final (element, namePart, _) = switch (declaration) {
-    ast.ClassDeclaration(
-      :final declaredFragment,
-      :final namePart,
-      :final body,
-    ) =>
-      (declaredFragment!.element, namePart, body.members),
-    ast.EnumDeclaration(
-      :final declaredFragment,
-      :final namePart,
-      :final body,
-    ) =>
-      (declaredFragment!.element, namePart, body.members),
-    ast.MixinDeclaration(:final declaredFragment, :final body) => (
-      declaredFragment!.element,
-      null,
-      body.members,
-    ),
-    ast.ClassTypeAlias(:final declaredFragment) => (
-      declaredFragment!.element,
-      null,
-      const <ast.ClassMember>[],
-    ),
+  final InterfaceElement element = switch (declaration) {
+    ast.ClassDeclaration(:final declaredFragment) => declaredFragment!.element,
+    ast.EnumDeclaration(:final declaredFragment) => declaredFragment!.element,
+    ast.MixinDeclaration(:final declaredFragment) => declaredFragment!.element,
+    ast.ClassTypeAlias(:final declaredFragment) => declaredFragment!.element,
     _ => unsupported(unit, declaration, 'nominal declaration'),
   };
   final sourceMembers = [
@@ -176,17 +158,32 @@ IrClass lowerClass(
     for (final ctor in element.constructors) {
       constructor(unit, ctor, declaration, null, const []);
     }
-  } else if (namePart case ast.PrimaryConstructorDeclaration primary) {
-    constructor(
-      unit,
-      primary.declaredFragment!.element,
-      primary,
-      primary.body?.body,
-      primary.body?.initializers ?? const [],
-    );
-  } else if (element.unnamedConstructor case final ctor?
-      when ctor.isOriginImplicitDefault) {
-    constructor(unit, ctor, declaration, null, const []);
+  } else {
+    for (final (sourceUnit, source) in bindings.fragmentsOf(element)) {
+      final primary = switch (source) {
+        ast.ClassDeclaration(
+          namePart: ast.PrimaryConstructorDeclaration primary,
+        ) ||
+        ast.EnumDeclaration(
+          namePart: ast.PrimaryConstructorDeclaration primary,
+        ) => primary,
+        _ => null,
+      };
+      if (primary == null) continue;
+      final fragment = primary.declaredFragment!;
+      if (fragment != fragment.element.fragments.last) continue;
+      constructor(
+        sourceUnit,
+        fragment.element,
+        primary,
+        primary.body?.body,
+        primary.body?.initializers ?? const [],
+      );
+    }
+    if (element.unnamedConstructor case final ctor?
+        when ctor.isOriginImplicitDefault) {
+      constructor(unit, ctor, declaration, null, const []);
+    }
   }
   for (final (unit, member) in sourceMembers) {
     final fragment = switch (member) {
@@ -344,6 +341,7 @@ IrClass lowerClass(
     );
   }
   var referencePayload = false;
+  var recordStorage = false;
   ({InstanceField length, InstanceField data, FunctionTarget spread})?
   listStorage;
   for (final (sourceUnit, source) in bindings.fragmentsOf(element)) {
@@ -358,6 +356,9 @@ IrClass lowerClass(
         if (annotationType ==
             annotationType.library.getClass('ReferencePayload')) {
           referencePayload = true;
+        } else if (annotationType ==
+            annotationType.library.getClass('RecordStorage')) {
+          recordStorage = true;
         } else if (annotationType ==
             annotationType.library.getClass('ConstantListStorage')) {
           InstanceField field(String key) => fields.singleWhere(
@@ -384,6 +385,7 @@ IrClass lowerClass(
     constructors: constructors,
     weakFields: weakFields,
     referencePayload: referencePayload,
+    recordStorage: recordStorage,
     listStorage: listStorage,
     ephemerons: {
       for (final MapEntry(:key, :value) in ephemeronNames.entries)

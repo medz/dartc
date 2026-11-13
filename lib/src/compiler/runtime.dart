@@ -21,6 +21,34 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     final args = block.parameters;
     final Value? value;
     switch (operation) {
+      case .instantiateClosure:
+        if (target.kind != .function ||
+            target.typeParameters.isNotEmpty ||
+            target.signature.optionalPositional != 0 ||
+            target.signature.named.isNotEmpty ||
+            args.length != 2 ||
+            target.returnType != ValueType.function ||
+            args[1].type is! ClassType) {
+          throw ArgumentError('Invalid function instantiation signature.');
+        }
+        value = block.emit(
+          InstantiateFunctionFrom(
+            args[0],
+            args[1],
+            (args[1].type as ClassType).declaration,
+          ),
+        );
+      case .uncheckedCast:
+        if (target.kind != .function ||
+            target.typeParameters.length != 1 ||
+            target.returnType != target.typeParameters.single ||
+            target.signature.parameters.length != 1 ||
+            target.signature.parameters.single != ValueType.dynamicType ||
+            target.signature.optionalPositional != 0 ||
+            target.signature.named.isNotEmpty) {
+          throw ArgumentError('Invalid unchecked cast signature.');
+        }
+        value = block.emit(UncheckedCast(args.single, target.returnType));
       case .typeView:
         value = block.emit(TypeCast(args.single, TypeMetadata.type));
       case .className:
@@ -45,6 +73,9 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
         continue;
       case .sleep:
         primitives[target] = .sleep;
+        continue;
+      case .captureStackTrace:
+        primitives[target] = .captureStackTrace;
         continue;
       case .read:
         value = block.emit(LoadNative(args.single, .new(Int64)));
@@ -95,16 +126,30 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       release = annotations.entries[RuntimeRole.release],
       runEvents = annotations.entries[RuntimeRole.runEvents],
       eventAccess = annotations.entries[RuntimeRole.events],
-      copyBytes = annotations.entries[RuntimeRole.copyBytes];
+      copyBytes = annotations.entries[RuntimeRole.copyBytes],
+      captureStackTrace = annotations.entries[RuntimeRole.captureStackTrace],
+      recordError = annotations.entries[RuntimeRole.recordError];
   if (allocate == null ||
       release == null ||
       runEvents == null ||
       eventAccess == null ||
-      copyBytes == null) {
+      copyBytes == null ||
+      captureStackTrace == null ||
+      recordError == null) {
     throw ArgumentError('Missing runtime entry contract.');
   }
   return HeapRuntime(
     program,
+    async: switch (annotations.entries) {
+      {
+        RuntimeRole.asyncCreate: final create,
+        RuntimeRole.asyncStart: final start,
+        RuntimeRole.asyncAwait: final awaitValue,
+        RuntimeRole.asyncReturn: final complete,
+      } =>
+        AsyncRuntime(create, start, awaitValue, complete),
+      _ => null,
+    },
     invocation: annotations.entries[RuntimeRole.invocation],
     dispatchFailure: annotations.entries[RuntimeRole.dispatchFailure],
     exhaustivenessFailure:
@@ -116,6 +161,8 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
     runEvents: runEvents,
     eventAccess: eventAccess,
     copyBytes: copyBytes,
+    captureStackTrace: captureStackTrace,
+    recordError: recordError,
     primitives: primitives,
     nonAllocating: annotations.nonAllocating,
   );

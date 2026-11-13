@@ -86,7 +86,7 @@ final class ValueOperations(
     Value left,
     Value right,
     Block block,
-    void Function(TypeTest, List<Value>) prepareTest,
+    Block Function(TypeTest, Block) prepareTest,
   ) {
     final done = graph.addBlock([.boolean]);
     for (final type in [
@@ -102,10 +102,10 @@ final class ValueOperations(
           equal = graph.addBlock([type, type]),
           next = graph.addBlock();
       final a = TypeTest(left, type), b = TypeTest(right, type);
-      prepareTest(a, graph.instructions[block]!);
+      block = prepareTest(a, block);
       graph.ends[block] = Branch(a, Jump(matching), Jump(next));
-      prepareTest(b, graph.instructions[matching]!);
-      graph.ends[matching] = Branch(
+      final checked = prepareTest(b, matching);
+      graph.ends[checked] = Branch(
         b,
         Jump(equal, [a.refinement(true) ?? left, b.refinement(true) ?? right]),
         Jump(next),
@@ -121,6 +121,19 @@ final class ValueOperations(
       graph.ends[equal] = Jump(done, [comparison]);
       block = next;
     }
+    // Records need no persistent identity; equality must still visit their fields.
+    final body = graph.instructions[block]!;
+    final actual = layouts.types.runtimeTypeOf(left, body);
+    final kind = _load(TypeMetadata.kind, actual, body);
+    final record = Equals(kind, Constant.integer(TypeKind.record.index));
+    body.add(record);
+    final ordinary = graph.addBlock();
+    graph.ends[block] = Branch(
+      record,
+      Jump(done, [const Constant.boolean(false)]),
+      Jump(ordinary),
+    );
+    block = ordinary;
     final identity =
         layouts.isReference(left.type) && layouts.isReference(right.type)
         ? ReferenceEquality(left, right)
@@ -133,7 +146,7 @@ final class ValueOperations(
   Block identityHash(
     Value value,
     Block block,
-    void Function(TypeTest, List<Value>) prepareTest,
+    Block Function(TypeTest, Block) prepareTest,
   ) {
     if (value.type == .nullType || layouts.isBoxable(value.type)) {
       return hashScalar(value, block);
@@ -147,7 +160,7 @@ final class ValueOperations(
       if (layouts.typeTest(value.type, type) == .constantFalse) continue;
       final scalar = graph.addBlock([type]), next = graph.addBlock();
       final test = TypeTest(value, type);
-      prepareTest(test, graph.instructions[block]!);
+      block = prepareTest(test, block);
       graph.ends[block] = Branch(
         test,
         Jump(scalar, [test.refinement(true)!]),

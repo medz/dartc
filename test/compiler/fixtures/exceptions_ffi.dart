@@ -29,6 +29,18 @@ final class Exceptions() {
         'checkedDouble',
       );
 
+  late final stackTraceLifecycle = _library
+      .lookupFunction<Bool Function(Int32), bool Function(int)>(
+        'stackTraceLifecycle',
+      );
+  late final traceDepth = _library
+      .lookupFunction<Int32 Function(), int Function()>('traceDepth');
+  late final reenterTrace = _library
+      .lookupFunction<
+        Int32 Function(Pointer<NativeFunction<Int32 Function()>>),
+        int Function(Pointer<NativeFunction<Int32 Function()>>)
+      >('reenterTrace');
+
   void close() {
     _library.close();
     _storage.close();

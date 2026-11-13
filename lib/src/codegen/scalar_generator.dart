@@ -21,7 +21,6 @@ import 'stack_maps.dart';
 import 'heap_plan.dart';
 import 'heap_entry.dart';
 import 'heap_runtime.dart';
-import 'frame_lookup.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
@@ -31,6 +30,8 @@ import 'instance_storage.dart';
 import 'closure_storage.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
+import 'record_storage.dart';
+import 'async_functions.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -125,9 +126,8 @@ base class ScalarCodeGenerator<R extends Object>(
       selected
         ..clear()
         ..addAll(sourceDefinitions);
-      final frames = FrameLookup();
       final heap = HeapPlan(runtime: runtime);
-      final traces = StackTraces(frames);
+      final traces = StackTraces(runtime);
       final casts = CheckedCasts();
       IrCallable? constructor(ValueType? type, [String name = 'new']) {
         final target = program.classes
@@ -165,6 +165,10 @@ base class ScalarCodeGenerator<R extends Object>(
         ),
       );
       final lists = ListStorage(program.classes);
+      final records = RecordStorage(
+        program.classes,
+        bodies.expand((body) => body.recordTypes),
+      );
       final globals = GlobalStorage(
         bodies,
         lateError: lateErrorType == null ? null : constructor(lateErrorType),
@@ -237,11 +241,21 @@ base class ScalarCodeGenerator<R extends Object>(
       final members = MemberCalls(
         program,
         selected,
+        records: records,
         instantiatedTypes: [if (constantLists) lists.type],
       );
+      final asynchronous = AsyncFunctions(
+        selected.map(program.implementationOf).whereType<IrFunction>(),
+      );
       final closures = ClosureStorage(
-        selected.map(program.implementationOf).whereType<IrCallable>(),
-        boundMethods: members.tearOffTargets,
+        [
+          ...selected.map(program.implementationOf).whereType<IrCallable>(),
+          ...asynchronous.entries,
+        ],
+        boundMethods: [
+          ...members.tearOffTargets,
+          ...asynchronous.entries.map((entry) => entry.target),
+        ],
         lateFailure: instances.failure?.target,
       );
       final layouts = ProgramLayout(
@@ -250,7 +264,7 @@ base class ScalarCodeGenerator<R extends Object>(
           ...arithmetic.classes,
           ...program.classes,
           ...closures.classes,
-          traces.declaration,
+          ...asynchronous.classes,
         ],
         nativeLayout: NativeLayout(target),
         functions: program.functions,
@@ -258,6 +272,7 @@ base class ScalarCodeGenerator<R extends Object>(
         closureStorage: closures,
         stringStorage: strings,
         listStorage: lists,
+        recordStorage: records,
         referencedClasses: selected.expand(
           (target) =>
               program.implementationOf(target)?.referencedClasses ?? const [],
@@ -267,13 +282,13 @@ base class ScalarCodeGenerator<R extends Object>(
       final selection = ProgramSelection(
         layouts,
         heap,
-        frames,
         traces,
         casts,
         members,
         arithmetic,
         globals,
         instances,
+        asyncFunctions: asynchronous,
       );
       for (final declaration in selected) {
         final function = program.implementationOf(declaration);
@@ -284,7 +299,11 @@ base class ScalarCodeGenerator<R extends Object>(
           continue;
         }
         if (function is! IrFunction) {
-          throw ArgumentError('Definition has no body: ${declaration.name}');
+          throw ArgumentError(
+            'Definition has no body: ${declaration.library}::'
+            '${declaration.owner == null ? '' : '${declaration.owner!.dartName}.'}'
+            '${declaration.name}',
+          );
         } else {
           selection.include(function);
         }
@@ -325,7 +344,7 @@ base class ScalarCodeGenerator<R extends Object>(
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
     final functions = {
       for (final body in selection.functions.values)
-        body.function.target: ScalarFunction(body, _createFunction(), traces),
+        body.target: ScalarFunction(body, _createFunction()),
     };
     final capture = selection.capture, managed = selection.managed;
     final primitives = selection.primitives;
@@ -580,12 +599,12 @@ base class ScalarCodeGenerator<R extends Object>(
       final body = program.implementationOf(function);
       if (!selected.contains(function) ||
           body is! IrFunction ||
-          body.bodyKind != .synchronous ||
+          (body.bodyKind != .synchronous && body.bodyKind != .asynchronous) ||
           function.kind != .function ||
           function.parameterTypes.isNotEmpty ||
           function.typeParameters.isNotEmpty) {
         throw UnsupportedError(
-          'Process entry requires a synchronous, parameterless function.',
+          'Process entry requires a parameterless function.',
         );
       }
       code.add(Uint8List((-code.length) & 15));

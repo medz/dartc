@@ -92,7 +92,14 @@ const _compilerLibraries = {
 };
 
 Set<String> selectCompilerFixtures(Iterable<String> names) {
-  const available = {..._compilerLibraries, 'entry', 'descriptor_write'};
+  const available = {
+    ..._compilerLibraries,
+    'entry',
+    'descriptor_write',
+    'futures',
+    'async_functions',
+    'records',
+  };
   final selected = names.toSet();
   final unknown = selected.difference(available);
   if (unknown.isNotEmpty) {
@@ -166,6 +173,10 @@ Future<void> main(List<String> args) async {
       ('exceptions', 'exceptions', 'entry_exception'),
       ('finalizers', 'finalizers_entry', 'entry_finalizers'),
       ('finalizers', 'finalizers_error', 'entry_finalizers_error'),
+      ('futures', 'futures', 'entry_futures'),
+      ('async_functions', 'async_functions', 'entry_async_functions'),
+      ('async_functions', 'async_error', 'entry_async_error'),
+      ('records', 'records', 'entry_records'),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([

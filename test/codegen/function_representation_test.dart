@@ -14,6 +14,46 @@ void main() {
   final layouts = ProgramLayout([]);
   final members = MemberCalls(IrProgram([], []), {});
 
+  test('trusted casts omit checks while retaining scalar boxing', () {
+    for (final (source, result) in <(ValueType, ValueType)>[
+      (.object.nullable, FunctionType(.integer, [.integer])),
+      (.object, .integer),
+      (.object, .floating),
+      (.integer, .object),
+      (.floating, .object),
+    ]) {
+      final target = FunctionTarget(uri, 'view', result, [source]);
+      final entry = Block(target.parameterTypes);
+      final cast = entry.emit(UncheckedCast(entry.parameters.single, result));
+      entry.finish(Return(cast));
+      final function = IrFunction(target, [entry]);
+      final checks = CheckedCasts();
+      final body = FunctionRepresentation(
+        function,
+        layouts,
+        checks,
+        members,
+        HeapPlan(),
+      );
+      expect(cast.effects, isEmpty);
+      expect(checks.functions, isEmpty);
+      expect(
+        body.boxes.containsKey(cast),
+        source != ValueType.object && source != ValueType.object.nullable,
+      );
+      expect(body.inputsOf(cast), [entry.parameters.single]);
+      final text = StringBuffer();
+      function.writeTo(text);
+      expect(text.toString(), contains('unchecked'));
+    }
+    final cell = NewCell(CellType(.integer), const Constant.integer(1));
+    expect(() => UncheckedCast(cell, .object), throwsArgumentError);
+    expect(
+      () => UncheckedCast(const Constant.integer(1), cell.type),
+      throwsArgumentError,
+    );
+  });
+
   test('function null comparisons do not inspect method identities', () {
     final method = FunctionTarget(
       uri,

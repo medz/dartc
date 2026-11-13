@@ -559,7 +559,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
       return context.bindings.constantOf(variable, unit, expression);
     case ast.PrefixedIdentifier() ||
         ast.PropertyAccess() ||
-        ast.SimpleIdentifier(element: GetterElement()) ||
+        ast.SimpleIdentifier(element: null || GetterElement()) ||
         ast.SimpleIdentifier(element: MethodElement(isStatic: false)) ||
         ast.FunctionExpressionInvocation() ||
         ast.MethodInvocation(
@@ -607,6 +607,7 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           ast.Identifier(
             element: ClassElement() ||
                 EnumElement() ||
+                MixinElement() ||
                 TypeAliasElement() ||
                 ExtensionElement() ||
                 ExtensionTypeElement(),

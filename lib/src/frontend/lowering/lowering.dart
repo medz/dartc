@@ -36,19 +36,24 @@ final class Lowering({final bool enableAssertions = false}) {
       runtimeSources: input.runtimeSources,
       sourceLibraries: {for (final library in input.libraries) library.element},
     );
-    for (final library in input.libraries) {
+    final libraries = [...input.libraries];
+    final registered = {for (final library in libraries) library.element};
+    for (var i = 0; i < libraries.length; i++) {
+      final library = libraries[i];
       bindings.registerLibrary(library);
-    }
-    Future<void> registerDependencySources(int from) async {
-      for (var i = from; i < bindings.dependencyClasses.length; i++) {
-        final element = bindings.dependencyClasses[i];
-        if (bindings.sourceOf(element) == null) {
-          bindings.registerLibrary(await input.resolveLibrary(element.library));
+      // Mixin binding needs its superclass sources before synchronous lowering.
+      for (final dependency in [
+        for (final fragment in library.element.fragments)
+          ...fragment.importedLibraries,
+        ...library.element.exportedLibraries,
+      ]) {
+        if ((dependency.isInSdk ||
+                input.runtimeSources.contains(dependency.uri)) &&
+            registered.add(dependency)) {
+          libraries.add(await input.resolveLibrary(dependency));
         }
       }
     }
-
-    await registerDependencySources(0);
     final native = NativeBindings(bindings);
     input.libraries.forEach(native.bind);
     final functions = <IrCallable>[];
@@ -94,7 +99,6 @@ final class Lowering({final bool enableAssertions = false}) {
         dependencyFunction < bindings.dependencyFunctions.length ||
         mixin < bindings.mixinDeclarations.length) {
       if (dependencyClass < bindings.dependencyClasses.length) {
-        await registerDependencySources(dependencyClass);
         final element = bindings.dependencyClasses[dependencyClass++];
         final (unit, node) =
             bindings.sourceOf(element) ??
@@ -102,11 +106,13 @@ final class Lowering({final bool enableAssertions = false}) {
               'Class source unavailable: ${element.name}',
             ));
         final declaration = lowerClass(unit, bindings, node, functions);
-        // Primitive numeric declarations and their SDK implementations share a class.
+        bindings.bindInheritedPrimitiveMembers(element, unit, node);
+        // Primitive declarations and their SDK implementations share a class.
         if (!{
           ValueType.number,
           ValueType.integer,
           ValueType.floating,
+          ValueType.string,
         }.contains(declaration.type)) {
           classes.add(declaration);
         }

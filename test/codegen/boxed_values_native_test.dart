@@ -57,12 +57,20 @@ void main() {
       expect(values.stack(count), count.isEven ? 0.5 : -0.0);
       if (count.isOdd) expect(1 / values.stack(count), double.negativeInfinity);
     }
-    for (final operation in ['return', 'view', 'edge', 'initial', 'write']) {
+    for (final operation in [
+      'return',
+      'view',
+      'unchecked',
+      'edge',
+      'initial',
+      'write',
+    ]) {
       expect(values.isNull(operation), 0, reason: operation);
     }
     for (final operation in [
       'return',
       'view',
+      'unchecked',
       'edge',
       'initial',
       'write',

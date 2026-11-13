@@ -58,6 +58,13 @@ String transform(String value, String pattern, int mode, int first, int last) {
         onMatch: (match) => '[' + match[0]! + ']',
         onNonMatch: (part) => '<' + part + '>',
       );
+    case 18:
+      _trace = 0;
+      final result = value.replaceAllMapped(TracingPattern(pattern), (match) {
+        _trace = _trace * 10 + 3;
+        return '[${match.start}:${match.end}]';
+      });
+      return '$_trace/$result';
     default:
       return value.toString();
   }

@@ -6,7 +6,7 @@ import 'binary_encoding.dart';
 import 'double_bits.dart';
 import 'function_emitter.dart';
 import 'function_liveness.dart';
-import 'function_representation.dart';
+import 'selected_function.dart';
 import 'native_invocation.dart';
 import 'reference_equality.dart';
 import 'storage_access.dart';
@@ -14,7 +14,7 @@ import 'type_values.dart';
 
 /// Selects encodings and fixed call locations before allocating a function.
 final class FunctionSelection<R>(
-  final FunctionRepresentation body,
+  final SelectedFunction body,
   final FunctionEmitter<R> emitter,
 ) {
   final layouts = body.layouts;
@@ -55,17 +55,11 @@ final class FunctionSelection<R>(
   }
 
   this {
-    final function = body.function;
-    if (function.bodyKind != .synchronous) {
-      throw UnsupportedError(
-        'Native function signature: ${function.target.name}',
-      );
-    }
     // Internal booleans use integer locations; exported booleans remain rejected.
     entry = emitter.convention.classify(
       NativeSignature.types(
-        layouts.callType(function.target.returnType),
-        layouts.entryTypes(function.target).map(layouts.callType),
+        layouts.callType(body.target.returnType),
+        layouts.entryTypes(body.target).map(layouts.callType),
       ),
     );
     for (final block in body.blocks) {
@@ -120,11 +114,11 @@ final class FunctionSelection<R>(
                 constant: value is ScalarConstant,
               );
             }
-          case NativeInvocation(:final signature, :final arguments):
+          case NativeInvocation(:final signature):
             calls[instruction] = (
               layout: emitter.convention.classify(signature),
               target: null,
-              arguments: arguments,
+              arguments: body.inputsOf(instruction).skip(1).toList(),
             );
           case KeepAlive():
           case NativeSymbolAddress():
@@ -140,10 +134,9 @@ final class FunctionSelection<R>(
               );
             }
             if (_generalTemporaries < 1) _generalTemporaries = 1;
-          case LoadField(:final field, :final type) ||
-              StorageRead(:final field, :final type):
+          case LoadField(:final field) || StorageRead(:final field):
             _storage(field, body.inputsOf(instruction).first);
-            layouts.checkTransfer(field.type, type);
+            layouts.checkTransfer(field.type, body.typeOf(instruction));
           case StoreField(:final field, :final value) ||
               StorageWrite(:final field, :final value):
             _storage(field, body.inputsOf(instruction).first);
@@ -152,7 +145,8 @@ final class FunctionSelection<R>(
               field.type,
               constant: value is ScalarConstant,
             );
-          case TypeView(:final operand, :final type):
+          case TypeView(:final operand, :final type) ||
+              UncheckedCast(:final operand, :final type):
             layouts.checkTransfer(
               operand.type,
               type,
@@ -214,7 +208,7 @@ final class FunctionSelection<R>(
             if (!_number(left.type) || !_number(right.type)) {
               throw UnsupportedError(
                 'Native arithmetic requires known numeric representations in '
-                '${function.target.library}::${function.target.name}: '
+                '${body.target.library}::${body.target.name}: '
                 '${left.type.dartName} $operator ${right.type.dartName}',
               );
             }
@@ -331,8 +325,8 @@ final class FunctionSelection<R>(
           default:
             throw UnsupportedError(
               'Native operation: ${instruction.runtimeType} in '
-              '${body.function.target.owner?.dartName ?? body.function.target.library}.'
-              '${body.function.target.name}',
+              '${body.target.owner?.dartName ?? body.target.library}.'
+              '${body.target.name}',
             );
         }
       }
@@ -345,7 +339,7 @@ final class FunctionSelection<R>(
       if (body.ends[block] case Return(value: final value?)) {
         layouts.checkTransfer(
           value.type,
-          function.target.returnType,
+          body.target.returnType,
           constant: value is ScalarConstant,
         );
       }
@@ -356,8 +350,8 @@ final class FunctionSelection<R>(
               ? argument.test.operand
               : argument;
           layouts.checkTransfer(
-            stored.type,
-            edge.target.parameters[i].type,
+            body.typeOf(stored),
+            body.typeOf(body.parametersOf(edge.target)[i]),
             constant: stored is ScalarConstant,
           );
         }
@@ -407,6 +401,9 @@ final class FunctionSelection<R>(
     Value right, {
     bool floatingInputs = false,
   }) {
+    final inputs = body.inputsOf(instruction).toList();
+    left = inputs.first;
+    if (inputs.length > 1) right = inputs[1];
     final count = floatingInputs
         ? [left, right].where((v) => v.type == .integer).length
         : 0;
@@ -425,6 +422,9 @@ final class FunctionSelection<R>(
     Value left,
     Value right,
   ) {
+    final inputs = body.inputsOf(instruction).toList();
+    left = inputs.first;
+    right = inputs.last;
     if (left.type == .floating) {
       (left, right) = (right, left);
       comparison = switch (comparison) {

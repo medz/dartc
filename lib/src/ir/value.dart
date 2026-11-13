@@ -546,6 +546,7 @@ sealed class Instruction(super.type) extends Value {
     MakeInvocation() ||
     BindMethod(direct: true) ||
     InstantiateFunction() ||
+    InstantiateFunctionFrom() ||
     MakeClosure() ||
     NewCell() ||
     MakeRecord() ||
@@ -610,6 +611,7 @@ sealed class Instruction(super.type) extends Value {
     NumericSquareRoot() ||
     TypeTest() ||
     TypeView() ||
+    UncheckedCast() ||
     RecordGet() ||
     PointerAddress() ||
     NativeAddress() ||
@@ -1106,6 +1108,29 @@ final class InstantiateFunction._(
   Iterable<Value> get inputs => [function];
 }
 
+/// Instantiates a generic function with an instance's actual nominal arguments.
+///
+/// [declaration] selects the supertype view; the instance's static arguments
+/// do not replace its actual arguments. Function bounds remain checked.
+final class InstantiateFunctionFrom(
+  final Value function,
+  final Value instance,
+  final ClassType declaration,
+) extends Instruction {
+  this : super(.function) {
+    final signature = _functionSignature(function);
+    if (declaration != declaration.declaration ||
+        declaration.typeParameters.isEmpty ||
+        declaration.typeParameters.length != signature.typeParameters.length ||
+        instance.type is! ClassType ||
+        (instance.type as ClassType).asInstanceOf(declaration) == null) {
+      throw ArgumentError('Expected matching nominal and function binders.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [function, instance];
+}
+
 FunctionType _functionSignature(Value function) => switch (function.type) {
   final FunctionType type => type,
   _ => throw ArgumentError('Expected a non-nullable function signature.'),
@@ -1528,6 +1553,21 @@ final class TypeView(final Value operand, super.type) extends Instruction {
       throw ArgumentError('A type view requires a valid Dart upcast.');
     }
   }
+  @override
+  Iterable<Value> get inputs => [operand];
+}
+
+/// A trusted type assertion with no runtime check.
+///
+/// The producer must establish that subsequent uses are valid. This changes
+/// the static view, not object identity or runtime type; it cannot expose cells.
+final class UncheckedCast(final Value operand, super.type) extends Instruction {
+  this {
+    if (operand.type is CellType || type is CellType) {
+      throw ArgumentError('A trusted cast cannot expose storage.');
+    }
+  }
+
   @override
   Iterable<Value> get inputs => [operand];
 }

@@ -19,6 +19,7 @@ typedef FunctionReferences = ({
   Set<ObjectConstant> objects,
   Set<FunctionConstant> functionConstants,
   Set<SequenceConstant> sequenceConstants,
+  Set<RecordType> recordTypes,
   Set<ClassType> classes,
   Set<DeferredImport> deferredImports,
 });
@@ -44,6 +45,7 @@ FunctionReferences verifyCallable(
   Set<ObjectConstant>? objects;
   Set<FunctionConstant>? functionConstants;
   Set<SequenceConstant>? sequenceConstants;
+  Set<RecordType>? recordTypes;
   Set<ClassType>? classes;
   Set<DeferredImport>? deferredImports;
   final scope = <TypeParameterType>{};
@@ -71,6 +73,7 @@ FunctionReferences verifyCallable(
       objects: _snapshot(objects),
       functionConstants: _snapshot(functionConstants),
       sequenceConstants: _snapshot(sequenceConstants),
+      recordTypes: _snapshot(recordTypes),
       classes: _snapshot(classes),
       deferredImports: _snapshot(deferredImports),
     );
@@ -105,6 +108,9 @@ FunctionReferences verifyCallable(
 
   void constant(Constant value) {
     checkTypeScope(value.type);
+    if (value is RecordConstant) {
+      (recordTypes ??= {}).add(value.type as RecordType);
+    }
     if (value.type == ValueType.string) {
       (instantiatedClasses ??= {}).add(ValueType.string);
     }
@@ -198,6 +204,9 @@ FunctionReferences verifyCallable(
   for (final block in blocks) {
     void define(Value value, int position) {
       checkTypeScope(value.type);
+      if (value is MakeRecord) {
+        (recordTypes ??= {}).add(value.type as RecordType);
+      }
       if (definitions.containsKey(value)) {
         throw StateError('Repeated SSA definition.');
       }

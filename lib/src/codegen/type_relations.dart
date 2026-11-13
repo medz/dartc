@@ -6,8 +6,9 @@ import 'type_values.dart';
 /// Generates subtype checks over reified types, retaining lexical binder scopes.
 final class TypeRelations(
   final TypeValues values,
-  Iterable<ClassType> declarations,
-) {
+  Iterable<ClassType> declarations, {
+  final ClassType? recordStorage,
+}) {
   static final _scope = ClassType(null, '_TypeScope');
   static final _scopeId = InstanceField(_scope, 'id', .integer, isFinal: true);
   static final _count = InstanceField(_scope, 'count', .integer, isFinal: true);
@@ -476,13 +477,19 @@ final class TypeRelations(
       _equal(current, a, _int(kind.index), shaped, next);
       _equal(shaped, b, _int(kind.index), sameKind, parentKind);
       _equal(parentKind, b, _int(TypeKind.nominal.index), parentShape, no);
-      _equal(
-        parentShape,
-        _load(parentShape, TypeMetadata.shape, right),
-        _int(values.id(parent)),
-        yes,
-        no,
-      );
+      var candidate = parentShape;
+      for (final nominal in [parent, if (kind == .record) ?recordStorage]) {
+        final next = block();
+        _equal(
+          candidate,
+          _load(candidate, TypeMetadata.shape, right),
+          _int(values.id(nominal)),
+          yes,
+          next,
+        );
+        candidate = next;
+      }
+      candidate.finish(Jump(no));
       if (kind == .function) {
         sameKind.finish(
           Return(_call(sameKind, _function, [left, right, ...context])),

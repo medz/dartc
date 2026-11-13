@@ -180,7 +180,14 @@ ObjectModule boxedValues(Target target) {
   no.finish(Return(const Constant.integer(0)));
   functions.add(IrFunction(runtimeBoolean, [boolBody, yes, no]));
 
-  for (final operation in ['return', 'view', 'edge', 'initial', 'write']) {
+  for (final operation in [
+    'return',
+    'view',
+    'unchecked',
+    'edge',
+    'initial',
+    'write',
+  ]) {
     final factory = FunctionTarget(library, 'factory_$operation', .object, []);
     final body = Block(), join = Block([.object]);
     final blocks = [body];
@@ -188,6 +195,8 @@ ObjectModule boxedValues(Target target) {
     switch (operation) {
       case 'view':
         value = body.emit(TypeView(const Constant.floating(0.0), .object));
+      case 'unchecked':
+        value = body.emit(UncheckedCast(const Constant.floating(0.0), .object));
       case 'edge':
         body.finish(Jump(join, [const Constant.boolean(false)]));
         blocks.add(join);
@@ -249,6 +258,7 @@ ObjectModule boxedValues(Target target) {
     for (final operation in [
       'return',
       'view',
+      'unchecked',
       'edge',
       'initial',
       'write',
@@ -269,6 +279,8 @@ ObjectModule boxedValues(Target target) {
       switch (operation) {
         case 'view':
           value = body.emit(TypeView(value, type));
+        case 'unchecked':
+          value = body.emit(UncheckedCast(value, type));
         case 'edge':
           body.finish(Jump(join, [value]));
           blocks.add(join);

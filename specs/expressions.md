@@ -45,7 +45,9 @@ NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调�
 
 Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普通用户对象保留重写、异常和副作用；继承 Object 默认实现时使用身份相等与稳定身份哈希。null 的相等比较不调用用户运算符。int、double、bool 和 null 的内置行为不因装箱改变；数值相等保留整数精度及 NaN 规则，相等的 int/double 与正负零具有相同哈希。见[宽类型与数值边界验证](../test/compiler/bound_methods_test.dart)。函数与 Type 的规则分别见[函数值](functions.md)和[类型值](types.md)。
 
-原生字符串按内容比较和哈希；record 原生表示与结构比较仍待接通。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
+原生字符串按内容比较和哈希。record 支持构造、嵌套常量、位置与命名字段、结构相等、哈希和文本格式化；字段保留求值顺序，托管字段在回收后仍可读取。dynamic 读取按实际形状选择字段，函数字段可以调用，缺失字段和赋值产生 NoSuchMethodError。见[原生 record 验证](../test/compiler/records_test.dart)。哈希值不保证跨运行或编译版本相同，也不保证不等值的哈希不同。
+
+record 的 `==` 按字段值比较，包括同一 record 含 NaN 的情况。SDK 3.14 JIT 的身份快捷判断会令样本中的 `pair == pair` 返回 true；dartc 按 [record 相等规则](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md#equality)和 [Record.== 契约](../sdk/std/lib/core/record.dart)返回 false。该反例单独按规范断言，其余行为与 SDK 对照。
 
 `identityHashCode` 支持普通调用，不调用用户重写的 hashCode。已支持的非 record 对象保持与 identical 相容的稳定哈希，数值与布尔值不因重复装箱改变结果，null 也可作为参数。见[原生身份哈希验证](../test/compiler/expandos_test.dart)。
 
@@ -61,11 +63,13 @@ Object/Object? 视图的 `==`、`!=` 和 hashCode 按实际值选择实现。普
 
 `bool.parse` 和 `bool.tryParse` 使用 SDK 的普通 Dart 实现，支持省略或显式指定 caseSensitive、函数值与原生 Bool 存储。默认只接受 `true`/`false`；关闭大小写敏感后只忽略 ASCII 字母大小写，不裁剪空白，不接受 `0`、`1` 或 Unicode 近似字符。失败时 parse 抛出保留原 source 的 FormatException，tryParse 返回 null。见[SDK 与原生对照](../test/compiler/boolean_text_test.dart)。
 
-## 整数文本转换
+## 数字文本转换
 
 `int.parse`、`int.tryParse`、`int.toString` 和 `int.toRadixString` 支持原生执行，包括静态及绑定方法值。进制为 2–36，字母数字不区分大小写，允许前导正负号和外围 Unicode 空白；显式进制的结果必须落在有符号 64 位范围内。省略 radix 的正数 `0x`/`0X` 前缀允许完整无符号 64 位值，并按相同位模式解释为有符号 int。无效文本和溢出使 parse 抛出 FormatException、tryParse 返回 null；异常保留原 source。无效进制的非空输入抛出 RangeError。格式化使用小写数字，对最小 int 也满足往返契约。FormatException 的具体消息和错误定位不承诺与 SDK 实现逐字相同。
 
-int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。double 支持 toString、toStringAsFixed、toStringAsExponential 和 toStringAsPrecision，保留负零、非有限值、二进制浮点的十进制舍入及精度范围检查；可提取为绑定方法值。已接通同一封闭程序内的 dynamic 成员派发、getter 返回函数的调用、方法提取、签名和类型检查及 noSuchMethod；缺失成员与不匹配签名保留 Invocation 和求值顺序。见[原生文本对照](../test/compiler/object_text_test.dart)。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
+`double.parse`、`double.tryParse`、`num.parse` 和 `num.tryParse` 支持直接调用及函数值。double 接受十进制小数、指数、带符号的 Infinity/NaN 和外围空白，不接受十六进制或数字分隔符；保留负零、次正规数以及溢出到无穷、下溢到零的符号，舍入到最接近的 binary64，恰好居中时取偶数尾数。无效输入使 parse 抛出 FormatException、tryParse 返回 null。num 先尝试整数，成功时保留 int 类型，否则尝试 double。见[库契约](../sdk/std/lib/core/double.dart)、[原生行为对照](../test/compiler/object_text_test.dart)和[舍入边界](../test/runtime/fixtures/decimal_text.dart)。
+
+int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。double 支持 toString、toStringAsFixed、toStringAsExponential 和 toStringAsPrecision，保留负零、非有限值、二进制浮点的十进制舍入及精度范围检查；可提取为绑定方法值。fixed/exponential 的显式小数位数为 0–20，precision 的有效位数为 1–21；非法精度在 NaN、无穷的处理之前抛出 RangeError。省略 exponential 的精度时输出最短指数形式。已接通同一封闭程序内的 dynamic 成员派发、getter 返回函数的调用、方法提取、签名和类型检查及 noSuchMethod；缺失成员与不匹配签名保留 Invocation 和求值顺序。见[原生文本对照](../test/compiler/object_text_test.dart)。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
 
 ## 原生转整数与字符串常量
 
@@ -77,7 +81,7 @@ int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。d
 
 原生字符串常量保留 UTF-16 码元和规范身份，可在普通参数、字段与错误载荷中传递。空串、非 BMP 字符及孤立代理项不会被重新编码或规范化；见[常量数据验证](../test/codegen/object_values_test.dart)。支持 `String.length` 和 `codeUnitAt(index)` 的直接调用、泛型接收者和方法值；长度按 UTF-16 码元计数，读取保留零码元、代理项和非 BMP 字符的两个码元。`index < 0` 或 `index >= length` 时，在访问载荷前抛出 RangeError；未使用结果也保留边界检查、求值和 catch/finally 顺序。见 [`length` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/length.html)、[`codeUnitAt` 契约](https://api.dart.dev/stable/3.13.7/dart-core/String/codeUnitAt.html)、[IR 契约](../test/ir/strings_test.dart)和[原生读取验证](../test/compiler/strings_test.dart)。
 
-`String.fromCharCode` 支持直接调用和构造器值；0 到 0xffff（含单独代理项）生成一个码元，0x10000 到 0x10ffff 生成代理对，范围外抛出 RangeError。`[]` 从 `codeUnitAt` 结果构造单码元字符串，越界保留接收者、下标的求值及清理顺序。`+` 按顺序连接全部码元，空串与孤立代理项不改变内容；动态字符串经过回收、绑定方法及跨入口全局保存后仍可读取。`==`、`!=` 和 hashCode 按内容处理，包括 Object 视图；相等字符串的哈希相同，不要求与 SDK 的具体哈希值一致。见 [`fromCharCode`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCode.html)、[`[]`](https://api.dart.dev/stable/3.13.7/dart-core/String/operator_get.html)及[构造、拼接与回收验证](../test/compiler/strings_test.dart)。插值使用已支持接收者的普通 toString；编码、Unicode 大小写转换、RegExp 和 Error.stackTrace getter 尚未接通。
+`String.fromCharCode` 支持直接调用和构造器值；0 到 0xffff（含单独代理项）生成一个码元，0x10000 到 0x10ffff 生成代理对，范围外抛出 RangeError。`[]` 从 `codeUnitAt` 结果构造单码元字符串，越界保留接收者、下标的求值及清理顺序。`+` 按顺序连接全部码元，空串与孤立代理项不改变内容；动态字符串经过回收、绑定方法及跨入口全局保存后仍可读取。`==`、`!=` 和 hashCode 按内容处理，包括 Object 视图；相等字符串的哈希相同，不要求与 SDK 的具体哈希值一致。见 [`fromCharCode`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCode.html)、[`[]`](https://api.dart.dev/stable/3.13.7/dart-core/String/operator_get.html)及[构造、拼接与回收验证](../test/compiler/strings_test.dart)。插值使用已支持接收者的普通 toString；Unicode 大小写转换和 RegExp 尚未接通。
 
 `String.fromCharCodes` 支持 Iterable<int>、构造器值和可选 start/end。范围要求 `0 <= start <= end`；输入不足时截短，跳过的元素不读 current，空区间不获取迭代器。16 位值保留为码元，较大合法码点分解为代理对；无效码点抛出 ArgumentError。自定义迭代器的 getter、moveNext、current、异常与 finally 保留求值顺序。`String.codeUnits` 返回不可修改的 List<int>，支持长度、索引、迭代及跨回收/入口保存，修改方法仍执行其参数检查后拒绝写入。依据为 [`fromCharCodes`](https://api.dart.dev/stable/3.13.7/dart-core/String/String.fromCharCodes.html)和[固定 SDK String 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/string.dart)。[原生验证](../test/compiler/strings_test.dart)也覆盖从借用的 Int64 指针输入到有容量上限的 UTF-16 输出，以及调用方释放输入后字符串仍存活。
 
@@ -103,6 +107,8 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 `List.generate` 按索引顺序调用生成器，支持固定长度结果；`List.unmodifiable` 复制元素槽。不可修改列表拒绝修改操作，包括空源、空范围和不命中元素的操作。列表支持默认 Comparable 排序、重叠 setRange、insertAll、replaceRange、removeWhere、reversed、asMap 和 cast 视图。惰性 Iterable 的 where/map/take/skip/fold/any/every 保留遍历顺序与回调。标量 typed_data 的范围见[标准库](libraries.md)。
 
+非空 `setRange` 要求非负 skipCount，且跳过后有足够的源元素。固定 SDK 3.14.0 的 VM 固定长度列表对一般 Iterable 漏检这两项，可能只写入部分元素而正常返回；dartc 对负 skipCount 抛出 RangeError，对不足的输入抛出 StateError。依据为[公开范围复制契约](../sdk/std/lib/core/list.dart)与[通用 List 实现](../sdk/std/lib/collection/list.dart)，[独立预期验证](../test/compiler/object_text_test.dart)不采用该 VM 行为。
+
 ## 原生 Set
 
 支持可变与 const Set 字面量，Set/LinkedHashSet/HashSet 的普通、identity/from/of 构造，以及 Set.unmodifiable、插入、删除、查询、遍历和集合运算。默认 Set 保留插入顺序；重复的相等值保留最先插入的对象，lookup 返回该对象。自定义 equals/hashCode/isValidKey 与 toSet 副本保持相等策略。不可修改集合拒绝空修改；cast 视图保留底层元素类型检查。结构变化使正在遍历的迭代器抛出 ConcurrentModificationError。见[原生集合对照](../test/compiler/object_text_test.dart)。
@@ -114,6 +120,14 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 协变视图的写入按实际键和值类型检查；类型错误、hashCode 或 == 抛错时不执行该次条目写入，异常保留 catch/finally。keys 是实时视图，迭代器检查新增、删除及清空等结构修改；仅替换已有值不改变键的迭代顺序。支持 values、entries、forEach、addAll、putIfAbsent 和 update 的普通库行为，以及用户 Map 重写、方法值和已有 Map 模式。键、值和迭代状态在移动回收及跨原生入口保存后保持有效，用户哈希和相等回调中也可分配。见[原生 Map 验证](../test/compiler/maps_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
 
 `const Map` 通过不可变 Dart 实现保留查询、键顺序、类型参数与常量身份；写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。Map spread 保留逐项转换和求值顺序。Map.from/of/fromEntries/fromIterables/unmodifiable、identity、map、update、putIfAbsent、removeWhere 与 cast 视图使用 SDK 算法；不可修改 Map 复制输入并拒绝空修改。List、Set、Map 的 toString 调用元素的实际方法，并终止对循环容器的递归。见[原生集合与格式化对照](../test/compiler/object_text_test.dart)。
+
+## JSON 与 UTF-8
+
+`jsonEncode`、`jsonDecode`、JsonEncoder 和 JsonDecoder 支持原生执行，保留数字、字符串转义、嵌套集合、重复键的后值、缩进、reviver 遍历顺序及 toEncodable/toJson 回调。非法文本抛出 FormatException；非字符串 Map 键、非有限数和无法转换的对象抛出 JsonUnsupportedObjectError，循环容器抛出 JsonCyclicError。支持分块 JSON 解码及 UTF-8 解码与 JSON 解码的组合转换。见[固定 SDK 契约](../sdk/std/lib/convert/json.dart)和[原生行为验证](../test/compiler/object_text_test.dart)。
+
+UTF-8 编解码保留有效码点；编码将孤立 UTF-16 代理项替换为 U+FFFD，解码忽略开头的 BOM。解码支持任意字节处分块、严格错误及 allowMalformed 替换模式；不完整序列在关闭时处理。依据为[UTF-8 契约](../sdk/std/lib/convert/utf.dart)，验证覆盖多字节边界、BOM 分块、超长编码、代理项、越界码点和截断输入。
+
+StringConversionSink.addSlice 的 `isLast: true` 必须关闭输入，并让 JSON 输出 sink 收到唯一结果。固定 SDK 3.14.0 的字符串 JSON sink 仅完成解析，遗漏结果交付和输出关闭；dartc 按[addSlice 契约](../sdk/std/lib/convert/string_conversion.dart)执行完整关闭。[分块验证](../test/compiler/object_text_test.dart)分别检查显式 close 与最后一个 slice，后者的预期不采用该 SDK 错误行为。
 
 ## 数值比较与 SDK 差异
 
@@ -131,6 +145,6 @@ analyzer 14.7 的常量求值也存在相同的精度问题，还会将 `0.0 == 
 
 模式常量、Map 模式重复键与 switch 穷尽性使用同一求值结果，覆盖常量别名、record、枚举及 sealed 层次；带守卫的 case 不保证覆盖。见[模式常量验证](../test/frontend/analysis/pattern_constants_test.dart)。原始 analyzer 对象仍保留上游诊断，包含可能受错误常量折叠影响的不可达警告；会话验收与 IR 转换使用重新检查的结果。
 
-运行时 `identical` 支持普通调用和函数值调用，不执行用户的 `==`。整数按值、double 按位模式比较身份，区分正负零及不同 NaN 位模式；其余已支持原生存储的对象保持引用身份。record 不承诺持久身份，其原生存储尚未接通。见[声明绑定验证](../test/frontend/lowering/identity_test.dart)、[原生身份验证](../test/compiler/pointer_values_test.dart)和 [`identical` 契约](https://api.dart.dev/dart-core/identical.html)。
+运行时 `identical` 支持普通调用和函数值调用，不执行用户的 `==`。整数按值、double 按位模式比较身份，区分正负零及不同 NaN 位模式；其余已支持原生存储的非 record 对象保持引用身份。record 不承诺持久身份，原生运行时的 identical 对 record 返回 false；相等比较仍访问各字段。见[声明绑定验证](../test/frontend/lowering/identity_test.dart)、[原生身份验证](../test/compiler/pointer_values_test.dart)和 [`identical` 契约](https://api.dart.dev/dart-core/identical.html)。
 
 跨 int/double 的 `identical` 常量结果仍未接通；analyzer 为这类依赖目标表示的判断保留未知值，当前转换会明确拒绝，不能把未知值当作 false。

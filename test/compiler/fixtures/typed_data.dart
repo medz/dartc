@@ -131,6 +131,10 @@ bool typedBounds(int mode) {
         Struct.create<Samples>(Uint8List(8), -1);
       case 8:
         Struct.create<Samples>(Uint8List(8), 1);
+      case 9:
+        Uint64List.view(Uint8List(8).buffer, 0, 0x2000000000000000);
+      case 10:
+        ByteData.view(Uint8List(8).buffer, 0x7fffffffffffffff, 2);
     }
     return false;
   } on ArgumentError {
@@ -141,6 +145,11 @@ bool typedBounds(int mode) {
 final class Samples extends Struct {
   @Array(4)
   external Array<Int16> values;
+}
+
+final class ByteSamples extends Struct {
+  @Array(4)
+  external Array<Int8> values;
 }
 
 final class FloatBits extends Union {
@@ -175,6 +184,16 @@ MemoryReport sharedNativeViews(int value) {
 @Export<Bool Function(Int32)>()
 bool typedCollections(int mode) {
   switch (mode) {
+    case 8:
+      final data = Int8List.fromList([-3, 4, -5, 6]);
+      final source = Struct.create<ByteSamples>(data).values.elements;
+      final target = Struct.create<ByteSamples>(data).values.elements.buffer
+          .asUint8ClampedList();
+      target.setRange(1, 4, source);
+      return target[0] == 253 &&
+          target[1] == 0 &&
+          target[2] == 4 &&
+          target[3] == 0;
     case 0:
       final integers = Int8List.fromList([-1]) + Uint16List.fromList([65535]);
       final floats = Float32List.fromList([1.25]) + Float64List.fromList([2.5]);
@@ -212,6 +231,23 @@ bool typedCollections(int mode) {
       try {
         values.rangeEquals(0, 3, copy, 1);
       } on RangeError {
+        return true;
+      }
+      return false;
+    case 6:
+      final values = Uint16List.fromList(List<int>.generate(80, (i) => i * 7));
+      final copy = Uint16List.fromList(values);
+      if (!values.rangeEquals(3, 78, copy, 3)) return false;
+      copy[60]++;
+      return !values.rangeEquals(3, 78, copy, 3);
+    case 7:
+      final source = Int8List.fromList([-3, 4, -5, 6]);
+      final clamped = Uint8ClampedList.view(source.buffer);
+      clamped.setRange(1, 4, source);
+      if (clamped.join(',') != '253,0,4,0') return false;
+      try {
+        clamped.asUnmodifiableView().setRange(0, 4, clamped);
+      } on UnsupportedError {
         return true;
       }
       return false;

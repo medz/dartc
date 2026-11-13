@@ -85,11 +85,12 @@ Instruction? lowerCoreMember(
   };
 }
 
-/// Resolves only the public SDK enum protocols, not user members of the same name.
+/// Resolves SDK enum storage and the public name extension by declaration.
 InstanceField? coreEnumField(ExecutableElement? member) {
   if (member is! GetterElement || !member.library.isDartCore) return null;
   return switch ((member.enclosingElement, member.name)) {
     (ClassElement(name: 'Enum'), 'index') => CoreTypes.enumIndex,
+    (ClassElement(name: 'Enum'), '_name') => CoreTypes.enumName,
     (ExtensionElement(name: 'EnumName'), 'name') => CoreTypes.enumName,
     _ => null,
   };

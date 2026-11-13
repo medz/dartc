@@ -44,14 +44,12 @@ void main() {
     'unsupported entries and unused static errors fail compilation',
     () async {
       final compiler = Compiler(Target.host());
-      for (final name in ['arguments', 'async']) {
-        await expectLater(
-          compiler.compile([
-            'test/compiler/fixtures/entry/$name.dart',
-          ], output: const .executable()),
-          throwsUnsupportedError,
-        );
-      }
+      await expectLater(
+        compiler.compile([
+          'test/compiler/fixtures/entry/arguments.dart',
+        ], output: const .executable()),
+        throwsUnsupportedError,
+      );
       await expectLater(
         compiler.compile([
           'test/compiler/fixtures/arithmetic.dart',

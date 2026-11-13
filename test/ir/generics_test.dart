@@ -7,6 +7,27 @@ void main() {
       TypeParameterType(name)
         ..initializeBound(bound ?? ValueType.object.nullable);
 
+  test(
+    'possible instances follow bounds, promotions, unions and nullability',
+    () {
+      final t = parameter('T', ValueType.number.nullable);
+      final promoted = PromotedTypeParameterType(t, ValueType.integer);
+      expect(t.mayHaveInstance(ValueType.floating), isTrue);
+      expect(t.mayHaveInstance(ValueType.string), isFalse);
+      expect(t.mayHaveInstance(ValueType.nullClass), isTrue);
+      expect(t.nonNullable.mayHaveInstance(ValueType.nullClass), isFalse);
+      expect(promoted.mayHaveInstance(ValueType.integer), isTrue);
+      expect(promoted.mayHaveInstance(ValueType.floating), isFalse);
+      final future = ValueType.futureOr(promoted);
+      expect(future.mayHaveInstance(ValueType.integer), isTrue);
+      expect(
+        future.mayHaveInstance(ValueType.future.instantiate([.integer])),
+        isTrue,
+      );
+      expect(future.mayHaveInstance(ValueType.string), isFalse);
+    },
+  );
+
   test('a declaration uses its own type parameters as its open arguments', () {
     final t = parameter('T');
     for (final declare in [ClassType.new, ClassType.declare]) {

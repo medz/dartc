@@ -1,6 +1,5 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
-import 'package:dartc/src/codegen/frame_lookup.dart';
 import 'package:dartc/src/codegen/global_storage.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
@@ -16,14 +15,10 @@ void main() {
   setUpAll(prepareRuntime);
   test('heap support closes transitively generated call dependencies', () {
     final program = IrProgram([], []);
-    final frames = FrameLookup(), casts = CheckedCasts();
-    final traces = StackTraces(frames);
+    final casts = CheckedCasts();
+    final traces = StackTraces(heapRuntime);
     final arithmetic = NumericOperations();
-    final layouts = ProgramLayout([
-      ...casts.classes,
-      ...arithmetic.classes,
-      traces.declaration,
-    ]);
+    final layouts = ProgramLayout([...casts.classes, ...arithmetic.classes]);
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
@@ -56,7 +51,6 @@ void main() {
     final selection = ProgramSelection(
       layouts,
       heap,
-      frames,
       traces,
       casts,
       MemberCalls(program, {}),
@@ -69,6 +63,8 @@ void main() {
     expect(selection.close(persistent: true), {
       heapRuntime.allocate,
       heapRuntime.release,
+      heapRuntime.captureStackTrace,
+      heapRuntime.recordError,
     });
     expect(arithmetic.functions.length, greaterThanOrEqualTo(2));
     expect(
@@ -80,6 +76,8 @@ void main() {
       ...selection.primitives,
       heapRuntime.allocate,
       heapRuntime.release,
+      heapRuntime.captureStackTrace,
+      heapRuntime.recordError,
       if (selection.capture) traces.capture,
     };
     for (final body in selection.functions.values) {
@@ -88,7 +86,7 @@ void main() {
             .where((t) => !definitions.contains(t))
             .map((t) => t.name),
         isEmpty,
-        reason: body.function.target.name,
+        reason: body.target.name,
       );
     }
   });
@@ -111,13 +109,9 @@ void main() {
       ],
       [init],
     );
-    final frames = FrameLookup(), casts = CheckedCasts();
-    final traces = StackTraces(frames);
-    final layouts = ProgramLayout([
-      ...casts.classes,
-      ...program.classes,
-      traces.declaration,
-    ]);
+    final casts = CheckedCasts();
+    final traces = StackTraces(heapRuntime);
+    final layouts = ProgramLayout([...casts.classes, ...program.classes]);
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
@@ -141,7 +135,6 @@ void main() {
     final selection = ProgramSelection(
       layouts,
       heap,
-      frames,
       traces,
       casts,
       MemberCalls(program, {}),
@@ -154,6 +147,8 @@ void main() {
       constructor,
       heapRuntime.allocate,
       heapRuntime.release,
+      heapRuntime.captureStackTrace,
+      heapRuntime.recordError,
     });
   });
 }

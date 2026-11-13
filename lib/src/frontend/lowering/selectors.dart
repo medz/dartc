@@ -326,6 +326,13 @@ final class SelectorChain(
       ast.SimpleIdentifier(element: final GetterElement getter)
           when !getter.isStatic =>
         (null, node.name, getter, null, false),
+      ast.SimpleIdentifier(element: null, :final name) => (
+        null,
+        name,
+        null,
+        null,
+        false,
+      ),
       ast.SimpleIdentifier(element: final MethodElement method)
           when !method.isStatic =>
         (null, node.name, method, null, false),
@@ -334,9 +341,7 @@ final class SelectorChain(
         target: final target,
         :final argumentList,
         :final isNullAware,
-      )
-          when target?.staticType is dart.DynamicType ||
-              node.isCascaded && cascadeReceiver?.type is DynamicType =>
+      ) =>
         (target, name, null, argumentList, isNullAware),
       ast.MethodInvocation(
         methodName: ast.SimpleIdentifier(element: final GetterElement getter),
@@ -506,9 +511,13 @@ final class SelectorChain(
       final slot = owner.slots[name];
       if (slot == null) unsupported(context.unit, node, 'record member $name');
       final record = context.normal(context.cast(known, owner));
-      return record == null
+      final value = record == null
           ? null
           : context.normal(readRecordField(context, record, slot));
+      final invocation = getterArguments ?? arguments;
+      return invocation == null
+          ? value
+          : invokeValue(value, invocation, getterCall);
     }
     if (coreEnumField(member is ExecutableElement ? member : null)
         case final field?) {
@@ -641,6 +650,7 @@ final class SelectorChain(
       PrefixElement() => true,
       ClassElement() ||
       EnumElement() ||
+      MixinElement() ||
       ExtensionElement() ||
       ExtensionTypeElement() => true,
       _ => false,

@@ -29,7 +29,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
   /// Analysis resources are closed before code generation. [output] selects
   /// the file kind and, for a shared library, its name. No output files change.
   /// Executables use `main` from the first library's exported namespace;
-  /// parameterless synchronous entries are currently supported.
+  /// parameterless synchronous and async entries are supported.
   ///
   /// [nativeSymbols] maps exact asset IDs and requested symbols to native names
   /// before platform symbol decoration.
@@ -66,6 +66,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         'sdk/runtime/dispatch.dart',
         'sdk/runtime/numbers.dart',
         'sdk/runtime/console.dart',
+        'sdk/runtime/stack_trace.dart',
       ],
     ).use((input) async {
       final lowered = await Lowering().lower(input);

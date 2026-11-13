@@ -26,10 +26,13 @@ final class StackMaps() {
   ) {
     if (_entries.isEmpty) return null;
     final data = ByteData(
-      _entries.fold(8, (size, entry) => size + 8 + entry.$2.size),
+      _entries.fold(
+        StackMapRecord.tableHeader,
+        (size, entry) => size + StackMapRecord.callerStack + entry.$2.size,
+      ),
     );
     data.setUint64(0, _entries.length, .little);
-    var offset = 8;
+    var offset = StackMapRecord.tableHeader;
     for (final (address, roots) in _entries) {
       for (final (position, encoding)
           in _addresses[address] ?? const <(int, FixupEncoding)>[]) {
@@ -37,8 +40,8 @@ final class StackMaps() {
       }
       relocations.add(.address(sections.length, offset, symbols.length));
       symbols.add(.new('.dartc.return', 0, address, null, binding: .local));
-      roots.writeTo(data, offset + 8);
-      offset += 8 + roots.size;
+      roots.writeTo(data, offset + StackMapRecord.callerStack);
+      offset += StackMapRecord.callerStack + roots.size;
     }
     final table = symbols.length;
     symbols.add(

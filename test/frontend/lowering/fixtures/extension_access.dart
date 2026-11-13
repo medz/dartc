@@ -3,6 +3,27 @@
 
 import 'effects.dart';
 
+extension RecordAccess<T extends (int, {int named, int Function(int) apply})>
+    on T {
+  int get total => $1 + named;
+  int callImplicit(int value) => apply(value) + $1;
+  int Function() get captured =>
+      () => $1 + named;
+}
+
+int recordMembers(int seed) {
+  final record = (seed, named: seed + 2, apply: (int n) => tick(n));
+  return record.total +
+      record.callImplicit(seed + 3) +
+      record.captured() +
+      record.apply(seed + 4);
+}
+
+int? optionalRecordCall(bool absent, int seed) {
+  final record = absent ? null : (apply: (int n) => tick(n));
+  return record?.apply(tick(seed));
+}
+
 class Cell<T> {
   final List<T> values;
   Cell(T value) : values = [value];

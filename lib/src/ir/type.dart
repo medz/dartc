@@ -17,26 +17,40 @@ sealed class const ValueType() {
     ],
   );
 
-  /// A nominal upper bound for selecting possible instance receivers.
+  /// Whether [type] can supply a runtime instance of this static type.
   ///
-  /// Type arguments remain unresolved; this only excludes unrelated classes.
-  ClassType? get classBound {
-    ValueType type = this;
-    final seen = <TypeParameterType>{};
-    while (true) {
-      switch (type.nonNullable) {
-        case ClassType bound:
-          return bound;
+  /// Checks closed bounds; unresolved type arguments remain possible.
+  bool mayHaveInstance(ClassType type) {
+    if (type == nullClass) return mayBeNull;
+    final active = <TypeParameterType>{};
+    bool visit(ValueType bound) {
+      switch (bound.nonNullable) {
         case final TypeParameterType parameter ||
             NonNullableTypeParameterType(:final parameter):
-          if (!seen.add(parameter)) return null;
-          type = parameter.bound;
-        case PromotedTypeParameterType(:final bound):
-          type = bound;
+          if (!active.add(parameter)) return true;
+          final possible = visit(parameter.bound);
+          active.remove(parameter);
+          return possible;
+        case PromotedTypeParameterType(:final parameter, :final bound):
+          return visit(parameter) && visit(bound);
+        case FutureOrType(:final argument, :final futureType):
+          return visit(argument) || visit(futureType);
+        case RecordType():
+          return type.asInstanceOf(record) != null;
+        case ClassType bound:
+          final view = type.asInstanceOf(bound.declaration);
+          return view != null &&
+              (bound.freeTypeParameters.isNotEmpty ||
+                  view.freeTypeParameters.isNotEmpty ||
+                  bound.accepts(view));
         default:
-          return null;
+          return bound.freeTypeParameters.isNotEmpty ||
+              type.freeTypeParameters.isNotEmpty ||
+              bound.accepts(type);
       }
     }
+
+    return visit(this);
   }
 
   /// Normalizes a source type for runtime equality and constant identity.

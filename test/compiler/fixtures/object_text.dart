@@ -9,11 +9,58 @@ import '../../frontend/lowering/fixtures/dynamic_dispatch_private_use.dart'
 import '../../frontend/lowering/fixtures/effects.dart' as effects;
 
 import 'core_collections.dart';
+import 'core_conversion.dart';
+
+// FFI storage subclasses cannot declare generative constructors.
+// ignore: use_primary_constructors
+final class ParsedNumber extends Struct {
+  @Double()
+  external double floating;
+
+  @Int64()
+  external int integer;
+}
+
+num? parseNumber(String source, int mode) => switch (mode) {
+  0 => double.parse(source),
+  1 => double.tryParse(source),
+  2 => double.parse.call(source),
+  3 => double.tryParse.call(source),
+  4 => num.parse(source),
+  5 => num.tryParse(source),
+  6 => num.parse.call(source),
+  _ => num.tryParse.call(source),
+};
+
+@Export<Int32 Function(Pointer<Uint16>, IntPtr, Int32, Pointer<ParsedNumber>)>()
+int parseBuffer(
+  Pointer<Uint16> input,
+  int length,
+  int mode,
+  Pointer<ParsedNumber> output,
+) {
+  final source = String.fromCharCodes(input.asTypedList(length));
+  try {
+    final value = parseNumber(source, mode);
+    if (value == null) return 2;
+    if (value is int) {
+      output.ref.integer = value;
+      return 1;
+    }
+    output.ref.floating = value.toDouble();
+    return 0;
+  } on FormatException catch (error) {
+    return mode >= 4 || identical(error.source, source) ? 3 : 9;
+  }
+}
 
 String formatDouble(double value, int mode, int digits) => switch (mode) {
   0 => value.toString(),
   1 => value.toStringAsFixed(digits),
-  2 => value.toStringAsExponential(digits < 0 ? null : digits),
+  2 => value.toStringAsExponential(digits),
+  4 => value.toStringAsExponential(),
+  5 => value.toStringAsFixed.call(digits),
+  6 => value.toStringAsPrecision.call(digits),
   _ => value.toStringAsPrecision(digits),
 };
 
@@ -109,6 +156,33 @@ String dispatchText(int mode) {
 @Export<Int32 Function(Int32, Pointer<Uint16>, IntPtr)>()
 int dispatchBuffer(int mode, Pointer<Uint16> output, int capacity) =>
     _write(dispatchText(mode), output, capacity);
+
+@Export<
+  Int32 Function(
+    Pointer<Uint16>,
+    IntPtr,
+    Int32,
+    IntPtr,
+    Pointer<Uint16>,
+    IntPtr,
+  )
+>()
+int conversionBuffer(
+  Pointer<Uint16> source,
+  int length,
+  int mode,
+  int split,
+  Pointer<Uint16> output,
+  int capacity,
+) => _write(
+  conversionText(
+    String.fromCharCodes(source.asTypedList(length)),
+    Conversion.values[mode],
+    split,
+  ),
+  output,
+  capacity,
+);
 
 int _write(String text, Pointer<Uint16> output, int capacity) {
   if (text.length > capacity) return -2;

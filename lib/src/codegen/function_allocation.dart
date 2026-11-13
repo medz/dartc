@@ -12,7 +12,6 @@ import 'function_selection.dart';
 /// Homes are not reused across SSA definitions. Edge arguments are staged before
 /// assignment so loop-carried swaps and rotations retain simultaneous semantics.
 final class FunctionAllocation<R extends Object>(
-  final IrFunction function,
   final FunctionEmitter<R> emitter,
   final FunctionSelection<R> selection,
   final void Function(Constant, R) loadObject,
@@ -45,7 +44,7 @@ final class FunctionAllocation<R extends Object>(
       for (final value in liveness.liveIn[block]!) {
         if (selection.cells.contains(value)) continue;
         if (_owners[value] != block ||
-            block != function.entry && value is BlockParameter) {
+            block != selection.body.entry && value is BlockParameter) {
           _shared.add(value);
         }
       }
@@ -147,7 +146,7 @@ final class FunctionAllocation<R extends Object>(
               (v is BlockParameter || _owners[v] != block),
         ),
       );
-    if (block == function.entry) {
+    if (block == selection.body.entry) {
       for (final (i, parameter) in selection.body.entryParameters.indexed) {
         if (_uses.containsKey(parameter)) {
           switch (selection.entry.parameters[i]) {
@@ -403,7 +402,9 @@ final class FunctionAllocation<R extends Object>(
     final parameters = selection.liveness.liveParameters[edge.target]!;
     for (final (slot, i) in parameters.indexed) {
       final argument = selection.body.argumentsOf(edge)[i];
-      final type = edge.target.parameters[i].type;
+      final type = selection.body.typeOf(
+        selection.body.parametersOf(edge.target)[i],
+      );
       final scratch = emitter.allocatableRegisters.lastWhere(
         (r) => emitter.bank(r) == selection.bank(type),
       );
@@ -411,9 +412,10 @@ final class FunctionAllocation<R extends Object>(
       emitter.storeStack(scratch, _stagingOffset + slot * 8);
     }
     for (final (slot, i) in parameters.indexed) {
-      final parameter = edge.target.parameters[i];
+      final parameter = selection.body.parametersOf(edge.target)[i];
       final scratch = emitter.allocatableRegisters.lastWhere(
-        (r) => emitter.bank(r) == selection.bank(parameter.type),
+        (r) =>
+            emitter.bank(r) == selection.bank(selection.body.typeOf(parameter)),
       );
       emitter.loadStack(scratch, _stagingOffset + slot * 8);
       emitter.storeStack(scratch, _slot(parameter));

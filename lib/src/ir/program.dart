@@ -20,6 +20,9 @@ final class IrClass(
   /// direct superclass and no fixed fields.
   final bool referencePayload = false,
 
+  /// The concrete carrier of structural records; all payload words are references.
+  final bool recordStorage = false,
+
   /// Storage for a concrete class with one type parameter implementing `List<E>`.
   /// The fields are length and a traced non-generic buffer; spread
   /// takes `List<T>` and `Iterable<Object?>` and returns void.
@@ -95,6 +98,13 @@ final class IrClass(
   }
 
   this {
+    if (recordStorage &&
+        (!referencePayload ||
+            type.isAbstract ||
+            type.typeParameters.isNotEmpty ||
+            type.asInstanceOf(ValueType.record) == null)) {
+      throw ArgumentError('Records require concrete, traced payload storage.');
+    }
     if (referencePayload &&
         (this.fields.isNotEmpty || type.superclass != ValueType.object)) {
       throw ArgumentError(
@@ -217,10 +227,7 @@ final class IrProgram(
       ClassType type,
       ({ValueType receiver, MemberSelector selector}) member,
     ) {
-      if (member.receiver.classBound case final owner?
-          when type.asInstanceOf(owner.declaration) == null) {
-        return;
-      }
+      if (!member.receiver.mayHaveInstance(type)) return;
       final target = lookupMember(type, member.selector).target;
       if (target != null) pending.add(target);
     }
@@ -239,7 +246,12 @@ final class IrProgram(
           }
         }
       }
-      for (final type in body.instantiatedClasses) {
+      for (final type in [
+        ...body.instantiatedClasses,
+        if (body.recordTypes.isNotEmpty)
+          for (final declaration in classes)
+            if (declaration.recordStorage) declaration.type,
+      ]) {
         if (instances.add(type)) {
           for (final member in members) {
             select(type, member);

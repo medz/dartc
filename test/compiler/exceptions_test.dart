@@ -13,6 +13,37 @@ import 'fixtures/exceptions_ffi.dart';
 
 void main() {
   test(
+    'stack snapshots and first Error traces survive collection and overrides',
+    () {
+      final native = Exceptions();
+      addTearDown(native.close);
+      for (var mode = 0; mode < 6; mode++) {
+        expect(sdk.stackTraceLifecycle(mode), isTrue, reason: 'SDK case $mode');
+        expect(
+          native.stackTraceLifecycle(mode),
+          isTrue,
+          reason: 'native case $mode',
+        );
+      }
+    },
+  );
+
+  test(
+    'stack snapshots cross suspended native reentry without losing callers',
+    () {
+      final native = Exceptions();
+      addTearDown(native.close);
+      final depth = native.traceDepth();
+      final callback = NativeCallable<Int32 Function()>.isolateLocal(
+        native.traceDepth,
+        exceptionalReturn: -1,
+      );
+      addTearDown(callback.close);
+      expect(native.reenterTrace(callback.nativeFunction), greaterThan(depth));
+    },
+  );
+
+  test(
     'catch, rethrow and overriding finally completions match SDK effects',
     () {
       final native = Exceptions();

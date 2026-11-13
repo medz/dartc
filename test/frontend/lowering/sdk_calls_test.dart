@@ -32,11 +32,32 @@ void main() {
       (target) => target.name == 'join' && target.owner == CoreTypes.iterable,
     );
     expect(fixture.program.implementationOf(join), isA<IrFunction>());
+    final wait = fixture.program.functions
+        .singleWhere((f) => f.target.name == 'waitRecord')
+        .callees
+        .single;
+    expect(wait.library, Uri.parse('dart:async'));
+    expect(fixture.program.implementationOf(wait), isA<IrFunction>());
+    expect(
+      fixture.program.functions
+          .singleWhere(
+            (f) =>
+                f.target.owner == CoreTypes.enumeration &&
+                f.target.name == 'compareByName',
+          )
+          .blocks
+          .expand((b) => b.instructions)
+          .whereType<LoadField>()
+          .map((load) => load.field),
+      contains(CoreTypes.enumName),
+    );
   });
 
   test('SDK constants retain their declared field storage', () {
     final duration = fixture.program.functions
-        .singleWhere((f) => f.target.name == 'duration')
+        .singleWhere(
+          (f) => f.target.name == 'duration' && f.target.owner == null,
+        )
         .objects
         .single;
     expect(

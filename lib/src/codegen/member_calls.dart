@@ -1,15 +1,20 @@
 import 'package:dartc/ir.dart';
 
+import 'record_storage.dart';
+import 'type_values.dart';
+
 /// Resolves native member entries for the concrete classes in a compilation.
 final class MemberCalls(
   final IrProgram program,
   final Set<FunctionTarget> definitions, {
   Iterable<ClassType> instantiatedTypes = const [],
+  final RecordStorage? records,
 }) {
   final _instances = {
     ...instantiatedTypes,
     for (final target in definitions)
       ...?program.implementationOf(target)?.instantiatedClasses,
+    if (records != null && records.shapes.isNotEmpty) records.type,
   };
   final _helpers = <Object, IrFunction>{};
   final _builtins = <(ValueType, bool), IrFunction>{};
@@ -70,11 +75,17 @@ final class MemberCalls(
     }
   }
 
-  Map<ClassType, FunctionTarget> dynamicTargets(DynamicDispatch call) => {
+  Map<ClassType, FunctionTarget> dynamicTargets(
+    DynamicDispatch call, {
+    TypeValues? types,
+  }) => {
     for (final type in _receivers(call.receiver.unviewedType))
       if (program.classes.any((declaration) => declaration.type == type))
         type:
-            ?program.lookupMember(type, call.selector).target ??
+            ?(type == records?.declaration?.type && types != null
+                ? records!.getter(call.selector, types)
+                : null) ??
+            program.lookupMember(type, call.selector).target ??
             (call.selector.kind == .setter
                 ? null
                 : program.lookupMember(type, (
@@ -226,26 +237,8 @@ final class MemberCalls(
         },
       ).target;
 
-  Iterable<ClassType> _receivers(ValueType receiver) sync* {
-    for (final type in _instances) {
-      if (type == ValueType.nullClass) {
-        if (receiver.accepts(.nullType)) {
-          yield type;
-        }
-        continue;
-      }
-      if (receiver.classBound case final owner?
-          when type.asInstanceOf(owner.declaration) == null) {
-        continue;
-      }
-      if (receiver.freeTypeParameters.isEmpty &&
-          type.freeTypeParameters.isEmpty &&
-          !receiver.accepts(type)) {
-        continue;
-      }
-      yield type;
-    }
-  }
+  Iterable<ClassType> _receivers(ValueType receiver) =>
+      _instances.where(receiver.mayHaveInstance);
 
   Map<ClassType, FunctionTarget> targetsFor(
     ValueType receiver,
@@ -265,8 +258,13 @@ final class MemberCalls(
       final lookup = program.lookupMember(type, selector);
       if (lookup.target case final target?) {
         if (hasBuiltin && target.owner == ValueType.object) continue;
-        if (!definitions.contains(target)) {
-          throw ArgumentError('Missing member definition: ${target.name}');
+        // String content operations enter through the backend support closure.
+        if (program.implementationOf(target) == null &&
+            !(hasBuiltin && target.owner == ValueType.string)) {
+          throw ArgumentError(
+            'Missing member definition: ${type.dartName}.${target.name} '
+            '(receiver ${receiver.dartName}).',
+          );
         }
         targets[type] = target;
       } else if (!hasBuiltin ||

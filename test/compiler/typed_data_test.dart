@@ -42,7 +42,7 @@ void main() {
     expect(native.readonly(), readonlyTypedViews());
   });
   test('sizes, alignment and bounds fail before accessing storage', () {
-    for (var mode = 0; mode < 9; mode++) {
+    for (var mode = 0; mode < 11; mode++) {
       expect(native.bounds(mode), isTrue, reason: 'case $mode');
     }
   });
@@ -59,7 +59,7 @@ void main() {
   test(
     'typed concatenation, aliased conversions and floating bit patterns',
     () {
-      for (var mode = 0; mode < 6; mode++) {
+      for (var mode = 0; mode < 9; mode++) {
         expect(native.collections(mode), isTrue, reason: 'case $mode');
       }
     },

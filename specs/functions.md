@@ -19,7 +19,7 @@
 | 裸 `Function`/dynamic 函数值调用 | 支持已表示的函数、方法、构造器、闭包及 callable object，包括 Function 上界和 `.call` 提取。先验证位置/命名/类型实参个数，再应用实际声明的默认类型、界限和形参检查。保留闭包环境及构造器别名身份。原生回调只支持明确建模的签名。见[动态调用样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)。 |
 | 可调用对象、隐式 `call` 提取 | 支持实例的普通和泛型 `call` 调用，以及在函数类型上下文中隐式提取其绑定方法。见[可调用对象样本](../test/frontend/lowering/fixtures/callables.dart)。 |
 | `sync*` | 支持带显式 `Yield`/恢复边的生成器 IR：调用及取得 iterator 不执行函数体，每个 iterator 的局部状态独立，外层捕获绑定仍共享。支持 `yield`、`yield*`、泛型及跨暂停的 catch/finally。行为通过 SDK 对照验证；支持 FutureOr<Iterable<T>> 返回声明；生成器的具体实现 runtimeType 和同一 iterator 重入尚未建模，原生后端的帧保存/状态机转换尚未实现。见[生成器样本](../test/frontend/lowering/fixtures/generators.dart)。 |
-| `async`、`await` | IR 区分公开返回签名与 `completionType`，用显式 `Await` 终结符和正常/异常恢复边保存暂停点。支持立即执行、类型化 Future/value 双臂、跨暂停的捕获/异常/控制流，以及 finally 完成后才接续返回的 Future；返回表达式的类型检查仍在 finally 之前。参考执行器使用 SDK Future 微任务，已作顺序/错误/身份对照；原生后端的异步帧与运行时转换尚未实现。见[异步样本](../test/frontend/lowering/fixtures/async_functions.dart)。 |
+| `async`、`await` | IR 区分公开返回签名与 `completionType`，用显式 `Await` 终结符和正常/异常恢复边保存暂停点。支持立即执行、类型化 Future/value 双臂、跨暂停的捕获/异常/控制流，以及 finally 完成后才接续返回的 Future；返回表达式的类型检查仍在 finally 之前。原生执行保留跨暂停的局部值、共享捕获、词法类型实参和 GC 存活，支持顶层、局部、实例方法、getter、运算符及函数值调用。用户 Future 按实际类型实参检查完成回调。见[原生异步验证](../test/compiler/async_functions_test.dart)；完整异步栈文本仍待实现。 |
 | `async*` | 支持普通、泛型和局部 `async*` 函数，返回 `Stream<T>`。`Yield` 区分继续和取消，`YieldStream` 委托数据与错误事件，订阅操作本身的异常可进入局部处理器。开始监听、暂停、取消、异步 finally 和清理失败已有 [SDK 行为对照](../test/ir/async_generators_test.dart)。源码转换也通过[暂停与取消对照](../test/frontend/lowering/async_generators_test.dart)验证。 |
 | `external` 函数 | `IrExternal` 保存外部实现的 Dart 签名、默认值和声明身份，源码支持顶层函数、类成员、构造器和 extension 成员；external 变量生成访问器声明，不分配普通字段或全局存储。[IR 校验](../test/ir/program_references_test.dart)覆盖重复实现、缺失实现和默认值类型。见[源码声明验证](../test/frontend/lowering/externals_test.dart)。外部符号绑定及原生调用仍由后续领域实现。 |
 
@@ -45,7 +45,7 @@
 
 原生闭包支持捕获 `late` 和 `late final`，包括未绑定存储、惰性初始化闭包及其词法泛型环境。初始化器在第一次读取时执行；逃逸闭包在创建者返回后及同模块后续原生入口中保留绑定。见[局部 late 原生验证](../test/compiler/late_locals_test.dart)。
 
-原生 dynamic 支持上述同步函数值、callable object、泛型默认值、显式类型实参、方法提取、getter/setter 和 noSuchMethod。无效调用先核对实参形状，再执行默认类型、界限和参数检查；getter 调用保留两种语法的求值顺序。见[原生动态调用对照](../test/compiler/object_text_test.dart)。FFI 回调、record 存储及异步函数的原生执行仍是缺口。
+原生 dynamic 支持上述同步函数值、callable object、泛型默认值、显式类型实参、方法提取、getter/setter 和 noSuchMethod。无效调用先核对实参形状，再执行默认类型、界限和参数检查；getter 调用保留两种语法的求值顺序。见[原生动态调用对照](../test/compiler/object_text_test.dart)。FFI 回调及跨线程托管调用仍是缺口。
 
 ## 异步参考执行器范围
 

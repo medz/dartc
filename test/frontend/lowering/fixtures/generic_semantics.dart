@@ -2,6 +2,16 @@
 // ignore_for_file: unnecessary_type_check, unnecessary_type_name_in_constructor, dead_code, use_primary_constructors
 import 'effects.dart';
 
+String _joinGeneric<T>(T initial, T replacement) {
+  var value = initial;
+  final before = '$value';
+  value = replacement;
+  return '$before/$value';
+}
+
+String genericTextJoin(int seed) =>
+    '${_joinGeneric<int?>(seed < 0 ? null : seed, null)}|${_joinGeneric<String?>('text', null)}|${_joinGeneric(seed, seed + 1)}';
+
 abstract class Readable<T> {
   T get item;
 }

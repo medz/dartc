@@ -4,7 +4,7 @@
 
 3.14 没有新增语法。列表、Map 或 record 子模式的类型检查不能把整个被匹配属性提升为子模式的类型；[反例](../test/frontend/analysis/fixtures/patterns/promotion.dart)须在静态分析阶段拒绝。依据为 [3.14 语言变化](https://dart.dev/resources/language/evolution#dart-3-14)。历史 SDK 差异保留当时验证的版本，不代表已在新版本复现。
 
-目标是完整 Dart 语言和所需标准库，明确排除项见下文。当前开发版使用官方 analyzer 的分析结果生成 IR，原生后端可生成整数、浮点和指针函数的目标文件与库，并可执行无参数的同步 main。支持[对象构造与回收](classes.md#原生执行范围)、同模块跨入口托管状态、同步重入和卸载清理；启动参数、异步入口及跨线程执行仍待实现，原生范围见[库与导出](libraries.md#原生库)。已发布编译器的支持范围见 [0.5.0](https://github.com/medz/dartc/tree/v0.5.0/specs)。
+目标是完整 Dart 语言和所需标准库，明确排除项见下文。当前开发版使用官方 analyzer 的分析结果生成 IR，原生后端可生成整数、浮点和指针函数的目标文件与库，并可执行无参数的同步及 async main。支持[对象构造与回收](classes.md#原生执行范围)、同模块跨入口托管状态、同步重入和卸载清理；启动参数及跨线程执行仍待实现，原生范围见[库与导出](libraries.md#原生库)。已发布编译器的支持范围见 [0.5.0](https://github.com/medz/dartc/tree/v0.5.0/specs)。
 
 各页的“当前 IR 范围”说明哪些 Dart 源码可以转换。仅支持手工构造 IR 的条目单独标明。行为对照比较 IR 和 Dart SDK 的返回值、调用顺序、异常或流事件。
 

@@ -236,7 +236,7 @@ Linux executables currently use fixed addresses and statically resolved inputs. 
 
 Numerical functions, direct calls, branches, loops and native scalar pointer access are useful starting points.
 
-Object construction, nullable values, type checks and synchronous exceptions have native implementations within a limited scope. Full class dispatch, asynchronous execution and complete standard-library support remain incomplete.
+Object construction, nullable values, type checks and synchronous exceptions have native implementations within a limited scope. Async functions and parameterless async main can run natively. Streams, isolates and complete standard-library support remain incomplete.
 
 The [compatibility guide](specs/README.md) distinguishes source analysis, IR behavior and native execution. A construct accepted by analysis is not necessarily executable.
 

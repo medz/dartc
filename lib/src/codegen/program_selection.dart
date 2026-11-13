@@ -1,8 +1,8 @@
 import 'package:dartc/ir.dart';
 
 import 'checked_casts.dart';
-import 'frame_lookup.dart';
 import 'function_representation.dart';
+import 'selected_function.dart';
 import 'global_storage.dart';
 import 'heap_plan.dart';
 import 'instance_storage.dart';
@@ -11,20 +11,22 @@ import 'native_invocation.dart';
 import 'numeric_operations.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
+import 'async_functions.dart';
 
 /// Selects function bodies and closes generated call dependencies before emission.
 final class ProgramSelection(
   final ProgramLayout layouts,
   final HeapPlan heap,
-  final FrameLookup frames,
   final StackTraces traces,
   final CheckedCasts casts,
   final MemberCalls members,
   final NumericOperations arithmetic,
   final GlobalStorage globals,
-  final InstanceStorage instances,
-) {
-  final functions = <FunctionTarget, FunctionRepresentation>{};
+  final InstanceStorage instances, {
+  AsyncFunctions? asyncFunctions,
+}) {
+  final asyncFunctions = asyncFunctions ?? AsyncFunctions(const []);
+  final functions = <FunctionTarget, SelectedFunction>{};
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
 
@@ -66,7 +68,7 @@ final class ProgramSelection(
 
   void include(IrFunction function) {
     if (functions.containsKey(function.target)) return;
-    final body = FunctionRepresentation(
+    var body = FunctionRepresentation(
       function,
       layouts,
       casts,
@@ -74,6 +76,29 @@ final class ProgramSelection(
       heap,
       captureTrace: traces.capture,
     );
+    if (asyncFunctions.frames[function.target] case final frame?) {
+      final runtime =
+          heap.runtime?.async ??
+          (throw UnsupportedError('Async runtime unavailable.'));
+      final resumed = frame.lower(body, runtime, heap.invalid);
+      final entryParameters = body.entryParameters;
+      body = FunctionRepresentation(
+        frame.wrapper(runtime),
+        layouts,
+        casts,
+        members,
+        heap,
+        captureTrace: traces.capture,
+      );
+      frame.initialize(body, entryParameters);
+      _bind(resumed);
+      functions[frame.resume] = resumed;
+    }
+    _bind(body);
+    functions[function.target] = body;
+  }
+
+  void _bind(SelectedFunction body) {
     for (final instruction
         in body.instructions.values.expand((v) => v).whereType<Instruction>()) {
       if (body.aliases.contains(instruction)) continue;
@@ -104,16 +129,15 @@ final class ProgramSelection(
                 };
       if (target != null) body.invocations[instruction] = target;
     }
-    functions[function.target] = body;
   }
 
   /// Returns source dependencies that require preparing storage and bindings again.
   Set<FunctionTarget> close({required bool persistent}) {
-    var traceFunctions = <IrFunction>[];
     Iterable<IrFunction> supportFunctions() => [
       ...?layouts.native?.functions,
       ...members.functions,
       ...layouts.closures.functions,
+      ...layouts.records.functions,
       ...arithmetic.functions,
       ...globals.functions,
       ...instances.functions,
@@ -122,8 +146,6 @@ final class ProgramSelection(
       ...layouts.types.functions,
       if (heap.initializers.contains(layouts.pointers.initializer))
         layouts.pointers.function,
-      if (capture) frames.function,
-      ...traceFunctions,
     ];
     final calls = {
       for (final body in functions.values) ...body.invocations.values,
@@ -148,12 +170,13 @@ final class ProgramSelection(
       }
       final needsTrace = calls.contains(traces.capture);
       final needsHeap =
-          managed || persistent || heap.allocates(calls) || exceptions;
+          needsTrace ||
+          managed ||
+          persistent ||
+          heap.allocates(calls) ||
+          exceptions;
       if (pending.isEmpty && capture == needsTrace && managed == needsHeap) {
         break;
-      }
-      if (!capture && needsTrace) {
-        traceFunctions = traces.functions(heap.invalid);
       }
       capture = needsTrace;
       managed = needsHeap;
@@ -162,6 +185,7 @@ final class ProgramSelection(
       calls.addAll([heap.allocate, heap.release]);
       if (calls.contains(heap.eventAccess)) calls.add(heap.runEvents);
     }
+    if (capture) calls.add(heap.runtime!.captureStackTrace);
     heap.retain(calls);
     calls.addAll(heap.initializers);
     primitives = managed
@@ -183,14 +207,15 @@ final class ProgramSelection(
         if (!globals.isEmpty) globals.declaration,
         ...arithmetic.classes,
         ...layouts.closures.classes,
+        ?layouts.records.generatedClass,
+        ...asyncFunctions.classes,
         layouts.strings.declaration,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
           layouts.pointers.declaration,
         ...layouts.relations.classes,
-        if (capture) traces.declaration,
       ],
-      support.map((body) => functions[body.target]!.function),
+      support,
       externals: [
         for (final target in [
           ...heap.primitives,
@@ -210,7 +235,7 @@ final class ProgramSelection(
                 defaults: members.program.implementationOf(target)!.defaults,
               ),
         if (!globals.isEmpty) IrExternal(globals.address),
-        if (capture) IrExternal(traces.capture),
+        ...asyncFunctions.entries,
       ],
     );
     return {};

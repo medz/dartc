@@ -1,13 +1,14 @@
 import 'package:dartc/ir.dart';
 
-import 'function_representation.dart';
+import 'selected_function.dart';
 
 /// Tracks selected values and local contents across control-flow edges and calls.
 final class FunctionLiveness(
-  FunctionRepresentation body,
+  SelectedFunction body,
   Iterable<Value> Function(Value) inputsOf,
-  Set<Value> calls,
-) {
+  Set<Value> calls, {
+  Iterable<Value> Function(Terminator)? extraInputs,
+}) {
   final liveIn = <Block, Set<Value>>{};
   final liveOut = <Block, Set<Value>>{};
   final liveParameters = <Block, List<int>>{};
@@ -53,6 +54,7 @@ final class FunctionLiveness(
       for (final edge in body.successors(block)) {
         live.addAll(edgeValues(edge));
       }
+      if (end is Await) live.remove(end.result);
       liveOut[block] = {...live};
       if (record) {
         for (final edge in body.successors(block)) {
@@ -62,6 +64,8 @@ final class FunctionLiveness(
         }
       }
       switch (end) {
+        case Await(:final operand):
+          read(body.operandsForAwait[end] ?? operand);
         case Return(value: final value?):
           read(value);
         case Branch(:final condition):
@@ -77,6 +81,9 @@ final class FunctionLiveness(
           break;
         default:
           throw UnsupportedError('Native terminator: ${end.runtimeType}');
+      }
+      for (final value in extraInputs?.call(end) ?? const <Value>[]) {
+        read(value);
       }
       for (final instruction in body.instructions[block]!.reversed) {
         if (body.introduced.contains(instruction) &&
@@ -118,10 +125,8 @@ final class FunctionLiveness(
         changed |= incoming.length != length;
       }
     } while (changed);
-    final parameters = body.parametersOf(body.function.entry).toSet();
-    if (liveIn[body.function.entry]!.any(
-      (value) => !parameters.contains(value),
-    )) {
+    final parameters = body.parametersOf(body.entry).toSet();
+    if (liveIn[body.entry]!.any((value) => !parameters.contains(value))) {
       throw StateError('Selected value lacks a dominating definition.');
     }
     for (final block in body.blocks) {

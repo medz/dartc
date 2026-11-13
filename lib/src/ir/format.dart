@@ -118,6 +118,8 @@ void writeFunction(
       'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}',
     InstantiateFunction() =>
       'instantiate ${value(op.function)}${typeArgs(op.typeArguments)}',
+    InstantiateFunctionFrom() =>
+      'instantiate ${value(op.function)} from ${value(op.instance)} as ${op.declaration.dartName}',
     FunctionCall() =>
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
@@ -181,6 +183,7 @@ void writeFunction(
     TypeTest() =>
       '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
     TypeView() => 'view ${value(op.operand)} as ${op.type.dartName}',
+    UncheckedCast() => 'unchecked ${value(op.operand)} as ${op.type.dartName}',
     TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
     NullCheck() => 'checkNotNull ${value(op.operand)}',
     NumericBinary() =>

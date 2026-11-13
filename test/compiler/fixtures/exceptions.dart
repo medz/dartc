@@ -97,3 +97,90 @@ double checkedDouble(double value) {
 }
 
 void main() => fail(7);
+
+class TraceOverride() extends Error {
+  static int reads = 0;
+  @override
+  StackTrace get stackTrace {
+    reads++;
+    return StackTrace.fromString('override');
+  }
+
+  StackTrace? get originalTrace => super.stackTrace;
+}
+
+class TraceInterface() implements Error {
+  static int reads = 0;
+  @override
+  StackTrace? get stackTrace {
+    reads++;
+    return null;
+  }
+}
+
+@Export<Bool Function(Int32)>()
+bool stackTraceLifecycle(int mode) {
+  if (mode == 0) {
+    const text = 'user trace\n🦋\n';
+    return StackTrace.empty.toString().isEmpty &&
+        StackTrace.fromString(text).toString() == text;
+  }
+  if (mode == 1) {
+    final trace = StackTrace.current;
+    final text = trace.toString();
+    allocate(40000);
+    return text.isNotEmpty && trace.toString() == text;
+  }
+  if (mode == 4) {
+    final error = TraceOverride();
+    TraceOverride.reads = 0;
+    try {
+      throw error;
+    } catch (_, trace) {
+      return TraceOverride.reads == 0 &&
+          error.originalTrace.toString() == trace.toString() &&
+          error.stackTrace.toString() == 'override' &&
+          TraceOverride.reads == 1;
+    }
+  }
+  if (mode == 5) {
+    TraceInterface.reads = 0;
+    try {
+      throw TraceInterface();
+    } catch (error) {
+      return TraceInterface.reads == 0 &&
+          (error as Error).stackTrace == null &&
+          TraceInterface.reads == 1;
+    }
+  }
+  final error = StateError('first throw');
+  if (error.stackTrace != null) return false;
+  final supplied = StackTrace.fromString('supplied trace');
+  StackTrace? first;
+  try {
+    if (mode == 3) Error.throwWithStackTrace(error, supplied);
+    throw error;
+  } catch (_, trace) {
+    first = trace;
+    if (mode == 3 && trace.toString() != supplied.toString()) return false;
+    if (error.stackTrace.toString() != trace.toString()) return false;
+  }
+  allocate(40000);
+  try {
+    try {
+      Error.throwWithStackTrace(error, StackTrace.fromString('second trace'));
+    } catch (_) {
+      rethrow;
+    }
+  } catch (_, trace) {
+    return trace.toString() == 'second trace' &&
+        error.stackTrace.toString() == first.toString();
+  }
+}
+
+@Export<Int32 Function()>()
+int traceDepth() => StackTrace.current.toString().split('\n').length;
+
+@Export<Int32 Function(Pointer<NativeFunction<Int32 Function()>>)>()
+int reenterTrace(Pointer<NativeFunction<Int32 Function()>> callback) =>
+    callback.asFunction<int Function()>()();

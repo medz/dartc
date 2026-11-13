@@ -9,22 +9,20 @@ import 'package:dartc/layout.dart';
 import 'double_bits.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
-import 'function_representation.dart';
+import 'selected_function.dart';
 import 'function_selection.dart';
 import 'heap_entry.dart';
 import 'native_adapter.dart';
 import 'native_invocation.dart';
-import 'stack_traces.dart';
 import 'storage_access.dart';
 import 'type_values.dart';
 
 /// Generates a control-flow graph with explicit edge transfers.
 final class ScalarFunction<R extends Object>(
-  FunctionRepresentation body,
+  SelectedFunction body,
   final FunctionEmitter<R> emitter,
-  final StackTraces traces,
 ) {
-  final function = body.function;
+  final target = body.target;
   final layouts = body.layouts;
   final selection = FunctionSelection(body, emitter);
 
@@ -44,7 +42,6 @@ final class ScalarFunction<R extends Object>(
     void Function(Fixup, int)? codeAddress,
   }) {
     final allocation = FunctionAllocation(
-      function,
       emitter,
       selection,
       (value, register) =>
@@ -111,11 +108,13 @@ final class ScalarFunction<R extends Object>(
             indirect: true,
           );
           allocation.define(instruction, destination);
-        } else if (instruction case DoubleBits(:final operand)) {
-          final source = allocation.read(operand);
+        } else if (instruction is DoubleBits) {
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
           final destination = allocation.allocate(.general);
           emitter.move(destination, source);
-          allocation.release(operand);
+          allocation.release(selection.body.inputsOf(instruction).single);
           allocation.define(instruction, destination);
         } else if (instruction
             case ObjectRuntimeType(:final operand) ||
@@ -124,7 +123,9 @@ final class ScalarFunction<R extends Object>(
                 !selection.body.aliases.contains(instruction) &&
                 (instruction is ObjectHashCode || operand.type != .nullType) &&
                 layouts.representation(operand.type) == .reference) {
-          final value = allocation.read(operand);
+          final value = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
           final result = allocation.allocate(.general, except: [value]);
           final done = emitter.label();
           if (instruction is ObjectRuntimeType) {
@@ -146,7 +147,7 @@ final class ScalarFunction<R extends Object>(
             signed: false,
           );
           emitter.bind(done);
-          allocation.release(operand);
+          allocation.release(selection.body.inputsOf(instruction).single);
           allocation.define(instruction, result);
         } else if (instruction case NewCell(:final initial)
             when selection.cells.contains(instruction)) {
@@ -158,8 +159,8 @@ final class ScalarFunction<R extends Object>(
           } else if (layouts.isReference(selection.body.typeOf(instruction))) {
             allocation.clearCell(instruction);
           }
-        } else if (instruction case KeepAlive(:final value)) {
-          allocation.release(value);
+        } else if (instruction is KeepAlive) {
+          allocation.release(selection.body.inputsOf(instruction).single);
           emptyResult(instruction);
         } else if (instruction is ReadCell &&
             !selection.body.aliases.contains(instruction)) {
@@ -247,8 +248,8 @@ final class ScalarFunction<R extends Object>(
                     (p) => p is RegisterArgument<R> && p.register == r,
                   ),
             );
-            allocation.load(native.address, address);
-            allocation.release(native.address);
+            allocation.load(selection.body.inputsOf(native).first, address);
+            allocation.release(selection.body.inputsOf(native).first);
             emitter.callRegister(address);
           }
           for (final fixup in parked) {
@@ -342,6 +343,7 @@ final class ScalarFunction<R extends Object>(
         } else if (instruction
             case LoadField(:final field) || StorageRead(:final field)
             when !selection.body.aliases.contains(instruction)) {
+          final type = selection.body.typeOf(instruction);
           final receiver = selection.body.inputsOf(instruction).first;
           final source = allocation.read(receiver);
           allocation.release(receiver);
@@ -358,11 +360,9 @@ final class ScalarFunction<R extends Object>(
           );
           var destination = stored;
           if (layouts.representation(field.type) !=
-              layouts.representation(instruction.type)) {
-            if (selection.bank(instruction.type) != emitter.bank(stored)) {
-              destination = allocation.allocate(
-                selection.bank(instruction.type),
-              );
+              layouts.representation(type)) {
+            if (selection.bank(type) != emitter.bank(stored)) {
+              destination = allocation.allocate(selection.bank(type));
               allocation.releaseTemporary(stored);
             }
             emitter.loadMemory(
@@ -387,13 +387,16 @@ final class ScalarFunction<R extends Object>(
               'Memory access requires a reference representation.',
             );
           }
-          final source = allocation.read(operand);
-          allocation.release(operand);
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
+          allocation.release(selection.body.inputsOf(instruction).single);
           final destination = allocation.allocate(.general, preferred: source);
           emitter.move(destination, source);
           allocation.define(instruction, destination);
         } else if (selection.body.aliases.contains(instruction) ||
             instruction is TypeView ||
+            instruction is UncheckedCast ||
             instruction is TypeReference ||
             instruction is ReifyType ||
             instruction is ObjectRuntimeType) {
@@ -415,41 +418,46 @@ final class ScalarFunction<R extends Object>(
             allocation.release(operand);
           }
           allocation.define(instruction, destination);
-        } else if (instruction case StoreObjectReference(
-          :final object,
-          :final byteOffset,
-        )) {
-          final base = objectDataAddress(object, byteOffset);
+        } else if (instruction is StoreObjectReference) {
+          final base = objectDataAddress(
+            selection.body.inputsOf(instruction).first,
+            selection.body.inputsOf(instruction).elementAt(1),
+          );
           final value = selection.body.inputsOf(instruction).last;
-          final source = allocation.read(value, except: [base]);
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).last,
+            except: [base],
+          );
           allocation.release(value);
           emitter.storeMemory(source, base, bytes: 8);
           allocation.releaseTemporary(base);
           emptyResult(instruction);
-        } else if (instruction case LoadObjectReference(
-          :final object,
-          :final byteOffset,
-        )) {
-          final source = objectDataAddress(object, byteOffset);
+        } else if (instruction is LoadObjectReference) {
+          final source = objectDataAddress(
+            selection.body.inputsOf(instruction).first,
+            selection.body.inputsOf(instruction).elementAt(1),
+          );
           allocation.releaseTemporary(source);
           final destination = allocation.allocate(.general, preferred: source);
           emitter.loadMemory(destination, source, bytes: 8, signed: false);
           allocation.define(instruction, destination);
         } else if (instruction
-            case StoreNative(:final address, :final nativeType, :final value) ||
-                StoreObjectData(
-                  object: final address,
-                  :final nativeType,
-                  :final value,
-                )) {
+            case StoreNative(:final nativeType) ||
+                StoreObjectData(:final nativeType)) {
           final offset = instruction is StoreObjectData
               ? instruction.byteOffset
               : null;
           final base = offset == null
-                  ? allocation.read(address)
-                  : objectDataAddress(address, offset),
-              source = allocation.read(value, except: [base]);
-          allocation.release(value);
+                  ? allocation.read(selection.body.inputsOf(instruction).first)
+                  : objectDataAddress(
+                      selection.body.inputsOf(instruction).first,
+                      selection.body.inputsOf(instruction).elementAt(1),
+                    ),
+              source = allocation.read(
+                selection.body.inputsOf(instruction).last,
+                except: [base],
+              );
+          allocation.release(selection.body.inputsOf(instruction).last);
           if (nativeType.isSinglePrecision) {
             final temporary = allocation.allocate(.floating, preferred: source);
             emitter.convertDoubleToFloat(temporary, source);
@@ -459,22 +467,25 @@ final class ScalarFunction<R extends Object>(
             emitter.storeMemory(source, base, bytes: nativeType.nativeSize);
           }
           if (offset == null) {
-            allocation.release(address);
+            allocation.release(selection.body.inputsOf(instruction).first);
           } else {
             allocation.releaseTemporary(base);
           }
           emptyResult(instruction);
         } else if (instruction
-            case LoadNative(address: final operand, :final nativeType) ||
-                LoadObjectData(object: final operand, :final nativeType)) {
+            case LoadNative(:final nativeType) ||
+                LoadObjectData(:final nativeType)) {
           final offset = instruction is LoadObjectData
               ? instruction.byteOffset
               : null;
           final source = offset == null
-              ? allocation.read(operand)
-              : objectDataAddress(operand, offset);
+              ? allocation.read(selection.body.inputsOf(instruction).first)
+              : objectDataAddress(
+                  selection.body.inputsOf(instruction).first,
+                  selection.body.inputsOf(instruction).elementAt(1),
+                );
           if (offset == null) {
-            allocation.release(operand);
+            allocation.release(selection.body.inputsOf(instruction).first);
           } else {
             allocation.releaseTemporary(source);
           }
@@ -492,12 +503,11 @@ final class ScalarFunction<R extends Object>(
             emitter.convertFloatToDouble(destination, destination);
           }
           allocation.define(instruction, destination);
-        } else if (instruction case FloatBitCast(
-          :final operand,
-          :final width,
-        )) {
-          final source = allocation.read(operand);
-          allocation.release(operand);
+        } else if (instruction case FloatBitCast(:final width)) {
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
+          allocation.release(selection.body.inputsOf(instruction).single);
           final toFloat = instruction.type == .floating;
           final destination = allocation.allocate(
             toFloat ? .floating : .general,
@@ -516,8 +526,10 @@ final class ScalarFunction<R extends Object>(
           }
           allocation.define(instruction, destination);
         } else if (instruction case NumericToInt(:final operand)) {
-          final source = allocation.read(operand);
-          allocation.release(operand);
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
+          allocation.release(selection.body.inputsOf(instruction).single);
           final destination = allocation.allocate(.general, preferred: source);
           if (operand.type == .integer) {
             emitter.move(destination, source);
@@ -529,8 +541,10 @@ final class ScalarFunction<R extends Object>(
             case NumericToDouble(:final operand) ||
                 NumericRoundToDouble(:final operand) ||
                 NumericSquareRoot(:final operand)) {
-          final source = allocation.read(operand);
-          allocation.release(operand);
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
+          allocation.release(selection.body.inputsOf(instruction).single);
           final destination = allocation.allocate(.floating, preferred: source);
           if (operand.type == .integer) {
             emitter.convertIntToDouble(destination, source);
@@ -544,9 +558,11 @@ final class ScalarFunction<R extends Object>(
             );
           }
           allocation.define(instruction, destination);
-        } else if (instruction case NumericNegate(:final operand)) {
-          final source = allocation.read(operand);
-          allocation.release(operand);
+        } else if (instruction is NumericNegate) {
+          final source = allocation.read(
+            selection.body.inputsOf(instruction).single,
+          );
+          allocation.release(selection.body.inputsOf(instruction).single);
           final destination = allocation.allocate(.floating, preferred: source);
           final temporary = emitter.negationNeedsTemporary
               ? allocation.allocate(.general)
@@ -631,14 +647,10 @@ final class ScalarFunction<R extends Object>(
         case Return(:final value):
           if (selection.entry.resultRegister case final result?) {
             if (layouts.representation(value!.type) ==
-                layouts.representation(function.target.returnType)) {
+                layouts.representation(target.returnType)) {
               emitter.move(result, allocation.read(value));
             } else {
-              allocation.load(
-                value,
-                result,
-                asType: function.target.returnType,
-              );
+              allocation.load(value, result, asType: target.returnType);
             }
           }
           if (failures) {
@@ -657,9 +669,6 @@ final class ScalarFunction<R extends Object>(
           }
         case Throw(:final exception, stackTrace: final trace!, :final onThrow):
           allocation.placeException(exception, trace);
-          if ((block.end as Throw).stackTrace == null) {
-            traces.recordError(emitter);
-          }
           emitter.loadImmediate(
             emitter.failureRegister,
             CallStatus.threw.index,

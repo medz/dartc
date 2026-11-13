@@ -4,6 +4,7 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/src/compiler/runtime.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -22,6 +23,8 @@ void main() {
     runEvents: heapRuntime.runEvents,
     eventAccess: heapRuntime.eventAccess,
     copyBytes: heapRuntime.copyBytes,
+    captureStackTrace: heapRuntime.captureStackTrace,
+    recordError: heapRuntime.recordError,
     primitives: heapRuntime.primitives,
     nonAllocating: [...heapRuntime.nonAllocating, function],
   );
@@ -65,6 +68,8 @@ void main() {
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,
         copyBytes: heapRuntime.copyBytes,
+        captureStackTrace: heapRuntime.captureStackTrace,
+        recordError: heapRuntime.recordError,
         primitives: heapRuntime.primitives,
         nonAllocating: [],
       ),
@@ -78,11 +83,32 @@ void main() {
         runEvents: heapRuntime.runEvents,
         eventAccess: heapRuntime.eventAccess,
         copyBytes: heapRuntime.copyBytes,
+        captureStackTrace: heapRuntime.captureStackTrace,
+        recordError: heapRuntime.recordError,
         primitives: {
+          ...heapRuntime.primitives,
           heapRuntime.primitives.entries
                   .singleWhere((entry) => entry.value == .map)
                   .key:
               .fail,
+        },
+        nonAllocating: [],
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => HeapRuntime(
+        heapRuntime.program,
+        allocate: heapRuntime.allocate,
+        release: heapRuntime.release,
+        runEvents: heapRuntime.runEvents,
+        eventAccess: heapRuntime.eventAccess,
+        copyBytes: heapRuntime.copyBytes,
+        captureStackTrace: heapRuntime.captureStackTrace,
+        recordError: heapRuntime.recordError,
+        primitives: {
+          for (final entry in heapRuntime.primitives.entries)
+            if (entry.value != .captureStackTrace) entry.key: entry.value,
         },
         nonAllocating: [],
       ),
@@ -105,6 +131,42 @@ void main() {
       ),
       throwsArgumentError,
     );
+  });
+
+  test('trusted cast entries validate signatures without Dart cast checks', () {
+    final parameter = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    for (final input in [ValueType.dynamicType, ValueType.integer]) {
+      final target = FunctionTarget(
+        uri,
+        'assertType',
+        parameter,
+        [input],
+        typeParameters: [parameter],
+      );
+      final result = (
+        program: IrProgram(
+          lowered.program.classes,
+          lowered.program.functions,
+          globals: lowered.program.globals,
+          externals: [...lowered.program.externals, IrExternal(target)],
+        ),
+        entryPoint: lowered.entryPoint,
+        exports: lowered.exports,
+        imports: lowered.imports,
+        runtime: RuntimeDeclarations(lowered.runtime.entries, {
+          ...lowered.runtime.primitives,
+          target: .uncheckedCast,
+        }, lowered.runtime.nonAllocating),
+      );
+      if (input == ValueType.integer) {
+        expect(() => bindRuntime(result), throwsArgumentError);
+      } else {
+        final body =
+            bindRuntime(result).program.implementationOf(target) as IrFunction;
+        expect(body.blocks.single.instructions.single, isA<UncheckedCast>());
+      }
+    }
   });
 
   for (final CodeGenerator generator in [

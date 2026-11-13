@@ -25,6 +25,16 @@ class Access() {
   int get result => 8;
 }
 
+mixin Shared {
+  static const offset = 4;
+  static int get value => effects.tick(offset);
+  static set value(int n) {
+    effects.tick(n);
+  }
+
+  static int call(int n) => effects.tick(n);
+}
+
 int access(int n, int mode) {
   try {
     return switch (mode) {
@@ -34,6 +44,9 @@ int access(int n, int mode) {
       3 => maybe ??= effects.tick(n),
       4 => callback(effects.tick(n)),
       5 => Access.value = effects.tick(n),
+      6 => Shared.value += effects.tick(n),
+      7 => Shared.offset,
+      8 => Shared.call(n),
       _ => value = effects.tick(n),
     };
   } catch (_) {

@@ -43,6 +43,9 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     } else if (list != null) {
       storage = layouts.storageOf(layouts.lists.type);
       layout = storage.layout;
+    } else if (value is RecordConstant) {
+      storage = layouts.storageOf(layouts.records.type);
+      layout = storage.layout;
     } else if (value is ObjectConstant) {
       storage = layouts.storageOf(value.type as ClassType);
       if (storage.errorTraceOffset != null) {
@@ -69,6 +72,7 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     final offset = _words.length * 8;
     final payloadWords = switch (value) {
       ScalarConstant(value: final String text) => (text.length + 3) ~/ 4,
+      RecordConstant(:final fields) => fields.length,
       _ => 0,
     };
     final size = layout.size + payloadWords * 8;
@@ -76,13 +80,26 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
     _constants[key] = symbol;
     final type =
         carrier?.type ??
-        (list == null
+        (value is RecordConstant
+            ? layouts.records.type
+            : list == null
             ? value.type as ClassType
             : layouts.lists.type.instantiate(
                 (list.type as ClassType).typeArguments,
               ));
-    _header(symbol, offset, type, layout, size, carrier?.signature ?? type);
-    if (list != null) {
+    _header(
+      symbol,
+      offset,
+      type,
+      layout,
+      size,
+      value is RecordConstant ? _recordType(value) : carrier?.signature ?? type,
+    );
+    if (value is RecordConstant) {
+      for (final (i, field) in value.fields.indexed) {
+        _write(field, .object.nullable, offset + layout.size + i * 8);
+      }
+    } else if (list != null) {
       _words[(offset + layouts.fieldOffset(layouts.lists.length)) ~/ 8] =
           list.elements.length;
       relocations.add(
@@ -117,6 +134,24 @@ final class ConstantData(final ProgramLayout layouts, final int symbolBase) {
       }
     }
     return symbol;
+  }
+
+  RecordType _recordType(RecordConstant record) {
+    ValueType actual(Constant field) => switch (field) {
+      RecordConstant() => _recordType(field),
+      FunctionConstant() =>
+        layouts.closures.constants[field.structuralKey]!.signature,
+      SequenceConstant()
+          when (field.type as ClassType).declaration == CoreTypes.list =>
+        layouts.lists.type.instantiate((field.type as ClassType).typeArguments),
+      TypeConstant() => TypeMetadata.type,
+      _ => field.type,
+    };
+    final type = record.type as RecordType;
+    return RecordType(record.fields.take(type.positionalCount).map(actual), {
+      for (final entry in type.slots.entries.skip(type.positionalCount))
+        entry.key: actual(record.fields[entry.value]),
+    });
   }
 
   void _header(

@@ -2,10 +2,37 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import '../../sdk/runtime/decimal.dart';
+import 'fixtures/decimal_text.dart';
 
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'decimal parsing preserves grammar, limits and nearest-even rounding',
+    () {
+      for (final source in decimalInputs) {
+        final expected = double.tryParse(source);
+        final text = source.trim();
+        final actual = DoubleText.tryParse(text, 0, text.length);
+        if (expected?.isNaN == true) {
+          expect(actual?.isNaN, isTrue, reason: source);
+        } else {
+          expect(actual, expected, reason: source);
+          expect(actual?.isNegative, expected?.isNegative, reason: source);
+        }
+      }
+      for (final MapEntry(key: source, value: expected)
+          in decimalRounding.entries) {
+        final bits = ByteData(8)
+          ..setFloat64(0, DoubleText.tryParse(source, 0, source.length)!);
+        expect(bits.getUint64(0), expected, reason: source);
+      }
+      expect(DoubleText.tryParse('prefix-1.25suffix', 6, 11), -1.25);
+      expect(DoubleText.tryParse(' 1 ', 0, 3), isNull);
+      expect(() => DoubleText.tryParse('1', 0, 2), throwsRangeError);
+    },
+  );
+
   test('decimal formatting preserves binary64 rounding and precision', () {
     final random = Random(41037), bits = ByteData(8);
     final values = <double>[
@@ -36,16 +63,24 @@ void main() {
     ];
     for (final value in values) {
       expect(DoubleText.shortest(value), value.toString(), reason: '$value');
-      expect(
-        DoubleText.exponential(value, null),
-        value.toStringAsExponential(),
-      );
+      final source = value.toString();
+      final parsed = DoubleText.tryParse(source, 0, source.length);
+      if (value.isNaN) {
+        expect(parsed?.isNaN, isTrue);
+      } else {
+        expect(parsed, value);
+        expect(parsed?.isNegative, value.isNegative);
+      }
+      if (!value.isFinite) continue;
+      expect(DoubleText.exponential(value, -1), value.toStringAsExponential());
       for (final digits in [0, 1, 6, 17, 20]) {
-        expect(
-          DoubleText.fixed(value, digits),
-          value.toStringAsFixed(digits),
-          reason: '$value fixed $digits',
-        );
+        if (value.abs() < 1e21) {
+          expect(
+            DoubleText.fixed(value, digits),
+            value.toStringAsFixed(digits),
+            reason: '$value fixed $digits',
+          );
+        }
         expect(
           DoubleText.exponential(value, digits),
           value.toStringAsExponential(digits),
@@ -58,8 +93,5 @@ void main() {
         );
       }
     }
-    expect(() => DoubleText.fixed(double.nan, 21), throwsRangeError);
-    expect(() => DoubleText.exponential(0, -1), throwsRangeError);
-    expect(() => DoubleText.precision(0, 0), throwsRangeError);
   });
 }

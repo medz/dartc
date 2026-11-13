@@ -17,6 +17,7 @@ import 'package:dartc/abi.dart' show NativeLayout;
 import 'pointer_parameters.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
+import 'record_storage.dart';
 
 enum TypeTestKind() {
   constantTrue,
@@ -36,6 +37,7 @@ final class ProgramLayout(
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
   ListStorage? listStorage,
+  RecordStorage? recordStorage,
 }) {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
@@ -48,11 +50,20 @@ final class ProgramLayout(
   final pointerParameters = PointerParameters(functions);
   final strings = stringStorage ?? StringStorage();
   final lists = listStorage ?? ListStorage(classes);
+  final records = recordStorage ?? RecordStorage(classes, const []);
   late final TypeRelations relations;
   final _classes = {
     for (final declaration in classes) declaration.type: declaration,
   };
   final _storage = <ClassType, ClassStorage>{};
+
+  /// Completes generated storage before any offsets or descriptors are consumed.
+  void defineStorage(IrClass declaration) {
+    if (_storage.containsKey(declaration.type)) {
+      throw StateError('Class storage was already consumed.');
+    }
+    _classes[declaration.type] = declaration;
+  }
 
   this {
     _classes[FfiTypes.pointer] = pointers.declaration;
@@ -60,7 +71,10 @@ final class ProgramLayout(
     for (final declaration in types.classes) {
       _classes.putIfAbsent(declaration.type, () => declaration);
     }
-    relations = TypeRelations(types, [..._classes.keys, ...referencedClasses]);
+    relations = TypeRelations(types, [
+      ..._classes.keys,
+      ...referencedClasses,
+    ], recordStorage: records.declaration?.type);
     for (final declaration in relations.classes) {
       _classes.putIfAbsent(declaration.type, () => declaration);
     }

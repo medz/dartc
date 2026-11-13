@@ -41,7 +41,7 @@ final class Bindings({
   final ConstantEvaluation constants = constants ?? ConstantEvaluation();
   final _targets = <ExecutableElement, FunctionTarget>{};
   final nativeReferences = <FunctionTarget, NativeReference>{};
-  final _numericClasses = <ClassType>{};
+  final _primitiveClasses = <ClassType>{};
   (InterfaceElement, FieldElement, FieldElement)? _constantMapStorage;
   (InterfaceElement, FieldElement)? _constantSetStorage;
 
@@ -75,7 +75,7 @@ final class Bindings({
   /// Compiler-owned classes, retaining all referenced abstract members.
   Iterable<IrClass> get intrinsicClasses => [
     for (final owner in {
-      ..._numericClasses,
+      ..._primitiveClasses,
       for (final target in _intrinsics.keys)
         if (target.owner != null) target.owner!,
     })
@@ -109,7 +109,7 @@ final class Bindings({
   /// Includes a dependency class and the bodies it inherits.
   void requireClass(InterfaceElement element) {
     if (!_needsLowering(element.library) ||
-        _numericImplementation(element) != null ||
+        _primitiveImplementation(element) != null ||
         dependencyClasses.contains(element)) {
       return;
     }
@@ -120,6 +120,35 @@ final class Bindings({
       requireClass(mixin.element);
     }
     dependencyClasses.add(element);
+  }
+
+  /// Binds SDK primitive overrides declared only on an inherited interface.
+  void bindInheritedPrimitiveMembers(
+    InterfaceElement element,
+    ResolvedUnitResult unit,
+    ast.AstNode site,
+  ) {
+    if (!element.library.isDartCore) return;
+    final implementations = _primitiveImplementations(element);
+    if (implementations.isEmpty) return;
+    Iterable<ExecutableElement> members(InterfaceElement owner) => [
+      ...owner.methods,
+      ...owner.getters,
+      ...owner.setters,
+    ].where((member) => !member.isStatic && !member.isPrivate);
+    final inherited = {
+      for (final parent in element.allSupertypes)
+        ...members(parent.element).map(_memberSelector),
+    }..removeAll(members(element).map(_memberSelector));
+    for (final implementation in implementations) {
+      for (final member in members(implementation)) {
+        if (!member.isAbstract &&
+            !member.isExternal &&
+            inherited.contains(_memberSelector(member))) {
+          target(member, unit, site);
+        }
+      }
+    }
   }
 
   /// Includes the actual SDK error used by failed late binding operations.
@@ -235,6 +264,18 @@ final class Bindings({
     _libraries[library.element] = library;
     for (final unit in library.units) {
       for (final node in unit.unit.declarations) {
+        if (node is ast.FunctionDeclaration &&
+            runtimeContracts != null &&
+            runtimeSources.contains(unit.uri)) {
+          for (final annotation in node.metadata) {
+            final value = constants.annotation(unit, annotation);
+            if (value?.type case dart.InterfaceType(element: final contract)
+                when contract.library.uri == runtimeContracts &&
+                    contract == contract.library.getClass('RuntimeEntry')) {
+              target(node.declaredFragment!.element, unit, node);
+            }
+          }
+        }
         final element = switch (node) {
           ast.ClassDeclaration() => node.declaredFragment!.element,
           ast.EnumDeclaration() => node.declaredFragment!.element,
@@ -250,6 +291,7 @@ final class Bindings({
                 when contract.library.uri == runtimeContracts &&
                     contract ==
                         contract.library.getClass('ConstantSetStorage')) {
+              requireClass(element);
               _constantSetStorage = (
                 element,
                 element.getField(value!.getField('entries')!.toStringValue()!)!,
@@ -267,6 +309,7 @@ final class Bindings({
                 when contract.library.uri == runtimeContracts &&
                     contract ==
                         contract.library.getClass('ConstantMapStorage')) {
+              requireClass(element);
               _constantMapStorage = (
                 element,
                 element.getField(value!.getField('keys')!.toStringValue()!)!,
@@ -826,47 +869,48 @@ final class Bindings({
     final previous = enclosing == null ? _targets[element] : null;
     if (previous != null) return previous;
     final container = element.enclosingElement;
-    if (container is InterfaceElement && element is MethodElement) {
-      final numeric = _numericImplementation(container);
-      final declaration = numeric == null
+    Value? Function(FunctionTarget, Block)? supplied(
+      ExecutableElement member,
+    ) => intrinsicFor(
+      member,
+      requireClass,
+      (declaration) => target(declaration, unit, site),
+    );
+    final declaredIntrinsic = supplied(element);
+    ExecutableElement? memberOf(InterfaceElement? owner) => switch (element) {
+      GetterElement() => owner?.getGetter(element.name!),
+      SetterElement() => owner?.getSetter(element.name!),
+      MethodElement() =>
+        owner?.methods
+            .where((m) => _memberSelector(m) == _memberSelector(element))
+            .firstOrNull,
+      _ => null,
+    };
+    if (container is InterfaceElement) {
+      final primitive = _primitiveImplementation(container);
+      final declaration = primitive == null
           ? null
-          : element.library
-                .getClass(numeric.name)
-                ?.methods
-                .where(
-                  (method) =>
-                      _memberSelector(method) == _memberSelector(element),
-                )
-                .firstOrNull;
+          : memberOf(element.library.getClass(primitive.name));
       if (declaration != null &&
-          !declaration.isAbstract &&
-          !declaration.isExternal) {
+          (supplied(declaration) != null ||
+              !declaration.isAbstract &&
+                  (!declaration.isExternal || element.isExternal))) {
         return _targets[element] = target(declaration, unit, site);
       }
     }
-    if (element.library.isDartCore &&
+    if (declaredIntrinsic == null &&
+        element.library.isDartCore &&
         !element.isStatic &&
-        element.isAbstract &&
+        (element.isAbstract || element.isExternal) &&
         container is InterfaceElement &&
-        const {'int', 'double', 'num'}.contains(container.name)) {
-      for (final name in switch (container.name) {
-        'int' => ['_IntegerImplementation'],
-        'double' => ['_Double'],
-        _ => ['_IntegerImplementation', '_Double'],
-      }) {
-        final implementation = element.library.getClass(name);
-        final member = switch (element) {
-          GetterElement() => implementation?.getGetter(element.name!),
-          SetterElement() => implementation?.getSetter(element.name!),
-          _ =>
-            implementation?.methods
-                .where(
-                  (method) =>
-                      _memberSelector(method) == _memberSelector(element),
-                )
-                .firstOrNull,
-        };
-        if (member == null) continue;
+        const {'int', 'double', 'num', 'String'}.contains(container.name)) {
+      for (final implementation in _primitiveImplementations(container)) {
+        final member = memberOf(implementation);
+        if (member == null ||
+            member.isAbstract ||
+            element.isExternal && member.isExternal) {
+          continue;
+        }
         final concrete = target(member, unit, site);
         if (container.name != 'num') return _targets[element] = concrete;
       }
@@ -936,11 +980,7 @@ final class Bindings({
           owner,
           (declaration) => target(declaration, unit, site),
         ) ??
-        intrinsicFor(
-          element,
-          requireClass,
-          (declaration) => target(declaration, unit, site),
-        );
+        declaredIntrinsic;
     final function = FunctionTarget(
       enclosing != null
           ? enclosing.library
@@ -996,26 +1036,29 @@ final class Bindings({
           intrinsic == null) {
         requireClass(element.enclosingElement);
       }
-      final numeric =
+      final primitive =
           container is InterfaceElement &&
-          (owner == ValueType.integer || owner == ValueType.floating);
-      if (numeric) _numericClasses.add(owner!);
+          (owner == ValueType.integer ||
+              owner == ValueType.floating ||
+              owner == ValueType.string);
+      if (primitive) _primitiveClasses.add(owner!);
       if (element.library.isDartCore && container?.name == 'num') {
-        _numericClasses.add(ValueType.number);
+        _primitiveClasses.add(ValueType.number);
       }
       if (_needsLowering(element.library) &&
-          (numeric || element.isStatic) &&
+          (primitive || element.isStatic) &&
           !element.isAbstract &&
           intrinsic == null &&
           (element is TopLevelFunctionElement ||
               element is MethodElement ||
               element is PropertyAccessorElement ||
-              numeric && element is ConstructorElement)) {
+              primitive && element is ConstructorElement)) {
         dependencyFunctions.add(element);
       }
       if (container is InterfaceElement &&
-          !element.library.isInSdk &&
-          _needsLowering(element.library)) {
+          _needsLowering(element.library) &&
+          (!element.library.isInSdk ||
+              runtimeSources.contains(sourceOf(container)?.$1.uri))) {
         requireClass(container);
       }
     }
@@ -1821,6 +1864,7 @@ final class Bindings({
     if (element.library.isDartCore || ffi != null) {
       final builtin =
           ffi ??
+          _primitiveImplementation(element) ??
           switch (element.name) {
             'Object' => ValueType.object,
             'Null' => ValueType.nullClass,
@@ -1838,8 +1882,8 @@ final class Bindings({
             'AssertionError' => ValueType.assertionError,
             'StackTrace' => ValueType.stackTrace,
             'num' => ValueType.number,
-            'int' || '_IntegerImplementation' => ValueType.integer,
-            'double' || '_Double' => ValueType.floating,
+            'int' => ValueType.integer,
+            'double' => ValueType.floating,
             'String' => ValueType.string,
             'Pattern' => ValueType.pattern,
             'bool' => ValueType.boolean,
@@ -2214,11 +2258,23 @@ bool isClassLike(Element? element) =>
     element is EnumElement ||
     element is MixinElement;
 
-ClassType? _numericImplementation(InterfaceElement element) =>
+ClassType? _primitiveImplementation(InterfaceElement element) =>
     !element.library.isDartCore
     ? null
     : switch (element.name) {
-        '_IntegerImplementation' => ValueType.integer,
+        '_IntegerImplementation' || '_Smi' => ValueType.integer,
         '_Double' => ValueType.floating,
+        '_StringBase' => ValueType.string,
         _ => null,
       };
+
+Iterable<ClassElement> _primitiveImplementations(InterfaceElement element) => [
+  for (final name in switch (element.name) {
+    'int' => ['_IntegerImplementation', '_Smi'],
+    'double' => ['_Double'],
+    'String' => ['_StringBase'],
+    'num' => ['_IntegerImplementation', '_Double'],
+    _ => const <String>[],
+  })
+    ?element.library.getClass(name),
+];

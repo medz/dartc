@@ -48,6 +48,9 @@ sealed class IrCallable(
   /// Constant Lists and Sets, including nested elements and defaults.
   Set<SequenceConstant> get sequenceConstants => _references.sequenceConstants;
 
+  /// Record shapes constructed here, including nested constants and defaults.
+  Set<RecordType> get recordTypes => _references.recordTypes;
+
   /// Nominal identities used by the signature, constants and graph.
   Set<ClassType> get referencedClasses => _references.classes;
 

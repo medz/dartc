@@ -92,4 +92,27 @@ void main() {
       }
     }
   });
+
+  test('replacement preserves long slices, Unicode and callback order', () {
+    for (final value in [
+      '${'a' * 499}x',
+      '${'a' * 2047}x',
+      '${'\u1000' * 2048}x',
+      '\ud800x\u{1f600}x',
+    ]) {
+      for (final mode in [9, 10, 18]) {
+        expect(
+          native.transform(value, 'x', mode, 0, -1),
+          sdk.transform(value, 'x', mode, 0, -1),
+          reason: '$mode/${value.length}',
+        );
+      }
+    }
+    for (final pattern in ['', 'a', 'missing']) {
+      expect(
+        native.transform('aba', pattern, 18, 0, -1),
+        sdk.transform('aba', pattern, 18, 0, -1),
+      );
+    }
+  });
 }

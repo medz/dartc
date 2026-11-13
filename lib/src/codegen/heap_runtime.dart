@@ -9,6 +9,7 @@ enum MemoryPrimitive() {
   writeBytes,
   clock,
   sleep,
+  captureStackTrace,
 }
 
 /// Source program and entry contracts used by managed code generation.
@@ -19,11 +20,14 @@ final class HeapRuntime(
   required final FunctionTarget runEvents,
   required final FunctionTarget eventAccess,
   required final FunctionTarget copyBytes,
+  required final FunctionTarget captureStackTrace,
+  required final FunctionTarget recordError,
   final FunctionTarget? invocation,
   final FunctionTarget? dispatchFailure,
   final FunctionTarget? exhaustivenessFailure,
   final FunctionTarget? floatingRemainder,
   final FunctionTarget? floatingModulo,
+  final AsyncRuntime? async,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
 }) {
@@ -36,12 +40,20 @@ final class HeapRuntime(
   final List<FunctionTarget> nonAllocating = .unmodifiable(nonAllocating);
 
   this {
+    if (primitives.values
+            .where((service) => service == .captureStackTrace)
+            .length !=
+        1) {
+      throw ArgumentError('Expected one stack capture machine entry.');
+    }
     for (final (target, signature) in [
       (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
       (release, FunctionType(.voidType, [.integer])),
       (runEvents, FunctionType(.voidType, [.integer])),
       (eventAccess, FunctionType(eventAccess.returnType, [])),
       (copyBytes, FunctionType(.voidType, [.integer, .integer, .integer])),
+      (captureStackTrace, FunctionType(.stackTrace, [.integer, .integer])),
+      (recordError, FunctionType(.voidType, [.object, .stackTrace])),
       if (invocation case final target?)
         (
           target,
@@ -82,6 +94,7 @@ final class HeapRuntime(
         .writeBytes => FunctionType(.integer, [.integer, .integer, .integer]),
         .clock => FunctionType(.integer, []),
         .sleep => FunctionType(.voidType, [.integer, .integer]),
+        .captureStackTrace => FunctionType(.stackTrace, []),
       };
       if (target.kind != .function ||
           target.typeParameters.isNotEmpty ||
@@ -89,6 +102,63 @@ final class HeapRuntime(
           program.implementationOf(target) is! IrExternal) {
         throw ArgumentError('Invalid memory service: ${target.name}');
       }
+    }
+    if (async case final entries?) {
+      for (final target in [
+        entries.create,
+        entries.start,
+        entries.awaitValue,
+        entries.complete,
+      ]) {
+        if (program.implementationOf(target) is! IrFunction) {
+          throw ArgumentError(
+            'Async runtime entry requires a Dart body: ${target.name}',
+          );
+        }
+      }
+    }
+  }
+}
+
+/// Ordinary Dart entries for a future and its suspension callbacks.
+final class AsyncRuntime(
+  final FunctionTarget create,
+  final FunctionTarget start,
+  final FunctionTarget awaitValue,
+  final FunctionTarget complete,
+) {
+  static final callback = FunctionType(.voidType, [
+    .object.nullable,
+    .object.nullable,
+    .stackTrace.nullable,
+  ]);
+  this {
+    for (final target in [create, start, awaitValue]) {
+      if (target.kind != .function || target.typeParameters.length != 1) {
+        throw ArgumentError('Invalid async entry: ${target.name}');
+      }
+      final t = target.typeParameters.single;
+      final signature = target == create
+          ? FunctionType(.object, [callback], typeParameters: [t])
+          : target == start
+          ? FunctionType(
+              ValueType.future.instantiate([t]),
+              [.object],
+              typeParameters: [t],
+            )
+          : FunctionType(
+              .voidType,
+              [.object, .object.nullable],
+              typeParameters: [t],
+            );
+      if (target.signature != signature) {
+        throw ArgumentError('Invalid async entry signature: ${target.name}');
+      }
+    }
+    if (complete.kind != .function ||
+        complete.signature !=
+            FunctionType(.voidType, [.object, .object.nullable])) {
+      throw ArgumentError('Invalid async completion entry: ${complete.name}');
     }
   }
 }

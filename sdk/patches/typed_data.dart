@@ -1,141 +1,82 @@
-import 'dart:collection' show ListBase;
-import 'dart:_internal' show FixedLengthListMixin;
-import 'dart:math' show Random;
 import 'dart:ffi' show Finalizable;
 
 import '../../lib/layout/memory.dart';
 import '../runtime/memory.dart';
 
 @patch
-class ByteData {
-  @patch
-  factory ByteData(int length) =>
-      _Buffer.allocate(_byteLength(length, 1)).asByteData();
-}
-
-@patch
 class Int8List {
   @patch
   factory Int8List(int length) =>
-      _Buffer.allocate(_byteLength(length, 1)).asInt8List();
-  @patch
-  factory Int8List.fromList(List<int> elements) =>
-      _fill(Int8List(elements.length), elements);
+      _NativeData.allocate(length, 1).buffer.asInt8List();
 }
 
 @patch
 class Uint8List {
   @patch
-  factory Uint8List(int length) =>
-      _Buffer.allocate(_byteLength(length, 1)).asUint8List();
-  @patch
-  factory Uint8List.fromList(List<int> elements) =>
-      _fill(Uint8List(elements.length), elements);
+  factory Uint8List(int length) => _NativeData.allocate(length, 1);
 }
 
 @patch
 class Uint8ClampedList {
   @patch
   factory Uint8ClampedList(int length) =>
-      _Buffer.allocate(_byteLength(length, 1)).asUint8ClampedList();
-  @patch
-  factory Uint8ClampedList.fromList(List<int> elements) =>
-      _fill(Uint8ClampedList(elements.length), elements);
+      _NativeData.allocate(length, 1).buffer.asUint8ClampedList();
 }
 
 @patch
 class Int16List {
   @patch
   factory Int16List(int length) =>
-      _Buffer.allocate(_byteLength(length, 2)).asInt16List();
-  @patch
-  factory Int16List.fromList(List<int> elements) =>
-      _fill(Int16List(elements.length), elements);
+      _NativeData.allocate(length, 2).buffer.asInt16List();
 }
 
 @patch
 class Uint16List {
   @patch
   factory Uint16List(int length) =>
-      _Buffer.allocate(_byteLength(length, 2)).asUint16List();
-  @patch
-  factory Uint16List.fromList(List<int> elements) =>
-      _fill(Uint16List(elements.length), elements);
+      _NativeData.allocate(length, 2).buffer.asUint16List();
 }
 
 @patch
 class Int32List {
   @patch
   factory Int32List(int length) =>
-      _Buffer.allocate(_byteLength(length, 4)).asInt32List();
-  @patch
-  factory Int32List.fromList(List<int> elements) =>
-      _fill(Int32List(elements.length), elements);
+      _NativeData.allocate(length, 4).buffer.asInt32List();
 }
 
 @patch
 class Uint32List {
   @patch
   factory Uint32List(int length) =>
-      _Buffer.allocate(_byteLength(length, 4)).asUint32List();
-  @patch
-  factory Uint32List.fromList(List<int> elements) =>
-      _fill(Uint32List(elements.length), elements);
+      _NativeData.allocate(length, 4).buffer.asUint32List();
 }
 
 @patch
 class Int64List {
   @patch
   factory Int64List(int length) =>
-      _Buffer.allocate(_byteLength(length, 8)).asInt64List();
-  @patch
-  factory Int64List.fromList(List<int> elements) =>
-      _fill(Int64List(elements.length), elements);
+      _NativeData.allocate(length, 8).buffer.asInt64List();
 }
 
 @patch
 class Uint64List {
   @patch
   factory Uint64List(int length) =>
-      _Buffer.allocate(_byteLength(length, 8)).asUint64List();
-  @patch
-  factory Uint64List.fromList(List<int> elements) =>
-      _fill(Uint64List(elements.length), elements);
+      _NativeData.allocate(length, 8).buffer.asUint64List();
 }
 
 @patch
 class Float32List {
   @patch
   factory Float32List(int length) =>
-      _Buffer.allocate(_byteLength(length, 4)).asFloat32List();
-  @patch
-  factory Float32List.fromList(List<double> elements) =>
-      _fill(Float32List(elements.length), elements);
+      _NativeData.allocate(length, 4).buffer.asFloat32List();
 }
 
 @patch
 class Float64List {
   @patch
   factory Float64List(int length) =>
-      _Buffer.allocate(_byteLength(length, 8)).asFloat64List();
-  @patch
-  factory Float64List.fromList(List<double> elements) =>
-      _fill(Float64List(elements.length), elements);
-}
-
-int _byteLength(int count, int bytes) {
-  RangeError.checkNotNegative(count, 'length');
-  if (count > (0x0ffffffffffffff8 - ObjectHeader.fieldsOffset) ~/ bytes) {
-    return -1;
-  }
-  return count * bytes;
-}
-
-L _fill<E, L extends List<E>>(L result, List<E> source) {
-  for (var i = 0; i < source.length; i++) {
-    result[i] = source[i];
-  }
-  return result;
+      _NativeData.allocate(length, 8).buffer.asFloat64List();
 }
 
 TypedData _nativeStorage(TypedData? data, int offset, int size) {
@@ -154,7 +95,8 @@ TypedData _nativeStorage(TypedData? data, int offset, int size) {
 }
 
 int _nativeAddress(TypedData data) =>
-    (data.buffer as _Buffer)._address + data.offsetInBytes;
+    ((data.buffer as _ByteBuffer)._data as _NativeData)._address +
+    data.offsetInBytes;
 
 ByteBuffer _nativeBuffer(
   Object owner,
@@ -168,454 +110,734 @@ ByteBuffer _nativeBuffer(
     0x7fffffffffffffff ~/ elementSize,
     'length',
   );
-  return _Buffer(owner, address, length * elementSize);
+  return _NativeData(owner, address, length * elementSize).buffer;
 }
 
-enum _Element(
-  final int bytes, {
-  final bool signed = false,
-  final bool floating = false,
-  final bool clamped = false,
-}) {
-  int8(1, signed: true),
-  uint8(1),
-  uint8Clamped(1, clamped: true),
-  int16(2, signed: true),
-  uint16(2),
-  int32(4, signed: true),
-  uint32(4),
-  int64(8, signed: true),
-  uint64(8),
-  float32(4, signed: true, floating: true),
-  float64(8, signed: true, floating: true),
-}
+Finalizable _nativeOwner(TypedData data) =>
+    (data.buffer as _ByteBuffer)._data as Finalizable;
 
-final class _Buffer(
+final class _NativeData(
   final Object _owner,
   final int _address,
-  final int lengthInBytes, {
-  final bool _writable = true,
-}) implements ByteBuffer, Finalizable {
-  factory allocate(int length) {
-    final data = ByteStorage.allocate(length);
+  final int _byteLength,
+) extends _TypedIntListBase
+    with _TypedListMixin<int, Uint8List>, _Uint8ListCommonMixin
+    implements Finalizable {
+  factory allocate(int length, int width) {
+    RangeError.checkNotNegative(length, 'length');
+    const maximum = 0x0ffffffffffffff8 - ObjectHeader.fieldsOffset;
+    final bytes = length > maximum ~/ width ? -1 : length * width;
+    final owner = ByteStorage.allocate(bytes);
     return .new(
-      data,
-      Memory.addressOf(data) + ObjectHeader.fieldsOffset,
-      length,
+      owner,
+      Memory.addressOf(owner) + ObjectHeader.fieldsOffset,
+      bytes,
     );
   }
 
-  _Buffer get _readOnly =>
-      _writable ? .new(_owner, _address, lengthInBytes, writable: false) : this;
-
-  int _length(int offset, int? length, int bytes) {
-    RangeError.checkValueInInterval(offset, 0, lengthInBytes, 'offsetInBytes');
-    if (offset % bytes != 0) throw ArgumentError.value(offset, 'offsetInBytes');
-    final available = (lengthInBytes - offset) ~/ bytes;
-    if (length == null) return available;
-    RangeError.checkValueInInterval(length, 0, available, 'length');
-    return length;
-  }
-
-  void _checkWritable() {
-    if (!_writable)
-      throw UnsupportedError('Cannot modify an unmodifiable view');
-  }
-
-  int _read(int offset, int width, Endian endian) {
-    var result = 0;
-    for (var i = 0; i < width; i++) {
-      final shift = (endian == Endian.little ? i : width - i - 1) * 8;
-      result |= Memory.readByte(_address + offset + i) << shift;
-    }
-    Memory.keepAlive(this);
-    return result;
-  }
-
-  void _write(int offset, int width, int value, Endian endian) {
-    _checkWritable();
-    for (var i = 0; i < width; i++) {
-      final shift = (endian == Endian.little ? i : width - i - 1) * 8;
-      Memory.writeByte(_address + offset + i, value >>> shift);
-    }
-    Memory.keepAlive(this);
-  }
-
   @override
-  ByteData asByteData([int offsetInBytes = 0, int? length]) =>
-      _ByteData(this, offsetInBytes, _length(offsetInBytes, length, 1));
-  @override
-  Int8List asInt8List([int offsetInBytes = 0, int? length]) =>
-      _Int8List(this, offsetInBytes, _length(offsetInBytes, length, 1));
-  @override
-  Uint8List asUint8List([int offsetInBytes = 0, int? length]) =>
-      _Uint8List(this, offsetInBytes, _length(offsetInBytes, length, 1));
-  @override
-  Uint8ClampedList asUint8ClampedList([int offsetInBytes = 0, int? length]) =>
-      _Uint8ClampedList(this, offsetInBytes, _length(offsetInBytes, length, 1));
-  @override
-  Int16List asInt16List([int offsetInBytes = 0, int? length]) =>
-      _Int16List(this, offsetInBytes, _length(offsetInBytes, length, 2));
-  @override
-  Uint16List asUint16List([int offsetInBytes = 0, int? length]) =>
-      _Uint16List(this, offsetInBytes, _length(offsetInBytes, length, 2));
-  @override
-  Int32List asInt32List([int offsetInBytes = 0, int? length]) =>
-      _Int32List(this, offsetInBytes, _length(offsetInBytes, length, 4));
-  @override
-  Uint32List asUint32List([int offsetInBytes = 0, int? length]) =>
-      _Uint32List(this, offsetInBytes, _length(offsetInBytes, length, 4));
-  @override
-  Int64List asInt64List([int offsetInBytes = 0, int? length]) =>
-      _Int64List(this, offsetInBytes, _length(offsetInBytes, length, 8));
-  @override
-  Uint64List asUint64List([int offsetInBytes = 0, int? length]) =>
-      _Uint64List(this, offsetInBytes, _length(offsetInBytes, length, 8));
-  @override
-  Float32List asFloat32List([int offsetInBytes = 0, int? length]) =>
-      _Float32List(this, offsetInBytes, _length(offsetInBytes, length, 4));
-  @override
-  Float64List asFloat64List([int offsetInBytes = 0, int? length]) =>
-      _Float64List(this, offsetInBytes, _length(offsetInBytes, length, 8));
-  @override
-  external Float32x4List asFloat32x4List([int offsetInBytes = 0, int? length]);
-  @override
-  external Int32x4List asInt32x4List([int offsetInBytes = 0, int? length]);
-  @override
-  external Float64x2List asFloat64x2List([int offsetInBytes = 0, int? length]);
-}
-
-abstract class _TypedList<E extends num, L extends List<E>>(
-  final _Buffer buffer,
-  final int offsetInBytes,
-  final int length,
-  final _Element _kind,
-) extends ListBase<E> with FixedLengthListMixin<E> implements TypedData {
-  @override
-  int get elementSizeInBytes => _kind.bytes;
-  @override
-  int get lengthInBytes => length * elementSizeInBytes;
-  L _view(_Buffer buffer, int offset, int length);
-
-  int _offset(int index) {
-    if (index < 0 || index >= length) {
-      throw IndexError.withLength(
-        index,
-        length,
-        indexable: this,
-        name: 'index',
-      );
-    }
-    return offsetInBytes + index * elementSizeInBytes;
-  }
-
-  @override
-  E operator [](int index) {
-    var bits = buffer._read(_offset(index), _kind.bytes, Endian.little);
-    if (_kind.floating) {
-      return (_kind.bytes == 4
-              ? Memory.float32FromBits(bits)
-              : Memory.float64FromBits(bits))
-          as E;
-    }
-    if (_kind.signed && _kind.bytes < 8) {
-      final shift = 64 - _kind.bytes * 8;
-      bits = (bits << shift) >> shift;
-    }
-    return bits as E;
-  }
-
-  @override
-  void operator []=(int index, E value) {
-    buffer._checkWritable();
-    final offset = _offset(index);
-    final int bits;
-    if (_kind.floating) {
-      bits = _kind.bytes == 4
-          ? Memory.float32Bits(value as double)
-          : Memory.float64Bits(value as double);
-    } else {
-      final integer = value as int;
-      bits = _kind.clamped
-          ? (integer < 0
-                ? 0
-                : integer > 255
-                ? 255
-                : integer)
-          : integer;
-    }
-    buffer._write(offset, _kind.bytes, bits, Endian.little);
-  }
-
-  L asUnmodifiableView() => _view(buffer._readOnly, offsetInBytes, length);
-
-  @override
-  List<E> operator +(List<E> other) {
-    if (other is! _TypedList<E, List<E>>) return super + other;
-    final total = length + other.length;
-    final result =
-        (_kind.floating ? Float64List(total) : Int64List(total)) as List<E>;
-    result.setRange(0, length, this);
-    result.setRange(length, total, other);
-    return result;
-  }
-
-  @override
-  L sublist(int start, [int? end]) {
-    final limit = RangeError.checkValidRange(start, end, length);
-    final result = _view(
-      _Buffer.allocate((limit - start) * elementSizeInBytes),
-      0,
-      limit - start,
-    );
-    for (var i = start; i < limit; i++) {
-      result[i - start] = this[i];
-    }
-    return result;
-  }
-
-  @override
-  void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]) {
-    RangeError.checkValidRange(start, end, length);
-    RangeError.checkNotNegative(skipCount, 'skipCount');
-    final count = end - start;
-    if (iterable is _TypedList<E, List<E>>) {
-      if (iterable.length - skipCount < count)
-        throw StateError('Too few elements');
-      if (count == 0) return;
-      buffer._checkWritable();
-    }
-    if (iterable is _TypedList<E, List<E>> && iterable._kind == _kind) {
-      Memory.copyBytes(
-        buffer._address + offsetInBytes + start * elementSizeInBytes,
-        iterable.buffer._address +
-            iterable.offsetInBytes +
-            skipCount * elementSizeInBytes,
-        count * elementSizeInBytes,
-      );
-      Memory.keepAlive(iterable);
-      Memory.keepAlive(this);
-      return;
-    }
-    if (iterable is _TypedList<E, List<E>> &&
-        identical(buffer._owner, iterable.buffer._owner)) {
-      iterable = iterable.sublist(skipCount, skipCount + end - start);
-      skipCount = 0;
-    }
-    super.setRange(start, end, iterable, skipCount);
-  }
-
-  @override
-  void setAll(int index, Iterable<E> iterable) {
-    buffer._checkWritable();
-    super.setAll(index, iterable);
-  }
-
-  @override
-  void fillRange(int start, int end, [E? fillValue]) {
-    buffer._checkWritable();
-    super.fillRange(start, end, fillValue);
-  }
-
-  @override
-  void sort([int Function(E, E)? compare]) {
-    buffer._checkWritable();
-    super.sort(compare);
-  }
-
-  @override
-  void shuffle([Random? random]) {
-    buffer._checkWritable();
-    super.shuffle(random);
-  }
-}
-
-final class _Int8List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Int8List>
-    implements Int8List {
-  this : super(buffer, offset, length, .int8);
-  @override
-  Int8List _view(_Buffer buffer, int offset, int length) =>
-      _Int8List(buffer, offset, length);
-}
-
-final class _Uint8List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Uint8List>
-    implements Uint8List {
-  this : super(buffer, offset, length, .uint8);
-  @override
-  Uint8List _view(_Buffer buffer, int offset, int length) =>
-      _Uint8List(buffer, offset, length);
-}
-
-final class _Uint8ClampedList(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Uint8ClampedList>
-    implements Uint8ClampedList {
-  this : super(buffer, offset, length, .uint8Clamped);
-  @override
-  Uint8ClampedList _view(_Buffer buffer, int offset, int length) =>
-      _Uint8ClampedList(buffer, offset, length);
-}
-
-final class _Int16List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Int16List>
-    implements Int16List {
-  this : super(buffer, offset, length, .int16);
-  @override
-  Int16List _view(_Buffer buffer, int offset, int length) =>
-      _Int16List(buffer, offset, length);
-}
-
-final class _Uint16List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Uint16List>
-    implements Uint16List {
-  this : super(buffer, offset, length, .uint16);
-  @override
-  Uint16List _view(_Buffer buffer, int offset, int length) =>
-      _Uint16List(buffer, offset, length);
-}
-
-final class _Int32List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Int32List>
-    implements Int32List {
-  this : super(buffer, offset, length, .int32);
-  @override
-  Int32List _view(_Buffer buffer, int offset, int length) =>
-      _Int32List(buffer, offset, length);
-}
-
-final class _Uint32List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Uint32List>
-    implements Uint32List {
-  this : super(buffer, offset, length, .uint32);
-  @override
-  Uint32List _view(_Buffer buffer, int offset, int length) =>
-      _Uint32List(buffer, offset, length);
-}
-
-final class _Int64List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Int64List>
-    implements Int64List {
-  this : super(buffer, offset, length, .int64);
-  @override
-  Int64List _view(_Buffer buffer, int offset, int length) =>
-      _Int64List(buffer, offset, length);
-}
-
-final class _Uint64List(_Buffer buffer, int offset, int length)
-    extends _TypedList<int, Uint64List>
-    implements Uint64List {
-  this : super(buffer, offset, length, .uint64);
-  @override
-  Uint64List _view(_Buffer buffer, int offset, int length) =>
-      _Uint64List(buffer, offset, length);
-}
-
-final class _Float32List(_Buffer buffer, int offset, int length)
-    extends _TypedList<double, Float32List>
-    implements Float32List {
-  this : super(buffer, offset, length, .float32);
-  @override
-  Float32List _view(_Buffer buffer, int offset, int length) =>
-      _Float32List(buffer, offset, length);
-}
-
-final class _Float64List(_Buffer buffer, int offset, int length)
-    extends _TypedList<double, Float64List>
-    implements Float64List {
-  this : super(buffer, offset, length, .float64);
-  @override
-  Float64List _view(_Buffer buffer, int offset, int length) =>
-      _Float64List(buffer, offset, length);
-}
-
-final class _ByteData(
-  final _Buffer buffer,
-  final int offsetInBytes,
-  final int lengthInBytes,
-) implements ByteData {
+  int get length => _byteLength;
   @override
   int get elementSizeInBytes => 1;
+
   @override
-  ByteData asUnmodifiableView() =>
-      _ByteData(buffer._readOnly, offsetInBytes, lengthInBytes);
-  int _offset(int offset, int bytes) {
-    RangeError.checkValueInInterval(
-      offset,
-      0,
-      lengthInBytes - bytes,
-      'byteOffset',
+  int operator [](int index) =>
+      _getUint8(_typedDataIndexCheck(this, index, length));
+  @override
+  void operator []=(int index, int value) =>
+      _setUint8(_typedDataIndexCheck(this, index, length), value);
+}
+
+@patch
+class _TypedListBase {
+  bool get _writable => true;
+
+  void _copyBytes(
+    int start,
+    int count,
+    _TypedListBase from,
+    int skipCount,
+    int width,
+  ) {
+    if (!_writable)
+      throw UnsupportedError('Cannot modify an unmodifiable list');
+    Memory.copyBytes(
+      (_typedData as _NativeData)._address + offsetInBytes + start * width,
+      (from._typedData as _NativeData)._address +
+          from.offsetInBytes +
+          skipCount * width,
+      count * width,
     );
-    return offsetInBytes + offset;
+    Memory.keepAlive(from);
+    Memory.keepAlive(this);
   }
 
-  int _read(int offset, int bytes, Endian endian, bool signed) {
-    final bits = buffer._read(_offset(offset, bytes), bytes, endian);
-    final shift = 64 - bytes * 8;
-    return signed ? (bits << shift) >> shift : bits;
+  @patch
+  void _setClampedRange(
+    int start,
+    int count,
+    _TypedListBase from,
+    int skipOffset,
+  ) {
+    if (!_writable)
+      throw UnsupportedError('Cannot modify an unmodifiable list');
+    final source = from as List<int>, target = this as List<int>;
+    final backward =
+        (_typedData as _NativeData)._address + offsetInBytes + start >
+        (from._typedData as _NativeData)._address +
+            from.offsetInBytes +
+            skipOffset;
+    for (var n = 0; n < count; n++) {
+      final i = backward ? count - n - 1 : n;
+      target[start + i] = source[skipOffset + i];
+    }
   }
 
-  void _write(int offset, int bytes, int value, Endian endian) {
-    buffer._checkWritable();
-    buffer._write(_offset(offset, bytes), bytes, value, endian);
+  @patch
+  void _memMove1(int start, int count, _TypedListBase from, int skipCount) =>
+      _copyBytes(start, count, from, skipCount, 1);
+
+  @patch
+  void _memMove2(int start, int count, _TypedListBase from, int skipCount) =>
+      _copyBytes(start, count, from, skipCount, 2);
+
+  @patch
+  void _memMove4(int start, int count, _TypedListBase from, int skipCount) =>
+      _copyBytes(start, count, from, skipCount, 4);
+
+  @patch
+  void _memMove8(int start, int count, _TypedListBase from, int skipCount) =>
+      _copyBytes(start, count, from, skipCount, 8);
+}
+
+@patch
+class _TypedList {
+  int _readBits(int offset, int width) {
+    final data = this as _NativeData;
+    var bits = 0;
+    for (var i = 0; i < width; i++) {
+      bits |= Memory.readByte(data._address + offset + i) << (i * 8);
+    }
+    Memory.keepAlive(data);
+    return bits;
   }
 
+  void _writeBits(int offset, int width, int value) {
+    final data = this as _NativeData;
+    for (var i = 0; i < width; i++) {
+      Memory.writeByte(data._address + offset + i, value >>> (i * 8));
+    }
+    Memory.keepAlive(data);
+  }
+
+  @patch
+  int _getInt8(int offsetInBytes) => _readBits(offsetInBytes, 1).toSigned(8);
+  @patch
+  void _setInt8(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 1, value);
+
+  @patch
+  int _getUint8(int offsetInBytes) => _readBits(offsetInBytes, 1);
+  @patch
+  void _setUint8(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 1, value);
+
+  @patch
+  int _getInt16(int offsetInBytes) => _readBits(offsetInBytes, 2).toSigned(16);
+  @patch
+  void _setInt16(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 2, value);
+
+  @patch
+  int _getUint16(int offsetInBytes) => _readBits(offsetInBytes, 2);
+  @patch
+  void _setUint16(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 2, value);
+
+  @patch
+  int _getInt32(int offsetInBytes) => _readBits(offsetInBytes, 4).toSigned(32);
+  @patch
+  void _setInt32(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 4, value);
+
+  @patch
+  int _getUint32(int offsetInBytes) => _readBits(offsetInBytes, 4);
+  @patch
+  void _setUint32(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 4, value);
+
+  @patch
+  int _getInt64(int offsetInBytes) => _readBits(offsetInBytes, 8);
+  @patch
+  void _setInt64(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 8, value);
+
+  @patch
+  int _getUint64(int offsetInBytes) => _readBits(offsetInBytes, 8);
+  @patch
+  void _setUint64(int offsetInBytes, int value) =>
+      _writeBits(offsetInBytes, 8, value);
+
+  @patch
+  double _getFloat32(int offsetInBytes) =>
+      Memory.float32FromBits(_readBits(offsetInBytes, 4));
+  @patch
+  void _setFloat32(int offsetInBytes, double value) =>
+      _writeBits(offsetInBytes, 4, Memory.float32Bits(value));
+
+  @patch
+  double _getFloat64(int offsetInBytes) =>
+      Memory.float64FromBits(_readBits(offsetInBytes, 8));
+  @patch
+  void _setFloat64(int offsetInBytes, double value) =>
+      _writeBits(offsetInBytes, 8, Memory.float64Bits(value));
+}
+
+@patch
+class _TypedListView._storage(
+  final _TypedList _storageData,
+  final int _storageOffset,
+  final int _storageLength, {
+  final bool _writable = true,
+}) {
+  this {
+    _checkView(
+      _storageData,
+      _storageOffset,
+      _storageLength,
+      elementSizeInBytes,
+    );
+  }
+  @patch
+  _TypedList get _typedData => _storageData;
+  @patch
+  int get offsetInBytes => _storageOffset;
   @override
-  int getInt8(int byteOffset) => _read(byteOffset, 1, Endian.little, true);
-  @override
-  void setInt8(int byteOffset, int value) =>
-      _write(byteOffset, 1, value, Endian.little);
-  @override
-  int getUint8(int byteOffset) => _read(byteOffset, 1, Endian.little, false);
-  @override
-  void setUint8(int byteOffset, int value) =>
-      _write(byteOffset, 1, value, Endian.little);
-  @override
-  int getInt16(int byteOffset, [Endian endian = Endian.big]) =>
-      _read(byteOffset, 2, endian, true);
-  @override
-  void setInt16(int byteOffset, int value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 2, value, endian);
-  @override
-  int getUint16(int byteOffset, [Endian endian = Endian.big]) =>
-      _read(byteOffset, 2, endian, false);
-  @override
-  void setUint16(int byteOffset, int value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 2, value, endian);
-  @override
-  int getInt32(int byteOffset, [Endian endian = Endian.big]) =>
-      _read(byteOffset, 4, endian, true);
-  @override
-  void setInt32(int byteOffset, int value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 4, value, endian);
-  @override
-  int getUint32(int byteOffset, [Endian endian = Endian.big]) =>
-      _read(byteOffset, 4, endian, false);
-  @override
-  void setUint32(int byteOffset, int value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 4, value, endian);
-  @override
-  int getInt64(int byteOffset, [Endian endian = Endian.big]) =>
-      _read(byteOffset, 8, endian, true);
-  @override
-  void setInt64(int byteOffset, int value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 8, value, endian);
-  @override
-  int getUint64(int byteOffset, [Endian endian = Endian.big]) =>
-      _read(byteOffset, 8, endian, false);
-  @override
-  void setUint64(int byteOffset, int value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 8, value, endian);
-  @override
-  double getFloat32(int byteOffset, [Endian endian = Endian.big]) =>
-      Memory.float32FromBits(_read(byteOffset, 4, endian, false));
-  @override
-  void setFloat32(int byteOffset, double value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 4, Memory.float32Bits(value), endian);
-  @override
-  double getFloat64(int byteOffset, [Endian endian = Endian.big]) =>
-      Memory.float64FromBits(_read(byteOffset, 8, endian, false));
-  @override
-  void setFloat64(int byteOffset, double value, [Endian endian = Endian.big]) =>
-      _write(byteOffset, 8, Memory.float64Bits(value), endian);
+  int get length => _storageLength;
+}
+
+@patch
+class _TypedIntListViewBase._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+}
+
+@patch
+class _TypedDoubleListViewBase._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+}
+
+// Abstract SDK view bases also require initialized storage constructors.
+@patch
+class _TypedFloat32x4ListViewBase._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+}
+
+@patch
+class _TypedInt32x4ListViewBase._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+}
+
+@patch
+class _TypedFloat64x2ListViewBase._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+}
+
+@patch
+class _Int8ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Int8ArrayView._(_TypedList buffer, int offsetInBytes, int length) =>
+      ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getInt8(
+    offsetInBytes + _typedDataIndexCheck(this, index, length),
+  );
+}
+
+@patch
+class _UnmodifiableInt8ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableInt8ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Uint8ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Uint8ArrayView._(_TypedList buffer, int offsetInBytes, int length) =>
+      ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getUint8(
+    offsetInBytes + _typedDataIndexCheck(this, index, length),
+  );
+}
+
+@patch
+class _UnmodifiableUint8ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableUint8ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Uint8ClampedArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Uint8ClampedArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getUint8(
+    offsetInBytes + _typedDataIndexCheck(this, index, length),
+  );
+}
+
+@patch
+class _UnmodifiableUint8ClampedArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableUint8ClampedArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Int16ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Int16ArrayView._(_TypedList buffer, int offsetInBytes, int length) =>
+      ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getInt16(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 2,
+  );
+}
+
+@patch
+class _UnmodifiableInt16ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableInt16ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Uint16ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Uint16ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getUint16(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 2,
+  );
+}
+
+@patch
+class _UnmodifiableUint16ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableUint16ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Int32ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Int32ArrayView._(_TypedList buffer, int offsetInBytes, int length) =>
+      ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getInt32(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 4,
+  );
+}
+
+@patch
+class _UnmodifiableInt32ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableInt32ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Uint32ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Uint32ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getUint32(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 4,
+  );
+}
+
+@patch
+class _UnmodifiableUint32ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableUint32ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Int64ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Int64ArrayView._(_TypedList buffer, int offsetInBytes, int length) =>
+      ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getInt64(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 8,
+  );
+}
+
+@patch
+class _UnmodifiableInt64ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableInt64ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Uint64ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Uint64ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  int operator [](int index) => _typedData._getUint64(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 8,
+  );
+}
+
+@patch
+class _UnmodifiableUint64ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableUint64ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Float32ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Float32ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  double operator [](int index) => _typedData._getFloat32(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 4,
+  );
+}
+
+@patch
+class _UnmodifiableFloat32ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableFloat32ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _Float64ArrayView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength, {
+  super.writable,
+}) {
+  this : super._storage();
+
+  @patch
+  factory _Float64ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+
+  @patch
+  double operator [](int index) => _typedData._getFloat64(
+    offsetInBytes + _typedDataIndexCheck(this, index, length) * 8,
+  );
+}
+
+@patch
+class _UnmodifiableFloat64ArrayView._storage(
+  _TypedList data,
+  int offset,
+  int length,
+) {
+  this : super._storage(data, offset, length, writable: false);
+
+  @patch
+  factory _UnmodifiableFloat64ArrayView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+@patch
+class _ByteDataView._storage(
+  final _TypedList _storageData,
+  final int _storageOffset,
+  final int _storageLength,
+) {
+  this {
+    _checkView(_storageData, _storageOffset, _storageLength, 1);
+  }
+  @patch
+  factory _ByteDataView._(_TypedList buffer, int offsetInBytes, int length) =>
+      ._storage(buffer, offsetInBytes, length);
+  @patch
+  _TypedList get _typedData => _storageData;
+  @patch
+  int get offsetInBytes => _storageOffset;
+  @patch
+  int get length => _storageLength;
+}
+
+@patch
+class _UnmodifiableByteDataView._storage(
+  super.storageData,
+  super.storageOffset,
+  super.storageLength,
+) {
+  this : super._storage();
+  @patch
+  factory _UnmodifiableByteDataView._(
+    _TypedList buffer,
+    int offsetInBytes,
+    int length,
+  ) => ._storage(buffer, offsetInBytes, length);
+}
+
+void _checkView(_TypedList data, int offset, int length, int width) {
+  // Validate element counts before multiplication can wrap at native word width.
+  RangeError.checkValueInInterval(
+    offset,
+    0,
+    data.lengthInBytes,
+    'offsetInBytes',
+  );
+  RangeError.checkValueInInterval(
+    length,
+    0,
+    (data.lengthInBytes - offset) ~/ width,
+    'length',
+  );
+  _offsetAlignmentCheck(offset, width);
+}
+
+@patch
+mixin _TypedListMixin<E, L extends List<E>> {
+  @patch
+  List<E> operator +(List<E> other) {
+    // The public typed-data contract retains typed storage for numeric operands.
+    final List<E> result;
+    if (this is TypedDataList<int> && other is TypedDataList<int>) {
+      result = Int64List(length + other.length) as List<E>;
+    } else if (this is TypedDataList<double> &&
+        other is TypedDataList<double>) {
+      result = Float64List(length + other.length) as List<E>;
+    } else {
+      return [...this, ...other];
+    }
+    result.setRange(0, length, this);
+    result.setRange(length, result.length, other);
+    return result;
+  }
 }

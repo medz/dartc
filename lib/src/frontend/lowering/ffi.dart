@@ -314,9 +314,21 @@ Value? lowerFfi(
           bind(library.getTopLevelFunction('_attachPointerFinalizer')!),
           [
             callback,
-            view,
+            emit(
+              DirectCall(
+                bind(typedData().getTopLevelFunction('_nativeOwner')!),
+                [view],
+              ),
+            ),
             operands.first,
             named['token'] ?? const Constant.nullValue(),
+            emit(
+              IntBinary(
+                .multiply,
+                operands[1],
+                Constant.integer(storage.nativeSize),
+              ),
+            ),
           ],
         ),
       );

@@ -3,6 +3,7 @@ import 'memory.dart';
 import 'object_memory.dart';
 import 'heap.dart';
 import 'event_loop.dart';
+import 'stack_frames.dart';
 
 /// Walks the precise roots of stopped Dart frames, including native reentry.
 final class NativeRoots(
@@ -10,6 +11,7 @@ final class NativeRoots(
   final ObjectAccess objects,
   final EventLoop events,
 ) implements RootSet {
+  final StackFrames _frames = StackFrames(context);
   int _entrySp = 0, _entryPc = 0;
   bool _stopped = false, _closed = false;
 
@@ -34,30 +36,13 @@ final class NativeRoots(
     if (global != 0) {
       objects.visitStrong(Memory.objectAt<Object>(global), visitor);
     }
-    final table = Memory.read(context + RuntimeContext.maps);
-    var segment = Memory.read(context + RuntimeContext.active);
-    var sp = _entrySp, pc = _entryPc;
-    while (sp != 0 && pc != 0) {
-      final record = _findFrame(table, pc);
-      final count = Memory.read(record + 24);
+    _frames.start(_entrySp, _entryPc);
+    while (_frames.moveNext()) {
+      final count = _frames.rootCount;
       for (var i = 0; i < count; i++) {
-        final slot = sp + Memory.read(record + 32 + i * 8);
-        visitor.visit(ObjectMemory.reference(slot));
-      }
-      final caller = Memory.read(record + 8);
-      if (caller != 0) {
-        pc = Memory.read(sp + Memory.read(record + 16));
-        sp += caller;
-      } else {
-        segment = segment == 0
-            ? 0
-            : Memory.read(segment + RuntimeContext.previousEntry);
-        if (segment == 0) return;
-        sp = Memory.read(segment + RuntimeContext.suspendedSp);
-        pc = Memory.read(segment + RuntimeContext.suspendedPc);
+        visitor.visit(ObjectMemory.reference(_frames.rootSlot(i)));
       }
     }
-    Memory.fail();
   }
 
   @override
@@ -70,15 +55,5 @@ final class NativeRoots(
   void close() {
     if (_stopped) Memory.fail();
     _closed = true;
-  }
-
-  int _findFrame(int table, int pc) {
-    final count = Memory.read(table);
-    var record = table + 8;
-    for (var i = 0; i < count; i++) {
-      if (Memory.read(record) == pc) return record;
-      record += 32 + Memory.read(record + 24) * 8;
-    }
-    Memory.fail();
   }
 }

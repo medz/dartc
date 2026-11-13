@@ -58,7 +58,7 @@ void main() {
   });
   test('static and top-level getters, setters and updates', () {
     for (final n in [-1, 0, 7]) {
-      for (var mode = 0; mode < 7; mode++) {
+      for (var mode = 0; mode < 10; mode++) {
         compare('access', [n, mode], () => accessors.access(n, mode));
       }
     }

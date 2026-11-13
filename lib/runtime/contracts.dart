@@ -15,6 +15,12 @@ enum RuntimeRole() {
   exhaustivenessFailure,
   floatingRemainder,
   floatingModulo,
+  captureStackTrace,
+  recordError,
+  asyncCreate,
+  asyncStart,
+  asyncAwait,
+  asyncReturn,
 }
 
 /// Binds an external declaration to one trusted machine operation.
@@ -44,6 +50,9 @@ enum MemoryOperation() {
   float64Bits,
   className,
   typeView,
+  captureStackTrace,
+  uncheckedCast,
+  instantiateClosure,
 }
 
 /// Excludes this reference slot from strong tracing.
@@ -67,6 +76,9 @@ final class const ConstantListStorage(
 
 /// Marks variable payload words as managed references.
 final class const ReferencePayload();
+
+/// Binds record instances to a class with an inline, traced field payload.
+final class const RecordStorage();
 
 /// Reified type shapes shared with native metadata.
 enum TypeKind() {

@@ -6,53 +6,32 @@ import 'package:dartc/runtime/contracts.dart' show TypeKind;
 
 import 'program_layout.dart';
 import 'checked_casts.dart';
-import 'type_values.dart';
 import 'closure_storage.dart';
 import 'member_calls.dart';
 import 'heap_plan.dart';
 import 'cell_initialization.dart';
 import 'storage_access.dart';
-import 'double_bits.dart';
 import 'reference_equality.dart';
-import 'selected_graph.dart';
+import 'selected_function.dart';
 import 'value_operations.dart';
 import 'native_invocation.dart';
 import 'non_null_values.dart';
+import 'record_storage.dart';
 
 /// Places allocating representation changes before register and root analysis.
 final class FunctionRepresentation(
   final IrFunction function,
-  final ProgramLayout layouts,
+  ProgramLayout layouts,
   CheckedCasts casts,
   MemberCalls members,
   HeapPlan heap, {
   FunctionTarget? captureTrace,
-}) extends SelectedGraph {
-  final _operands = <Instruction, List<Value>>{};
-  final _arguments = <Jump, List<Value>>{};
-  final boxes = <Instruction, Value>{};
-  final introduced = <Instruction>{};
-  final tests = <TypeTest, TypeTestKind>{};
-  final invocations = <Instruction, FunctionTarget>{};
-  final aliases = <Instruction>{};
-  final _resultTypes = <Value, ValueType>{};
-  final stackCells = <NewCell>{};
+}) extends SelectedFunction {
+  final awaitTypes = <Await, Value>{};
   final _prologue = <Value>[];
   bool get _factoryEnvironment =>
       function.target.kind == .factory &&
       function.target.owner!.typeParameters.isNotEmpty;
-  late final entryParameters =
-      layouts.entryTypes(function.target).length ==
-          function.entry.parameters.length
-      ? function.entry.parameters
-      : [
-          ...function.entry.parameters,
-          ...Block(
-            layouts
-                .entryTypes(function.target)
-                .skip(function.entry.parameters.length),
-          ).parameters,
-        ];
 
   late final _classArguments = _ownerArguments(
     _factoryEnvironment
@@ -81,9 +60,6 @@ final class FunctionRepresentation(
     }
     return arguments;
   }
-
-  List<BlockParameter> parametersOf(Block block) =>
-      block == function.entry ? entryParameters : block.parameters;
 
   Value _reify(ValueType type, List<Value> into) {
     if (type is TypeParameterType) {
@@ -117,42 +93,26 @@ final class FunctionRepresentation(
     return call;
   }
 
-  Iterable<Value> inputsOf(Value operation) => switch (operation) {
-    StorageAccess(:final inputs) => inputs,
-    DoubleBits(:final operand) => [operand],
-    TypeReference(:final operand) => [operand],
-    ReferenceEquality(:final left, :final right) => [left, right],
-    NativeInvocation(:final inputs) => inputs,
-    Instruction() => _operands[operation] ?? operation.inputs,
-    _ => throw ArgumentError('Expected a selected operation.'),
-  };
-
-  /// The stored type before a selected call result is boxed for its caller.
-  ValueType typeOf(Value value) =>
-      _resultTypes[value] ??
-      (stackCells.contains(value)
-          ? (value.type as CellType).content
-          : value.type);
-
   StorageRead _load(InstanceField field, Value receiver, List<Value> into) {
     final load = StorageRead(field, receiver);
     into.add(load);
     return load;
   }
 
-  List<Value> argumentsOf(Jump edge) => _arguments[edge] ?? edge.arguments;
-
-  Iterable<Jump> successors(Block block) => switch (ends[block]!) {
-    final Jump jump => [jump],
-    Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
-    Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
-    Throw(:final onThrow) ||
-    ExhaustivenessFailure(:final onThrow) => [?onThrow],
-    Return() || Unreachable() => const [],
-    _ => block.successors,
-  };
-
-  this {
+  this
+    : super(
+        function.target,
+        layouts,
+        function.entry,
+        parameters: [
+          ...function.entry.parameters,
+          ...Block(
+            layouts
+                .entryTypes(function.target)
+                .skip(function.entry.parameters.length),
+          ).parameters,
+        ],
+      ) {
     final nonNull = NonNullValues(function);
     final valueOperations = ValueOperations(this, layouts, heap.invalid);
     checkCellInitialization(function);
@@ -203,15 +163,16 @@ final class FunctionRepresentation(
       }
     }
     for (final parameter in function.entry.parameters) {
-      if (addressOnly.contains(parameter)) _resultTypes[parameter] = .integer;
+      if (addressOnly.contains(parameter)) resultTypes[parameter] = .integer;
     }
+    if (function.bodyKind == .asynchronous) stackCells.clear();
     Value pointerAddress(Value pointer, List<Value> into) {
       if (!addressOnly.contains(pointer)) {
         return _load(layouts.pointers.address, pointer, into);
       }
       final address = PointerAddress(pointer);
       aliases.add(address);
-      _operands[address] = [pointer];
+      operands[address] = [pointer];
       into.add(address);
       return address;
     }
@@ -251,7 +212,7 @@ final class FunctionRepresentation(
       final check = TypeCast(raw, type);
       into.add(raw);
       final signature = casts.targetFor(check, layouts);
-      _operands[check] = [
+      operands[check] = [
         raw,
         for (final parameter in signature.parameters) _reify(parameter, into),
       ];
@@ -262,15 +223,57 @@ final class FunctionRepresentation(
     void runtimeType(ObjectRuntimeType instruction, List<Value> into) {
       final source = instruction.operand.type;
       if (source == .nullType || layouts.representation(source) != .reference) {
-        _operands[instruction] = [_reify(source, into)];
+        operands[instruction] = [_reify(source, into)];
       }
     }
 
-    void typeTest(TypeTest instruction, List<Value> into) {
+    Block typeTest(TypeTest instruction, Block block) {
       final kind = tests[instruction] = layouts.typeTest(
         instruction.operand.type,
         instruction.testedType,
       );
+      if (kind == .subtype) {
+        final tested = instruction.testedType;
+        final constraints = switch (tested.nullableBase ?? tested) {
+          NonNullableTypeParameterType(:final parameter) => [
+            parameter,
+            ValueType.object,
+          ],
+          PromotedTypeParameterType(
+            :final parameter,
+            :final bound,
+            :final isNonNullable,
+          ) =>
+            [parameter, bound, if (isNonNullable) ValueType.object],
+          _ => null,
+        };
+        if (constraints != null) {
+          // Promotion constrains a value; it does not introduce a runtime Type.
+          final done = addBlock([.boolean]);
+          Jump result(bool matches) =>
+              Jump(done, [Constant.boolean(matches != instruction.negated)]);
+          if (tested.nullableBase != null) {
+            final test = TypeTest(instruction.operand, .nullType);
+            block = typeTest(test, block);
+            final next = addBlock();
+            ends[block] = Branch(test, result(true), Jump(next));
+            block = next;
+          }
+          for (final constraint in constraints) {
+            final test = TypeTest(instruction.operand, constraint);
+            block = typeTest(test, block);
+            final next = addBlock();
+            ends[block] = Branch(test, Jump(next), result(false));
+            block = next;
+          }
+          ends[block] = result(true);
+          aliases.add(instruction);
+          operands[instruction] = done.parameters;
+          instructions[done]!.add(instruction);
+          return done;
+        }
+      }
+      final into = instructions[block]!;
       if (kind == .subtype) {
         final actual = ObjectRuntimeType(instruction.operand, direct: true);
         runtimeType(actual, into);
@@ -286,13 +289,14 @@ final class FunctionRepresentation(
             negated: instruction.negated,
           );
           aliases.add(instruction);
-          _operands[instruction] = [comparison];
+          operands[instruction] = [comparison];
           into.addAll([comparison, instruction]);
-          return;
+          return block;
         }
-        _operands[instruction] = [actual, _reify(instruction.testedType, into)];
+        operands[instruction] = [actual, _reify(instruction.testedType, into)];
       }
       into.add(instruction);
+      return block;
     }
 
     Jump edge(Jump jump) {
@@ -317,7 +321,7 @@ final class FunctionRepresentation(
       ];
       // Retain the verified edge's type proof while assigning its physical operands.
       final transfer = Jump(jump.target, jump.arguments);
-      _arguments[transfer] = arguments;
+      edgeArguments[transfer] = arguments;
       ends[block] = transfer;
       block.finish(transfer);
       return Jump(block, inputs);
@@ -361,7 +365,7 @@ final class FunctionRepresentation(
           final type = layouts.types.runtimeTypeOf(operand, body);
           final name = _load(TypeMetadata.className, type, body);
           aliases.add(instruction);
-          _operands[instruction] = [name];
+          operands[instruction] = [name];
           body.add(instruction);
           continue;
         }
@@ -370,7 +374,7 @@ final class FunctionRepresentation(
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = block.parameters;
+          operands[instruction] = block.parameters;
           continue;
         }
         if (instruction case ObjectHashCode(:final operand, direct: true)) {
@@ -378,7 +382,7 @@ final class FunctionRepresentation(
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = block.parameters;
+          operands[instruction] = block.parameters;
           continue;
         }
         if (instruction case NewCollection(:final collectionType)
@@ -388,7 +392,7 @@ final class FunctionRepresentation(
               .collectionFactory(collectionType)
               .implementation;
           invocations[instruction] = target;
-          _operands[instruction] = [
+          operands[instruction] = [
             ...target.signature.bind<Value>(
               [],
               {},
@@ -414,7 +418,7 @@ final class FunctionRepresentation(
               ? [instruction.growable ?? const Constant.boolean(true)]
               : instruction.inputs.toList();
           invocations[instruction] = target;
-          _operands[instruction] = [
+          operands[instruction] = [
             for (final (i, input) in inputs.indexed)
               convert(input, target.parameterTypes[i], body),
             _reify(
@@ -427,12 +431,37 @@ final class FunctionRepresentation(
           body.add(instruction);
           continue;
         }
+        if (instruction case MakeRecord(
+          type: final RecordType type,
+          inputs: final fields,
+        )) {
+          invocations[instruction] = layouts.records.create(
+            type,
+            layouts.types,
+          );
+          operands[instruction] = [
+            for (final field in fields) convert(field, .object.nullable, body),
+          ];
+          body.add(instruction);
+          continue;
+        }
+        if (instruction case RecordGet(:final record, :final slot)) {
+          final object = TypeView(record, .object);
+          final value = LoadObjectReference(
+            object,
+            Constant.integer(RecordStorage.offset(slot)),
+          );
+          body.addAll([object, value, instruction]);
+          aliases.add(instruction);
+          operands[instruction] = [value];
+          continue;
+        }
         if (instruction case NewPayload(
           type: final ClassType type,
           :final bytes,
         )) {
           invocations[instruction] = heap.allocatePayload(type);
-          _operands[instruction] = [bytes];
+          operands[instruction] = [bytes];
           body.add(instruction);
           continue;
         }
@@ -446,7 +475,7 @@ final class FunctionRepresentation(
             const Constant.integer(0),
           );
           body.addAll([byte, boolean]);
-          _operands[instruction] = [boolean];
+          operands[instruction] = [boolean];
           aliases.add(instruction);
           body.add(instruction);
           continue;
@@ -467,7 +496,7 @@ final class FunctionRepresentation(
                   layouts.native!.view(type).initializer,
                   layouts,
                 );
-          _operands[instruction] = [
+          operands[instruction] = [
             address ?? const Constant.integer(0),
             owner,
             if (address != null && !copy) layouts.types.constant(type),
@@ -476,7 +505,7 @@ final class FunctionRepresentation(
           continue;
         }
         if (instruction case NativeAddress(:final view)) {
-          _operands[instruction] = [
+          operands[instruction] = [
             _load(
               layouts.native!.view(view.type as ClassType).address,
               view,
@@ -493,7 +522,7 @@ final class FunctionRepresentation(
               : layouts.native!.layout
                     .of((instruction as NativeFieldOffset).owner)
                     .offsets[instruction.index];
-          _operands[instruction] = [Constant.integer(value)];
+          operands[instruction] = [Constant.integer(value)];
           aliases.add(instruction);
           body.add(instruction);
           continue;
@@ -504,7 +533,7 @@ final class FunctionRepresentation(
           :final nativeType,
         )) {
           invocations[instruction] = heap.runtime!.copyBytes;
-          _operands[instruction] = [
+          operands[instruction] = [
             destination,
             source,
             Constant.integer(layouts.native!.layout.of(nativeType).size),
@@ -515,7 +544,7 @@ final class FunctionRepresentation(
         if (instruction
             case PointerAddress(pointer: final receiver) ||
                 StringLength(string: final receiver)) {
-          _operands[instruction] = [
+          operands[instruction] = [
             if (instruction is PointerAddress && addressOnly.contains(receiver))
               receiver
             else
@@ -549,8 +578,8 @@ final class FunctionRepresentation(
             body.addAll([bytes, address]);
           }
           if (addressOnly.contains(instruction)) {
-            _resultTypes[instruction] = .integer;
-            _operands[instruction] = [address];
+            resultTypes[instruction] = .integer;
+            operands[instruction] = [address];
             aliases.add(instruction);
             body.add(instruction);
             continue;
@@ -559,7 +588,7 @@ final class FunctionRepresentation(
             layouts.pointers.initializer,
             layouts,
           );
-          _operands[instruction] = [
+          operands[instruction] = [
             address,
             layouts.types.constant(FfiTypes.pointerRuntimeType),
           ];
@@ -621,13 +650,13 @@ final class FunctionRepresentation(
                 layouts.pointers.initializer,
                 layouts,
               );
-              _operands[instruction] = [
+              operands[instruction] = [
                 call,
                 layouts.types.constant(FfiTypes.pointerRuntimeType),
               ];
             } else {
               aliases.add(instruction);
-              _operands[instruction] = [result ?? call];
+              operands[instruction] = [result ?? call];
             }
             body.add(instruction);
             continue;
@@ -650,13 +679,13 @@ final class FunctionRepresentation(
               layouts.pointers.initializer,
               layouts,
             );
-            _operands[instruction] = [
+            operands[instruction] = [
               raw,
               layouts.types.constant(FfiTypes.pointerRuntimeType),
             ];
           } else {
             aliases.add(instruction);
-            _operands[instruction] = [raw];
+            operands[instruction] = [raw];
           }
           body.add(instruction);
           continue;
@@ -675,7 +704,7 @@ final class FunctionRepresentation(
             shape.initializer!,
             layouts,
           );
-          _operands[instruction] = arguments;
+          operands[instruction] = arguments;
           body.add(instruction);
           continue;
         }
@@ -703,7 +732,7 @@ final class FunctionRepresentation(
             shape.initializer,
             layouts,
           );
-          _operands[instruction] = [
+          operands[instruction] = [
             initial,
             if (shape.lazy case final lazy?) ...[
               instruction is CopyCell
@@ -726,7 +755,7 @@ final class FunctionRepresentation(
           if (instruction is ReadCell) {
             final read = _load(shape.value, cell, body);
             aliases.add(instruction);
-            _operands[instruction] = [read];
+            operands[instruction] = [read];
           } else {
             final value = convert(
               (instruction as WriteCell).value,
@@ -735,7 +764,7 @@ final class FunctionRepresentation(
             );
             body.add(StorageWrite(shape.value, cell, value));
             aliases.add(instruction);
-            _operands[instruction] = [];
+            operands[instruction] = [];
           }
           body.add(instruction);
           continue;
@@ -747,7 +776,7 @@ final class FunctionRepresentation(
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = block.parameters;
+          operands[instruction] = block.parameters;
           continue;
         }
         if (instruction case ObjectHashCode(:final operand, direct: false)
@@ -763,7 +792,7 @@ final class FunctionRepresentation(
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = block.parameters;
+          operands[instruction] = block.parameters;
           continue;
         }
         if (instruction case Equals(:final left, :final right, :final negated)
@@ -776,7 +805,7 @@ final class FunctionRepresentation(
           );
           body.addAll([equal, instruction]);
           aliases.add(instruction);
-          _operands[instruction] = [equal];
+          operands[instruction] = [equal];
           continue;
         }
         if (instruction case Equals(:final left, :final right)
@@ -796,7 +825,7 @@ final class FunctionRepresentation(
             instruction,
             factory,
           );
-          _operands[instruction] = [
+          operands[instruction] = [
             for (final input in instruction.inputs)
               convert(input, .dynamicType, body),
             for (final type in instruction.typeArguments) _reify(type, body),
@@ -814,6 +843,11 @@ final class FunctionRepresentation(
             null,
             function,
             typeArguments,
+          ),
+          InstantiateFunctionFrom(:final function) => (
+            null,
+            function,
+            const <ValueType>[],
           ),
           BindMethod(:final method, :final receiver) => (
             method,
@@ -857,7 +891,9 @@ final class FunctionRepresentation(
               ? instruction
               : null;
           final functionValue =
-              instruction is FunctionCall || instruction is InstantiateFunction;
+              instruction is FunctionCall ||
+              instruction is InstantiateFunction ||
+              instruction is InstantiateFunctionFrom;
           final builtin =
               instruction is Equals ||
               instruction is ObjectRuntimeType ||
@@ -868,7 +904,9 @@ final class FunctionRepresentation(
           final targets = dynamicCall != null
               ? {
                   for (final entry
-                      in members.dynamicTargets(dynamicCall).entries)
+                      in members
+                          .dynamicTargets(dynamicCall, types: layouts.types)
+                          .entries)
                     entry.key: (
                       target: entry.value,
                       closure: null as ClosureShape?,
@@ -937,7 +975,7 @@ final class FunctionRepresentation(
             };
             if (result is! Constant) body.add(result);
             aliases.add(instruction);
-            _operands[instruction] = [result];
+            operands[instruction] = [result];
             body.add(instruction);
             continue;
           }
@@ -996,7 +1034,13 @@ final class FunctionRepresentation(
               ? LoadField(TypeMetadata.shape, actual)
               : null;
           if (shape != null && !functionValue) body.add(shape);
-          final types = [for (final type in typeArguments) _reify(type, body)];
+          final types = instruction is InstantiateFunctionFrom
+              ? _ownerArguments(
+                  layouts.types.runtimeTypeOf(instruction.instance, body),
+                  instruction.declaration,
+                  body,
+                )
+              : [for (final type in typeArguments) _reify(type, body)];
           final result = instruction.type;
           final join = result == .never ? null : Block([result]);
           final missing = Block();
@@ -1019,7 +1063,7 @@ final class FunctionRepresentation(
                 operation,
                 factory,
               );
-              _operands[operation] = [
+              operands[operation] = [
                 for (final input in operation.inputs)
                   convert(input, .dynamicType, missingBody),
                 ...types,
@@ -1079,7 +1123,22 @@ final class FunctionRepresentation(
             final kind = LoadField(TypeMetadata.kind, actual);
             final test = Equals(kind, Constant.integer(TypeKind.nominal.index));
             body.addAll([kind, test]);
-            ends[next] = Branch(test, Jump(nominal), Jump(builtinEntry));
+            var otherKind = builtinEntry;
+            if (layouts.records.declaration case final carrier?
+                when targets.containsKey(carrier.type)) {
+              otherKind = addBlock();
+              final record = Equals(
+                kind,
+                Constant.integer(TypeKind.record.index),
+              );
+              instructions[otherKind]!.add(record);
+              ends[otherKind] = Branch(
+                record,
+                Jump(nominal),
+                Jump(builtinEntry),
+              );
+            }
+            ends[next] = Branch(test, Jump(nominal), Jump(otherKind));
             next = nominal;
             if (instruction case Equals(:final right)
                 when right.type.accepts(.nullType)) {
@@ -1099,7 +1158,8 @@ final class FunctionRepresentation(
             final dynamicClosure = dynamicCall != null && closure != null;
             final functionValue = dynamicCall == null
                 ? instruction is FunctionCall ||
-                      instruction is InstantiateFunction
+                      instruction is InstantiateFunction ||
+                      instruction is InstantiateFunctionFrom
                 : dynamicClosure;
             final binding = dynamicCall == null
                 ? instruction is BindMethod
@@ -1111,17 +1171,20 @@ final class FunctionRepresentation(
                   ? TypeKind.function
                   : type == ValueType.nullClass
                   ? TypeKind.nullType
+                  : type == layouts.records.declaration?.type
+                  ? TypeKind.record
                   : TypeKind.nominal;
               final kindTest = Equals(
                 dynamicKind!,
                 Constant.integer(kind.index),
               );
               instructions[next]!.add(kindTest);
-              final checkShape = kind == TypeKind.nullType
+              final checkShape =
+                  kind == TypeKind.nullType || kind == TypeKind.record
                   ? selected
                   : addBlock();
               ends[next] = Branch(kindTest, Jump(checkShape), Jump(otherwise));
-              if (kind != TypeKind.nullType) {
+              if (kind != TypeKind.nullType && kind != TypeKind.record) {
                 final shapeBody = instructions[checkShape]!;
                 final key = dynamicClosure
                     ? _load(layouts.closures.tag, receiver, shapeBody)
@@ -1143,6 +1206,34 @@ final class FunctionRepresentation(
               }
               next = otherwise;
               current = selected;
+              if (kind == TypeKind.record) {
+                final shapes = layouts.records
+                    .fieldsFor(dynamicCall.selector)
+                    .toList();
+                if (shapes.isNotEmpty) {
+                  final found = addBlock();
+                  final actualShape = _load(
+                    TypeMetadata.shape,
+                    actual,
+                    instructions[current]!,
+                  );
+                  for (final (i, shape) in shapes.indexed) {
+                    final nextShape = i == shapes.length - 1
+                        ? missing
+                        : addBlock();
+                    final test = Equals(
+                      actualShape,
+                      Constant.integer(
+                        layouts.records.shapeId(shape, layouts.types),
+                      ),
+                    );
+                    instructions[current]!.add(test);
+                    ends[current] = Branch(test, Jump(found), Jump(nextShape));
+                    current = nextShape;
+                  }
+                  current = found;
+                }
+              }
               if (binding && dynamicClosure) {
                 ends[current] = Jump(join!, [receiver]);
                 continue;
@@ -1158,7 +1249,7 @@ final class FunctionRepresentation(
                   typeArguments,
                 );
                 invocations[call] = bridge;
-                _operands[call] = [
+                operands[call] = [
                   for (final input in call.inputs)
                     convert(input, .dynamicType, instructions[current]!),
                   ...types,
@@ -1182,10 +1273,16 @@ final class FunctionRepresentation(
             if (shape != null) {
               final selected = Block(), otherwise = Block();
               blocks.addAll([selected, otherwise]);
+              final record = type == layouts.records.declaration?.type;
+              final key = record
+                  ? _load(TypeMetadata.kind, actual, instructions[next]!)
+                  : shape;
               final test = Equals(
-                shape,
+                key,
                 Constant.integer(
-                  closure != null
+                  record
+                      ? TypeKind.record.index
+                      : closure != null
                       ? closure.tag
                       : layouts.types.id(type.declaration),
                 ),
@@ -1286,7 +1383,7 @@ final class FunctionRepresentation(
                   type == ValueType.nullClass ? ValueType.nullType : ownerView,
                 );
                 final checked = casts.targetFor(cast, layouts);
-                _operands[cast] = [
+                operands[cast] = [
                   receiver,
                   for (final parameter in checked.parameters)
                     environment[parameter]!,
@@ -1315,7 +1412,7 @@ final class FunctionRepresentation(
                 captures,
               );
               captures.forEach(append);
-              _operands[bound] = [
+              operands[bound] = [
                 Constant.integer(shape.tag),
                 captured,
                 ...classTypes,
@@ -1330,7 +1427,7 @@ final class FunctionRepresentation(
               append(widened);
               final check = TypeCast(widened, instruction.type);
               final checkTypes = <Value>[];
-              _operands[check] = [
+              operands[check] = [
                 widened,
                 for (final parameter
                     in casts.targetFor(check, layouts).parameters)
@@ -1362,7 +1459,8 @@ final class FunctionRepresentation(
                 );
               }
             }
-            if (instruction is InstantiateFunction) {
+            if (instruction is InstantiateFunction ||
+                instruction is InstantiateFunctionFrom) {
               final shape = layouts.closures.specializations[closure]!;
               final actualType = reify(shape.signature);
               Value arguments = const Constant.nullValue();
@@ -1372,19 +1470,24 @@ final class FunctionRepresentation(
                   node.initializer,
                   layouts,
                 );
-                _operands[node] = [
+                operands[node] = [
                   ...node.inputs,
                   layouts.types.constant(TypeMetadata.list),
                 ];
                 append(node);
                 arguments = node;
               }
-              final applied = InstantiateFunction(receiver, typeArguments);
+              final applied = InstantiateFunction(
+                receiver,
+                instruction is InstantiateFunctionFrom
+                    ? (receiver.type as FunctionType).typeParameters
+                    : typeArguments,
+              );
               invocations[applied] = heap.constructorFor(
                 shape.initializer!,
                 layouts,
               );
-              _operands[applied] = [
+              operands[applied] = [
                 Constant.integer(shape.tag),
                 receiver,
                 arguments,
@@ -1449,7 +1552,7 @@ final class FunctionRepresentation(
               if (widened is TypeView) append(widened);
               final check = TypeCast(widened, destination);
               final signature = casts.targetFor(check, layouts);
-              _operands[check] = [
+              operands[check] = [
                 widened,
                 for (final parameter in signature.parameters)
                   environment[parameter]!,
@@ -1550,7 +1653,7 @@ final class FunctionRepresentation(
             invocations[call] = target;
             final entryTypes = layouts.entryTypes(target);
             final converted = <Value>[];
-            _operands[call] = [
+            operands[call] = [
               for (final (i, value) in arguments.indexed)
                 convert(value, entryTypes[i], converted),
               ...invocationTypes,
@@ -1566,7 +1669,7 @@ final class FunctionRepresentation(
             }
             if (layouts.representation(result) == .reference &&
                 layouts.isBoxable(target.returnType)) {
-              _resultTypes[call] = target.returnType;
+              resultTypes[call] = target.returnType;
             }
             append(call);
             final conversions = <Value>[];
@@ -1583,7 +1686,7 @@ final class FunctionRepresentation(
           block = join;
           body = instructions[block] = [instruction];
           aliases.add(instruction);
-          _operands[instruction] = join.parameters;
+          operands[instruction] = join.parameters;
           continue;
         }
         final lateCell = switch (instruction) {
@@ -1690,7 +1793,7 @@ final class FunctionRepresentation(
               pending.forEach(append);
               final check = TypeCast(widened, field.type);
               final signature = casts.targetFor(check, layouts);
-              _operands[check] = [
+              operands[check] = [
                 widened,
                 for (final parameter in signature.parameters)
                   arguments[field.owner.typeParameters.indexOf(parameter)],
@@ -1749,7 +1852,7 @@ final class FunctionRepresentation(
           pending.forEach(append);
           body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = values;
+          operands[instruction] = values;
           continue;
         }
         if (instruction
@@ -1767,12 +1870,12 @@ final class FunctionRepresentation(
           );
           final check = TypeCast(widened, field.type);
           final signature = casts.targetFor(check, layouts);
-          _operands[check] = [
+          operands[check] = [
             widened,
             for (final parameter in signature.parameters)
               arguments[field.owner.typeParameters.indexOf(parameter)],
           ];
-          _operands[instruction] = [receiver, check];
+          operands[instruction] = [receiver, check];
           body.add(check);
           if (sourceBlock.end
               case Invoke(:final operation, :final onReturn, :final onThrow)
@@ -1805,15 +1908,16 @@ final class FunctionRepresentation(
           body = instructions[block]!;
           body.add(instruction);
           aliases.add(instruction);
-          _operands[instruction] = [value];
+          operands[instruction] = [value];
           continue;
         }
         if (instruction case ReifyType(:final template)) {
-          _operands[instruction] = [_reify(template, body)];
+          operands[instruction] = [_reify(template, body)];
         }
         if (instruction is ObjectRuntimeType) runtimeType(instruction, body);
         if (instruction is TypeTest) {
-          typeTest(instruction, body);
+          block = typeTest(instruction, block);
+          body = instructions[block]!;
           continue;
         }
         if (instruction
@@ -1821,17 +1925,19 @@ final class FunctionRepresentation(
           if (nonNull.contains(operand) &&
               instruction.type.accepts(operand.type.nonNullable)) {
             aliases.add(instruction);
-            _operands[instruction] = [operand];
+            operands[instruction] = [operand];
             body.add(instruction);
             continue;
           }
           final check = casts.targetFor(instruction, layouts);
-          _operands[instruction] = [
+          operands[instruction] = [
             operand,
             for (final parameter in check.parameters) _reify(parameter, body),
           ];
         }
-        if (instruction case TypeView(:final operand, :final type)
+        if (instruction
+            case TypeView(:final operand, :final type) ||
+                UncheckedCast(:final operand, :final type)
             when needsBox(operand, type)) {
           boxes[instruction] = operand;
         }
@@ -1878,7 +1984,7 @@ final class FunctionRepresentation(
             changed |= value != input;
             inputs[i] = value;
           }
-          if (changed) _operands[instruction] = inputs;
+          if (changed) operands[instruction] = inputs;
         }
         body.add(instruction);
       }
@@ -1892,11 +1998,29 @@ final class FunctionRepresentation(
             ? Unreachable(call)
             : Invoke(call, onReturn: null, onThrow: edge(onThrow));
       }
+      if (sourceBlock.end case Throw(
+        :final exception,
+        :final stackTrace,
+        :final onThrow,
+      )) {
+        final value = convert(exception, .object, body);
+        final trace = traceFor(stackTrace, body);
+        if (heap.runtime case final runtime? when trace != null) {
+          body.add(DirectCall(runtime.recordError, [value, trace]));
+        }
+        ends[block] = Throw(
+          value,
+          stackTrace: trace,
+          onThrow: onThrow == null ? null : edge(onThrow),
+        );
+      }
       ends[block] ??= switch (sourceBlock.end) {
         Return(:final value) => Return(
           convert(
             value ?? const Constant.nullValue(),
-            function.target.returnType,
+            function.bodyKind == .asynchronous
+                ? .object.nullable
+                : function.target.returnType,
             body,
           ),
         ),
@@ -1914,13 +2038,24 @@ final class FunctionRepresentation(
           onReturn: onReturn == null ? null : edge(onReturn),
           onThrow: edge(onThrow),
         ),
-        Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
-          convert(exception, .object, body),
-          stackTrace: traceFor(stackTrace, body),
-          onThrow: onThrow == null ? null : edge(onThrow),
-        ),
         final end => end,
       };
+      if (ends[block] case final Await end) {
+        final suspended = Await(
+          end.operand,
+          end.result,
+          onResume: end.onResume == null ? null : edge(end.onResume!),
+          onThrow: end.onThrow == null ? null : edge(end.onThrow!),
+        );
+        // The original operand proves FutureOr<T>; the selected operand is boxed.
+        ends[block] = suspended;
+        operandsForAwait[suspended] = convert(
+          end.operand,
+          .object.nullable,
+          body,
+        );
+        awaitTypes[suspended] = _reify(end.result.type, body);
+      }
       if (block != sourceBlock) block.finish(sourceBlock.end);
     }
     instructions[function.entry]!.insertAll(0, _prologue);

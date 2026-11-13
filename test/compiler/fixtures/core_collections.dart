@@ -189,6 +189,101 @@ String collectionText(int mode) {
       return 'iterator failed to detect modification';
     case 16:
       return '${ArgumentError.value('line\n\t"', 'input', 'bad')}|${RangeError.range(4, 0, 2, 'index')}|${StateError('state')}|${UnsupportedError('operation')}';
+    case 18:
+      final text = StringBuffer();
+      for (var i = 0; i < 260; i++) {
+        text.write(i < 130 ? 'x' : 'abcdefghi');
+      }
+      for (var i = 0; i < 130; i++) {
+        text.writeCharCode(i % 5 == 0 ? 0x1f642 : 0x61 + i % 26);
+      }
+      final snapshot = text.toString();
+      text.writeAll([], '|');
+      var rejected = false;
+      try {
+        text.writeCharCode(0x110000);
+      } on RangeError {
+        rejected = true;
+      }
+      final length = text.length;
+      text
+        ..clear()
+        ..writeCharCode(0)
+        ..writeCharCode(0xd800)
+        ..writeln();
+      return '$snapshot|$length|$rejected|$text';
+    case 19:
+      final result = StringBuffer();
+      for (final values in [<int>{}, LinkedHashSet<int>(hashCode: (_) => 0)]) {
+        for (var i = 0; i < 200; i++) {
+          values.add(i);
+        }
+        for (var i = 0; i < 160; i++) {
+          values.remove(i);
+        }
+        final copy = values.toSet();
+        values
+          ..clear()
+          ..add(999);
+        for (var i = 0; i < 80; i++) {
+          copy.add(i);
+        }
+        final iterator = copy.iterator..moveNext();
+        copy.add(201);
+        var detected = false;
+        try {
+          iterator.moveNext();
+        } on ConcurrentModificationError {
+          detected = true;
+        }
+        result.write('$values|$copy|${copy.lookup(199)}|$detected;');
+      }
+      final map = {for (var i = 0; i < 100; i++) i: '$i'};
+      final copy = Map<int, String>.of(map);
+      map
+        ..clear()
+        ..[200] = 'original';
+      copy.putIfAbsent(101, () {
+        copy.clear();
+        return 'inserted';
+      });
+      return '$result|$map|$copy';
+    case 20:
+      final fixed = List<int>.generate(130, (i) => i, growable: false);
+      final slice = fixed.sublist(1, 129);
+      final copy = List<int>.unmodifiable(slice);
+      slice[0] = -1;
+      final nullable = List<int?>.of(fixed)
+        ..length = 1
+        ..length = 40;
+      nullable.addAll([4, null, 7]);
+      final text = <Object?>[Label('label'), null, 3, '中'].join();
+      var rejected = 0;
+      try {
+        nullable.length = -1;
+      } on RangeError {
+        rejected++;
+      }
+      try {
+        fixed.addAll([]);
+      } on UnsupportedError {
+        rejected++;
+      }
+      return '${copy.length}/${copy.first}/${copy.last}|${nullable.length}/${nullable[0]}/${nullable[1]}/${nullable.last}|$text|$rejected';
+    case 21:
+      final outcomes = <String>[];
+      for (final skip in [-1, 0, 2]) {
+        final fixed = List<int>.filled(3, 0);
+        try {
+          fixed.setRange(0, 2, [1].where((_) => true), skip);
+          outcomes.add('accepted');
+        } on RangeError {
+          outcomes.add('range');
+        } on StateError {
+          outcomes.add('short');
+        }
+      }
+      return outcomes.join('/');
     default:
       _calls = 0;
       final first = Label('first');

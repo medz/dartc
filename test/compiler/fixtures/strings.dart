@@ -203,15 +203,13 @@ int stringConstruct(int code, int index, int bound) {
   final string = bound == 0 ? String.fromCharCode(code) : make(code);
   final unit = string[index];
   final Object a = string, b = String.fromCharCode(code);
-  if (a != b ||
-      a.hashCode != b.hashCode ||
-      string != b ||
-      string == code ||
-      string.hashCode != b.hashCode ||
-      unit.length != 1 ||
-      unit.codeUnitAt(0) != string.codeUnitAt(index)) {
-    return -1;
-  }
+  if (a != b) return -11;
+  if (a.hashCode != b.hashCode) return -12;
+  if (string != b) return -13;
+  if (string == code) return -14;
+  if (string.hashCode != b.hashCode) return -15;
+  if (unit.length != 1) return -16;
+  if (unit.codeUnitAt(0) != string.codeUnitAt(index)) return -17;
   final empty = text(0) + text(0);
   if (string.runtimeType != String || String.fromCharCode(0x61) != 'a') {
     return -3;

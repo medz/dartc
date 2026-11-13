@@ -4,16 +4,8 @@ import '../runtime/numbers.dart';
 @patch
 class double {
   @patch
-  String toString() => DoubleText.shortest(this);
-  @override
-  String toStringAsFixed(int fractionDigits) =>
-      DoubleText.fixed(this, fractionDigits);
-  @override
-  String toStringAsExponential([int? fractionDigits]) =>
-      DoubleText.exponential(this, fractionDigits);
-  @override
-  String toStringAsPrecision(int precision) =>
-      DoubleText.precision(this, precision);
+  static double? _nativeParse(String str, int start, int end) =>
+      DoubleText.tryParse(str, start, end);
 }
 
 @patch
@@ -26,6 +18,18 @@ class _BigIntImpl {
 
 @patch
 class _Double {
+  @patch
+  String _toString() => DoubleText.shortest(this);
+  @patch
+  String _toStringAsFixed(int fractionDigits) =>
+      DoubleText.fixed(this, fractionDigits);
+  @patch
+  String _toStringAsExponential(int fractionDigits) =>
+      DoubleText.exponential(this, fractionDigits);
+  @patch
+  String _toStringAsPrecision(int fractionDigits) =>
+      DoubleText.precision(this, fractionDigits);
+
   @patch
   double _modulo(double other) => floatingModulo(this, other);
   @patch

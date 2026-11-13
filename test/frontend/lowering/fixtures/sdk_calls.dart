@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'effects.dart';
 
 enum const E() {
@@ -12,6 +14,9 @@ int enumCompareNames() => Enum.compareByName(E.a, E.b);
 E enumByName() => E.values.byName('a');
 Map<String, E> enumNames() => E.values.asNameMap();
 Duration duration() => const Duration(seconds: 2);
+
+Future<(int, String)> waitRecord((Future<int>, Future<String>) values) =>
+    values.wait;
 
 class Strings() implements List<String> {
   @override

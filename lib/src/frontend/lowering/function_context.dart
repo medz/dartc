@@ -697,8 +697,14 @@ final class FunctionContext(
         ? const []
         : [
             for (var i = 0; i < end; i++)
-              refined(_locals[mutableLocals[i].$1]!),
+              _mergeLocal(mutableLocals[i].$1, mutableLocals[i].$2),
           ];
+  }
+
+  Value _mergeLocal(VariableElement variable, ValueType type) {
+    final value = _locals[variable]!, narrowed = refined(value);
+    // Null on one path does not establish assignability to an open type parameter.
+    return type.accepts(narrowed.type) ? narrowed : value;
   }
 
   /// Restores [values] at the same lexical scope in which they were captured.
@@ -718,7 +724,7 @@ final class FunctionContext(
     final second = <Value>[if (result != null) result.$3];
     final changed = <VariableElement>[];
     for (final (i, (variable, type)) in mutableLocals.indexed) {
-      final value = refined(_locals[variable]!);
+      final value = _mergeLocal(variable, type);
       if (saved[i] == value) continue;
       types.add(type);
       first.add(saved[i]);

@@ -120,7 +120,7 @@ void main() {
         }
       }
     });
-    test('${generator.target} rejects missing built-in Type members', () {
+    test('${generator.target} rejects conflicting SDK Type members', () {
       final custom = ClassType(
         library,
         'CustomType',
@@ -166,10 +166,10 @@ void main() {
           definitions: program.reachableFrom([target]),
         ),
         throwsA(
-          isA<UnsupportedError>().having(
+          isA<ArgumentError>().having(
             (error) => error.message,
-            'missing built-in implementation',
-            contains('built-in member unavailable: Type.hashCode'),
+            'conflicting SDK declaration',
+            contains('Conflicting runtime class: Type'),
           ),
         ),
       );
@@ -254,6 +254,20 @@ void main() {
         ),
         (.nullType, parameter),
         (.integer, parameter),
+        (.object.nullable, parameter.nonNullable),
+        (.object.nullable, PromotedTypeParameterType(parameter, .string)),
+        (
+          .object.nullable,
+          PromotedTypeParameterType(parameter, .string).nullable,
+        ),
+        (
+          .object.nullable,
+          PromotedTypeParameterType(
+            parameter,
+            ValueType.integer.nullable,
+            isNonNullable: true,
+          ),
+        ),
         (FfiTypes.pointerTypes[Pointer<Int64>]!, parameter),
       ]) {
         final target = FunctionTarget(
@@ -292,6 +306,8 @@ void main() {
       final owner = ClassType(library, 'Box', typeParameters: [parameter]);
       for (final (source, cast) in <(ValueType, ValueType?)>[
         (.object.nullable, parameter),
+        (.object.nullable, parameter.nonNullable),
+        (.object.nullable, PromotedTypeParameterType(parameter, .string)),
         (parameter, .integer),
         (parameter.nullable, null),
       ]) {

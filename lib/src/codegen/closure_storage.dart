@@ -73,7 +73,9 @@ final class ClosureStorage(
             includeCell(input.type);
           }
           if (operation case MakeClosure(:final target)) targets.add(target);
-          if (operation case InstantiateFunction(:final function)) {
+          if (operation
+              case InstantiateFunction(:final function) ||
+                  InstantiateFunctionFrom(:final function)) {
             instantiations.add(function.type as FunctionType);
           }
         }

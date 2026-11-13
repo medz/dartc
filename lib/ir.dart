@@ -158,6 +158,8 @@ export 'src/ir/value.dart'
         TestedValue,
         TypeCast,
         TypeView,
+        UncheckedCast,
+        InstantiateFunctionFrom,
         TypeTest,
         UnwindValue,
         WriteCell,
