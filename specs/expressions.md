@@ -37,7 +37,7 @@
 
 动态执行对照只覆盖已表示的用户成员和明确实现的核心操作。未知导入/SDK 实现及尚未表示的 typed noSuchMethod forwarder 不会被误报为缺失成员；已表示转发使用普通函数体执行入口及返回检查。NoSuchMethodError 的类型与传播已对照；宿主诊断文本对自定义类型实参和私有 Symbol 的呈现仍有限，不保证与 VM 文本一致。
 
-NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调用路径：构造返回新的错误对象，不触发接收者 noSuchMethod，也不提前读取用户 Invocation getter。支持类型判断、抛出、捕获和重新抛出的身份保持；该工厂支持不代表完整原生 Error 实例 API 或诊断文本与 VM 完全一致。
+NoSuchMethodError.withInvocation 的普通工厂调用与提取复用既有调用路径：构造返回新的错误对象，不触发接收者 noSuchMethod，也不提前读取用户 Invocation getter。支持类型判断、抛出、捕获和重新抛出的身份保持；原生构造和文本使用 SDK 错误类正文，方法、getter、setter 与 Invocation 信息见[错误文本验证](../test/compiler/object_text_test.dart)；VM 特有的匹配方法签名描述仍未提供，不保证错误文本与 VM 逐字一致。
 
 动态调用 `g<String>('bad')` 遗漏必需命名实参时，传给 `noSuchMethod` 的 Invocation 应保留显式类型实参 `String`。在同一份 `shapeBeforeBounds` 样本上，macOS ARM64 的 Dart SDK 3.13.7 JIT 返回 111，SDK AOT 返回 101。IR 保留显式类型实参，结果为 111。对照使用 SDK 显式构造的 Invocation 和同一接收者的 `noSuchMethod`。[样本](../test/frontend/lowering/fixtures/dynamic_dispatch.dart)、[Invocation.typeArguments](https://api.dart.dev/dart-core/Invocation/typeArguments.html)。
 
@@ -87,6 +87,8 @@ int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。d
 
 `substring`、`compareTo`、`startsWith`、`endsWith`、`indexOf`、`lastIndexOf`、`contains`、`trim/trimLeft/trimRight`、`*`、`padLeft/padRight`、`replaceRange`、`replaceFirst/replaceFirstMapped`、`replaceAll/replaceAllMapped`、`split` 和 `splitMapJoin` 支持原生执行。String 的 Pattern 方法保留空匹配和 UTF-16 偏移；自定义 Pattern 保留方法派发及调用副作用。`split` 的空字符串模式逐码元分割，`splitMapJoin` 的空字符串模式保留完整代理对；回调按匹配顺序执行。`runes` 复用 SDK 的码点迭代规则，孤立代理项保持原值。范围错误在访问载荷前抛出，结果可跨 GC 和后续原生调用保存。见[原生与 SDK 对照](../test/compiler/string_operations_test.dart)。
 
+`padLeft` 与 `padRight` 在减去字符串长度前处理负宽度，包括最小 64 位整数，遵循 [String 的公开契约](../sdk/std/lib/core/string.dart)；不继承固定 SDK 正文先减法造成的溢出。负宽度、普通补白和方法提取由同一组原生字符串测试覆盖。
+
 静态类型限定为 String 或 null 的插值已支持原生执行，null 转换成文本 `null`，其余字符串保留码元；插值表达式先按源码顺序求值。固定 SDK 的 `Expando.toString` 使用此路径，见[原生验证](../test/compiler/expandos_test.dart)；一般值的插值格式化仍是缺口。
 
 ## 原生 List
@@ -119,7 +121,7 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 协变视图的写入按实际键和值类型检查；类型错误、hashCode 或 == 抛错时不执行该次条目写入，异常保留 catch/finally。keys 是实时视图，迭代器检查新增、删除及清空等结构修改；仅替换已有值不改变键的迭代顺序。支持 values、entries、forEach、addAll、putIfAbsent 和 update 的普通库行为，以及用户 Map 重写、方法值和已有 Map 模式。键、值和迭代状态在移动回收及跨原生入口保存后保持有效，用户哈希和相等回调中也可分配。见[原生 Map 验证](../test/compiler/maps_test.dart)和 [IR 操作契约](../test/ir/collections_test.dart)。
 
-`const Map` 通过不可变 Dart 实现保留查询、键顺序、类型参数与常量身份；写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。Map spread 保留逐项转换和求值顺序。Map.from/of/fromEntries/fromIterables/unmodifiable、identity、map、update、putIfAbsent、removeWhere 与 cast 视图使用 SDK 算法；不可修改 Map 复制输入并拒绝空修改。List、Set、Map 的 toString 调用元素的实际方法，并终止对循环容器的递归。见[原生集合与格式化对照](../test/compiler/object_text_test.dart)。
+`const Map` 使用 SDK 不可变 Map 的查询与迭代规则，保留键顺序、类型参数与常量身份；数字相等键、Type 键和 GC 后查询见[原生 Map 验证](../test/compiler/maps_test.dart)。写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。Map spread 保留逐项转换和求值顺序。Map.from/of/fromEntries/fromIterables/unmodifiable、identity、map、update、putIfAbsent、removeWhere 与 cast 视图使用 SDK 算法；不可修改 Map 复制输入并拒绝空修改。List、Set、Map 的 toString 调用元素的实际方法，并终止对循环容器的递归。见[原生集合与格式化对照](../test/compiler/object_text_test.dart)。
 
 ## JSON 与 UTF-8
 

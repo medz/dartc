@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Use the SDK's immutable Map lookup and NoSuchMethodError construction and formatting. Constant Map indexes retain their entries through collection; method, getter and setter failures keep their invocation details. VM-specific matching-signature descriptions remain unavailable.
+- Reuse the SDK's String repetition body. Padding handles negative widths before subtracting the string length, including the minimum signed integer.
+- Reject SDK body replacements without an explicit target-storage or specification adaptation. Official and internal library identities no longer permit blanket replacements.
+- Implement runtime subtyping, type equality, hashing and normalization in ordinary Dart. Direct code-generation clients supply the checked type entries through `HeapRuntime.types`; generated metadata participates in method reachability even when the source does not construct Type values.
+
 - Run async functions and parameterless async main in native programs. Preserve typed await results, Future identity, callback checks, shared captures, garbage collection, Zone context and catch/finally ordering across suspension. Uncaught async main errors reach the process boundary.
 
 - IR clients can use `UncheckedCast` for trusted type assertions without a runtime check; Dart `as` casts remain checked. SDK internal casts preserve object identity, scalar representation and actual runtime types.

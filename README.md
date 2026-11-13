@@ -230,7 +230,7 @@ dartc math.dart --kind shared \
 
 Cross-compilation does not require a matching host. Running or loading the result requires the selected target environment.
 
-Linux executables currently use fixed addresses and statically resolved inputs. Dynamic executable linking and position-independent executables are not supported.
+Linux executables with explicit shared-library inputs use position-independent code and the target GNU dynamic loader. Static-only inputs run without a dynamic loader. See the [executable support boundaries](specs/libraries.md#独立程序入口) for startup and lifecycle limitations.
 
 ## Know what to expect
 
