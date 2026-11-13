@@ -59,7 +59,7 @@ Type 文本保留类名、实际类型实参、可空性、FutureOr、record 字
 
 ## analyzer 元数据边界
 
-analyzer 14.7 对部分合并接口缺少泛型默认类型，或保留显式 extension 运算符的未代入类型参数；lowering 不把这些值当作已检查的类型。枚举 `_name` 存储以及私有 Symbol 常量也有信息丢失，分别见[类](classes.md)和[变量及常量](variables.md)。这些是兼容缺口。
+analyzer 14.7 对部分合并接口缺少泛型默认类型，或保留显式 extension 运算符的未代入类型参数；lowering 不把这些值当作已检查的类型。枚举 `_name` 存储通过常量重算保留独立父类层，见[类](classes.md)；私有 Symbol 常量的库身份仍有信息丢失，见[变量及常量](variables.md)。未修复的信息丢失仍是兼容缺口。
 
 将继承方法 `f<T>()` 与接口 `f<U extends T>()` 在 `T=Object?` 时合并，analyzer 14.7 还可能抛出 `_TopMergeStateError`，而 SDK 3.13.7 可编译执行。这发生在取得已解析库之前；显式为原方法写出 `T extends Object?` 可绕过该上游差异，不改变 dartc 的语言目标。
 

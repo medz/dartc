@@ -136,7 +136,7 @@ final class ConstantEvaluation() {
     try {
       final element = variable as internal.VariableElementImpl;
       final initializer = element.constantInitializer2;
-      final internal.Constant? result;
+      internal.Constant? result;
       if (initializer != null) {
         result = _Visitor(this, element.library!).evaluateConstant(
           initializer,
@@ -157,9 +157,23 @@ final class ConstantEvaluation() {
           element.isEnumConstant &&
           result is internal.DartObjectImpl) {
         final owner = element.enclosingElement as internal.EnumElementImpl;
-        result.updateEnumConstant(
-          index: owner.constants.indexOf(element),
-          name: element.name!,
+        final metadata =
+            internal.DartObjectImpl(
+              owner.library.typeSystem,
+              owner.supertype!,
+              internal.GenericState({}),
+            )..updateEnumConstant(
+              index: owner.constants.indexOf(element),
+              name: element.name!,
+            );
+        // Keep Enum's private name separate from the user's private fields.
+        result = internal.DartObjectImpl(
+          owner.library.typeSystem,
+          result.type,
+          internal.GenericState({
+            ...result.fields!,
+            internal.GenericState.SUPERCLASS_FIELD: metadata,
+          }, invocation: result.constructorInvocation),
         );
       }
       return _values[variable] = result;

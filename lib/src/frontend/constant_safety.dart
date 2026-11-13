@@ -72,17 +72,6 @@ final class _Scan() extends RecursiveAstVisitor<void> {
         '${element.library.uri}::${element.displayName}',
       );
     }
-    if (element.enclosingElement is EnumElement &&
-        element.enclosingElement.fields.any(
-          (field) =>
-              !field.isStatic &&
-              !field.isOriginGetterSetter &&
-              field.name == '_name',
-        )) {
-      throw _UnsafeConstant(
-        'enum instance field _name loses its value in analyzer constants',
-      );
-    }
     for (final parameter in element.formalParameters) {
       variable(parameter);
     }

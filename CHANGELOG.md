@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Preserve user-defined `_name` fields in enums independently from their implicit names. Support field initializers, redirecting constructors, generic fields and imported nested constants without corrupting enum names or identity.
+
 - Encode and decode URI components, queries and full URI text in native code using the SDK implementations. Support query-string splitting, UTF-8/Latin-1/ASCII encodings and malformed-input errors.
 - Run synchronous generators in native programs using the SDK iterator implementation. Preserve lazy, independent iterations, generic captures, yield delegation, catch/finally and live references across suspension. Reject recursive moveNext with StateError before changing the active iteration.
 

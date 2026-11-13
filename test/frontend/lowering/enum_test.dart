@@ -1,10 +1,10 @@
-import 'dart:io';
-
 import 'package:dartc/frontend.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
 import 'fixtures/enums.dart' as sdk;
+import 'fixtures/enum_private_storage.dart' as storage;
+import 'fixtures/enum_private_storage_use.dart' as imported;
 
 void main() {
   group('enum SDK comparison', () {
@@ -96,85 +96,37 @@ void main() {
     });
   });
 
-  group('unsupported enum constructs', () {
-    for (final (name, declaration) in <(String, String)>[
-      ('field formal', 'a(7); final int _name; const Broken(this._name);'),
-      ('field initializer', 'a; final int _name = 7; const Broken();'),
-      (
-        'string storage',
-        "a('own'); final String _name; const Broken(this._name);",
-      ),
-    ]) {
-      test('rejects enum _name $name rather than corrupting storage', () async {
-        final directory = Directory.systemTemp.createTempSync('dartc-enum-');
-        addTearDown(() => directory.deleteSync(recursive: true));
-        final file = File('${directory.path}/entry.dart')
-          ..writeAsStringSync(
-            'enum Broken { $declaration }\nObject f() => Broken.a._name;',
-          );
-        await expectLater(
-          AnalysisSession([file.path])
-              .use((input) async => (await Lowering().lower(input)).program),
-          throwsA(
-            isA<UnsupportedError>()
-                .having(
-                  (error) => error.message,
-                  'source',
-                  contains('entry.dart:'),
-                )
-                .having((error) => error.message, 'reason', contains('_name')),
-          ),
-        );
-      });
-    }
+  test(
+    'enum names and user storage retain separate private identities',
+    () async {
+      final fixture = await FixtureComparison.load('enum_private_storage');
+      for (var index = 0; index < storage.Code.values.length; index++) {
+        fixture.compare('privateEnumStorage', [
+          index,
+        ], () => storage.privateEnumStorage(index));
+      }
+      fixture.compare(
+        'privateEnumInitializers',
+        [],
+        storage.privateEnumInitializers,
+      );
+    },
+  );
 
-    test(
-      'rejects _name storage reached through cross-library constants',
-      () async {
-        final directory = Directory.systemTemp.createTempSync('dartc-enum-');
-        addTearDown(() => directory.deleteSync(recursive: true));
-        File('${directory.path}/dependency.dart').writeAsStringSync(
-          'enum Broken { a(7); final int _name; const Broken(this._name); }\n'
-          'const alias = Broken.a;\n'
-          'const nested = <Object>[alias];\n'
-          'const record = (alias,);\n'
-          'const folded = identical(alias, Broken.a);',
-        );
-        final entry = File('${directory.path}/entry.dart');
-        for (final expression in [
-          'd.alias',
-          'd.nested',
-          'd.record',
-          'd.folded',
-        ]) {
-          entry.writeAsStringSync(
-            "import 'dependency.dart' as d; Object f() => $expression;",
-          );
-          await expectLater(
-            AnalysisSession([entry.path])
-                .use((input) async => (await Lowering().lower(input)).program),
-            throwsA(
-              isA<UnsupportedError>()
-                  .having(
-                    (error) => error.message,
-                    'use site',
-                    contains('entry.dart:'),
-                  )
-                  .having(
-                    (error) => error.message,
-                    'reason',
-                    contains('_name'),
-                  ),
-            ),
-            reason: expression,
-          );
-        }
-        entry.writeAsStringSync(
-          "import 'dependency.dart' as d; int f() => 42;",
-        );
-        await AnalysisSession([entry.path])
-            .use((input) async => (await Lowering().lower(input)).program);
-      },
-    );
-  });
+  test(
+    'cross-library aliases and nested constants retain enum storage',
+    () async {
+      final fixture = FixtureComparison(
+        await AnalysisSession(
+          ['test/frontend/lowering/fixtures/enum_private_storage_use.dart'],
+          includeDependencies: true,
+        ).use((input) async => (await Lowering().lower(input)).program),
+      );
+      fixture.compare(
+        'crossLibraryEnumStorage',
+        [],
+        imported.crossLibraryEnumStorage,
+      );
+    },
+  );
 }

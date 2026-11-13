@@ -1621,9 +1621,7 @@ final class Bindings({
               layer.getField(declaration.name!),
             );
           }
-          if (element is EnumElement) {
-            // Analyzer stores Enum's inherited slots directly in the enum value,
-            // unlike the separate superclass layer used by ordinary instances.
+          if (layerType.isDartCoreEnum) {
             fields[CoreTypes.enumIndex] = convert(layer.getField('index'));
             fields[CoreTypes.enumName] = convert(layer.getField('_name'));
             break;
