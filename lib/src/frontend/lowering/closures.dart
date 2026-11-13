@@ -2,6 +2,7 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart' as ast;
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 import 'bindings.dart';
@@ -32,21 +33,52 @@ final class ClosurePlan() extends GeneralizingAstVisitor<void> {
     FunctionTarget address, {
     required bool store,
   }) {
-    final name = store ? '<array-store>' : '<array-load>';
+    final element = array.typeArguments.single;
+    final compound =
+        element is ClassType && element.nativeType is NativeCompoundType;
+    final name = compound
+        ? '<array-view>'
+        : store
+        ? '<array-store>'
+        : '<array-load>';
     final declaration = (enclosing, site, name);
     if (adapters[declaration] case final body?) return body.target;
     final target = FunctionTarget(
       enclosing.library,
       name,
-      .integer,
-      [array, .integer, if (store) .integer],
+      compound ? element : .integer,
+      compound
+          ? [ValueType.object, .integer]
+          : [array, .integer, if (store) .integer],
       kind: .closure,
       enclosing: enclosing,
       sourceOffset: site.offset,
+      captures: [if (compound) array],
     );
     final entry = Block(target.parameterTypes);
     final arguments = entry.parameters.skip(target.argumentOffset).toList();
-    final storage = FfiTypes.describe(array.typeArguments.single);
+    if (compound) {
+      // Array's SDK typed-data base is a pointer; the captured array owns its storage.
+      final base = entry.emit(
+        UncheckedCast(
+          arguments[0],
+          FfiTypes.pointer.instantiate([FfiTypes.voidType]),
+        ),
+      );
+      final pointer = entry.emit(
+        IntBinary(.add, entry.emit(PointerAddress(base)), arguments[1]),
+      );
+      entry.finish(
+        Return(
+          entry.emit(
+            NativeView(element, address: pointer, owner: entry.parameters[1]),
+          ),
+        ),
+      );
+      adapters[declaration] = IrFunction(target, [entry]);
+      return target;
+    }
+    final storage = FfiTypes.describe(element);
     final offset = entry.emit(
       IntBinary(.multiply, arguments[1], entry.emit(NativeSize(storage))),
     );

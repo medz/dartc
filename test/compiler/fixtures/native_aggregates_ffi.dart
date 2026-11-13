@@ -94,6 +94,22 @@ final class NativeAggregates() {
       .lookupFunction<Arrays Function(Arrays), Arrays Function(Arrays)>(
         'copyArrayPrefix',
       );
+  late final arrayViews = _library
+      .lookupFunction<Arrays Function(Arrays), Arrays Function(Arrays)>(
+        'updateArrayViews',
+      );
+  late final arrayViewFailure = _library
+      .lookupFunction<Bool Function(Arrays, Int32), bool Function(Arrays, int)>(
+        'arrayViewFailure',
+      );
+  late final retainArrayViews = _library
+      .lookupFunction<Void Function(Double), void Function(double)>(
+        'retainArrayViews',
+      );
+  late final readArrayViews = _library
+      .lookupFunction<Arrays Function(Int32), Arrays Function(int)>(
+        'readArrayViews',
+      );
   late final _allocate = _process
       .lookupFunction<
         Pointer<Void> Function(IntPtr),

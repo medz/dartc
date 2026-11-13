@@ -120,3 +120,17 @@ void _arrayStore<T extends NativeType>(
   int index,
   Array<T> value,
 ) => _copyArray(_arraySlice(target, index), value);
+
+// Nested views retain an owner and byte stride instead of VM typed-data storage.
+final class _NestedArrayList<T extends NativeType>(final Array<Array<T>> _array)
+    with ListMixin<Array<T>>, FixedLengthListMixin<Array<T>> {
+  @override
+  int get length => _array._size;
+
+  @override
+  Array<T> operator [](int index) => _arraySlice(_array, index);
+
+  @override
+  void operator []=(int index, Array<T> value) =>
+      _arrayStore(_array, index, value);
+}

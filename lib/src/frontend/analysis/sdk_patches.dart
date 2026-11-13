@@ -40,7 +40,12 @@ final class SdkPatches(final OverlayResourceProvider files) {
       [ffi, if (runtime != null) '$runtime/ffi.dart'],
       classes: {
         '_ArraySize',
-        if (runtime != null) '_AbiSpecificIntegerArrayList',
+        if (runtime != null) ...{
+          '_AbiSpecificIntegerArrayList',
+          '_BoolArrayList',
+          '_PointerArrayList',
+          '_ArrayList',
+        },
       },
     );
     if (runtime != null) {

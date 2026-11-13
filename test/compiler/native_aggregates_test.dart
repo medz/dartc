@@ -149,4 +149,45 @@ void main() {
     expect(native.arrayBounds(input, 3), -1);
     expect(native.arrayBounds(input, 2), 17);
   });
+
+  test(
+    'array list views preserve typed values, aliases and mutation limits',
+    () {
+      final input = Struct.create<Arrays>();
+      input.points[1].x = 10;
+      input.matrix[1][1] = 2.75;
+      input.pointers[0] = Pointer<Int64>.fromAddress(0x1234);
+      final actual = native.arrayViews(input);
+      final expected = updateArrayViews(input);
+      for (final result in [actual, expected]) {
+        expect(result.flags.elements, [true, false, true]);
+        expect(result.pointers[1].address, 0x1234);
+        expect(result.points[1].x, 12.75);
+        expect(result.choices[0].value, 12.75);
+        expect(result.matrix[0][1], 2.75);
+        expect(result.matrix[1][1], 3.75);
+      }
+      for (var mode = 0; mode <= 10; mode++) {
+        expect(native.arrayViewFailure(input, mode), isTrue, reason: '$mode');
+        expect(arrayViewFailure(input, mode), isTrue, reason: 'SDK: $mode');
+      }
+    },
+  );
+
+  test(
+    'escaped array elements retain managed storage after their list dies',
+    () {
+      for (final value in [-3.5, 0.0, 12.25]) {
+        native.retainArrayViews(value);
+        for (final count in [0, 40000]) {
+          final result = native.readArrayViews(count);
+          expect(result.points[0].x, value);
+          expect(result.choices[0].value, value + 1);
+          expect(result.matrix[0][0], value + 2);
+          expect(result.pointers[0].address, 0x1234);
+          expect(result.flags[0], isTrue);
+        }
+      }
+    },
+  );
 }

@@ -209,27 +209,66 @@ Value? lowerFfi(
   final access = member.enclosingElement;
   if (access is! ExtensionElement) return null;
   final array = library.getClass('Array');
-  if (bind != null &&
-      arrayAccess != null &&
-      access == library.getExtension('AbiSpecificIntegerArray') &&
-      member == access.getGetter('elements')) {
+  final isArray =
+      access.extendedType is dart.InterfaceType &&
+      (access.extendedType as dart.InterfaceType).element == array;
+  if (isArray && bind != null && member == access.getGetter('elements')) {
     final receiver = operands.single;
     final type = receiver.type as ClassType;
-    final constructor = bind(
-      library.getClass('_AbiSpecificIntegerArrayList')!.unnamedConstructor!,
-    );
-    return emit(
-      Construct(constructor, [
-        receiver,
-        arrayAccess(type, false),
-        arrayAccess(type, true),
-      ], instantiatedType: constructor.owner!.instantiate(type.typeArguments)),
-    );
+    final element = type.typeArguments.single;
+    final (name, types, arguments) = switch (access) {
+      _
+          when arrayAccess != null &&
+              access == library.getExtension('AbiSpecificIntegerArray') =>
+        (
+          '_AbiSpecificIntegerArrayList',
+          type.typeArguments,
+          <Value>[receiver, arrayAccess(type, false), arrayAccess(type, true)],
+        ),
+      _ when access == library.getExtension('BoolArray') => (
+        '_BoolArrayList',
+        <ValueType>[],
+        <Value>[receiver],
+      ),
+      _ when access == library.getExtension('PointerArray') => (
+        '_PointerArrayList',
+        (element as ClassType).typeArguments,
+        <Value>[receiver],
+      ),
+      _ when access == library.getExtension('ArrayArray') => (
+        '_NestedArrayList',
+        (element as ClassType).typeArguments,
+        <Value>[receiver],
+      ),
+      _
+          when arrayAccess != null &&
+              (access == library.getExtension('StructArray') ||
+                  access == library.getExtension('UnionArray')) =>
+        (
+          '_ArrayList',
+          <ValueType>[element],
+          <Value>[
+            receiver,
+            emit(NativeSize(FfiTypes.describe(element))),
+            arrayAccess(type, false),
+          ],
+        ),
+      _ => (null, <ValueType>[], <Value>[]),
+    };
+    if (name != null) {
+      final constructor = bind(library.getClass(name)!.unnamedConstructor!);
+      return emit(
+        Construct(
+          constructor,
+          arguments,
+          instantiatedType: constructor.owner!.instantiate(types),
+        ),
+      );
+    }
   }
   if (bind != null &&
       member == access.getGetter('elements') &&
-      access.extendedType is dart.InterfaceType &&
-      (access.extendedType as dart.InterfaceType).element == array &&
+      isArray &&
       result is ClassType &&
       result.library == Uri.parse('dart:typed_data')) {
     final receiver = operands.single;
@@ -248,8 +287,7 @@ Value? lowerFfi(
     );
     return typedView(receiver, address, length, bytes, result);
   }
-  if (access.extendedType is dart.InterfaceType &&
-      (access.extendedType as dart.InterfaceType).element == array &&
+  if (isArray &&
       bind != null &&
       (member.name == '[]' || member.name == '[]=')) {
     final receiver = operands.first;
@@ -274,7 +312,9 @@ Value? lowerFfi(
         operands.take(2),
       ),
     );
-    final storage = FfiTypes.describe(element);
+    final storage = FfiTypes.isPointer(element)
+        ? NativeTypeRef.of(ffi.Pointer<ffi.Void>)
+        : FfiTypes.describe(element);
     final value = member.name == '[]'
         ? _load(
             address,

@@ -261,24 +261,24 @@ final class FunctionContext(
             .instantiate(application.typeArguments)
             .result,
         bind: (member) => bindings.target(member, unit, site),
-        arrayAccess: (array, store) => emit(
-          MakeClosure(
-            _closures.nativeArrayAccess(
-              target,
+        arrayAccess: (array, store) {
+          final accessor = _closures.nativeArrayAccess(
+            target,
+            site,
+            array,
+            bindings.target(
+              application.executable.declaration.library.getTopLevelFunction(
+                '_arrayStart',
+              )!,
+              unit,
               site,
-              array,
-              bindings.target(
-                application.executable.declaration.library.getTopLevelFunction(
-                  '_arrayStart',
-                )!,
-                unit,
-                site,
-              ),
-              store: store,
             ),
-            [],
-          ),
-        ),
+            store: store,
+          );
+          return emit(
+            MakeClosure(accessor, [if (accessor.captures.isNotEmpty) receiver]),
+          );
+        },
         named: args.named,
       );
       if (value != null) return normal(value);
