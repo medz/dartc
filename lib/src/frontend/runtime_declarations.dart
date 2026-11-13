@@ -13,12 +13,14 @@ final class RuntimeDeclarations(
   Map<RuntimeRole, FunctionTarget> entries,
   Map<FunctionTarget, MemoryOperation> primitives,
   Iterable<FunctionTarget> nonAllocating,
+  Iterable<FunctionTarget> systemFunctions,
 ) {
   final Map<RuntimeRole, FunctionTarget> entries = .unmodifiable(entries);
   final Map<FunctionTarget, MemoryOperation> primitives = .unmodifiable(
     primitives,
   );
   final List<FunctionTarget> nonAllocating = .unmodifiable(nonAllocating);
+  final Set<FunctionTarget> systemFunctions = .unmodifiable(systemFunctions);
 
   /// Reads trusted annotations while their owning analysis session is open.
   factory resolve(
@@ -27,7 +29,12 @@ final class RuntimeDeclarations(
     FunctionTarget? Function(ExecutableElement) targetFor,
   ) {
     final visitor = _RuntimeDeclarations(input, libraries, targetFor);
-    return .new(visitor.entries, visitor.primitives, visitor.nonAllocating);
+    return .new(
+      visitor.entries,
+      visitor.primitives,
+      visitor.nonAllocating,
+      visitor.systemFunctions,
+    );
   }
 }
 
@@ -50,6 +57,7 @@ final class _RuntimeDeclarations(
   final entries = <RuntimeRole, FunctionTarget>{};
   final primitives = <FunctionTarget, MemoryOperation>{};
   final nonAllocating = <FunctionTarget>[];
+  final systemFunctions = <FunctionTarget>{};
   late ResolvedUnitResult unit;
 
   @override
@@ -73,9 +81,16 @@ final class _RuntimeDeclarations(
     final isEntry = type.element == source.getClass('RuntimeEntry');
     final isPrimitive = type.element == source.getClass('Primitive');
     final noAllocation = type.element == source.getClass('NonAllocating');
-    if (!isEntry && !isPrimitive && !noAllocation) return;
+    final system = type.element == source.getClass('SystemNative');
+    if (!isEntry && !isPrimitive && !noAllocation && !system) return;
     final target = targetFor(element);
     if (target == null) return;
+    if (system) {
+      if (!element.isExternal || !systemFunctions.add(target)) {
+        throw ArgumentError('Invalid system declaration: ${target.name}');
+      }
+      return;
+    }
     if (noAllocation) {
       nonAllocating.add(target);
       return;

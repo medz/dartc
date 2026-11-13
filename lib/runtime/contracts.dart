@@ -44,6 +44,9 @@ enum RuntimeRole() {
 /// Binds an external declaration to one trusted machine operation.
 final class const Primitive(final MemoryOperation operation);
 
+/// Resolves a trusted SDK `@Native` declaration in the target's system library.
+final class const SystemNative();
+
 enum MemoryOperation() {
   map,
   unmap,

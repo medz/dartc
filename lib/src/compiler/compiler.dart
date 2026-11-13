@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dartc/abi.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
@@ -112,11 +113,23 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     );
     final nativeImports = <FunctionTarget, NativeImport>{};
     final addresses = <NativeReference, String>{};
-    String resolve(NativeReference reference) =>
-        nativeSymbols[reference.assetId]?[reference.symbol] ??
-        (throw ArgumentError(
-          'Unbound native symbol ${reference.symbol} in asset ${reference.assetId}',
-        ));
+    final systemReferences = {
+      for (final function in lowered.runtime.systemFunctions)
+        ?imports[function],
+    };
+    final systemSymbols = <String, String>{};
+    String resolve(NativeReference reference) {
+      if (systemReferences.contains(reference)) {
+        final name = target.nativeSymbol(reference.symbol);
+        systemSymbols[name] = name;
+        return reference.symbol;
+      }
+      return nativeSymbols[reference.assetId]?[reference.symbol] ??
+          (throw ArgumentError(
+            'Unbound native symbol ${reference.symbol} in asset ${reference.assetId}',
+          ));
+    }
+
     for (final target in definitions) {
       final function = program.implementationOf(target);
       if (function is IrFunction) {
@@ -164,6 +177,16 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .macos => MachO(target),
       .linux => Elf(target),
     };
+    if (systemSymbols.isNotEmpty) {
+      inputs.add(
+        .sharedLibrary(
+          target.operatingSystem == .macos
+              ? '/usr/lib/libSystem.B.dylib'
+              : 'libc.so.6',
+          symbols: systemSymbols,
+        ),
+      );
+    }
     final bytes = switch (output) {
       ObjectOutput() => format.encodeObject(object),
       StaticLibraryOutput() => ArchiveWriter(format).encode([object]),

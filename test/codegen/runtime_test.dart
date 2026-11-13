@@ -167,10 +167,12 @@ void main() {
         entryPoint: lowered.entryPoint,
         exports: lowered.exports,
         imports: lowered.imports,
-        runtime: RuntimeDeclarations(lowered.runtime.entries, {
-          ...lowered.runtime.primitives,
-          target: operation,
-        }, lowered.runtime.nonAllocating),
+        runtime: RuntimeDeclarations(
+          lowered.runtime.entries,
+          {...lowered.runtime.primitives, target: operation},
+          lowered.runtime.nonAllocating,
+          lowered.runtime.systemFunctions,
+        ),
       );
       if (!valid) {
         expect(() => bindRuntime(result), throwsArgumentError);
