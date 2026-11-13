@@ -41,8 +41,7 @@ final class ConstantEvaluation() {
   final _active = <VariableElement>{};
 
   /// Checks constant obligations in every declaration, including dead code.
-  void check(ResolvedUnitResult unit) {
-    final errors = unit.diagnostics.where((d) => d.severity == .error).toList();
+  void check(ResolvedUnitResult unit, List<Diagnostic> errors) {
     for (final error in errors) {
       if (!_evaluationErrors.contains(error.diagnosticCode) &&
           !ConstantPatterns.errors.contains(error.diagnosticCode)) {

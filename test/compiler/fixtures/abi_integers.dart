@@ -8,11 +8,9 @@ import 'package:dartc/interop.dart';
   Abi.linuxArm64: Uint16(),
   Abi.linuxX64: Int32(),
 })
-final class PlatformInt extends AbiSpecificInteger {
-  // shortcut: analyzer's FFI verifier misses primary constructors; use one when fixed.
-  // ignore: use_primary_constructors
-  const new();
-}
+// shortcut: analyzer 14.7 omits primary FFI constructors, remove this suppression when its verifier is fixed.
+// ignore: abi_specific_integer_invalid
+final class const PlatformInt() extends AbiSpecificInteger;
 
 final class IntegerState() extends Struct {
   @Uint8()

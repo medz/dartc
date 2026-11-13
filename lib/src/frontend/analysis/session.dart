@@ -9,6 +9,8 @@ import 'package:analyzer/file_system/physical_file_system.dart';
 // A single options override also protects transitive dependency diagnostics.
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart';
+// ignore: implementation_imports
+import 'package:analyzer/src/diagnostic/diagnostic.dart' as diagnostics;
 import 'package:dartc/sdk.dart';
 
 import '../analyzer_metadata.dart';
@@ -225,6 +227,42 @@ final class CheckedLibraries._(
     return _constants.annotation(unit, annotation);
   }
 
+  void _checkUnit(ResolvedUnitResult unit) {
+    final errors = unit.diagnostics.where((d) => d.severity == .error).toList();
+    // Analyzer 14.7 omits primary constructors from its ABI integer shape check.
+    for (final node in unit.unit.declarations.whereType<ClassDeclaration>()) {
+      if (node.namePart case PrimaryConstructorDeclaration(
+        :final declaredFragment,
+      )) {
+        final element = node.declaredFragment!.element;
+        final parent = element.supertype?.element;
+        if (parent == null ||
+            parent.library.uri != Uri.parse('dart:ffi') ||
+            parent != parent.library.getClass('AbiSpecificInteger')) {
+          continue;
+        }
+        if (declaredFragment?.element.isConst != true ||
+            element.constructors.length != 1 ||
+            element.typeParameters.isNotEmpty ||
+            element.fields.isNotEmpty ||
+            element.methods.isNotEmpty) {
+          throw FormatException(
+            '${unit.uri}: ABI-specific integer classes require exactly one const '
+            'constructor, no other members, and no type parameters.',
+            unit.content,
+            node.namePart.typeName.offset,
+          );
+        }
+        errors.removeWhere(
+          (error) =>
+              error.diagnosticCode == diagnostics.abiSpecificIntegerInvalid &&
+              error.offset == node.namePart.typeName.offset,
+        );
+      }
+    }
+    _constants.check(unit, errors);
+  }
+
   this {
     if (_libraries.isEmpty) {
       throw ArgumentError('At least one library is required.');
@@ -237,7 +275,7 @@ final class CheckedLibraries._(
         throw ArgumentError('Expected distinct libraries from one session.');
       }
       for (final unit in library.units) {
-        _constants.check(unit);
+        _checkUnit(unit);
       }
     }
   }
@@ -268,7 +306,7 @@ extension CheckedSources on CheckedLibraries {
         throw FormatException('Expected a Dart library: ${element.uri}');
       }
       for (final unit in result.units) {
-        _constants.check(unit);
+        _checkUnit(unit);
       }
       return result;
     });
