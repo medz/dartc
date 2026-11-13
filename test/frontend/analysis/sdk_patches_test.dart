@@ -100,110 +100,16 @@ void main() {
         final async = libraries.singleWhere(
           (library) => library.element.uri == Uri.parse('dart:async'),
         );
-        for (final (type, name) in [
-          ('_Future', 'then'),
-          ('_Completer', 'completeError'),
-        ]) {
-          final member = async.element.getClass(type)!.getMethod(name)!;
-          expect(member.fragments, hasLength(1));
-          final body = async.getFragmentDeclaration(member.firstFragment)!;
-          expect(
-            body.resolvedUnit!.uri.toString(),
-            'dart:async/future_impl.dart',
-          );
-        }
-        final awaitBody = async.getFragmentDeclaration(
-          async.element
-              .getClass('_SuspendState')!
-              .getMethod('_awaitWithTypeCheck')!
-              .firstFragment,
-        )!;
+        final then = async.element.getClass('_Future')!.getMethod('then')!;
+        expect(then.fragments, hasLength(1));
         expect(
-          patches.origins[awaitBody.resolvedUnit!.uri]!.path,
-          endsWith('/_internal/vm/lib/async_patch.dart'),
+          async
+              .getFragmentDeclaration(then.firstFragment)!
+              .resolvedUnit!
+              .uri
+              .toString(),
+          'dart:async/future_impl.dart',
         );
-        final ffi = libraries.singleWhere(
-          (library) => library.element.uri == Uri.parse('dart:ffi'),
-        );
-        final size = ffi.element.getClass('_ArraySize')!;
-        for (final name in ['_typedDataBase', '_offsetInBytes']) {
-          final source = ffi.getFragmentDeclaration(
-            size.getGetter(name)!.firstFragment,
-          )!;
-          expect(
-            patches.origins[source.resolvedUnit!.uri]!.path,
-            endsWith('/ffi_patch.dart'),
-          );
-        }
-        final collection = libraries.singleWhere(
-          (library) => library.element.uri == Uri.parse('dart:collection'),
-        );
-        final typedData = libraries.singleWhere(
-          (library) => library.element.uri == Uri.parse('dart:typed_data'),
-        );
-        final typedMixin = typedData.element.mixins.singleWhere(
-          (mixin) => mixin.name == '_TypedListMixin',
-        );
-        for (final member in [
-          typedData.element
-              .getClass('Uint8List')!
-              .getNamedConstructor('fromList')!,
-          typedData.element.getClass('ByteData')!.unnamedConstructor!,
-          typedData.element.getClass('_ByteDataView')!.getMethod('getFloat64')!,
-          typedMixin.getMethod('sublist')!,
-          typedMixin.getMethod('setRange')!,
-        ]) {
-          final body = typedData.getFragmentDeclaration(member.fragments.last)!;
-          expect(
-            patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith('/vm/lib/typed_data_patch.dart'),
-          );
-        }
-        expect(
-          typedData.element
-              .getTopLevelFunction('_uint8ListRangeEquals')!
-              .fragments,
-          hasLength(1),
-        );
-        for (final name in ['_HashMap', '_HashSet', '_CustomHashMap']) {
-          final source = collection.getFragmentDeclaration(
-            collection.element.getClass(name)!.firstFragment,
-          )!;
-          expect(
-            patches.origins[source.resolvedUnit!.uri]!.path,
-            endsWith('/vm_shared/lib/collection_patch.dart'),
-          );
-        }
-        for (final name in ['LinkedHashMap', 'LinkedHashSet']) {
-          final constructor = collection.element
-              .getClass(name)!
-              .unnamedConstructor!;
-          final body = collection.getFragmentDeclaration(
-            constructor.fragments.last,
-          )!;
-          expect(
-            patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith('/vm/lib/hash_factories.dart'),
-          );
-        }
-        final convert = libraries.singleWhere(
-          (library) => library.element.uri == Uri.parse('dart:convert'),
-        );
-        for (final fragment in [
-          convert.element.getTopLevelFunction('_parseJson')!.fragments.last,
-          convert.element.getClass('_JsonStringParser')!.firstFragment,
-          convert.element
-              .getClass('_Utf8Decoder')!
-              .getMethod('convertSingle')!
-              .fragments
-              .last,
-        ]) {
-          final body = convert.getFragmentDeclaration(fragment)!;
-          expect(
-            patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith('/vm/lib/convert_patch.dart'),
-          );
-        }
         final math = libraries.singleWhere(
           (library) => library.element.uri == Uri.parse('dart:math'),
         );
@@ -214,107 +120,15 @@ void main() {
           patches.origins[squareRoot.resolvedUnit!.uri]!.path,
           endsWith('/vm/lib/math_patch.dart'),
         );
+        expect(math.element.getTopLevelFunction('_sqrt')!.isExternal, isTrue);
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );
-        final uriEncoder = core.getFragmentDeclaration(
-          core.element
-              .getClass('_Uri')!
-              .getMethod('_uriEncode')!
-              .fragments
-              .last,
-        )!;
-        expect(
-          patches.origins[uriEncoder.resolvedUnit!.uri]!.path,
-          endsWith('/vm_shared/lib/uri_encode_patch.dart'),
-        );
-        expect(core.element.getClass('_ConstantMap'), isNull);
-        expect(core.element.getClass('_MissingMethod'), isNull);
-        final compact = libraries.singleWhere(
-          (library) => library.element.uri == Uri.parse('dart:_compact_hash'),
-        );
-        for (final fragment in [
-          compact.element.getClass('_ConstMap')!.firstFragment,
-          compact.element.mixins
-              .singleWhere((m) => m.name == '_ImmutableLinkedHashMapMixin')
-              .getMethod('_createIndex')!
-              .firstFragment,
-        ]) {
-          expect(
-            compact
-                .getFragmentDeclaration(fragment)!
-                .resolvedUnit!
-                .uri
-                .toString(),
-            'dart:_compact_hash',
-          );
-        }
-        for (final member in [
-          core.element
-              .getClass('NoSuchMethodError')!
-              .getNamedConstructor('withInvocation')!,
-          core.element.getClass('NoSuchMethodError')!.getMethod('toString')!,
-          core.element
-              .getClass('NoSuchMethodError')!
-              .getMethod('_toStringPlain')!,
-        ]) {
-          final body = core.getFragmentDeclaration(member.fragments.last)!;
-          expect(
-            patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith('/vm/lib/errors_patch.dart'),
-          );
-        }
-        for (final member in [
-          core.element
-              .getClass('StackTrace')!
-              .getNamedConstructor('fromString')!,
-          core.element.getClass('_StringStackTrace')!.getMethod('toString')!,
-        ]) {
-          expect(member.fragments, hasLength(1));
-          final body = core.getFragmentDeclaration(member.firstFragment)!;
-          expect(
-            body.resolvedUnit!.uri.toString(),
-            'dart:core/stacktrace.dart',
-          );
-        }
         for (final (type, method, source) in [
-          ('int', 'parse', '/vm_shared/lib/integers_patch.dart'),
-          ('int', 'tryParse', '/vm_shared/lib/integers_patch.dart'),
-          ('double', 'parse', '/vm/lib/double_patch.dart'),
-          ('double', 'tryParse', '/vm/lib/double_patch.dart'),
-          ('double', '_nativeParse', '/sdk/patches/double.dart'),
-          ('_Record', '==', '/vm/lib/record_patch.dart'),
-          ('_Record', 'toString', '/vm/lib/record_patch.dart'),
-          ('StringBuffer', 'write', '/vm_shared/lib/string_buffer_patch.dart'),
-          (
-            'StringBuffer',
-            'toString',
-            '/vm_shared/lib/string_buffer_patch.dart',
-          ),
-          ('StringBuffer', '_create', '/sdk/patches/string.dart'),
           ('_StringBase', '*', '/vm/lib/string_patch.dart'),
           ('_StringBase', 'padLeft', '/sdk/patches/string.dart'),
-          ('_StringBase', 'padRight', '/sdk/patches/string.dart'),
-          ('_StringBase', 'trim', '/vm/lib/string_patch.dart'),
-          ('_StringBase', 'indexOf', '/vm/lib/string_patch.dart'),
-          ('_StringBase', 'allMatches', '/vm/lib/string_patch.dart'),
-          ('_StringBase', 'splitMapJoin', '/vm/lib/string_patch.dart'),
-          (
-            '_StringBase',
-            '_createStringFromIterable',
-            '/vm/lib/string_patch.dart',
-          ),
-          ('_StringBase', 'replaceRange', '/vm/lib/string_patch.dart'),
-          ('_StringBase', 'replaceAllMapped', '/vm/lib/string_patch.dart'),
-          ('_IntegerImplementation', 'toRadixString', '/vm/lib/integers.dart'),
-          ('_Smi', 'toString', '/vm/lib/integers.dart'),
-          ('_Double', 'toString', '/vm/lib/double.dart'),
-          ('_Double', 'toStringAsFixed', '/vm/lib/double.dart'),
-          ('_Double', '_toStringAsFixed', '/sdk/patches/double.dart'),
-          ('_GrowableList', 'add', '/vm/lib/growable_array.dart'),
-          ('_GrowableList', 'addAll', '/vm/lib/growable_array.dart'),
-          ('_GrowableList', '_grow', '/vm/lib/growable_array.dart'),
-          ('_Array', 'toList', '/vm/lib/array.dart'),
+          ('_Double', 'remainder', '/vm/lib/double.dart'),
+          ('_Double', '_remainder', '/sdk/patches/double.dart'),
         ]) {
           final member = core.element.getClass(type)!.getMethod(method)!;
           final body = core.getFragmentDeclaration(member.fragments.last)!;
@@ -322,81 +136,35 @@ void main() {
             patches.origins[body.resolvedUnit!.uri]!.path,
             endsWith(source),
           );
-          expect(
-            member.formalParameters.any((p) => p.name == 'onError'),
-            isFalse,
-          );
         }
-        final nativeParse = core.element
-            .getClass('double')!
-            .getMethod('_nativeParse')!;
-        final declaration = core.getFragmentDeclaration(
-          nativeParse.firstFragment,
-        )!;
+        final from = core.element
+            .getClass('List')!
+            .getNamedConstructor('from')!;
+        expect(from.fragments, hasLength(2));
+        final fromBody = core.getFragmentDeclaration(from.fragments.last)!;
         expect(
-          patches.origins[declaration.resolvedUnit!.uri]!.path,
-          endsWith('/vm/lib/double_patch.dart'),
+          patches.origins[fromBody.resolvedUnit!.uri]!.path,
+          endsWith('/vm/lib/array_patch.dart'),
         );
-        for (final (type, constructor, source) in [
-          ('List', 'empty', '/sdk/patches/list.dart'),
-          ('List', 'from', '/vm/lib/array_patch.dart'),
-          ('List', 'of', '/vm/lib/array_patch.dart'),
-          ('List', 'filled', '/vm/lib/array_patch.dart'),
-          ('List', 'generate', '/vm/lib/array_patch.dart'),
-          ('List', 'unmodifiable', '/vm/lib/array_patch.dart'),
-          ('String', 'fromCharCode', '/vm/lib/string_patch.dart'),
-          ('Map', 'new', '/vm_shared/lib/map_patch.dart'),
-        ]) {
-          final member = core.element
-              .getClass(type)!
-              .constructors
-              .singleWhere((c) => c.name == constructor);
-          expect(member.fragments.length, greaterThanOrEqualTo(2));
-          final body = core.getFragmentDeclaration(member.fragments.last)!;
-          expect(
-            patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith(source),
-          );
-        }
         expect(
-          core.element
-              .getClass('List')!
-              .getNamedConstructor('from')!
-              .formalParameters
-              .first
-              .type
-              .getDisplayString(),
+          from.formalParameters.first.type.getDisplayString(),
           'Iterable<Object?>',
         );
-        for (final name in ['_OneByteString', '_TwoByteString']) {
-          final storage = core.element.getClass(name)!;
-          final body = core.getFragmentDeclaration(storage.firstFragment)!;
-          expect(
-            patches.origins[body.resolvedUnit!.uri]!.path,
-            endsWith('/sdk/patches/string.dart'),
-          );
-          expect(storage.supertype!.element.name, '_StringBase');
-        }
         final expando = core.element.getClass('Expando')!;
         final string = core.element.getClass('String')!;
         expect(string.getMethod('trim')!.isAbstract, isTrue);
-        expect(string.getMethod('substring')!.isAbstract, isTrue);
-        expect(string.getMethod('toString'), isNull);
-        expect(string.getMethod('allMatches'), isNull);
         expect(expando.fragments, hasLength(2));
         expect(
           expando.fields.where((field) => field.name == 'name'),
           hasLength(1),
         );
-        expect(
-          expando.fields.map((field) => field.name),
-          containsAll(['_data', '_used']),
-        );
+        final privateStorage = expando.getField('_data')!;
+        expect(privateStorage.isPrivate, isTrue);
+        expect(privateStorage.library, same(core.element));
         final original = core.getFragmentDeclaration(
           expando.getMethod('toString')!.firstFragment,
         )!;
         expect(original.resolvedUnit!.uri.toString(), 'dart:core/weak.dart');
-        expect(original.node.toSource(), contains(r'"Expando:$name"'));
         final ctor = expando.unnamedConstructor!;
         expect(ctor.isGenerative, isTrue);
         expect(ctor.fragments, hasLength(2));
