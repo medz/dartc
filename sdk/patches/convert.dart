@@ -1,4 +1,4 @@
-import '../runtime/decimal.dart';
+import 'decimal.dart';
 
 @patch
 double _parseDouble(String source, int start, int end) =>

@@ -67,7 +67,9 @@ record 的 `==` 按字段值比较，包括同一 record 含 NaN 的情况。SDK
 
 `int.parse`、`int.tryParse`、`int.toString` 和 `int.toRadixString` 支持原生执行，包括静态及绑定方法值。进制为 2–36，字母数字不区分大小写，允许前导正负号和外围 Unicode 空白；显式进制的结果必须落在有符号 64 位范围内。省略 radix 的正数 `0x`/`0X` 前缀允许完整无符号 64 位值，并按相同位模式解释为有符号 int。无效文本和溢出使 parse 抛出 FormatException、tryParse 返回 null；异常保留原 source。无效进制的非空输入抛出 RangeError。格式化使用小写数字，对最小 int 也满足往返契约。FormatException 的具体消息和错误定位不承诺与 SDK 实现逐字相同。
 
-`double.parse`、`double.tryParse`、`num.parse` 和 `num.tryParse` 支持直接调用及函数值。double 接受十进制小数、指数、带符号的 Infinity/NaN 和外围空白，不接受十六进制或数字分隔符；保留负零、次正规数以及溢出到无穷、下溢到零的符号，舍入到最接近的 binary64，恰好居中时取偶数尾数。无效输入使 parse 抛出 FormatException、tryParse 返回 null。num 先尝试整数，成功时保留 int 类型，否则尝试 double。见[库契约](../sdk/std/lib/core/double.dart)、[原生行为对照](../test/compiler/object_text_test.dart)和[舍入边界](../test/runtime/fixtures/decimal_text.dart)。
+`double.parse`、`double.tryParse`、`num.parse` 和 `num.tryParse` 支持直接调用及函数值。double 接受十进制小数、指数、带符号的 Infinity/NaN 和外围空白，不接受十六进制或数字分隔符；保留负零、次正规数以及溢出到无穷、下溢到零的符号，舍入到最接近的 binary64，恰好居中时取偶数尾数。无效输入使 parse 抛出 FormatException、tryParse 返回 null。num 先尝试整数，成功时保留 int 类型，否则尝试 double。见[库契约](../sdk/std/lib/core/double.dart)、[原生行为对照](../test/compiler/object_text_test.dart)和[舍入边界](../test/sdk/fixtures/decimal_text.dart)。
+
+解析与格式化复用官方 Dart 入口，真正外部的十进制转换由 [SDK 目标实现](../sdk/patches/decimal.dart)补齐；JSON 数字解析共用这一实现。
 
 int、double 和 bool 通过 Object 视图调用 toString 使用实际实现。double 支持 toString、toStringAsFixed、toStringAsExponential 和 toStringAsPrecision，保留负零、非有限值、二进制浮点的十进制舍入及精度范围检查；可提取为绑定方法值。fixed/exponential 的显式小数位数为 0–20，precision 的有效位数为 1–21；非法精度在 NaN、无穷的处理之前抛出 RangeError。省略 exponential 的精度时输出最短指数形式。已接通同一封闭程序内的 dynamic 成员派发、getter 返回函数的调用、方法提取、签名和类型检查及 noSuchMethod；缺失成员与不匹配签名保留 Invocation 和求值顺序。见[原生文本对照](../test/compiler/object_text_test.dart)。依据为[固定 SDK int 声明](https://github.com/dart-lang/sdk/blob/416e33b0ffaef062a60ec966bb8c82ed2b83f128/sdk/lib/core/int.dart)，验证见[SDK 与原生整数文本对照](../test/compiler/integer_text_test.dart)。
 

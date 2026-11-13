@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 
-import '../../sdk/runtime/decimal.dart';
+import '../../sdk/patches/decimal.dart';
 import 'fixtures/decimal_text.dart';
 
 import 'package:test/test.dart';

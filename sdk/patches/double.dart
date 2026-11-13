@@ -1,4 +1,4 @@
-import '../runtime/decimal.dart';
+import 'decimal.dart';
 import '../runtime/numbers.dart';
 
 @patch

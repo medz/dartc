@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
-import '../runtime/fixtures/decimal_text.dart';
+import '../sdk/fixtures/decimal_text.dart';
 import 'fixtures/object_text.dart' as sdk;
 import 'fixtures/core_collections.dart' as collections;
 import 'fixtures/core_conversion.dart' as conversion;
