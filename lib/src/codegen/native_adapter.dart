@@ -329,6 +329,10 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         }
       }
     }
+    // Root publication may clobber the native hidden result-address register.
+    final parked = !intoDart && heap?.persistent == true
+        ? HeapEntry.park(emitter, address)
+        : const <Fixup>[];
     if (compoundResult) {
       if (intoDart) {
         emitter.stackAddress(address, base + resultSlot);
@@ -373,9 +377,6 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         writeScalar(location, register, size: intoDart ? 8 : type.nativeSize);
       }
     }
-    final parked = !intoDart && heap?.persistent == true
-        ? HeapEntry.park(emitter, address)
-        : const <Fixup>[];
     if (indirectCall == null) {
       call(emitter.call(), emitter.position, frame);
     } else {

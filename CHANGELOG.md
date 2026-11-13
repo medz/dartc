@@ -1,6 +1,7 @@
 ## Unreleased
 
 - Preserve private Symbol library identity through constant evaluation, nested storage, collection keys, patterns, defaults and Invocation calls. Same-library parts share identity; symbols from different libraries and string-constructed names remain distinct. Dotted symbol literals follow the language specification as public library names.
+- Preserve ARM64 indirect struct return buffers when a native callback publishes managed roots. Large callback results no longer overwrite the active entry frame or corrupt later collections.
 
 - Compile `dart:math.sqrt` through its SDK body, binding only the external square-root operation. Direct calls and function values accept boxed `num` arguments, preserve numeric conversion and special values, and reject invalid dynamic arguments.
 
