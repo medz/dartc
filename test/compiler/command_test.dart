@@ -27,6 +27,19 @@ void main() {
         expect(await command.run([source, '-o', file.path, declaration]), 64);
         expect(file.readAsStringSync(), 'existing output');
       }
+      for (final name in [
+        'dart.library.io',
+        'dart.library.js_interop',
+        'dart.library.unknown',
+      ]) {
+        errors.clear();
+        expect(
+          await command.run([source, '-o', file.path, '-D$name=false']),
+          1,
+        );
+        expect(errors.toString(), contains('Reserved SDK declaration'));
+        expect(file.readAsStringSync(), 'existing output');
+      }
       expect(
         await command.run([
           source,
@@ -56,7 +69,7 @@ void main() {
       expect(sdk.exitCode, 0, reason: '${sdk.stdout}\n${sdk.stderr}');
       expect(
         result.stdout,
-        'native\n${(sdk.stdout as String).split('\n').skip(1).join('\n')}',
+        'native\n${(sdk.stdout as String).split('\n')[1]}\nfalse\n',
       );
     },
   );

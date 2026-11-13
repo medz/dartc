@@ -8,7 +8,7 @@
 | --- | --- |
 | 编译单元、具名/无名 library、脚本标记 | analyzer 解析；转换库内声明，脚本标记不生成 IR。 |
 | import、as 前缀、显式/隐式 core | analyzer 解析；保留已解析声明身份，支持普通导入前缀。SDK API 的运行时实现另计。 |
-| 条件 import/export | `AnalysisSession(environment: ...)` 和 `Compiler.compile(environment: ...)` 的声明参与 URI 选择，按源码顺序选择首个匹配项；未匹配时使用默认 URI。目标平台内建的 `dart.library.*` 声明仍待补齐。 |
+| 条件 import/export | `AnalysisSession(environment: ...)` 和 `Compiler.compile(environment: ...)` 的声明参与 URI 选择，按源码顺序选择首个匹配项；未匹配时使用默认 URI。Compiler 从固定 SDK 的原生库清单提供 `dart.library.*`，反射和 JS 互操作不在目标范围。 |
 | export、再导出、show/hide | analyzer 解析导出命名空间及组合器；引用保留原声明身份。不是原生符号导出。 |
 | 命名空间冲突与读写查找 | analyzer 拒绝歧义、不可见名称；getter/setter 引用复用声明身份。 |
 | deferred import | 支持每个源前缀独立的加载状态、loadLibrary 调用及提取、异步完成和重复加载。访问成员、常量、类型及构造器之前保留加载检查；检查早于实参和赋值右侧的求值。实际代码装载由后续执行及链接领域提供。 |
@@ -30,6 +30,8 @@ SDK 3.13.7 接受 deferred 前缀下的具名构造器提取，却将[无名 `.n
 ## 编译环境声明
 
 `AnalysisSession` 在创建时保存 `environment` 的不可变快照；`Compiler.compile` 和 CLI `-DNAME=VALUE`、`--define NAME=VALUE` 将声明传给同一分析会话。CLI 保留空值及值中的等号、逗号、Unicode，重复名字以最后一项为准；格式错误在修改输出前失败。
+
+Compiler 为固定 SDK 的原生公开库提供值为 `true` 的 `dart.library.<name>` 声明，私有库及 `mirrors` 不声明；JS 库不在原生清单中。未声明的名称保留缺失状态，`fromEnvironment` 使用调用方默认值，`hasEnvironment` 返回 false。`dart.library.*` 由 Compiler 保留，调用方覆盖会在修改输出前失败；独立 `AnalysisSession` 仍使用调用方的完整声明。库声明表示目标库可选，不代表其全部成员已经实现。已知编译环境同样用于常量断言和集合，不能因 analyzer 的平台未知值而漏掉未使用声明的错误。
 
 `String.fromEnvironment`、`int.fromEnvironment`、`bool.fromEnvironment` 和 `bool.hasEnvironment` 共用声明，支持 const、非 const 调用和构造器函数值。缺失或无法解析时保留默认值，空字符串仍算已声明；整数遵循 `int.tryParse`，布尔只识别精确的 `true`/`false`。不读取或合并操作系统环境变量。见[公开契约](https://dart.dev/libraries/core/environment-declarations)、[原生对照](../test/compiler/environment_test.dart)、[命令行验证](../test/compiler/command_test.dart)及[会话验证](../test/frontend/analysis/checked_libraries_test.dart)。
 

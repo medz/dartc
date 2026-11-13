@@ -96,7 +96,7 @@ Pass compilation declarations for `String.fromEnvironment`, `int.fromEnvironment
 dartc bin/main.dart --kind exe -o app -DAPP_NAME=demo --define DEBUG=false
 ```
 
-Declarations also select conditional imports and exports. They are separate from the program's OS environment. Library callers can pass the same values through `Compiler.compile(environment: {'APP_NAME': 'demo'})`.
+Declarations also select conditional imports and exports. They are separate from the program's OS environment. Library callers can pass the same values through `Compiler.compile(environment: {'APP_NAME': 'demo'})`. The compiler supplies reserved `dart.library.*` declarations for its native SDK libraries, including `dart.library.io` and `dart.library.ffi`; callers cannot override them. Reflection and JS interop are excluded.
 
 </details>
 

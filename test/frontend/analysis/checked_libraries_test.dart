@@ -4,6 +4,18 @@ import 'package:test/test.dart';
 
 void main() {
   const path = 'test/compiler/fixtures/arithmetic.dart';
+  test('platform declarations determine unused constant assertions', () async {
+    const fixture =
+        'test/frontend/analysis/fixtures/environment_assertion.dart';
+    await AnalysisSession([fixture]).use((_) {});
+    await expectLater(
+      AnalysisSession(
+        [fixture],
+        environment: {'dart.library.js_interop': 'true'},
+      ).use((_) {}),
+      throwsFormatException,
+    );
+  });
   test(
     'environment declarations are isolated from later caller edits',
     () async {
@@ -29,16 +41,13 @@ void main() {
           'before',
         );
         expect(
-          checked.libraries.any(
-            (l) => l.element.uri.path.endsWith('/environment_selected.dart'),
-          ),
-          isTrue,
-        );
-        expect(
-          checked.libraries.any(
-            (l) => l.element.uri.path.endsWith('/environment_default.dart'),
-          ),
-          isFalse,
+          [
+            for (final import in library.firstFragment.libraryImports)
+              if (import.importedLibrary?.getTopLevelVariable('selected')
+                  case final selected?)
+                selected.computeConstantValue()!.toStringValue(),
+          ],
+          ['native', 'default'],
         );
       });
     },

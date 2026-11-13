@@ -40,6 +40,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
   /// Shared-library inputs follow the target loader's symbol lookup rules.
   /// Object and archive outputs retain unresolved imports for a later link.
   /// [environment] supplies compilation declarations, independent of OS variables.
+  /// The reserved `dart.library.*` declarations are supplied by the native SDK.
   Future<Compilation> compile(
     List<String> paths, {
     Output output = const .object(),
@@ -48,6 +49,15 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     Map<String, String> environment = const {},
   }) async {
     environment = Map.unmodifiable(environment);
+    for (final name in environment.keys) {
+      if (name.startsWith('dart.library.')) {
+        throw ArgumentError.value(
+          name,
+          'environment',
+          'Reserved SDK declaration',
+        );
+      }
+    }
     final inputs = linkInputs.toList();
     if (inputs.isNotEmpty &&
         output is! SharedLibraryOutput &&
@@ -57,6 +67,18 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       );
     }
     final sourceFiles = resources ?? await SdkSources.load();
+    final sdk = DartSdk(sourceFiles);
+    final manifest = jsonDecode(
+      utf8.decode(sourceFiles.read('sdk/std/lib/libraries.json')),
+    ) as Map<String, dynamic>;
+    final libraries =
+        manifest['vm_common']['libraries'] as Map<String, dynamic>;
+    environment = {
+      ...environment,
+      for (final name in libraries.keys)
+        if (!name.startsWith('_') && name != 'mirrors')
+          'dart.library.$name': 'true',
+    };
     final (
       lowered,
       sources,
@@ -65,7 +87,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       paths,
       includeDependencies: true,
       environment: environment,
-      sdk: DartSdk(sourceFiles),
+      sdk: sdk,
       sources: sourceFiles,
       resources: [
         'sdk/runtime/allocator.dart',

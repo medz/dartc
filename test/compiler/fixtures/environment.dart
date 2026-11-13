@@ -1,10 +1,26 @@
 import 'environment_default.dart'
     if (flavor == 'native') 'environment_selected.dart';
+import 'environment_default.dart'
+    if (dart.library.js_interop) 'environment_default.dart'
+    if (dart.library.io) 'environment_selected.dart'
+    as platform;
 
 const stringValues = {
   'text': String.fromEnvironment('text', defaultValue: 'fallback'),
   'empty': String.fromEnvironment('empty', defaultValue: 'fallback'),
   'missing': String.fromEnvironment('missing', defaultValue: 'fallback'),
+  'dart.library.io': String.fromEnvironment(
+    'dart.library.io',
+    defaultValue: 'fallback',
+  ),
+  'dart.library.ffi': String.fromEnvironment(
+    'dart.library.ffi',
+    defaultValue: 'fallback',
+  ),
+  'dart.library.js_interop': String.fromEnvironment(
+    'dart.library.js_interop',
+    defaultValue: 'fallback',
+  ),
 };
 const integerValues = {
   'number': int.fromEnvironment('number', defaultValue: 99),
@@ -18,11 +34,25 @@ const booleanValues = {
   'invalid': bool.fromEnvironment('invalid', defaultValue: true),
   'empty': bool.fromEnvironment('empty', defaultValue: true),
   'missing': bool.fromEnvironment('missing', defaultValue: true),
+  'dart.library.io': bool.fromEnvironment(
+    'dart.library.io',
+    defaultValue: true,
+  ),
+  'dart.library.js_util': bool.fromEnvironment(
+    'dart.library.js_util',
+    defaultValue: true,
+  ),
+  'dart.library.js_interop': bool.fromEnvironment(
+    'dart.library.js_interop',
+    defaultValue: true,
+  ),
 };
 const presence = {
   'empty': bool.hasEnvironment('empty'),
   'invalid': bool.hasEnvironment('invalid'),
   'missing': bool.hasEnvironment('missing'),
+  'dart.library.io': bool.hasEnvironment('dart.library.io'),
+  'dart.library.js_interop': bool.hasEnvironment('dart.library.js_interop'),
 };
 
 void check(bool value) {
@@ -54,5 +84,8 @@ void main() {
   check(readInt('missing') == 0);
   check(!readBool('missing'));
   print(selected);
-  print('$stringValues|$integerValues|$booleanValues|$presence');
+  print(
+    '${platform.selected}|$stringValues|$integerValues|$booleanValues|$presence',
+  );
+  print(const bool.hasEnvironment('dart.library.mirrors'));
 }

@@ -19,6 +19,9 @@ import 'package:analyzer/src/dart/ast/utilities.dart';
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/constant/evaluation.dart' as internal;
 // ignore: implementation_imports
+import 'package:analyzer/src/dart/constant/from_environment_evaluator.dart'
+    as internal;
+// ignore: implementation_imports
 import 'package:analyzer/src/dart/constant/value.dart' as internal;
 // ignore: implementation_imports
 import 'package:analyzer/src/dart/element/element.dart' as internal;
@@ -578,7 +581,7 @@ final class _Engine(
     }
     // External core factories retain analyzer's environment and Symbol handling.
     if (destination.isFactory || destination.isExternal) {
-      return super.evaluateAndFormatErrorsInConstructorCall(
+      final value = super.evaluateAndFormatErrorsInConstructorCall(
         library,
         node,
         typeArguments,
@@ -587,6 +590,28 @@ final class _Engine(
         constantVisitor,
         invocation: invocation,
       );
+      // Analyzer leaves web flags unknown; this session has an exact environment.
+      if (value is internal.DartObjectImpl &&
+          value.isUnknown &&
+          destination.enclosingElement == library.typeProvider.boolElement &&
+          destination.name == 'fromEnvironment') {
+        final key = constantVisitor.evaluateConstant(arguments.first);
+        if (key is internal.DartObjectImpl && key.toStringValue() != null) {
+          final fallback = arguments.length == 1
+              ? null
+              : constantVisitor.evaluateConstant(arguments.last);
+          if (fallback == null || fallback is internal.DartObjectImpl) {
+            return internal.FromEnvironmentEvaluator(
+              library.typeSystem,
+              library.session.declaredVariables,
+            ).getBool(
+              key.toStringValue(),
+              fallback as internal.DartObjectImpl?,
+            );
+          }
+        }
+      }
+      return value;
     }
     try {
       return _invoke(constructor, arguments, constantVisitor, node, invocation);

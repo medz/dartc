@@ -35,14 +35,13 @@ void main() {
           'test/compiler/fixtures/environment.dart',
         ]);
         expect(sdk.exitCode, 0, reason: '${sdk.stdout}\n${sdk.stderr}');
-        final actual = native.stdout as String;
-        final expected = sdk.stdout as String;
-        expect(actual.split('\n').first, definitions['flavor'] ?? 'default');
+        final actual = (native.stdout as String).trimRight().split('\n');
+        final expected = (sdk.stdout as String).trimRight().split('\n');
+        expect(actual.first, definitions['flavor'] ?? 'default');
         // SDK tools restrict configurable URIs to dart.library.* declarations.
-        expect(
-          actual.substring(actual.indexOf('\n')),
-          expected.substring(expected.indexOf('\n')),
-        );
+        expect(actual[1], expected[1]);
+        expect(actual[1], startsWith('native|'));
+        expect(actual[2], 'false', reason: 'dartc excludes reflection.');
       },
     );
   }
