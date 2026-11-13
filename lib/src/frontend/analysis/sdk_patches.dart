@@ -76,6 +76,8 @@ final class SdkPatches(final OverlayResourceProvider files) {
         patches('core')
             .singleWhere((path) => path.endsWith('/bigint_patch.dart')),
         patches('core')
+            .singleWhere((path) => path.endsWith('/bigint_patch_patch.dart')),
+        patches('core')
             .singleWhere((path) => path.endsWith('/integers_patch.dart')),
         patches('core')
             .singleWhere((path) => path.endsWith('/string_buffer_patch.dart')),

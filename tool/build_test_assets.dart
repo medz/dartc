@@ -109,6 +109,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'symbols',
     'base64_conversion',
     'math_random',
+    'bigint',
   };
   final selected = names.toSet();
   final unknown = selected.difference(available);
@@ -212,6 +213,7 @@ Future<void> main(List<String> args) async {
       ('symbols', 'symbols', 'entry_symbols'),
       ('base64_conversion', 'base64_conversion', 'entry_base64_conversion'),
       ('math_random', 'math_random', 'entry_math_random'),
+      ('bigint', 'bigint', 'entry_bigint'),
     ]) {
       if (!selected.contains(fixture)) continue;
       final entry = await Compiler(target).compile([

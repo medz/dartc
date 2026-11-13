@@ -9,14 +9,6 @@ class double {
 }
 
 @patch
-class _BigIntImpl {
-  static final _DivRemResult _divisionResult = _DivRemResult();
-
-  @patch
-  static _DivRemResult get _cachedDivRemResult => _divisionResult;
-}
-
-@patch
 class _Double {
   @patch
   String _toString() => DoubleText.shortest(this);

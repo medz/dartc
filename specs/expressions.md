@@ -69,6 +69,10 @@ record 的 `==` 按字段值比较，包括同一 record 含 NaN 的情况。SDK
 
 原生 `<<`、`>>`、`>>>` 及其复合赋值保留完整的位移计数。左移按 64 位回绕，算术右移补符号位，逻辑右移补零；计数大于等于 64 时，左移和逻辑右移为 0，算术右移为 0 或 -1。负计数抛出 ArgumentError，操作数只求值一次，忽略结果仍须抛错。错误的 message 保留负计数这个 int，name 与 invalidValue 为 null；这一载荷对应当前固定 SDK 的库行为，不扩大为跨版本语言保证。构造器与属性读取使用 SDK 的普通 Dart 实现，用户重写仍按实际接收者派发。见 [int 的原生整数范围](https://api.dart.dev/dart-core/int-class.html)、[逻辑右移规范](https://github.com/dart-lang/language/blob/main/accepted/2.14/triple-shift-operator/feature-specification.md)和[原生边界验证](../test/compiler/integer_operations_test.dart)。
 
+## 大整数
+
+`BigInt` 的运算复用固定 SDK 的普通 Dart 正文，除法缓存也沿用官方线程局部实现，并接到当前单线程模块存储。多段整数的乘除、截断余数、欧几里得模、gcd、整数幂、模逆和模幂已有[原生验证](../test/compiler/bigint_test.dart)，包含独立整数计算样本、符号边界、除零恢复、与 decimal 转换交错使用，以及回收后缓存和既有结果的存活。文本解析仍依赖尚未接通的 RegExp；完整 BigInt API 未由这些样本覆盖。
+
 ## 布尔文本转换
 
 `bool.parse` 和 `bool.tryParse` 使用 SDK 的普通 Dart 实现，支持省略或显式指定 caseSensitive、函数值与原生 Bool 存储。默认只接受 `true`/`false`；关闭大小写敏感后只忽略 ASCII 字母大小写，不裁剪空白，不接受 `0`、`1` 或 Unicode 近似字符。失败时 parse 抛出保留原 source 的 FormatException，tryParse 返回 null。见[SDK 与原生对照](../test/compiler/boolean_text_test.dart)。

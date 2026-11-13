@@ -148,6 +148,14 @@ void main() {
             endsWith(source),
           );
         }
+        final cache = core.element
+            .getClass('_BigIntImpl')!
+            .getGetter('_cachedDivRemResult')!;
+        final cacheBody = core.getFragmentDeclaration(cache.fragments.last)!;
+        expect(
+          patches.origins[cacheBody.resolvedUnit!.uri]!.path,
+          endsWith('/vm/lib/bigint_patch_patch.dart'),
+        );
         final from = core.element
             .getClass('List')!
             .getNamedConstructor('from')!;
