@@ -5,10 +5,20 @@ import 'native_callbacks_ffi.dart';
 import 'native_callables_ffi.dart';
 
 void main(List<String> arguments) {
-  final native = NativeCallbacks();
+  final native = arguments.contains('closure') ? null : NativeCallbacks();
   final callable = arguments.contains('closure') ? NativeCallables() : null;
-  final callback = callable?.thread() ?? native.thread();
+  final callback = callable?.thread() ?? native!.thread();
   final system = DynamicLibrary.process();
+  final allocate = system
+      .lookupFunction<
+        Pointer<Void> Function(UintPtr),
+        Pointer<Void> Function(int)
+      >('malloc');
+  final free = system
+      .lookupFunction<
+        Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)
+      >('free');
   final create = system
       .lookupFunction<
         Int32 Function(
@@ -29,11 +39,11 @@ void main(List<String> arguments) {
         Int32 Function(UintPtr, Pointer<Pointer<Void>>),
         int Function(int, Pointer<Pointer<Void>>)
       >('pthread_join');
-  final thread = native.allocate(sizeOf<UintPtr>()).cast<UintPtr>();
+  final thread = allocate(sizeOf<UintPtr>()).cast<UintPtr>();
   if (thread == nullptr) exit(3);
   if (create(thread, nullptr, callback, nullptr) != 0) exit(2);
   join(thread.value, nullptr);
-  native.free(thread.cast());
+  free(thread.cast());
   callable?.close();
-  native.close();
+  native?.close();
 }
