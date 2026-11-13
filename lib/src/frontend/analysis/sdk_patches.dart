@@ -64,6 +64,8 @@ final class SdkPatches(final OverlayResourceProvider files) {
       [ffi, if (runtime != null) '$runtime/ffi.dart'],
       declarations: {
         '_ArraySize',
+        'Abi',
+        '_abi',
         if (runtime != null) ...{
           '_NativeCallableBase',
           '_NativeCallableIsolateLocal',
@@ -564,6 +566,20 @@ final class SdkPatches(final OverlayResourceProvider files) {
               if (!owner.namePart.typeName.lexeme.startsWith('_') &&
                   !inheritsMember(owner, member)) {
                 _checkPrivate(member, path);
+              }
+            }
+            if (_official.contains(path)) {
+              // VM patches can strengthen modifiers; keep the public declaration.
+              for (final token in [
+                if (owner.abstractKeyword == null) declaration.abstractKeyword,
+                if (owner.baseKeyword == null) declaration.baseKeyword,
+                if (owner.finalKeyword == null) declaration.finalKeyword,
+                if (owner.interfaceKeyword == null)
+                  declaration.interfaceKeyword,
+                if (owner.sealedKeyword == null) declaration.sealedKeyword,
+                if (owner.mixinKeyword == null) declaration.mixinKeyword,
+              ].nonNulls) {
+                edit(path, token.offset, token.end, '');
               }
             }
             final modifiers = [

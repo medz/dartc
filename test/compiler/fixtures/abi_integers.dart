@@ -144,3 +144,25 @@ int stack(
   int i,
   int j,
 ) => a + b + c + d + e + f + g + h + i + j;
+
+@Export<Bool Function(Int32, Int32)>()
+bool checkCurrentAbi(int expected, int count) {
+  const platforms = {
+    Abi.macosArm64: 'macos_arm64',
+    Abi.macosX64: 'macos_x64',
+    Abi.linuxArm64: 'linux_arm64',
+    Abi.linuxX64: 'linux_x64',
+  };
+  final target = platforms.keys.elementAt(expected);
+  final current = Abi.current();
+  final create = Abi.current;
+  final dynamic dynamicCreate = create;
+  for (var i = 0; i < count; i++) {
+    Struct.create<IntegerState>().value = i;
+  }
+  return identical(current, target) &&
+      identical(current, create()) &&
+      identical(current, dynamicCreate()) &&
+      identical(current, Abi.values[Abi.values.indexOf(current)]) &&
+      current.toString() == platforms[target];
+}

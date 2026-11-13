@@ -88,6 +88,7 @@ enum MemoryOperation() {
   callbackTemplate,
   copyExecutable,
   flushInstructions,
+  abi,
 }
 
 /// The position-independent native entry page and its adjacent metadata page.

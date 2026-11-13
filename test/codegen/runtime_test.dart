@@ -192,6 +192,35 @@ void main() {
     }
   });
 
+  test('ABI queries reject incompatible trusted declarations', () {
+    final parameter = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    for (final target in [
+      FunctionTarget(uri, 'withArgument', .integer, [.integer]),
+      FunctionTarget(uri, 'wrongResult', .string, []),
+      FunctionTarget(uri, 'generic', .integer, [], typeParameters: [parameter]),
+    ]) {
+      final result = (
+        program: IrProgram(
+          lowered.program.classes,
+          lowered.program.functions,
+          globals: lowered.program.globals,
+          externals: [...lowered.program.externals, IrExternal(target)],
+        ),
+        entryPoint: lowered.entryPoint,
+        exports: lowered.exports,
+        imports: lowered.imports,
+        runtime: RuntimeDeclarations(
+          lowered.runtime.entries,
+          {...lowered.runtime.primitives, target: .abi},
+          lowered.runtime.nonAllocating,
+          lowered.runtime.systemFunctions,
+        ),
+      );
+      expect(() => bindRuntime(result, Target.host()), throwsArgumentError);
+    }
+  });
+
   final generator = Arm64CodeGenerator(const Target(.linux, .arm64));
   test('unmanaged programs do not retain runtime allocation or scheduling', () {
     for (final managed in [false, true]) {

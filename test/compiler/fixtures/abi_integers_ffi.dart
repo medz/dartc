@@ -18,6 +18,10 @@ final class AbiIntegers() {
       .lookupFunction<Char Function(Char), int Function(int)>('character');
   late final integerSize = _library
       .lookupFunction<Size Function(), int Function()>('integerSize');
+  late final checkCurrentAbi = _library
+      .lookupFunction<Bool Function(Int32, Int32), bool Function(int, int)>(
+        'checkCurrentAbi',
+      );
   late final stateSize = _library
       .lookupFunction<Size Function(), int Function()>('stateSize');
   late final access = _library

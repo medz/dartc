@@ -150,6 +150,7 @@ void main() {
         final ffi = libraries.singleWhere(
           (library) => library.element.uri == Uri.parse('dart:ffi'),
         );
+        expect(ffi.element.getClass('Abi')!.isFinal, isFalse);
         final close = ffi.getFragmentDeclaration(
           ffi.element
               .getClass('_NativeCallableBase')!
@@ -311,6 +312,12 @@ void main() {
   );
   for (final (name, change, code)
       in <(String, String Function(String), String)>[
+        (
+          'class modifiers',
+          (source) =>
+              source.replaceFirst('class Object {', 'final class Object {'),
+          'augmentation_modifier_extra',
+        ),
         (
           'parameter types',
           (source) => source.replaceFirst(

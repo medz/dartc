@@ -1,10 +1,16 @@
 import 'dart:_internal' show checkValidWeakTarget;
 
+import '../../lib/runtime/contracts.dart' as runtime;
+
 import '../runtime/memory.dart';
 import '../runtime/type_info.dart';
 import '../runtime/allocator.dart' as allocator;
 import '../runtime/finalization.dart' as finalization;
 import '../runtime/native_callbacks.dart' as callbacks;
+
+@patch
+@runtime.Primitive(.abi)
+external int _abi();
 
 NativeCallable<T> _newNativeCallable<T extends Function>(
   Function callback,

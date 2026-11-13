@@ -16,6 +16,23 @@ void main() {
     addTearDown(library.close);
   });
 
+  test(
+    'current ABI identifies the target and retains SDK constant identity',
+    () {
+      final expected = const [
+        Abi.macosArm64,
+        Abi.macosX64,
+        Abi.linuxArm64,
+        Abi.linuxX64,
+      ].indexOf(Abi.current());
+      for (var index = 0; index < 4; index++) {
+        expect(library.checkCurrentAbi(index, 0), index == expected);
+      }
+      expect(library.checkCurrentAbi(expected, 40000), isTrue);
+      expect(sdk.checkCurrentAbi(expected, 40000), isTrue);
+    },
+  );
+
   test('ABI integers use target widths and signs at call boundaries', () {
     final target = Target.host();
     final (bits, signed) = switch ((

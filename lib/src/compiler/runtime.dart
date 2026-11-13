@@ -22,6 +22,22 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     final args = block.parameters;
     final Value? value;
     switch (operation) {
+      case .abi:
+        if (target.kind != .function ||
+            target.typeParameters.isNotEmpty ||
+            target.signature != FunctionType(.integer, [])) {
+          throw ArgumentError('Invalid ABI query signature.');
+        }
+        // shortcut: ABI ordinals follow the pinned SDK, update with Abi.values changes.
+        value = Constant.integer(switch ((
+          targetPlatform.operatingSystem,
+          targetPlatform.architecture,
+        )) {
+          (.macos, .arm64) => 18,
+          (.macos, .x64) => 20,
+          (.linux, .arm64) => 13,
+          (.linux, .x64) => 15,
+        });
       case .copyExecutable:
         final implementation =
             annotations.entries[targetPlatform.operatingSystem == .macos
