@@ -139,6 +139,12 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 `const Map` 使用 SDK 不可变 Map 的查询与迭代规则，保留键顺序、类型参数与常量身份；数字相等键、Type 键和 GC 后查询见[原生 Map 验证](../test/compiler/maps_test.dart)。写入、remove 和 clear 抛出 UnsupportedError。`HashMap` 支持默认、自定义 equals/hashCode/isValidKey 和 identity 构造，查询不兼容类型的键按契约处理；普通 SDK 工厂继续使用这些入口。见[常量与自定义哈希验证](../test/compiler/finalizers_test.dart)。Map spread 保留逐项转换和求值顺序。Map.from/of/fromEntries/fromIterables/unmodifiable、identity、map、update、putIfAbsent、removeWhere 与 cast 视图使用 SDK 算法；不可修改 Map 复制输入并拒绝空修改。List、Set、Map 的 toString 调用元素的实际方法，并终止对循环容器的递归。见[原生集合与格式化对照](../test/compiler/object_text_test.dart)。
 
+## 原生有序集合
+
+SplayTreeMap 与 SplayTreeSet 直接复用[官方 Dart 树实现](../sdk/std/lib/collection/splay_tree.dart)。排序与键相等均由比较器决定；默认比较器使用 Comparable，isValidKey 可拒绝无关类型。Map 的键视图反映后续修改，支持首尾和相邻键查询；Set.lookup 返回保留的原元素，副本与集合运算保留比较策略。
+
+[原生有序集合对照](../test/compiler/object_text_test.dart)覆盖工厂、构造器函数值、cast 写入检查、比较器相等性、putIfAbsent 回调修改、值更新及节点/副本/迭代器跨 GC 存活。查询导致的树旋转及替换已有值不会使键迭代失效，新增或删除键会被正在执行的迭代器检测。此范围不代表所有 dart:collection 类型均已验收。
+
 ## JSON 与 UTF-8
 
 `jsonEncode`、`jsonDecode`、JsonEncoder 和 JsonDecoder 支持原生执行，保留数字、字符串转义、嵌套集合、重复键的后值、缩进、reviver 遍历顺序及 toEncodable/toJson 回调。非法文本抛出 FormatException；非字符串 Map 键、非有限数和无法转换的对象抛出 JsonUnsupportedObjectError，循环容器抛出 JsonCyclicError。支持分块 JSON 解码及 UTF-8 解码与 JSON 解码的组合转换。见[固定 SDK 契约](../sdk/std/lib/convert/json.dart)和[原生行为验证](../test/compiler/object_text_test.dart)。

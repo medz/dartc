@@ -149,6 +149,18 @@ void main() {
       () => expect(native.collection(i), collections.collectionText(i)),
     );
   }
+  for (final (mode, name) in [
+    (23, 'ordering, replacement and neighboring keys'),
+    (24, 'comparator equality, key validation and set algebra'),
+    (25, 'iterator recovery after lookups and mutation rejection'),
+    (26, 'factories, constructor values and checked cast views'),
+    (27, 'callback mutation and value updates'),
+    (28, 'nodes, copies and iterators survive collection'),
+  ]) {
+    test('splay tree $name', () {
+      expect(native.collection(mode), collections.collectionText(mode));
+    });
+  }
   test('NoSuchMethodError uses SDK formatting for methods and accessors', () {
     expect(native.collection(22), collections.collectionText(22));
   });

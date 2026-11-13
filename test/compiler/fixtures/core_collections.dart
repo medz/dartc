@@ -297,6 +297,167 @@ String collectionText(int mode) {
         }
       }
       return outcomes.join('/');
+    case 23:
+      final map = SplayTreeMap<int, String>()
+        ..addAll({5: 'five', 1: 'one', 3: 'three', 2: 'two'})
+        ..[3] = 'THREE';
+      final keys = map.keys;
+      final bounds = [
+        map.firstKey(),
+        map.lastKey(),
+        map.lastKeyBefore(3),
+        map.firstKeyAfter(3),
+        map.lastKeyBefore(1),
+        map.firstKeyAfter(5),
+      ];
+      map.remove(2);
+      map.addEntries([const MapEntry(4, 'four')]);
+      final from = SplayTreeMap<int, String>.of(map, (a, b) => b.compareTo(a));
+      return '${keys.join(',')}|${map.values.join(',')}|$bounds|${from.keys.join(',')}';
+    case 24:
+      var compared = 0;
+      final set = SplayTreeSet<String>((a, b) {
+        compared++;
+        return a.length.compareTo(b.length);
+      }, (key) => key is String)..addAll(['ccc', 'bb', 'a', 'zz']);
+      final canonical = set.lookup('??');
+      final before = compared;
+      // ignore: collection_methods_unrelated_type
+      final rejected = !set.contains(7) && set.lookup(null) == null;
+      final unchanged = compared == before;
+      final copy = set.toSet()..add('long');
+      final union = set.union({'zz', 'dddd'});
+      final intersection = set.intersection({'a', 'bb'});
+      final difference = set.difference({'a'});
+      set.retainAll(['z', 'zz']);
+      return '$canonical|$rejected/$unchanged|$set|$copy|$union|$intersection|$difference';
+    case 25:
+      final map = SplayTreeMap<int, int>.of({3: 30, 1: 10, 2: 20});
+      final values = <int>[];
+      final iterator = map.keys.iterator;
+      while (iterator.moveNext()) {
+        values.add(iterator.current);
+        map[3];
+        map[1];
+        map[iterator.current] = -iterator.current;
+      }
+      final modified = map.entries.iterator..moveNext();
+      map[4] = 40;
+      var detected = 0;
+      try {
+        modified.moveNext();
+      } on ConcurrentModificationError {
+        detected++;
+      }
+      final set = SplayTreeSet<int>.of([3, 1, 2]);
+      final keys = <int>[];
+      final setIterator = set.iterator;
+      while (setIterator.moveNext()) {
+        keys.add(setIterator.current);
+        set.add(setIterator.current);
+        set.contains(3);
+      }
+      final setModified = set.iterator..moveNext();
+      set.remove(2);
+      try {
+        setModified.moveNext();
+      } on ConcurrentModificationError {
+        detected++;
+      }
+      return '$values|$keys|$map|$detected';
+    case 26:
+      final from = SplayTreeMap<int, String>.from({2: 'b', 1: 'a'});
+      final iterable = SplayTreeMap<int, int>.fromIterable(
+        [3, 1, 3, 2],
+        key: (value) => value as int,
+        value: (value) => (value as int) * 10,
+      );
+      final constructor = SplayTreeMap<int, int>.fromIterables;
+      final paired = constructor([2, 1, 2], [20, 10, 21]);
+      final set = SplayTreeSet<int>.from(<Object>[3, 1, 2, 2]);
+      final Map<Object?, Object?> cast = paired.cast<Object?, Object?>();
+      cast[3] = 30;
+      var rejected = 0;
+      try {
+        constructor([1, 2], [1]);
+      } on ArgumentError {
+        rejected++;
+      }
+      try {
+        SplayTreeMap<int, String>.from(<Object, Object>{'bad': 1});
+      } on TypeError {
+        rejected++;
+      }
+      try {
+        SplayTreeSet<int>.from(<Object>[1, 'bad']);
+      } on TypeError {
+        rejected++;
+      }
+      try {
+        cast[4] = 'bad';
+      } on TypeError {
+        rejected++;
+      }
+      return '$from|$iterable|$paired|$set|$rejected';
+    case 27:
+      final map = SplayTreeMap<int, int>.of({1: 10, 3: 30});
+      var calls = 0;
+      final existing = map.putIfAbsent(1, () {
+        calls++;
+        return -1;
+      });
+      final inserted = map.putIfAbsent(2, () {
+        map
+          ..clear()
+          ..[2] = 200
+          ..[4] = 40;
+        return 20;
+      });
+      map.update(4, (value) {
+        map[2];
+        return value + 1;
+      });
+      map.update(5, (value) => value, ifAbsent: () => 50);
+      map.updateAll((key, value) {
+        map.firstKey();
+        return value + key;
+      });
+      final snapshot = '$map';
+      var detected = false;
+      try {
+        map.update(2, (value) {
+          map.remove(2);
+          return value;
+        });
+      } on ConcurrentModificationError {
+        detected = true;
+      }
+      return '$existing/$inserted/$calls|$snapshot|$map|$detected';
+    case 28:
+      final map = SplayTreeMap<int, List<int>>();
+      final set = SplayTreeSet<int>();
+      for (var i = 0; i < 401; i++) {
+        final key = i * 31 % 401;
+        map[key] = [key, key + 1];
+        set.add(key);
+      }
+      final iterator = map.keys.iterator..moveNext();
+      var allocations = 0;
+      for (var i = 0; i < 5000; i++) {
+        allocations += List<int>.filled(64, i).last;
+      }
+      var keys = iterator.current;
+      while (iterator.moveNext()) {
+        keys += iterator.current;
+        map.lastKey();
+      }
+      final copy = set.toSet();
+      var sum = 0;
+      for (final key in copy) {
+        sum += map.remove(key)!.first;
+        set.remove(key);
+      }
+      return '$allocations|$keys/$sum|${map.length}/${set.length}|${copy.length}/${copy.first}/${copy.last}';
     default:
       _calls = 0;
       final first = Label('first');
