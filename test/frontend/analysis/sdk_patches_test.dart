@@ -121,6 +121,17 @@ void main() {
           endsWith('/vm/lib/math_patch.dart'),
         );
         expect(math.element.getTopLevelFunction('_sqrt')!.isExternal, isTrue);
+        for (final (method, source) in [
+          ('nextInt', '/vm/lib/math_patch.dart'),
+          ('_initialSeed', '/sdk/patches/math.dart'),
+        ]) {
+          final member = math.element.getClass('_Random')!.getMethod(method)!;
+          final body = math.getFragmentDeclaration(member.fragments.last)!;
+          expect(
+            patches.origins[body.resolvedUnit!.uri]!.path,
+            endsWith(source),
+          );
+        }
         final core = libraries.singleWhere(
           (library) => library.element.isDartCore,
         );

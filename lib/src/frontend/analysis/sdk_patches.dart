@@ -146,7 +146,7 @@ final class SdkPatches(final OverlayResourceProvider files) {
       );
       final math = patches('math').single;
       _official.add(math);
-      _apply(library('math'), [math]);
+      _apply(library('math'), [math, '$runtime/math.dart']);
       final convert = patches('convert')
           .singleWhere((path) => path.endsWith('/convert_patch.dart'));
       _official.add(convert);

@@ -49,6 +49,10 @@ UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生�
 
 直接调用与函数值调用均支持 int、double 和装箱 num，包括导入前缀与转导。dynamic 实参保留类型检查，实参只求值一次；同名用户函数或静态方法仍调用用户实现。已在 macOS ARM64 与 Linux ARM64 原生执行，见[平方根行为验证](../test/compiler/math_test.dart)和[独立进程验证](../test/compiler/entry_test.dart)。其余数学函数尚未完整接通。
 
+`Random([seed])` 的种子混合、状态推进与 `nextInt`/`nextDouble`/`nextBool` 复用同一官方 Dart 实现。`nextInt` 接受 1 到 2^32 的上界，拒绝非法上界且不推进状态；构造器和方法提取、动态参数检查及回收后状态见[随机数验证](../test/compiler/math_random_test.dart)。显式种子沿用固定 SDK 的序列，不承诺跨 SDK 版本的序列稳定。
+
+省略或传入 null 种子时，目标补丁从现有单调时钟初始化共享的普通伪随机种子发生器。此来源不适用于密码学用途；当前未提供操作系统熵能力，`Random.secure()` 按公开契约在构造时抛出 `UnsupportedError`，包括重复调用和构造器提取。
+
 ## 独立程序入口
 
 入口选择遵循主规范的 Scripts 条款，使用根库导出命名空间中的 main，不按依赖遍历顺序查找同名函数。`Compiler.compile(output: const Output.executable())` 和 CLI `--kind exe` 接通现有标量函数的独立执行。整个输入依赖图先完成静态检查，未使用代码的错误仍拒绝编译。

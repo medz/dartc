@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Support `Random` through the SDK's existing sampling algorithms, with explicit or clock-based default seeds. Preserve bounds, method values and generator state; `Random.secure()` throws `UnsupportedError` while target entropy is unavailable.
+
 - Close Latin-1 decoder outputs for empty final slices and avoid closing them twice in replacement mode. Preserve invalid-byte rejection and replacement characters across chunk boundaries.
 
 - Validate Base64/Base64Url conversion through the SDK algorithms, including chunked streams, normalization, codec composition and collection. Fix empty final decoder slices so they validate pending input and close the output sink.
