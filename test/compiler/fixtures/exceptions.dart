@@ -208,3 +208,32 @@ int traceDepth() => StackTrace.current.toString().split('\n').length;
 @Export<Int32 Function(Pointer<NativeFunction<Int32 Function()>>)>()
 int reenterTrace(Pointer<NativeFunction<Int32 Function()>> callback) =>
     callback.asFunction<int Function()>()();
+
+@Export<Int64 Function(Int64, Int64)>()
+int patternFailure(int mode, int count) {
+  var left = 7, right = 8;
+  var cleaned = false;
+  try {
+    try {
+      if (mode < 2) {
+        [left, right] = mode == 0 ? <int>[1, 2] : <int>[1];
+      } else {
+        {'left': left, 'right': right} = mode == 2
+            ? <String, int>{'left': 1}
+            : <String, int>{'left': 1, 'right': 2};
+      }
+    } finally {
+      cleaned = true;
+    }
+  } on StateError catch (error, trace) {
+    allocate(count);
+    if (!cleaned ||
+        error.message != 'Pattern matching error' ||
+        error.stackTrace.toString() != trace.toString() ||
+        !trace.toString().contains('patternFailure')) {
+      return -1;
+    }
+    return left * 10 + right;
+  }
+  return left * 10 + right;
+}

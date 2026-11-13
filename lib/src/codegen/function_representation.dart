@@ -415,6 +415,11 @@ final class FunctionRepresentation(
             location,
           );
         }
+        if (instruction is PatternMatchFailure) {
+          invocations[instruction] =
+              heap.runtime?.patternMatchFailure ??
+              (throw UnsupportedError('Pattern match runtime unavailable'));
+        }
         if (instruction case ObjectClassName(:final operand)) {
           final type = layouts.types.runtimeTypeOf(operand, body);
           final name = _load(TypeMetadata.className, type, body);

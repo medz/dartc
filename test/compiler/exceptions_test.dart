@@ -82,6 +82,18 @@ void main() {
     }
   });
 
+  test('irrefutable pattern failures preserve locals, cleanup and errors across GC', () {
+    final native = Exceptions();
+    addTearDown(native.close);
+    const expected = [12, 78, 78, 12];
+    for (final count in [0, 40000]) {
+      for (var mode = 0; mode < expected.length; mode++) {
+        expect(sdk.patternFailure(mode, count), expected[mode]);
+        expect(native.patternFailure(mode, count), expected[mode]);
+      }
+    }
+  });
+
   test('uncaught exceptions stop at the native boundary', () async {
     final result = await Process.run(
       NativeAssets(Target.host())

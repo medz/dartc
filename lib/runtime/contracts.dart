@@ -42,6 +42,7 @@ enum RuntimeRole() {
   copyExecutableMacos,
   copyExecutableLinux,
   processMain,
+  patternMatchFailure,
 }
 
 /// Binds an external declaration to one trusted machine operation.

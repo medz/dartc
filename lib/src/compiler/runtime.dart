@@ -230,6 +230,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     dispatchFailure: annotations.entries[RuntimeRole.dispatchFailure],
     exhaustivenessFailure:
         annotations.entries[RuntimeRole.exhaustivenessFailure],
+    patternMatchFailure: annotations.entries[RuntimeRole.patternMatchFailure],
     floatingRemainder: annotations.entries[RuntimeRole.floatingRemainder],
     floatingModulo: annotations.entries[RuntimeRole.floatingModulo],
     allocate: allocate,

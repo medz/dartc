@@ -23,6 +23,10 @@ Object? dispatchFailure(Object? receiver, Invocation invocation) {
   return receiver.noSuchMethod(invocation);
 }
 
+/// Reports a failed irrefutable list or map pattern match.
+@RuntimeEntry(.patternMatchFailure)
+Never patternMatchFailure() => throw StateError('Pattern matching error');
+
 /// Reports a reachable miss after an exhaustive switch.
 @RuntimeEntry(.exhaustivenessFailure)
 Never exhaustivenessFailure() => throw _ExhaustivenessError();

@@ -42,6 +42,11 @@ final class Exceptions() {
         int Function(Pointer<NativeFunction<Int32 Function()>>)
       >('reenterTrace');
 
+  late final patternFailure = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'patternFailure',
+      );
+
   void close() {
     _library.close();
     _storage.close();
