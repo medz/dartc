@@ -2,6 +2,7 @@
 // ignore_for_file: equal_keys_in_const_map, equal_elements_in_const_set, const_eval_throws_exception, equal_keys_in_map_pattern, unreachable_switch_case
 
 import 'symbols_dependency.dart' as other;
+import 'public_symbols.dart' as public;
 part 'symbols_part.dart';
 
 const hidden = #_secret;
@@ -75,4 +76,5 @@ void main() {
     'qualified:${identical(#_prefix.name, other.qualified)}:'
     '${#_prefix.name == const Symbol('_prefix.name')}',
   );
+  public.main();
 }

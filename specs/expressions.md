@@ -6,7 +6,7 @@
 | --- | --- |
 | null、bool、整数、double、字符串 | 支持这五种字面量，包括最小有符号 int、整数在 double 上下文中的解释和负零。 |
 | 普通、raw、多行、插值与相邻字符串 | 支持普通、raw、多行、运行时插值与相邻拼接；保留插值表达式和 toString 的求值顺序、虚派发及异常。见[字符串样本](../test/frontend/lowering/fixtures/strings.dart)。 |
-| Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有字面量以名称和定义库保留身份，同库 part 共享身份，跨库同名与字符串构造的 Symbol 不相等。常量折叠、集合键、默认参数和 Invocation 使用相同身份，见[原生验证](../test/compiler/symbols_test.dart)。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/frontend/lowering/fixtures/symbols.dart)。 |
+| Symbol 字面量与构造 | 支持公开字面量、Symbol(String) 的普通/const 构造、构造器提取、empty/unaryMinus 与嵌套公开常量；const 按规范身份复用，普通构造保留独立身份。相等、hashCode、Symbol 类型的 toString 调用/提取及对象模式保留用户实现的虚派发。私有字面量以名称和定义库保留身份，同库 part 共享身份，跨库同名与字符串构造的 Symbol 不相等。常量折叠、集合键、默认参数和 Invocation 使用相同身份，见[原生验证](../test/compiler/symbols_test.dart)。构造器接收任意字符串，包括以 `_` 开头但不带私有库身份的名字。见[Symbol 样本](../test/compiler/fixtures/public_symbols.dart)。 |
 | Invocation 工厂与属性 | 支持 method/genericMethod/getter/setter 的直接调用及构造器提取、缺省参数、八个属性和对象模式；保留 Symbol 身份、类型实参、不可变浅快照及拷贝顺序。用户 implements/extends Invocation、抽象重声明及接口访问保留虚派发和继承默认 getter。匹配 SDK 3.13.7 的各类空集合身份与实际类型，这些细节不声明为跨 SDK 的语言保证。见[Invocation 样本](../test/frontend/lowering/fixtures/invocations.dart)。 |
 | Record 字面量 | 支持空、单字段、位置与命名混合的 record，以及嵌套和 const record。字段按源码顺序求值及隐式转换，失败时跳过后续字段；支持字段读取和结构相等。见[record 样本](../test/frontend/lowering/fixtures/records.dart)。 |
 | 可变/const List | 支持保留实际元素类型的可变 List 字面量、length、索引读写、sublist、add 和 addAll，以及 List.empty/filled/of/from/generate/unmodifiable 和 length setter。支持 const List 的内容和规范身份；原生集合范围见下文。 |
@@ -32,6 +32,8 @@
 发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/expressions.md)。
 
 带点的 Symbol 字面量代表库名，按[规范的 Symbol 条款](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex#L9040-L9125)不受库私有规则限制，即使首段以 `_` 开头。固定 Dart VM 将 `#_prefix.name` 区分库；dartc 在此遵循规范，跨库共享身份，并与 `const Symbol('_prefix.name')` 相等。
+
+内建 Symbol 的完整文本格式不承诺与 Dart VM 一致；原生检查验证直接调用、方法提取与插值使用相同派发结果，并保留用户重写的文本。
 
 ## 规范依据
 

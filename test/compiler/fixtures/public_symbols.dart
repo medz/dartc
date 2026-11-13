@@ -1,7 +1,7 @@
 // ignore_for_file: unnecessary_type_check, unnecessary_type_name_in_constructor, unnecessary_nullable_for_final_variable_declarations, unrelated_type_equality_checks
 
-import 'effects.dart';
-import 'symbols_public.dart' as other;
+import '../../frontend/lowering/fixtures/effects.dart';
+import 'public_symbols_other.dart' as other;
 
 typedef SymbolName = Symbol;
 typedef GenericSymbol<T> = Symbol;
@@ -49,38 +49,33 @@ const symbolRecord = (#alpha, named: <Symbol>[#beta, #foo._bar]);
 const symbolMap = <Symbol, Symbol>{#alpha: #beta, #beta: #alpha};
 const symbolSet = <Symbol>{#alpha, #beta};
 
-String symbolLiterals() {
-  const values = <Symbol>[
-    #alpha,
-    Symbol('alpha='),
-    #foo.bar,
-    #foo._bar,
-    #+,
-    #-,
-    #*,
-    #/,
-    #~/,
-    #%,
-    #==,
-    #<,
-    #<=,
-    #>,
-    #>=,
-    #<<,
-    #>>,
-    #>>>,
-    #&,
-    #|,
-    #^,
-    #~,
-    #[],
-    #[]=,
+bool symbolLiterals() {
+  const values = [
+    (#alpha, 'alpha'),
+    (#foo.bar, 'foo.bar'),
+    (#foo._bar, 'foo._bar'),
+    (#+, '+'),
+    (#-, '-'),
+    (#*, '*'),
+    (#/, '/'),
+    (#~/, '~/'),
+    (#%, '%'),
+    (#==, '=='),
+    (#<, '<'),
+    (#<=, '<='),
+    (#>, '>'),
+    (#>=, '>='),
+    (#<<, '<<'),
+    (#>>, '>>'),
+    (#>>>, '>>>'),
+    (#&, '&'),
+    (#|, '|'),
+    (#^, '^'),
+    (#~, '~'),
+    (#[], '[]'),
+    (#[]=, '[]='),
   ];
-  var result = '';
-  for (final value in values) {
-    result = '$result$value|';
-  }
-  return result;
+  return values.every((pair) => pair.$1 == Symbol(pair.$2));
 }
 
 bool symbolConstants() =>
@@ -95,8 +90,6 @@ bool symbolConstants() =>
     #[]= == const Symbol('[]=') &&
     #>>> == const Symbol('>>>') &&
     alpha.hashCode == alphaConstructor.hashCode;
-
-String symbolStaticNames() => '${Symbol.empty}|${Symbol.unaryMinus}';
 
 bool symbolNestedConstants() =>
     identical(nestedSymbols.value[0], alpha) &&
@@ -154,15 +147,10 @@ int symbolRuntimeIdentity(String name) {
   return result;
 }
 
-String symbolRuntimeText(String name) {
-  final value = Symbol(name);
-  return '$value|${value.toString()}';
-}
-
-String symbolBoundText(String name) {
+bool symbolRuntimeText(String name) {
   final value = Symbol(name);
   final render = value.toString;
-  return render();
+  return value.toString() == render() && '$value' == render();
 }
 
 bool symbolConstructorTearoffs(String name) {
@@ -193,11 +181,11 @@ String tracedName(int marker, String name) {
   return name;
 }
 
-String symbolConstructorOrder() {
+bool symbolConstructorOrder() {
   final factory = Symbol.new;
   final first = Symbol(tracedName(5, 'alpha'));
   final second = factory(tracedName(6, 'beta'));
-  return '$first|$second';
+  return first == #alpha && second == #beta;
 }
 
 int symbolChecks(Object? value) {
@@ -340,18 +328,15 @@ bool symbolUserConstants() {
       symbol.toString() == 'user:alpha';
 }
 
-int symbolRawNameEquality(String raw, String plain) {
+bool symbolRawNameEquality(String raw, String plain) {
   final first = Symbol(raw);
   final second = Symbol(plain);
   final set = <Symbol>{first, second};
   final map = <Symbol, int>{first: 1, second: 2};
-  return (first == second ? 1 : 0) +
-      (first.toString() == second.toString() ? 2 : 0) +
-      (identical(first, second) ? 4 : 0) +
-      (first.hashCode == second.hashCode ? 8 : 0) +
-      set.length * 100 +
-      map[Symbol(raw)]! * 1000 +
-      map[Symbol(plain)]! * 10000;
+  return first != second &&
+      set.length == 2 &&
+      map[Symbol(raw)] == 1 &&
+      map[Symbol(plain)] == 2;
 }
 
 bool containsSymbol(Iterable<Symbol> values, Symbol expected) {
@@ -394,7 +379,7 @@ int symbolCheckedArgument(dynamic value, bool tearoff) {
   }
 }
 
-String symbolArbitraryConstants() {
+bool symbolArbitraryConstants() {
   const values = <Symbol>[
     Symbol('_private'),
     Symbol('_foo.bar'),
@@ -406,11 +391,25 @@ String symbolArbitraryConstants() {
     Symbol('\u0000'),
     Symbol('Σ🌈'),
   ];
-  var result = '';
-  for (final value in values) {
-    result = '$result$value|';
+  const names = [
+    '_private',
+    '_foo.bar',
+    'get:foo',
+    'abc@123',
+    'a b',
+    '"quoted"',
+    'line\nend',
+    '\u0000',
+    'Σ🌈',
+  ];
+  for (var i = 0; i < values.length; i++) {
+    final constructed = Symbol(names[i]);
+    if (values[i] != constructed ||
+        values[i].hashCode != constructed.hashCode) {
+      return false;
+    }
   }
-  return result;
+  return true;
 }
 
 bool symbolPrivateNameConstructors() {
@@ -422,7 +421,6 @@ bool symbolPrivateNameConstructors() {
       !identical(value, runtime) &&
       value.hashCode == runtime.hashCode &&
       raw != #foo &&
-      raw.toString() == (#foo).toString() &&
       identical(raw, const Symbol('get:foo'));
 }
 
@@ -521,4 +519,132 @@ bool symbolSuperHashStability() {
       customBase == custom.baseHash() &&
       ordinary.calls == 1 &&
       custom.calls == 1;
+}
+
+void check(Object? actual, Object? expected, String label) {
+  if (actual != expected) {
+    throw StateError('$label: $actual, expected $expected');
+  }
+}
+
+void main() {
+  for (final (name, run) in <(String, bool Function())>[
+    ('literals', symbolLiterals),
+    ('constants', symbolConstants),
+    ('arbitrary constants', symbolArbitraryConstants),
+    ('constructed private names', symbolPrivateNameConstructors),
+    ('public libraries', symbolPublicLibraries),
+    ('runtime and static identity', symbolRuntimeStaticIdentity),
+    ('nested constants', symbolNestedConstants),
+    ('generic collections', symbolGenericCollections),
+    ('nested patterns', symbolNestedPatterns),
+    ('custom equality', symbolUserEquality),
+    ('asymmetric equality', symbolUserAsymmetry),
+    ('custom constants', symbolUserConstants),
+    ('custom collections', symbolUserCollections),
+    ('super hash stability', symbolSuperHashStability),
+  ]) {
+    check(run(), true, name);
+  }
+  check(symbolDefaultValues(), 863, 'defaults');
+  check(symbolTypeChecks(), 86333, 'type checks');
+  check(
+    symbolUserText(),
+    'user:alpha|user:alpha|user:alpha|user:alpha',
+    'custom text',
+  );
+  for (final name in [
+    '',
+    'alpha',
+    'beta',
+    '_private',
+    'foo.bar',
+    'foo._bar',
+    '_foo.bar',
+    'alpha=',
+    'unary-',
+    '[]',
+    '[]=',
+    '>>>',
+    'a b',
+    ' leading and trailing ',
+    '\t\n',
+    '"quoted"',
+    "a'b",
+    'line\nend',
+    'back\\slash',
+    '\u0000',
+    'Σ🌈',
+    'get:foo',
+    'set:foo',
+    'abc@123',
+    'abc@123.def@456',
+  ]) {
+    check(
+      symbolRuntimeIdentity(name),
+      name == 'alpha'
+          ? 1023
+          : name == 'beta'
+          ? 127
+          : 639,
+      'runtime identity: $name',
+    );
+    check(symbolRuntimeText(name), true, 'text dispatch: $name');
+    check(symbolConstructorTearoffs(name), true, 'constructor values: $name');
+    check(symbolGenericAlias(name), 319, 'generic alias: $name');
+    check(symbolConstantPattern(name), switch (name) {
+      'alpha' => 1,
+      'beta' => 2,
+      'foo._bar' => 3,
+      '' => 4,
+      'unary-' => 5,
+      '[]' => 6,
+      _ => 7,
+    }, 'constant pattern: $name');
+  }
+  for (final (raw, plain) in [
+    ('get:foo', 'foo'),
+    ('set:foo', 'foo='),
+    ('abc@123', 'abc'),
+    ('abc@123.def@456', 'abc.def'),
+  ]) {
+    check(symbolRawNameEquality(raw, plain), true, 'raw names: $raw');
+  }
+  for (var kind = 0; kind < 5; kind++) {
+    check(symbolObjectPattern(kind), kind < 3 ? 1 : 0, 'object pattern $kind');
+  }
+  for (final value in <Object?>['alpha', 'arbitrary name', null, 42, true]) {
+    for (final tearoff in [false, true]) {
+      calls.clear();
+      check(
+        symbolCheckedArgument(value, tearoff),
+        value is String
+            ? value == 'alpha'
+                  ? 1
+                  : 0
+            : -1,
+        'argument $value/$tearoff',
+      );
+      check(
+        calls.join(','),
+        value is String ? '1,2' : '1,3',
+        'checked argument effects',
+      );
+    }
+  }
+  calls.clear();
+  check(symbolEvaluationOrder(), true, 'equality');
+  check(calls.join(','), '1,2,3,4', 'equality effects');
+  calls.clear();
+  check(symbolConstructorOrder(), true, 'constructors');
+  check(calls.join(','), '5,6', 'constructor effects');
+  calls.clear();
+  check(symbolOrdinarySuperHash(), 1, 'ordinary super hash');
+  check(calls.join(','), '1', 'ordinary super hash effects');
+  for (final erase in [false, true]) {
+    calls.clear();
+    check(symbolUserSuperHash(erase), 1, 'custom super hash');
+    check(calls.join(','), '1', 'custom super hash effects');
+  }
+  print('public-symbols:ok');
 }

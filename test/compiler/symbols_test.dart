@@ -10,7 +10,7 @@ import '../support/native_assets.dart';
 
 void main() {
   test(
-    'private symbols retain library identity across constants and calls',
+    'symbols preserve identity, custom behavior, patterns and call checks',
     () async {
       final result = await Process.run(
         NativeAssets(Target.host())
@@ -38,6 +38,7 @@ patterns:1:2:3
 map-pattern:3
 invocations:true:true:true
 qualified:true:true
+public-symbols:ok
 ''');
     },
   );
