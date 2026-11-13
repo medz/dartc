@@ -57,6 +57,11 @@ abstract final class Memory() {
   @Primitive(.writeBytes)
   external static int writeBytes(int descriptor, int address, int count);
 
+  /// Fills at most 256 bytes from OS entropy; returns zero or negative errno.
+  /// Does not allocate or reenter Dart. The caller keeps the storage alive.
+  @Primitive(.entropy)
+  external static int entropy(int address, int count);
+
   /// Monotonic nanoseconds since an unspecified origin.
   @Primitive(.clock)
   external static int clock();

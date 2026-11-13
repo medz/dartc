@@ -92,6 +92,9 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     if (runtime?.primitives[target] == MemoryPrimitive.writeBytes) {
       return emitter.writeBytes();
     }
+    if (runtime?.primitives[target] == MemoryPrimitive.entropy) {
+      return emitter.entropy();
+    }
     if (runtime?.primitives[target] == MemoryPrimitive.clock) {
       return emitter.clock(systemClock);
     }

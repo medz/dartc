@@ -127,13 +127,50 @@ void main() {
   check(Random().nextInt(1) == 0, 'default seed after collection');
 
   for (final create in [Random.secure, () => Random.secure()]) {
+    final random = create();
+    final nextInt = random.nextInt, nextDouble = random.nextDouble;
+    final nextBool = random.nextBool;
+    var bits = 0, complement = 0, seenTrue = false, seenFalse = false;
+    for (var i = 0; i < 256; i++) {
+      for (final bound in [1, 2, 3, 255, 256, 257, 0x80000001, 1 << 32]) {
+        final value = nextInt(bound);
+        check(value >= 0 && value < bound, 'secure integer range');
+      }
+      final value = nextInt(1 << 32);
+      bits |= value;
+      complement |= value ^ 0xffffffff;
+      final floating = nextDouble();
+      check(floating >= 0.0 && floating < 1.0, 'secure double range');
+      if (nextBool()) {
+        seenTrue = true;
+      } else {
+        seenFalse = true;
+      }
+    }
+    check(bits == 0xffffffff && complement == 0xffffffff, 'secure bit width');
+    check(seenTrue && seenFalse, 'secure boolean range');
+    for (final bound in [0, -1, (1 << 32) + 1]) {
+      var rejected = false;
+      try {
+        nextInt(bound);
+      } on RangeError {
+        rejected = true;
+      }
+      check(rejected, 'secure invalid bound');
+    }
+    final dynamic dynamicRandom = random;
     var caught = false;
     try {
-      create();
-    } on UnsupportedError {
+      dynamicRandom.nextInt(1.0);
+    } on TypeError {
       caught = true;
     }
-    check(caught, 'secure source unavailable');
+    check(caught, 'secure dynamic bound');
+    for (var i = 0; i < 4000; i++) {
+      total += List<int>.filled(16, i).first;
+    }
+    check(nextInt(1) == 0, 'secure after collection');
+    check(nextDouble() >= 0, 'secure entropy after collection');
   }
   print('random:ok');
 }

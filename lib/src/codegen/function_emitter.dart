@@ -65,6 +65,9 @@ abstract interface class FunctionEmitter<R>() {
   /// Writes bytes, returning a count or negative errno.
   Uint8List writeBytes();
 
+  /// Fills (address, count), returning zero or negative errno. Count is at most 256.
+  Uint8List entropy();
+
   /// Returns monotonic nanoseconds; Darwin resolves its clock through libSystem.
   Uint8List clock(void Function(Fixup) systemClock);
 

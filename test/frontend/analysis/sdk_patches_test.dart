@@ -112,7 +112,7 @@ void main() {
           'sdk/std/lib/_internal/vm/lib/math_patch.dart',
           '=> _sqrt(x.toDouble())',
         ),
-        (seed, 'sdk/patches/math.dart', '=> _setupSeed(Memory.clock())'),
+        (seed, 'sdk/patches/math.dart', '=>\n      _setupSeed('),
         (value, 'sdk/std/lib/_vm/_vm.dart', '{\n    if (!variable.hasValue)'),
       ]) {
         final body = switch (declaration.node) {
@@ -180,11 +180,13 @@ void main() {
           endsWith('/vm/lib/math_patch.dart'),
         );
         expect(math.element.getTopLevelFunction('_sqrt')!.isExternal, isTrue);
-        for (final (method, source) in [
-          ('nextInt', '/vm/lib/math_patch.dart'),
-          ('_initialSeed', '/sdk/patches/math.dart'),
+        for (final (type, method, source) in [
+          ('_Random', 'nextInt', '/vm/lib/math_patch.dart'),
+          ('_Random', '_initialSeed', '/sdk/patches/math.dart'),
+          ('_SecureRandom', 'nextInt', '/vm/lib/math_patch.dart'),
+          ('_SecureRandom', '_getBytes', '/sdk/patches/math.dart'),
         ]) {
-          final member = math.element.getClass('_Random')!.getMethod(method)!;
+          final member = math.element.getClass(type)!.getMethod(method)!;
           final body = math.getFragmentDeclaration(member.fragments.last)!;
           expect(
             patches.origins[body.resolvedUnit!.uri]!.path,

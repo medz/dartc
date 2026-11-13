@@ -152,6 +152,34 @@ final class _X64Emitter(
   }
 
   @override
+  Uint8List entropy() {
+    final done = assembler.label();
+    assembler.loadImmediate(.rdx, 0);
+    _systemCall(318, 500);
+    if (convention.target.operatingSystem == .macos) {
+      assembler
+        ..jumpCondition(.aboveOrEqual, done)
+        ..negate(.rax);
+    } else {
+      final success = assembler.label();
+      assembler
+        ..compare(.rax, .rsi)
+        ..jumpCondition(.equal, success)
+        ..test(.rax)
+        ..jumpCondition(.lessThan, done)
+        ..loadImmediate(.rax, -5) // EIO: do not consume a short entropy read.
+        ..jump(done)
+        ..bind(success)
+        ..loadImmediate(.rax, 0);
+    }
+    assembler
+      ..bind(done)
+      ..loadImmediate(.r11, 0)
+      ..ret();
+    return assembler.finish();
+  }
+
+  @override
   Uint8List clock(void Function(Fixup) systemClock) {
     final frame = convention.frameLayout(
       localBytes: 16,

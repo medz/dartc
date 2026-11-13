@@ -36,6 +36,7 @@ import '../test/linker/fixtures/addresses.dart';
 import '../test/linker/fixtures/finalizers.dart';
 import '../test/compiler/fixtures/descriptor_write_assets.dart';
 import '../test/compiler/fixtures/managed_objects_assets.dart';
+import '../test/compiler/fixtures/random_entropy_assets.dart';
 import '../test/compiler/fixtures/native_finalizers_assets.dart';
 import '../test/compiler/fixtures/native_symbols_assets.dart';
 import '../test/support/native_assets.dart';
@@ -229,6 +230,20 @@ Future<void> main(List<String> args) async {
         'test/compiler/fixtures/$source.dart',
       ], output: const .executable());
       await entry.write(assets.file('compiler/$output'));
+    }
+    if (target == const Target(.linux, .arm64) &&
+        selected.contains('math_random')) {
+      for (final source in ['random_unavailable', 'random_source_lost']) {
+        final failure = await Compiler(target).compile(
+          ['test/compiler/fixtures/$source.dart'],
+          output: const .executable(),
+          nativeSymbols: const {
+            'entropy-test': {'deny': 'deny_entropy'},
+          },
+          linkInputs: [.object(denyEntropy())],
+        );
+        await failure.write(assets.file('compiler/entry_$source'));
+      }
     }
     if (target.operatingSystem == .linux) {
       for (final (fixture, name) in [

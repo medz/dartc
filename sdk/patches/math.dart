@@ -1,16 +1,19 @@
+import '../runtime/entropy.dart' as entropy;
 import '../runtime/memory.dart';
 
 @patch
 class _Random {
-  // shortcut: clock-only default seed, use entropy when target support exists.
   @patch
-  static int _initialSeed() => _setupSeed(Memory.clock());
+  static int _initialSeed() =>
+      _setupSeed(entropy.randomBytes(8) ?? Memory.clock());
 }
 
 @patch
 class _SecureRandom {
   @patch
-  static int _getBytes(int count) => throw UnsupportedError(
-    'No source of cryptographically secure random numbers available.',
-  );
+  static int _getBytes(int count) =>
+      entropy.randomBytes(count) ??
+      (throw UnsupportedError(
+        'No source of cryptographically secure random numbers available.',
+      ));
 }

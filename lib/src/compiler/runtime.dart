@@ -75,6 +75,9 @@ HeapRuntime bindRuntime(LoweringResult lowered) {
       case .writeBytes:
         primitives[target] = .writeBytes;
         continue;
+      case .entropy:
+        primitives[target] = .entropy;
+        continue;
       case .clock:
         primitives[target] = .clock;
         continue;

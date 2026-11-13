@@ -57,7 +57,7 @@ UTF-8、Latin-1、ASCII 及允许畸形 UTF-8 的 Encoding 配置已做[原生�
 
 `Random([seed])` 的种子混合、状态推进与 `nextInt`/`nextDouble`/`nextBool` 复用同一官方 Dart 实现。`nextInt` 接受 1 到 2^32 的上界，拒绝非法上界且不推进状态；构造器和方法提取、动态参数检查及回收后状态见[随机数验证](../test/compiler/math_random_test.dart)。显式种子沿用固定 SDK 的序列，不承诺跨 SDK 版本的序列稳定。
 
-省略或传入 null 种子时，目标补丁从现有单调时钟初始化共享的普通伪随机种子发生器。此来源不适用于密码学用途；当前未提供操作系统熵能力，`Random.secure()` 按公开契约在构造时抛出 `UnsupportedError`，包括重复调用和构造器提取。
+省略或传入 null 种子时，目标补丁优先使用操作系统熵初始化共享的普通伪随机种子发生器，熵源失败时可退回单调时钟；普通 `Random` 不适用于密码学用途。`Random.secure()` 复用官方取样算法，仅补齐系统随机字节叶子：macOS 使用 `getentropy`，Linux 使用 `getrandom`（等待系统熵源就绪）。中断会重试，其余失败在构造或后续取样时抛出 `UnsupportedError`，不使用弱种子退路。失败路径在隔离 Linux ARM64 进程中通过拒绝随机系统调用验证。
 
 ## 独立程序入口
 

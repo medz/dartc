@@ -3,7 +3,7 @@
 - Create native callbacks with `Pointer.fromFunction` for static Dart functions, including scalar, pointer and struct signatures. Preserve state and GC roots across synchronous reentry, return the specified exception value, and reject calls from another OS thread.
 - Support Stopwatch using the SDK lifecycle and elapsed-time conversions over the existing monotonic clock. Preserve accumulated time across pause/resume, reset state and extracted method values.
 
-- Support `Random` through the SDK's existing sampling algorithms, with explicit or clock-based default seeds. Preserve bounds, method values and generator state; `Random.secure()` throws `UnsupportedError` while target entropy is unavailable.
+- Support `Random` through the SDK's existing sampling algorithms. `Random.secure()` reads OS entropy on macOS and Linux and throws `UnsupportedError` if that source fails, including after construction. Ordinary default seeds prefer entropy and retain a clock fallback; explicit seeded streams remain unchanged.
 
 - Close Latin-1 decoder outputs for empty final slices and avoid closing them twice in replacement mode. Preserve invalid-byte rejection and replacement characters across chunk boundaries.
 - Show function names and source URI, line and column in stack traces, including part files, local functions and resumed async/generator frames. Preserve call-site positions through generated checks and boxing, and keep captured descriptions stable through collection; generated machine frames retain their address fallback.

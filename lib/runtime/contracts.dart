@@ -56,6 +56,7 @@ enum MemoryOperation() {
   context,
   writeByte,
   writeBytes,
+  entropy,
   clock,
   sleep,
   allocatePayload,
