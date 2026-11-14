@@ -30,6 +30,32 @@ IrProgram _inline(
 ).run(ProgramFlow(program, const [], openEntries: roots).facts);
 
 void main() {
+  test('a non-returning invocation keeps its proof after CFG expansion', () {
+    final helper = FunctionTarget(_uri, 'chooseOrThrow', .integer, [.boolean]);
+    final branch = Block(helper.parameterTypes),
+        returns = Block(),
+        fails = Block();
+    branch.finish(Branch(branch.parameters.single, Jump(returns), Jump(fails)));
+    returns.finish(const Return(Constant.integer(7)));
+    fails.finish(Throw(const Constant.string('failure')));
+    final root = FunctionTarget(_uri, 'root', .integer, []);
+    final entry = Block();
+    final call = entry.emit(
+      DirectCall(helper, [const Constant.boolean(false)]),
+    );
+    entry.finish(Unreachable(call));
+    final program = IrProgram([], [
+      IrFunction(helper, [branch, returns, fails]),
+      IrFunction(root, [entry]),
+    ]);
+    final optimized = _inline(program, [root], maxCalleeCost: 32);
+    final body = optimized.implementationOf(root) as IrFunction;
+    expect(body.callees, isNot(contains(helper)));
+    for (final graph in [program, optimized]) {
+      expect(() => _run(graph, root, []), throwsA('failure'));
+    }
+  });
+
   test('cleanup retains caller and inlined lifetime markers after calls', () {
     final helper = FunctionTarget(_uri, 'retain', .voidType, [.object]);
     final body = Block(helper.parameterTypes);

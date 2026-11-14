@@ -399,7 +399,7 @@ final class FunctionRewrite(
       ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(
         onThrow == null ? null : jump(onThrow),
       ),
-      Unreachable(:final cause) => Unreachable(value(cause)),
+      Unreachable(:final cause) => impossible(value(cause), current),
       Await(:final operand, :final result, :final onResume, :final onThrow) =>
         Await(
           value(operand),
