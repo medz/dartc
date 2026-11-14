@@ -133,6 +133,62 @@ void main() {
     expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
   });
 
+  test(
+    'callback bridges follow current roots, exports and rewritten bodies',
+    () {
+      final helper = FunctionTarget(uri, 'address', .integer, []);
+      final start = Block();
+      start.finish(Return(start.emit(DirectCall(helper, []))));
+      final address = Block();
+      address.finish(
+        Return(
+          address.emit(
+            NativeCallbackAddress(
+              other,
+              FunctionType(FfiTypes.scalarTypes[Int64]!, []),
+              exceptionalReturn: const Constant.integer(-1),
+            ),
+          ),
+        ),
+      );
+      final input = IrProgram([], [
+        IrFunction(entry, [start]),
+        IrFunction(helper, [address]),
+        program.implementationOf(other)! as IrFunction,
+      ]);
+      final unused = Compiler(target).prepare(input, roots: [other]);
+      expect(unused.definitions, {other});
+      expect(Arm64CodeGenerator(target).generate(unused).imports, isEmpty);
+      final removed = IrProgram([], [
+        input.implementationOf(entry)! as IrFunction,
+        IrFunction(helper, [
+          Block()..finish(const Return(Constant.integer(0))),
+        ]),
+        input.implementationOf(other)! as IrFunction,
+      ]);
+      final current = ProgramPreparation(target, removed, roots: [entry]);
+      expect(current.program, same(removed));
+      for (final selected in [
+        ProgramPreparation(target, input, roots: [entry]),
+        ProgramPreparation(
+          target,
+          input,
+          exports: {entry: NativeExport('address', NativeSignature(Int64, []))},
+        ),
+      ]) {
+        expect(
+          selected.program.functions.any(
+            (body) =>
+                body.target.library == null && body.callees.contains(other),
+          ),
+          isTrue,
+        );
+        final facts = CallTypeFlow(selected.program, selected.roots).facts;
+        expect(() => current.prepare(facts), throwsArgumentError);
+      }
+    },
+  );
+
   test('an eliminated callback does not require a persistent runtime', () {
     final start = Block(), live = Block(), dead = Block();
     start.finish(Branch(const Constant.boolean(true), Jump(live), Jump(dead)));

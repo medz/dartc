@@ -1,12 +1,13 @@
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 
 /// Checks native bindings and preserves typed values across native boundaries.
 final class NativeBindings(
   IrProgram source,
   Map<FunctionTarget, NativeImport> sourceImports,
   Map<FunctionTarget, NativeExport> sourceExports,
-  Set<FunctionTarget> selected,
+  Iterable<FunctionTarget> roots,
 ) {
   late final IrProgram program;
   final imports = <FunctionTarget, NativeImport>{};
@@ -47,12 +48,13 @@ final class NativeBindings(
               : target] =
           binding;
     }
-    for (final body in source.functions.where(
-      (f) => selected.contains(f.target),
-    )) {
+    // Programs without callback entries need no callback reachability analysis.
+    late final selected = reachableDefinitions(source, roots);
+    for (final body in source.functions) {
       for (final block in body.blocks) {
         for (final instruction
             in block.instructions.whereType<NativeCallbackEntry>()) {
+          if (!selected.contains(body.target)) break;
           final signature = instruction.dartSignature;
           final target = FunctionTarget(
             null,

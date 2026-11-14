@@ -107,12 +107,7 @@ final class ProgramPreparation(
         );
       }
     }
-    _bindings = NativeBindings(
-      source,
-      imports,
-      exports,
-      reachableDefinitions(source, entries),
-    );
+    _bindings = NativeBindings(source, imports, exports, entries);
     program = _bindings.program;
     this.roots = .unmodifiable({...entries, ..._bindings.exports.keys});
   }
