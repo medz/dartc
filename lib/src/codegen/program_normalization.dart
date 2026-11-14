@@ -32,23 +32,26 @@ final class ProgramNormalization(
       functions.add(_function(_helpers.values.elementAt(index)));
       changed = true;
     }
-    final externals = [
-      for (final external in program.externals)
-        if (external.sequenceConstants.isEmpty)
-          external
-        else
-          IrExternal(
-            external.target,
-            defaults: {
-              for (final entry in external.defaults.entries)
-                entry.key: _constant(entry.value),
-            },
-            effects: external.effects,
-          ),
-    ];
-    changed |= externals.indexed.any(
-      (entry) => !identical(entry.$2, program.externals[entry.$1]),
-    );
+    final externals = <IrExternal>[];
+    for (final external in program.externals) {
+      final defaults = {
+        for (final entry in external.defaults.entries)
+          entry.key: _constant(entry.value),
+      };
+      final updated = defaults.entries.any(
+        (entry) => !identical(entry.value, external.defaults[entry.key]),
+      );
+      changed |= updated;
+      externals.add(
+        updated
+            ? IrExternal(
+                external.target,
+                defaults: defaults,
+                effects: external.effects,
+              )
+            : external,
+      );
+    }
     final normalized = changed
         ? IrProgram(
             program.classes,

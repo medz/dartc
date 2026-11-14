@@ -223,6 +223,26 @@ void main() {
     },
   );
 
+  test('unchanged external defaults do not create a new program version', () {
+    final type = CoreTypes.setOf(.integer);
+    final entry = FunctionTarget(null, 'external', type, [
+      type,
+    ], optionalPositional: 1);
+    final source = IrProgram(
+      [],
+      [],
+      externals: [
+        IrExternal(
+          entry,
+          defaults: {
+            0: SequenceConstant(type, [const Constant.integer(7)]),
+          },
+        ),
+      ],
+    );
+    expect(ProgramNormalization(source).run(), same(source));
+  });
+
   test('missing checked constructors fail before machine representation', () {
     final root = FunctionTarget(
       null,
