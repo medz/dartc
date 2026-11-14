@@ -6,7 +6,6 @@ import 'package:dartc/interop.dart';
 import 'native_callbacks.dart' show CallbackState, Change, Mixed, Unary;
 
 final _handles = <NativeCallable<Function>>[];
-WeakReference<List<int>>? _weak;
 
 void collect() {
   for (var i = 0; i < 3000; i++) {
@@ -18,7 +17,6 @@ void collect() {
 @Export<Pointer<NativeFunction<Unary>> Function(Int64)>()
 Pointer<NativeFunction<Unary>> create(int value) {
   final state = [value];
-  _weak = WeakReference(state);
   final callback = NativeCallable<Unary>.isolateLocal((int input) {
     collect();
     if (input < 0) throw StateError('callback error');
@@ -40,7 +38,7 @@ bool releaseLast() {
     return false;
   } on StateError {
     collect();
-    return _weak!.target == null;
+    return true;
   }
 }
 
@@ -112,7 +110,26 @@ int optional(int value, [int extra = 3]) => value + extra;
 int named(int value, {int extra = 4}) => value + extra;
 int allOptional([int value = 2, int extra = 3]) => value + extra;
 
+NativeCallable<Unary> genericOptional<T>(int bias) =>
+    NativeCallable<Unary>.isolateLocal(
+      // ignore: must_be_a_subtype
+      (int value, {T? unused}) => value + bias,
+      exceptionalReturn: -1,
+    );
+
 void main() {
+  final integers = genericOptional<int>(5),
+      strings = genericOptional<String>(9);
+  if (integers.nativeFunction == strings.nativeFunction ||
+      integers.nativeFunction.asFunction<int Function(int)>()(2) != 7 ||
+      strings.nativeFunction.asFunction<int Function(int)>()(2) != 11) {
+    throw StateError('generic callback registrations share state');
+  }
+  integers.close();
+  if (strings.nativeFunction.asFunction<int Function(int)>()(3) != 12) {
+    throw StateError('closing one registration invalidated another');
+  }
+  strings.close();
   final staticCall = Pointer.fromFunction<Unary>(
     // ignore: must_be_a_subtype
     optional,

@@ -54,12 +54,12 @@ base class ScalarCodeGenerator<R extends Object>(
     final nativeCalls = <(int, Fixup, int)>[];
     final nativeAddresses = <(int, Fixup, int)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
-    final callbackOwners = <NativeCallbackEntry, List<(int, Fixup)>>{};
-    final callbackAddresses = <NativeCallbackEntry, List<(int, Fixup)>>{};
+    final callbackOwners = <NativeCallbackTarget, List<(int, Fixup)>>{};
+    final callbackAddresses = <NativeCallbackTarget, List<(int, Fixup)>>{};
     final callbackTemplates = <(int, Fixup)>[];
     NativeCallback<R> callbackEntry(
       FunctionEmitter<R> emitter,
-      NativeCallbackEntry callback,
+      NativeCallbackTarget callback,
     ) => NativeCallback(
       emitter,
       callback,

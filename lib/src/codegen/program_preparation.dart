@@ -352,7 +352,7 @@ final class PreparedProgram._(
   Set<FunctionTarget> selected,
   final bool _persistent,
   final Map<
-    NativeCallbackEntry,
+    NativeCallbackTarget,
     ({FunctionTarget address, FunctionTarget target})
   >
   _callbacks,
@@ -416,7 +416,7 @@ extension PreparedProgramEmission on PreparedProgram {
   ProgramSelection get selection => _selection;
   Map<FunctionTarget, NativeImport> get imports => _input._bindings.imports;
   Map<FunctionTarget, NativeExport> get exports => _input._bindings.exports;
-  Map<NativeCallbackEntry, ({FunctionTarget address, FunctionTarget target})>
+  Map<NativeCallbackTarget, ({FunctionTarget address, FunctionTarget target})>
   get callbacks => _callbacks;
   Map<NativeReference, String> get nativeSymbols => _input._nativeSymbols;
   ({FunctionTarget function, String symbol})? get entryPoint =>

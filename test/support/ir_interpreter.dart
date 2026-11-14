@@ -31,6 +31,8 @@ final class IrInterpreter(
   Object? call(Object? function, List<Object?> arguments) =>
       _call(function, arguments, const {});
 
+  final _callbackAddresses = <NativeCallbackTarget, int>{};
+
   final _loadedLibraries = <DeferredImport>{};
   final _globals = <GlobalVariable, Object?>{
     for (final global in program.globals)
@@ -1827,12 +1829,16 @@ final class IrInterpreter(
             NativeView() ||
             NativeAddress() ||
             NativeSymbolAddress() ||
-            NativeCallbackEntry() ||
             NativeSize() ||
             NativeFieldOffset() ||
             CopyNative():
           throw UnsupportedError(
             'Native aggregate memory requires target execution.',
+          );
+        case NativeCallbackAddress(:final target):
+          values[op] = _callbackAddresses.putIfAbsent(
+            target,
+            () => _callbackAddresses.length + 1,
           );
         case KeepAlive():
           values[op] = null;

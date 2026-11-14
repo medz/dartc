@@ -43,6 +43,13 @@ const _intIdentity = _identity;
 Pointer<NativeFunction<Unary>> aliasCallback() =>
     Pointer.fromFunction<Unary>(_intIdentity, -1);
 
+@Export<Bool Function()>()
+bool sharedCallback() => aliasCallback().address == aliasCallback().address;
+
+@Export<Pointer<NativeFunction<Unary>> Function()>()
+Pointer<NativeFunction<Unary>> alternateFailure() =>
+    Pointer.fromFunction<Unary>(_record, -74);
+
 double _mixed(
   int a,
   double b,

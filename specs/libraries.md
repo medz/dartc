@@ -95,7 +95,9 @@ Uri 的构造、构造器函数值、parse/tryParse、replace、resolve/resolveU
 
 ## FFI 回调类型检查
 
-Pointer.fromFunction 与 NativeCallable 的回调可带额外可选位置参数或可选命名参数，只要原函数可接受原生入口提供的参数。原函数类型和默认参数保留；缺少必需参数、参数或结果表示不兼容、非法异常返回值，以及 Pointer.fromFunction 的非静态来源仍在未使用代码中拒绝。见[分析合同](../test/frontend/analysis/ffi_callbacks_test.dart)。
+Pointer.fromFunction 与 NativeCallable 的回调可带额外可选位置参数或可选命名参数，只要原函数可接受原生入口提供的参数。原函数类型、默认参数和闭包的词法泛型环境保留；原生桥只按实际 FFI 参数形状调用，不把额外可选参数中的词法类型参数带入全局桥。缺少必需参数、参数或结果表示不兼容、非法异常返回值，以及 Pointer.fromFunction 的非静态来源仍在未使用代码中拒绝。见[分析合同](../test/frontend/analysis/ffi_callbacks_test.dart)。
+
+同一回调声明在图复制与内联后共享原生入口及线程绑定，异常返回值随声明保留；同一个 Dart 函数的不同声明仍可指定不同异常返回值。`NativeCallable.isolateLocal` 的每次运行时注册拥有独立 trampoline 和生命周期，关闭一个实例不影响另一实例。见[原生回调验证](../test/compiler/native_callbacks_test.dart)与[NativeCallable 验证](../test/compiler/native_callables_test.dart)。
 
 固定 analyzer 14.7 会拒绝这种可选回调，并提前跳过异常返回值检查。dartc 先确认函数子类型关系，再以本次调用的固定参数形状重新运行 analyzer 的完整 FFI 检查；检查后恢复原始类型。依据为固定 SDK 的[回调转换](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/pkg/vm/lib/modular/transformations/ffi/use_sites.dart#L1344)及[调用方向的子类型规则](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/pkg/vm/lib/modular/transformations/ffi/common.dart#L1968)。
 

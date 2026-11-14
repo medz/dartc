@@ -846,18 +846,15 @@ final class ProgramFlow(
           );
         }
         return result;
-      case NativeCallbackAddress(:final function):
+      case NativeCallbackAddress(:final target):
         activation.operationEffects[operation] = operation.effects;
+        final function = switch (target) {
+          StaticCallbackTarget(:final function) => function,
+          ClosureCallbackTarget(:final lookup) => lookup,
+        };
         return FlowResult(
           value: FlowValue.unknown(.integer)
               .withReferences([FlowValue.constant(FunctionConstant(function))]),
-          normal: state.copy(),
-        );
-      case NativeClosureEntryAddress(:final lookup):
-        activation.operationEffects[operation] = operation.effects;
-        return FlowResult(
-          value: FlowValue.unknown(.integer)
-              .withReferences([FlowValue.constant(FunctionConstant(lookup))]),
           normal: state.copy(),
         );
       case ReferenceAddress():

@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
-import 'package:dartc/ir.dart' show ScalarConstant, NativeClosureEntryAddress;
+import 'package:dartc/ir.dart' show ScalarConstant, ClosureCallbackTarget;
 
 import 'function_emitter.dart';
 import 'heap_entry.dart';
@@ -157,7 +157,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     final storage = NativeLayout(emitter.convention.target);
     final native = emitter.convention.classify(signature);
     final compoundResult = signature.result is NativeCompoundType;
-    final closureCallback = callback?.definition is NativeClosureEntryAddress;
+    final closureCallback = callback?.definition is ClosureCallbackTarget;
     var bridge = bridgeSignature(signature);
     if (closureCallback) {
       bridge = NativeSignature.types(bridge.result, [

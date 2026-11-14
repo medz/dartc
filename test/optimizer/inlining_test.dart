@@ -550,9 +550,11 @@ void main() {
       Return(
         body.emit(
           NativeCallbackAddress(
-            target,
-            FunctionType(FfiTypes.int64, [FfiTypes.int64]),
-            exceptionalReturn: const Constant.integer(-1),
+            StaticCallbackTarget(
+              target,
+              FunctionType(FfiTypes.int64, [FfiTypes.int64]),
+              exceptionalReturn: const Constant.integer(-1),
+            ),
           ),
         ),
       ),
@@ -567,6 +569,12 @@ void main() {
       IrFunction(helper, [body]),
       IrFunction(root, [entry]),
     ]);
-    expect(inlineDirectCalls(program, [root]), same(program));
+    final rewritten = inlineDirectCalls(program, [root]);
+    expect(_run(program, root, []), isTrue);
+    expect(_run(rewritten, root, []), isTrue);
+    expect(
+      (rewritten.implementationOf(root) as IrFunction).callees,
+      isNot(contains(helper)),
+    );
   });
 }

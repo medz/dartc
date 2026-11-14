@@ -17,6 +17,19 @@ void main() {
   });
 
   test(
+    'callback declarations retain their addresses and exception fallbacks',
+    () {
+      expect(native.shared(), isTrue);
+      final first = native.integer().asFunction<int Function(int)>();
+      final second = native.alternate().asFunction<int Function(int)>();
+      expect(first(-1), -73);
+      expect(second(-1), -74);
+      expect(first(5), 15);
+      expect(second(5), 15);
+    },
+  );
+
+  test(
     'escaped callbacks retain state, catch exceptions and allow reentry',
     () {
       final call = native.integer().asFunction<int Function(int)>();

@@ -138,15 +138,19 @@ void main() {
     () {
       final helper = FunctionTarget(uri, 'address', .integer, []);
       final start = Block();
-      start.finish(Return(start.emit(DirectCall(helper, []))));
+      final first = start.emit(DirectCall(helper, []));
+      final second = start.emit(DirectCall(helper, []));
+      start.finish(Return(start.emit(IntBinary(.subtract, first, second))));
       final address = Block();
       address.finish(
         Return(
           address.emit(
             NativeCallbackAddress(
-              other,
-              FunctionType(FfiTypes.scalarTypes[Int64]!, []),
-              exceptionalReturn: const Constant.integer(-1),
+              StaticCallbackTarget(
+                other,
+                FunctionType(FfiTypes.scalarTypes[Int64]!, []),
+                exceptionalReturn: const Constant.integer(-1),
+              ),
             ),
           ),
         ),
@@ -172,16 +176,21 @@ void main() {
         ProgramPreparation(target, input, roots: [entry]),
         ProgramPreparation(
           target,
+          inlineDirectCalls(input, [entry]),
+          roots: [entry],
+        ),
+        ProgramPreparation(
+          target,
           input,
           exports: {entry: NativeExport('address', NativeSignature(Int64, []))},
         ),
       ]) {
         expect(
-          selected.program.functions.any(
+          selected.program.functions.where(
             (body) =>
                 body.target.library == null && body.callees.contains(other),
           ),
-          isTrue,
+          hasLength(1),
         );
         final facts = CallTypeFlow(selected.program, selected.roots).facts;
         expect(() => current.prepare(facts), throwsArgumentError);
@@ -220,9 +229,11 @@ void main() {
       Return(
         dead.emit(
           NativeCallbackAddress(
-            other,
-            FunctionType(FfiTypes.scalarTypes[Int64]!, []),
-            exceptionalReturn: const Constant.integer(-1),
+            StaticCallbackTarget(
+              other,
+              FunctionType(FfiTypes.scalarTypes[Int64]!, []),
+              exceptionalReturn: const Constant.integer(-1),
+            ),
           ),
         ),
       ),

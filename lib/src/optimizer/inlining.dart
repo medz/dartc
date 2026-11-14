@@ -16,8 +16,8 @@ import 'reachability.dart';
 /// Both limits must be nonnegative, and zero disables expansion.
 ///
 /// Candidates are synchronous, nongeneric, single-block bodies ending in a
-/// return, without lexical captures, constructor-only writes or callback entries
-/// whose native addresses belong to the original instruction site. Call arguments
+/// return, without lexical captures or constructor-only writes. Callback address
+/// operations preserve the original native entry declaration. Call arguments
 /// still execute in order, including unused arguments with effects. Throwing
 /// operations keep the call site's exceptional continuation and logical frame
 /// chain, including inlined function identities and call sites. Cleanup removes
@@ -70,9 +70,7 @@ IrProgram inlineDirectCalls(
               body.target.typeParameters.isNotEmpty ||
               (body.target.owner?.typeParameters.isNotEmpty ?? false) ||
               body.closures.isNotEmpty ||
-              body.entry.instructions.any(
-                (op) => op.type == .never || op is NativeCallbackEntry,
-              )) {
+              body.entry.instructions.any((op) => op.type == .never)) {
             continue;
           }
           final copies =

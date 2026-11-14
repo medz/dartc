@@ -323,10 +323,11 @@ final class CallTypeFlow(
             ])) {
               _include(selected, unknown: true);
             }
-          case NativeCallbackAddress(:final function):
-            _include(function, unknown: true);
-          case NativeClosureEntryAddress(:final lookup):
-            _include(lookup, unknown: true);
+          case NativeCallbackAddress(:final target):
+            _include(switch (target) {
+              StaticCallbackTarget(:final function) => function,
+              ClosureCallbackTarget(:final lookup) => lookup,
+            }, unknown: true);
           case LoadField(field: InstanceField(:final initializer?)):
             _include(initializer, unknown: true);
           default:

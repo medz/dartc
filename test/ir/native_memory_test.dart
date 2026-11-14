@@ -17,36 +17,47 @@ void main() {
         FfiTypes.scalarTypes[ffi.Int64]!,
       ]);
       final function = FunctionTarget(null, 'callback', .integer, [.integer]);
-      expect(() => NativeCallbackAddress(function, type), throwsArgumentError);
+      expect(
+        () => NativeCallbackAddress(StaticCallbackTarget(function, type)),
+        throwsArgumentError,
+      );
       expect(
         () => NativeCallbackAddress(
-          function,
-          type,
-          exceptionalReturn: const Constant.floating(1),
+          StaticCallbackTarget(
+            function,
+            type,
+            exceptionalReturn: const Constant.floating(1),
+          ),
         ),
         throwsArgumentError,
       );
       expect(
         () => NativeCallbackAddress(
-          function,
-          FunctionType(FfiTypes.scalarTypes[ffi.Double]!, type.parameters),
-          exceptionalReturn: const Constant.floating(0),
+          StaticCallbackTarget(
+            function,
+            FunctionType(FfiTypes.scalarTypes[ffi.Double]!, type.parameters),
+            exceptionalReturn: const Constant.floating(0),
+          ),
         ),
         throwsArgumentError,
       );
       final voidType = FunctionType(FfiTypes.voidType, type.parameters);
       expect(
         () => NativeCallbackAddress(
-          function,
-          voidType,
-          exceptionalReturn: const Constant.integer(0),
+          StaticCallbackTarget(
+            function,
+            voidType,
+            exceptionalReturn: const Constant.integer(0),
+          ),
         ),
         throwsArgumentError,
       );
       final callback = NativeCallbackAddress(
-        function,
-        type,
-        exceptionalReturn: const Constant.integer(-1),
+        StaticCallbackTarget(
+          function,
+          type,
+          exceptionalReturn: const Constant.integer(-1),
+        ),
       );
       final block = Block();
       block.finish(Return(block.emit(callback)));
@@ -55,7 +66,10 @@ void main() {
       ]);
       expect(factory.callees, contains(function));
       expect(
-        NativeCallbackAddress(function, voidType).dartSignature.result,
+        NativeCallbackAddress(StaticCallbackTarget(function, voidType))
+            .target
+            .dartSignature
+            .result,
         ValueType.voidType,
       );
     },
@@ -66,11 +80,13 @@ void main() {
     final native = FunctionType(FfiTypes.scalarTypes[ffi.Int64]!, [
       FfiTypes.scalarTypes[ffi.Int64]!,
     ]);
-    final callback = NativeClosureEntryAddress(
-      lookup,
-      FunctionType(.integer, [.integer]),
-      native,
-      exceptionalReturn: const Constant.integer(-1),
+    final callback = NativeCallbackAddress(
+      ClosureCallbackTarget(
+        lookup,
+        FunctionType(.integer, [.integer]),
+        native,
+        exceptionalReturn: const Constant.integer(-1),
+      ),
     );
     final block = Block();
     block.finish(Return(block.emit(callback)));
@@ -79,20 +95,24 @@ void main() {
     ]);
     expect(factory.callees, contains(lookup));
     expect(
-      () => NativeClosureEntryAddress(
-        FunctionTarget(null, 'invalid', .integer, [.integer]),
-        callback.callbackType,
-        native,
-        exceptionalReturn: const Constant.integer(-1),
+      () => NativeCallbackAddress(
+        ClosureCallbackTarget(
+          FunctionTarget(null, 'invalid', .integer, [.integer]),
+          callback.target.dartSignature,
+          native,
+          exceptionalReturn: const Constant.integer(-1),
+        ),
       ),
       throwsArgumentError,
     );
     expect(
-      () => NativeClosureEntryAddress(
-        lookup,
-        FunctionType(.integer, [.floating]),
-        native,
-        exceptionalReturn: const Constant.integer(-1),
+      () => NativeCallbackAddress(
+        ClosureCallbackTarget(
+          lookup,
+          FunctionType(.integer, [.floating]),
+          native,
+          exceptionalReturn: const Constant.integer(-1),
+        ),
       ),
       throwsArgumentError,
     );

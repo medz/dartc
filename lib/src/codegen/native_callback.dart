@@ -11,7 +11,7 @@ import 'function_emitter.dart';
 /// The machine entry protocol for a thread-bound native callback.
 final class NativeCallback<R extends Object>(
   final FunctionEmitter<R> emitter,
-  final NativeCallbackEntry definition,
+  final NativeCallbackTarget definition,
   final void Function(Fixup) owner,
 ) {
   void checkThread({bool bind = false, int? addressSlot}) {
@@ -34,7 +34,7 @@ final class NativeCallback<R extends Object>(
     emitter.jumpIfZero(previous, identified);
     emitter.abort(70);
     emitter.bind(identified);
-    if (definition is NativeClosureEntryAddress) {
+    if (definition is ClosureCallbackTarget) {
       emitter.loadStack(address, addressSlot!);
       emitter.loadImmediate(previous, NativeCallbackLayout.thread);
       emitter.add.emit(address, address, previous);
@@ -52,7 +52,7 @@ final class NativeCallback<R extends Object>(
   }
 
   Uint8List address(void Function(Fixup) entry) {
-    if (definition is NativeCallbackAddress) checkThread(bind: true);
+    if (definition is StaticCallbackTarget) checkThread(bind: true);
     final result = emitter.convention
         .classify(NativeSignature(Int64, []))
         .resultRegister!;

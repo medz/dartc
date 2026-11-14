@@ -70,9 +70,10 @@ export 'src/ir/type.dart'
 export 'src/ir/value.dart'
     show
         blockParameters,
-        NativeCallbackEntry,
+        NativeCallbackTarget,
+        StaticCallbackTarget,
+        ClosureCallbackTarget,
         NativeCallbackAddress,
-        NativeClosureEntryAddress,
         NativeSymbolAddress,
         AwaitResult,
         LoadLibrary,

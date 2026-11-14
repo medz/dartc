@@ -302,20 +302,22 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
         final type =
             context.typeOf(expression.staticType!, expression) as ClassType;
         final entry = context.emit(
-          NativeClosureEntryAddress(
-            context.bindings.target(
-              ctor.library.getTopLevelFunction('_nativeCallableTarget')!,
-              unit,
-              expression,
+          NativeCallbackAddress(
+            ClosureCallbackTarget(
+              context.bindings.target(
+                ctor.library.getTopLevelFunction('_nativeCallableTarget')!,
+                unit,
+                expression,
+              ),
+              callback.type as FunctionType,
+              type.typeArguments.single as FunctionType,
+              exceptionalReturn: fallback == null
+                  ? null
+                  : context.bindings.constantExpression(
+                      unit,
+                      fallback.argumentExpression,
+                    ),
             ),
-            callback.type as FunctionType,
-            type.typeArguments.single as FunctionType,
-            exceptionalReturn: fallback == null
-                ? null
-                : context.bindings.constantExpression(
-                    unit,
-                    fallback.argumentExpression,
-                  ),
           ),
         );
         return context.emit(
@@ -745,10 +747,12 @@ Value? _lower(FunctionContext context, ast.Expression expression) {
           PointerFromAddress(
             context.emit(
               NativeCallbackAddress(
-                function.target,
-                context.typeOf(typeArgumentTypes!.single, expression)
-                    as FunctionType,
-                exceptionalReturn: fallback,
+                StaticCallbackTarget(
+                  function.target,
+                  context.typeOf(typeArgumentTypes!.single, expression)
+                      as FunctionType,
+                  exceptionalReturn: fallback,
+                ),
               ),
             ),
             context.typeOf(expression.staticType!, expression) as ClassType,

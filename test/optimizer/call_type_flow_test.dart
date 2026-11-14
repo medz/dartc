@@ -552,9 +552,11 @@ void main() {
     final target = FunctionTarget(_uri, 'callback', .integer, [.integer]);
     final body = _identity(target);
     final callback = NativeCallbackAddress(
-      target,
-      FunctionType(FfiTypes.int64, [FfiTypes.int64]),
-      exceptionalReturn: const Constant.integer(-1),
+      StaticCallbackTarget(
+        target,
+        FunctionType(FfiTypes.int64, [FfiTypes.int64]),
+        exceptionalReturn: const Constant.integer(-1),
+      ),
     );
     final entry = Block()
       ..emit(callback)

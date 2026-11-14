@@ -90,17 +90,18 @@ void main() {
       );
       final native = FunctionType(FfiTypes.int64, [FfiTypes.int64]);
       final callback = NativeCallbackAddress(
-        target,
-        native,
-        exceptionalReturn: const Constant.integer(-1),
+        StaticCallbackTarget(
+          target,
+          native,
+          exceptionalReturn: const Constant.integer(-1),
+        ),
       );
       final copy =
           callback.mapInputs((value) => value) as NativeCallbackAddress;
       expect(copy, isNot(same(callback)));
-      expect(copy.function, same(target));
-      expect(copy.nativeType, same(native));
-      expect(copy.signature, callback.signature);
-      expect(copy.exceptionalReturn, callback.exceptionalReturn);
+      expect(copy.target, same(callback.target));
+      expect((copy.target as StaticCallbackTarget).function, same(target));
+      expect(copy.target.nativeType, same(native));
     },
   );
 

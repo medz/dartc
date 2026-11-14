@@ -14,7 +14,7 @@ final class NativeBindings(
   final exports = <FunctionTarget, NativeExport>{};
   final callbacks =
       <
-        NativeCallbackEntry,
+        NativeCallbackTarget,
         ({FunctionTarget address, FunctionTarget target})
       >{};
   final _functions = <IrFunction>[];
@@ -54,21 +54,23 @@ final class NativeBindings(
     for (final body in source.functions) {
       for (final block in body.blocks) {
         for (final instruction
-            in block.instructions.whereType<NativeCallbackEntry>()) {
+            in block.instructions.whereType<NativeCallbackAddress>()) {
           if (!selected.contains(body.target)) break;
-          final signature = instruction.dartSignature;
+          final definition = instruction.target;
+          if (callbacks.containsKey(definition)) continue;
+          final signature = definition.dartSignature;
           final target = FunctionTarget(
             null,
             'callback${callbacks.length}',
             signature.result,
             [
-              if (instruction is NativeClosureEntryAddress) ValueType.integer,
+              if (definition is ClosureCallbackTarget) ValueType.integer,
               ...signature.parameters,
             ],
           );
           final entry = Block(target.parameterTypes);
-          final result = entry.emit(switch (instruction) {
-            NativeCallbackAddress(:final function) => DirectCall(
+          final result = entry.emit(switch (definition) {
+            StaticCallbackTarget(:final function) => DirectCall(
               function,
               function.signature.bind(
                 entry.parameters,
@@ -76,11 +78,11 @@ final class NativeBindings(
                 (i) => source.implementationOf(function)!.defaults[i]!,
               ),
             ),
-            NativeClosureEntryAddress(:final lookup) => FunctionCall(
+            ClosureCallbackTarget(:final lookup) => FunctionCall(
               entry.emit(
                 UncheckedCast(
                   entry.emit(DirectCall(lookup, [entry.parameters.first])),
-                  instruction.callbackType,
+                  definition.dartSignature,
                 ),
               ),
               entry.parameters.skip(1),
@@ -99,9 +101,9 @@ final class NativeBindings(
             [],
           );
           externals.add(IrExternal(address));
-          callbacks[instruction] = (
+          callbacks[definition] = (
             address: address,
-            target: _needsBridge(instruction.signature)
+            target: _needsBridge(definition.signature)
                 ? _bridge(target, intoDart: true)
                 : target,
           );

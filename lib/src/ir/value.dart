@@ -462,17 +462,7 @@ sealed class Instruction(super.type) extends Value {
       ),
       final ObjectClassName v => ObjectClassName(map(v.operand)),
       final NativeSymbolAddress v => NativeSymbolAddress(v.reference),
-      final NativeCallbackAddress v => NativeCallbackAddress(
-        v.function,
-        v.nativeType,
-        exceptionalReturn: v.exceptionalReturn,
-      ),
-      final NativeClosureEntryAddress v => NativeClosureEntryAddress(
-        v.lookup,
-        type(v.callbackType) as FunctionType,
-        v.nativeType,
-        exceptionalReturn: v.exceptionalReturn,
-      ),
+      final NativeCallbackAddress v => NativeCallbackAddress(v.target),
       final ReferenceAddress v => ReferenceAddress(map(v.object)),
       final ReferenceFromAddress v => ReferenceFromAddress(
         map(v.address),
@@ -783,7 +773,7 @@ sealed class Instruction(super.type) extends Value {
   /// Calls include all effects their callees could have. Allocation describes
   /// the operation itself; temporary boxes and GC safepoints depend on the backend.
   Set<Effect> get effects => switch (this) {
-    NativeCallbackEntry() => const {.readsStorage, .writesStorage},
+    NativeCallbackAddress() => const {.readsStorage, .writesStorage},
     KeepAlive() => const {.keepsAlive},
     ObjectHashCode(direct: true) => _bindOnce,
     ObjectRuntimeType(direct: true) => const {.readsStorage},
@@ -917,19 +907,22 @@ final class NativeSymbolAddress(final NativeReference reference)
   Iterable<Value> get inputs => const [];
 }
 
-/// A typed native entry whose escaping exceptions return a declared value.
-sealed class NativeCallbackEntry(
+/// A native entry declaration with stable identity across graph rewrites.
+///
+/// Distinct declarations may have the same ABI. Cloned address operations share
+/// the original declaration, its thread binding and its exceptional return.
+sealed class NativeCallbackTarget(
   /// The declared FFI function type, including nominal native types.
   final FunctionType nativeType,
-  final FunctionType callbackType,
+  FunctionType callbackType,
   final Constant? exceptionalReturn,
-) extends Instruction {
+) {
   final NativeSignature signature = (FfiTypes.describe(
     FfiTypes.nativeFunction.instantiate([nativeType]),
   ) as NativeFunctionType).signature;
   final FunctionType dartSignature = FfiTypes.dartSignature(nativeType);
 
-  this : super(.integer) {
+  this {
     final type = callbackType;
     if (type.typeParameters.isNotEmpty ||
         !type.acceptsShape(dartSignature.parameters.length, const [])) {
@@ -961,17 +954,14 @@ sealed class NativeCallbackEntry(
       throw ArgumentError('Invalid callback exceptional return.');
     }
   }
-
-  @override
-  Iterable<Value> get inputs => const [];
 }
 
 /// Binds a static callback to the current thread until its module is unloaded.
-final class NativeCallbackAddress(
+final class StaticCallbackTarget(
   final FunctionTarget function,
   FunctionType nativeType, {
   Constant? exceptionalReturn,
-}) extends NativeCallbackEntry {
+}) extends NativeCallbackTarget {
   this : super(nativeType, function.signature, exceptionalReturn) {
     if (function.kind != .function || function.typeParameters.isNotEmpty) {
       throw ArgumentError('Expected a nongeneric static callback.');
@@ -983,18 +973,29 @@ final class NativeCallbackAddress(
 ///
 /// [lookup] retrieves the live function for the trampoline address. The caller
 /// registers that function and owns the trampoline's lifetime.
-final class NativeClosureEntryAddress(
+final class ClosureCallbackTarget(
   final FunctionTarget lookup,
   FunctionType callbackType,
   FunctionType nativeType, {
   Constant? exceptionalReturn,
-}) extends NativeCallbackEntry {
+}) extends NativeCallbackTarget {
   this : super(nativeType, callbackType, exceptionalReturn) {
     if (lookup.kind != .function ||
         lookup.signature != FunctionType(.function, [.integer])) {
       throw ArgumentError('Expected an address-to-function callback lookup.');
     }
   }
+}
+
+/// Binds and obtains a declared callback entry without creating a trampoline.
+///
+/// Runtime closure registrations retain their own addresses and lifetimes.
+final class NativeCallbackAddress(final NativeCallbackTarget target)
+    extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
 }
 
 /// Observes a reference's current address; null has address zero.

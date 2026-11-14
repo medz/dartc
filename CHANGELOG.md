@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Preserve native callback declaration identity through graph cloning and inlining, including its thread binding and exception fallback. NativeCallable callbacks may use lexical generic types in unused optional parameters while retaining independent registration lifetimes.
+
 - Share stack-frame names, source URIs and inline caller metadata across call sites, formatting captured traces on demand while preserving source locations and asynchronous frame order.
 
 - Skip callback reachability analysis when a program has no native callback entries, preserving native binding and rewritten-program checks.

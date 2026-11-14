@@ -317,13 +317,12 @@ FunctionReferences verifyCallable(
         (implicitMembers ??= {}).add(member);
       }
       switch (op) {
-        case NativeCallbackEntry():
-          (callees ??= {}).add(switch (op) {
-            NativeCallbackAddress(:final function) => function,
-            NativeClosureEntryAddress(:final lookup) => lookup,
+        case NativeCallbackAddress(:final target):
+          (callees ??= {}).add(switch (target) {
+            StaticCallbackTarget(:final function) => function,
+            ClosureCallbackTarget(:final lookup) => lookup,
           });
-          checkTypeScope(op.dartSignature);
-          checkTypeScope(op.callbackType);
+          checkTypeScope(target.dartSignature);
         case ReifyType() || ObjectRuntimeType():
           (instantiatedClasses ??= {}).addAll(TypeMetadata.fields.keys);
         case LoadLibrary(:final reference) ||

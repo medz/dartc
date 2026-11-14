@@ -26,6 +26,14 @@ final class NativeCallbacks() {
         Pointer<NativeFunction<Unary>> Function(),
         Pointer<NativeFunction<Unary>> Function()
       >('aliasCallback');
+  late final shared = _library.lookupFunction<Bool Function(), bool Function()>(
+    'sharedCallback',
+  );
+  late final alternate = _library
+      .lookupFunction<
+        Pointer<NativeFunction<Unary>> Function(),
+        Pointer<NativeFunction<Unary>> Function()
+      >('alternateFailure');
   late final mixed = _library
       .lookupFunction<
         Pointer<NativeFunction<Mixed>> Function(),
