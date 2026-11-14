@@ -616,7 +616,7 @@ final class FlowState {
       );
     }
     if (unknownBounds.isNotEmpty) {
-      final next = copy();
+      final next = copy()..escape([value]);
       for (final object in next._objects.keys) {
         final state = next._objects[object]!;
         final slot = state.slots[key];

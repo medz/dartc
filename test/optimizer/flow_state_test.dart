@@ -859,6 +859,41 @@ void main() {
     expect(current.objects, [replacement.value.objects.single]);
   });
 
+  test(
+    'a successful write to outside storage publishes its callable value',
+    () {
+      final callback = FunctionTarget(_uri, 'privateCallback', .integer, []);
+      final holder = ClassType(_uri, 'OutsideHolder');
+      final field = InstanceField(
+        holder,
+        'callback',
+        callback.signature,
+        isLate: true,
+        isFinal: true,
+      );
+      final program = IrProgram(
+        [
+          IrClass(holder, [field]),
+        ],
+        [_body(callback, const Return(_one))],
+      );
+      final receiver = Block([holder]).parameters.single;
+      final value = FunctionConstant(callback);
+      final state = FlowState(program);
+      final written = _step(
+        state,
+        StoreField(field, receiver, value),
+        operands: [.unknown(holder), .constant(value)],
+      );
+      expect(
+        written.normal!.exposedValues.constants.map((c) => c.structuralKey),
+        contains(value.structuralKey),
+      );
+      expect(written.exceptional!.exposedValues.isBottom, isTrue);
+      expect(state.exposedValues.isBottom, isTrue);
+    },
+  );
+
   test('storage snapshots reject a different semantic graph', () {
     expect(
       () => FlowState(IrProgram([], [])).join(FlowState(IrProgram([], []))),
