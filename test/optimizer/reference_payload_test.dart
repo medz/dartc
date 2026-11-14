@@ -23,6 +23,16 @@ final _callback = FunctionTarget(null, 'callback', .integer, [.integer]);
 final _function = FlowValue.constant(FunctionConstant(_callback));
 
 void main() {
+  test('rebound SSA definitions do not alias earlier payload contents', () {
+    final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final value = FlowValue.integerRange(FlowIntegerRange(3, 9))
+        .withSource(Block([.integer]).parameters.single, _activation);
+    final before = _store(allocation.state, allocation.value, value);
+    final after = before.copy()..retainSources((_) => false);
+    expect(_load(before, allocation.value), value);
+    expect(_load(after, allocation.value), value.withSources(const []));
+  });
+
   test('reference payload loop joins widen stored ranges without losing slot bounds', () {
     final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
     final before = _store(

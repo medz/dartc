@@ -95,6 +95,15 @@ final class FlowState {
     _escaped,
   );
 
+  /// Keeps valid SSA equalities without changing stored values or prior snapshots.
+  void retainSources(bool Function(FlowSource) retain) {
+    FlowValue filter(FlowValue value) =>
+        value.withSources(value.sources.where(retain));
+    _globals = _globals.mapValues((_, slot) => slot.map(filter));
+    _objects = _objects.mapValues((_, object) => object.map(filter));
+    _escaped = filter(_escaped);
+  }
+
   /// Adds an executable alternative, skipping unchanged storage subtrees.
   /// [widen] drops expanding numeric bounds at a loop or recursive boundary.
   bool join(FlowState incoming, {bool widen = false}) {

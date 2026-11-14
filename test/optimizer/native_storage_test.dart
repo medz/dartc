@@ -19,6 +19,16 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('rebound SSA definitions do not alias earlier payload contents', () {
+    final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final value = FlowValue.integerRange(FlowIntegerRange(3, 9))
+        .withSource(Block([.integer]).parameters.single, _activation);
+    final before = _store(allocation.state, allocation.address, _i64, value);
+    final after = before.copy()..retainSources((_) => false);
+    expect(_load(before, allocation.address, _i64), value);
+    expect(_load(after, allocation.address, _i64), value.withSources(const []));
+  });
+
   test('native integer fragments widen as one stored value at loop joins', () {
     final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
     final before = _store(

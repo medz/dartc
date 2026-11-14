@@ -11,6 +11,89 @@ const _one = Constant.integer(1);
 const _two = Constant.integer(2);
 
 void main() {
+  test('rebinding forgets stored SSA equalities without changing snapshots or values', () {
+    final parameter = Block([.integer]).parameters.single;
+    final otherActivation = Object();
+    final value = FlowValue.integerRange(FlowIntegerRange(3, 9))
+        .withSource(parameter, _activation)
+        .withSource(parameter, otherActivation);
+    final forgotten = value.sources.singleWhere(
+      (source) => identical(source.activation, _activation),
+    );
+    final expected = value.withSources(
+      value.sources.where((source) => source != forgotten),
+    );
+    final box = ClassType(_uri, 'Stored');
+    final field = InstanceField(box, 'value', ValueType.integer.nullable);
+    final initializer = FunctionTarget(
+      _uri,
+      '',
+      .voidType,
+      [],
+      owner: box,
+      kind: .initializer,
+    );
+    final global = GlobalVariable(_uri, 'saved', ValueType.integer.nullable);
+    final initial = FlowState(
+      IrProgram(
+        [
+          IrClass(box, [field], constructors: [initializer]),
+        ],
+        [_body(initializer, const Return())],
+        globals: [global],
+      ),
+    );
+    final create = Construct(initializer, []);
+    final object = _step(
+      initial,
+      create,
+      invoke: (_, _, state) => _normal(const FlowValue.bottom(), state),
+    );
+    var stored = _step(
+      object.normal!,
+      StoreField(field, create, _one),
+      operands: [object.value, value],
+    ).normal!;
+    final cell = NewCell(CellType(.integer), _one);
+    final captured = _step(stored, cell, operands: [value]);
+    stored = _step(
+      captured.normal!,
+      StoreGlobal(global, _one),
+      operands: [value],
+    ).normal!;
+    final enclosing = FunctionTarget(_uri, 'scope', .voidType, []);
+    final closureTarget = FunctionTarget(
+      _uri,
+      'capture',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: enclosing,
+      sourceOffset: 1,
+      captures: [.integer],
+    );
+    final closure = _step(
+      stored,
+      MakeClosure(closureTarget, [_one]),
+      operands: [value],
+    );
+    stored = closure.normal!..escape([value]);
+    final snapshot = stored.copy();
+    stored.retainSources((source) => source != forgotten);
+    List<FlowValue> values(FlowState state) => [
+      _step(state, LoadGlobal(global)).value,
+      _step(state, LoadField(field, create), operands: [object.value]).value,
+      _step(state, ReadCell(cell), operands: [captured.value]).value,
+      state.capturesOf(closure.value.objects.single)!.single,
+      state.escapedValues,
+    ];
+    expect(values(snapshot), everyElement(value));
+    expect(values(stored), everyElement(expected));
+    final key = stored.structuralKey;
+    stored.retainSources((source) => source != forgotten);
+    expect(stored.structuralKey, key);
+  });
+
   test('numeric storage joins preserve branch bounds and widen only expanding loop bounds', () {
     final global = GlobalVariable(_uri, 'number', ValueType.integer.nullable);
     final initial = FlowState(IrProgram([], [], globals: [global]));
