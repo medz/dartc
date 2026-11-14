@@ -30,6 +30,41 @@ IrProgram _inline(
 ).run(ProgramFlow(program, const [], openEntries: roots).facts);
 
 void main() {
+  test('pure call chains expand from leaves within one caller budget', () {
+    final leaf = FunctionTarget(_uri, 'leaf', .integer, [.integer]);
+    final middle = FunctionTarget(_uri, 'middle', .integer, [.integer]);
+    final root = FunctionTarget(_uri, 'root', .integer, [.integer]);
+    final last = Block(leaf.parameterTypes);
+    last.finish(
+      Return(
+        last.emit(
+          IntBinary(.add, last.parameters.single, const Constant.integer(1)),
+        ),
+      ),
+    );
+    IrFunction forward(FunctionTarget target, FunctionTarget callee) {
+      final block = Block(target.parameterTypes);
+      block.finish(Return(block.emit(DirectCall(callee, block.parameters))));
+      return IrFunction(target, [block]);
+    }
+
+    final bodies = [
+      forward(root, middle),
+      forward(middle, leaf),
+      IrFunction(leaf, [last]),
+    ];
+    for (final order in [bodies, bodies.reversed.toList()]) {
+      final program = IrProgram([], order);
+      final after = _inline(program, [root]);
+      expect((after.implementationOf(root) as IrFunction).callees, isEmpty);
+      for (final input in [-7, 0, 42]) {
+        expect(_run(after, root, [input]), _run(program, root, [input]));
+      }
+      final bounded = _inline(program, [root], maxCallerGrowth: 1);
+      expect((bounded.implementationOf(root) as IrFunction).callees, {middle});
+    }
+  });
+
   test('a non-returning invocation keeps its proof after CFG expansion', () {
     final helper = FunctionTarget(_uri, 'chooseOrThrow', .integer, [.boolean]);
     final branch = Block(helper.parameterTypes),
@@ -475,10 +510,10 @@ void main() {
         ),
       ),
     );
-    final root = FunctionTarget(_uri, 'root', .integer, []);
-    final entry = Block();
+    final root = FunctionTarget(_uri, 'root', .integer, [.string]);
+    final entry = Block(root.parameterTypes);
     final called = entry.emit(DirectCall(wrapper, [const Constant.integer(7)]));
-    entry.emit(DirectCall(allocate, [const Constant.string('text')]));
+    entry.emit(DirectCall(allocate, entry.parameters));
     entry.finish(Return(entry.emit(DirectCall(leaf, [called]))));
     final program = IrProgram(
       [],
@@ -500,7 +535,7 @@ void main() {
       same(program.implementationOf(wrapper)),
     );
     final events = <int>[];
-    expect(_run(result, root, [], events), 8);
+    expect(_run(result, root, ['text'], events), 8);
     expect(events, [7]);
   });
 
