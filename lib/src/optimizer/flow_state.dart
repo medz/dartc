@@ -345,6 +345,7 @@ final class FlowState {
   }
 
   /// Evaluates storage operations; null leaves other operations to the solver.
+  /// [resultType] is the caller-substituted type for the current activation.
   FlowResult? transfer(
     Instruction operation,
     List<FlowValue> operands, {
@@ -352,7 +353,9 @@ final class FlowState {
     required bool repeated,
     required FlowInvoke invoke,
     required FlowCall call,
+    ValueType? resultType,
   }) {
+    resultType ??= operation.type;
     if (operands.length != operation.inputs.length) {
       throw ArgumentError('Storage transfer requires every operand.');
     }
@@ -428,7 +431,7 @@ final class FlowState {
                     memory != null &&
                     memory.contains(address.offset!, size)
                 ? memory.read(address.offset!, nativeType, layout)
-                : FlowValue.unknown(operation.type)
+                : FlowValue.unknown(resultType)
                       .withReferences([address.reference]),
           );
         }
@@ -436,8 +439,7 @@ final class FlowState {
             input.unknownTypes.isNotEmpty ||
             input.constants.isNotEmpty) {
           value = value.join(
-            FlowValue.unknown(operation.type)
-                .withReferences([input.references]),
+            FlowValue.unknown(resultType).withReferences([input.references]),
           );
         }
         return _withEffects(_normal(value, copy()), const {
@@ -580,7 +582,7 @@ final class FlowState {
         return _readObjects(
           operands.single,
           _cell,
-          operation.type,
+          resultType,
           invoke: invoke,
           call: call,
         );
@@ -588,7 +590,7 @@ final class FlowState {
         return _readObjects(
           operands.single,
           field,
-          operation.type,
+          resultType,
           invoke: invoke,
           call: call,
         );

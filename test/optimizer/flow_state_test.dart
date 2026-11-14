@@ -11,6 +11,33 @@ const _one = Constant.integer(1);
 const _two = Constant.integer(2);
 
 void main() {
+  test('unknown storage reads keep the activated generic result type', () {
+    final t = TypeParameterType('T')
+      ..initializeBound(ValueType.object.nullable);
+    final box = ClassType(_uri, 'Box', typeParameters: [t]);
+    final field = InstanceField(box, 'value', t);
+    final block = Block([box, CellType(t)]);
+    final state = FlowState(
+      IrProgram([
+        IrClass(box, [field]),
+      ], []),
+    );
+    for (final (read, receiver) in [
+      (LoadField(field, block.parameters[0]), box.instantiate([.integer])),
+      (ReadCell(block.parameters[1]), CellType(.integer)),
+    ]) {
+      expect(read.type, t);
+      final result = _step(
+        state,
+        read,
+        operands: [FlowValue.unknown(receiver)],
+        resultType: .integer,
+      );
+      expect(result.value.unknownTypes, {ValueType.integer});
+      expect(result.normal, isNotNull);
+    }
+  });
+
   test('a write before the first read replaces a lazy initializer', () {
     final type = FunctionType(.integer, []);
     final dead = FunctionTarget(_uri, 'dead', type, []);
@@ -909,12 +936,14 @@ FlowResult _step(
   bool repeated = false,
   FlowInvoke? invoke,
   FlowCall? call,
+  ValueType? resultType,
 }) => state.transfer(
   instruction,
   operands ??
       instruction.inputs.map((v) => FlowValue.constant(v as Constant)).toList(),
   allocate: (site) => FlowObject(site, _activation),
   repeated: repeated,
+  resultType: resultType,
   invoke:
       invoke ?? (_, _, _) => throw StateError('Unexpected initializer call'),
   call: call ?? (_, _, _) => throw StateError('Unexpected closure call'),
