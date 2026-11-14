@@ -217,6 +217,49 @@ final class _ProcessNamespace() extends _Namespace;
 @patch
 class _Directory {
   @patch
+  static String _systemTemp(_Namespace namespace) {
+    final storage = _ioMalloc(7);
+    if (storage == ffi.nullptr) throw const OutOfMemoryError();
+    try {
+      final name = storage.asTypedList(7);
+      for (final variable in ['TMPDIR', 'TMP']) {
+        name.setAll(0, '$variable\u0000'.codeUnits);
+        final value = _ioGetenv(storage);
+        if (value != ffi.nullptr) {
+          final path = _ioString(value);
+          return path.length > 1 && path.endsWith('/')
+              ? path.substring(0, path.length - 1)
+              : path;
+        }
+      }
+      return '/tmp';
+    } finally {
+      _ioFree(storage);
+    }
+  }
+
+  @patch
+  static _createTemp(_Namespace namespace, Uint8List rawPath) {
+    final length = rawPath.indexOf(0);
+    final path = _ioMalloc(length + 7);
+    if (path == ffi.nullptr) throw const OutOfMemoryError();
+    try {
+      final buffer = path.asTypedList(length + 7);
+      buffer.setRange(0, length, rawPath);
+      final error = _errnoLocation();
+      while (true) {
+        buffer.setAll(length, 'XXXXXX\u0000'.codeUnits);
+        final result = _ioMkdtemp(path);
+        if (result != ffi.nullptr) return _ioString(result);
+        final code = error.value;
+        if (code != 4) return _ioError(code); // Retry EINTR on POSIX targets.
+      }
+    } finally {
+      _ioFree(path);
+    }
+  }
+
+  @patch
   static _current(_Namespace namespace) {
     final error = _errnoLocation();
     final path = _ioGetcwd(ffi.nullptr, 0);
@@ -324,3 +367,15 @@ external ffi.Pointer<ffi.Uint8> _ioRealpath(
   ffi.Pointer<ffi.Uint8> path,
   ffi.Pointer<ffi.Uint8> buffer,
 );
+
+@SystemNative()
+@ffi.Native<ffi.Pointer<ffi.Uint8> Function(ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'getenv',
+)
+external ffi.Pointer<ffi.Uint8> _ioGetenv(ffi.Pointer<ffi.Uint8> name);
+
+@SystemNative()
+@ffi.Native<ffi.Pointer<ffi.Uint8> Function(ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'mkdtemp',
+)
+external ffi.Pointer<ffi.Uint8> _ioMkdtemp(ffi.Pointer<ffi.Uint8> template);

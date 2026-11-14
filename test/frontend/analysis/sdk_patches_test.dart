@@ -178,6 +178,8 @@ void main() {
         for (final member in [
           directory.getGetter('current')!,
           directory.getSetter('current')!,
+          directory.getGetter('systemTemp')!,
+          directory.getMethod('createTempSync')!,
         ]) {
           expect(
             io.getFragmentDeclaration(member.fragments.last)!.resolvedUnit!.uri,
