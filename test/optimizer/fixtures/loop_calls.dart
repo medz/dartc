@@ -49,3 +49,33 @@ int recursiveStored(int count) {
   final nested = recursiveStored(count - 1);
   return saved.value + nested;
 }
+
+int pairedFactories(int count) {
+  Link? left, right;
+  for (var index = 0; index < count; index++) {
+    left = append(left, index);
+    right = append(right, index + 100);
+  }
+  var sum = 0;
+  while (left != null && right != null) {
+    sum += right.value - left.value;
+    left = left.previous;
+    right = right.previous;
+  }
+  return sum;
+}
+
+T invoke<T>(T Function() action) => action();
+
+int nestedCallbacks(int value) => invoke(() => invoke(() => value + 1));
+
+int recursiveCallback(int count) =>
+    count <= 0 ? 0 : invoke(() => recursiveCallback(count - 1)) + 1;
+
+int nestedThrow(int value) => invoke(() {
+  try {
+    return invoke<int>(() => throw value);
+  } on int catch (error) {
+    return error + 2;
+  }
+});

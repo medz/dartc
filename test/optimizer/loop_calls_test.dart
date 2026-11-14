@@ -13,12 +13,30 @@ void main() {
         .use((input) async => (await Lowering().lower(input)).program);
   });
 
+  test('finite known callbacks have no recursion or execution obligation', () {
+    final function = program.functions.singleWhere(
+      (body) => body.target.name == 'nestedCallbacks',
+    );
+    final facts = ProgramFlow(program, [
+      (target: function.target, arguments: [FlowValue.unknown(.integer)]),
+    ]).facts;
+    final call = function.blocks
+        .expand((block) => block.instructions)
+        .whereType<DirectCall>()
+        .single;
+    expect(facts.canDiscard(call), isTrue);
+    expect(facts.exitsOf(call), (normal: true, exceptional: false));
+  });
+
   for (final (name, evaluate) in <(String, int Function(int))>[
     ('factoryLoop', source.factoryLoop),
     ('previousIteration', source.previousIteration),
     ('preservedCaller', source.preservedCaller),
     ('chainSum', source.chainSum),
     ('recursiveStored', source.recursiveStored),
+    ('pairedFactories', source.pairedFactories),
+    ('nestedCallbacks', source.nestedCallbacks),
+    ('recursiveCallback', source.recursiveCallback),
   ]) {
     test('source loop retains $name for runtime input', () {
       final function = program.functions.singleWhere(
@@ -42,6 +60,24 @@ void main() {
           IrInterpreter(facts.program, {}).run(rewritten, [count]),
           evaluate(count),
           reason: '$name($count)',
+        );
+      }
+      if (name == 'nestedCallbacks') {
+        expect(
+          rewritten.blocks
+              .expand(
+                (block) => [
+                  ...block.instructions,
+                  if (block.end case Invoke(:final operation)) operation,
+                ],
+              )
+              .where(
+                (operation) =>
+                    operation is FunctionCall ||
+                    operation is DirectCall ||
+                    operation is MakeClosure,
+              ),
+          isEmpty,
         );
       }
     });

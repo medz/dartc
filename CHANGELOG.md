@@ -2,6 +2,8 @@
 
 - Join changing invocation inputs within their call site so factories in loops converge without merging independent callers. Expire stored SSA equalities when control flow rebinds their definitions, preserving values saved by earlier loop iterations and recursive calls.
 
+- Distinguish finite calls through different known callback declarations from recursive cycles, while summarizing recursion through the same callback independently of changing captures.
+
 - Preserve integer bounds on executable branch paths and widen loop state only when bounds expand, retaining overflow and arithmetic exceptions. Exclude unrelated concrete receivers from generic member calls and analyze constant lists through their declared object storage.
 
 - Track actual function and object values in traced inline payloads through overwrites, copies, aliases and call summaries. Promote proven payload reads to SSA values and remove unused storage while preserving escaped references and raw memory invalidation. Unobserved intermediate lists and pure initialization of mutable or final bindings disappear after their stored values are propagated, while observable initialization effects and timing remain. Simple synchronous `runZoned` wrappers reduce to their callback computation without Zone or closure storage. Local catch handlers no longer force unobserved exception fields to remain; reads and rethrows still preserve their payload.

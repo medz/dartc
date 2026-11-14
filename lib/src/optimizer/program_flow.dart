@@ -314,7 +314,7 @@ final class ProgramFlow(
         effects: effects,
       );
     }
-    final path = _recursivePath(caller, target);
+    final path = _recursivePath(caller, target, arguments);
     final site = _callSites.putIfAbsent((
       caller,
       operation,
@@ -457,12 +457,31 @@ final class ProgramFlow(
         : invoked;
   }
 
-  List<_Activation> _recursivePath(_Activation caller, FunctionTarget target) {
+  List<_Activation> _recursivePath(
+    _Activation caller,
+    FunctionTarget target,
+    List<FlowValue> arguments,
+  ) {
+    bool matches(_Activation candidate) {
+      if (candidate.body.target != target) return false;
+      // Distinct callbacks can re-enter the same helper without forming a cycle.
+      for (final (index, argument) in arguments.indexed) {
+        final incoming = _callableOrigins(argument);
+        final existing = _callableOrigins(candidate.arguments[index]);
+        if (incoming != null &&
+            existing != null &&
+            !incoming.any(existing.contains)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
     final child = <_Activation, _Activation?>{caller: null};
     final pending = [caller];
     for (var i = 0; i < pending.length; i++) {
       final item = pending[i];
-      if (item.body.target == target) {
+      if (matches(item)) {
         final path = <_Activation>[];
         for (
           _Activation? current = item;
@@ -2688,6 +2707,23 @@ bool _equivalent(FlowValue left, FlowValue right) =>
     (left.constant != null &&
         right.constant != null &&
         left.constant!.structuralKey == right.constant!.structuralKey);
+
+Set<Object>? _callableOrigins(FlowValue value) {
+  if (value.unknownTypes.isNotEmpty || value.addresses.isNotEmpty) return null;
+  final origins = <Object>{};
+  for (final constant in value.constants) {
+    if (constant is! FunctionConstant) return null;
+    origins.add(constant.target.implementation);
+  }
+  for (final object in value.objects) {
+    if (object.type is! FunctionType) return null;
+    origins.add(switch (object.site) {
+      MakeClosure(:final target) => target,
+      final site => site,
+    });
+  }
+  return origins.isEmpty ? null : origins;
+}
 
 final class _Activation(final IrCallable body) {
   late final dominance = ValueDominance(body as IrFunction);
