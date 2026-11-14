@@ -30,7 +30,6 @@ final class HeapPlan({final HeapRuntime? runtime}) {
   FunctionTarget get release => _runtime.release;
   FunctionTarget get isOutOfMemory => _runtime.isOutOfMemory;
   FunctionTarget get runEvents => _runtime.runEvents;
-  FunctionTarget get eventAccess => _runtime.eventAccess;
   HeapRuntime get _runtime =>
       runtime ??
       (throw ArgumentError(

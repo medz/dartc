@@ -163,7 +163,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       isOutOfMemory = annotations.entries[RuntimeRole.isOutOfMemory],
       release = annotations.entries[RuntimeRole.release],
       runEvents = annotations.entries[RuntimeRole.runEvents],
-      eventAccess = annotations.entries[RuntimeRole.events],
       copyBytes = annotations.entries[RuntimeRole.copyBytes],
       captureStackTrace = annotations.entries[RuntimeRole.captureStackTrace],
       recordError = annotations.entries[RuntimeRole.recordError];
@@ -171,7 +170,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       isOutOfMemory == null ||
       release == null ||
       runEvents == null ||
-      eventAccess == null ||
       copyBytes == null ||
       captureStackTrace == null ||
       recordError == null) {
@@ -243,7 +241,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     isOutOfMemory: isOutOfMemory,
     release: release,
     runEvents: runEvents,
-    eventAccess: eventAccess,
     processExitCode: annotations.entries[RuntimeRole.processExitCode],
     copyBytes: copyBytes,
     captureStackTrace: captureStackTrace,

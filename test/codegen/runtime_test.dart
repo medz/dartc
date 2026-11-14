@@ -39,7 +39,6 @@ void main() {
     isOutOfMemory: heapRuntime.isOutOfMemory,
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
-    eventAccess: heapRuntime.eventAccess,
     processExitCode: processStatus?.target,
     copyBytes: heapRuntime.copyBytes,
     captureStackTrace: heapRuntime.captureStackTrace,
@@ -93,7 +92,6 @@ void main() {
         isOutOfMemory: heapRuntime.isOutOfMemory,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
-        eventAccess: heapRuntime.eventAccess,
         copyBytes: heapRuntime.copyBytes,
         captureStackTrace: heapRuntime.captureStackTrace,
         recordError: heapRuntime.recordError,
@@ -109,7 +107,6 @@ void main() {
         isOutOfMemory: heapRuntime.isOutOfMemory,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
-        eventAccess: heapRuntime.eventAccess,
         copyBytes: heapRuntime.copyBytes,
         captureStackTrace: heapRuntime.captureStackTrace,
         recordError: heapRuntime.recordError,
@@ -131,7 +128,6 @@ void main() {
         isOutOfMemory: heapRuntime.isOutOfMemory,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
-        eventAccess: heapRuntime.eventAccess,
         copyBytes: heapRuntime.copyBytes,
         captureStackTrace: heapRuntime.captureStackTrace,
         recordError: heapRuntime.recordError,
@@ -271,31 +267,42 @@ void main() {
       hasLength(1),
     );
   });
-  test('unmanaged programs do not retain runtime allocation or scheduling', () {
-    for (final managed in [false, true]) {
-      final program = IrProgram([], [mainBody(managed)]);
-      final module = generator.generate(
-        Compiler(generator.target)
-            .prepare(program, roots: [entry], runtime: heapRuntime),
-      );
-      for (final target in [heapRuntime.allocate, heapRuntime.release]) {
-        expect(module.symbols.any((s) => s.name == target.name), managed);
-      }
-      expect(
-        module.symbols.any((s) => s.name == heapRuntime.runEvents.name),
-        isFalse,
-      );
-      expect(module.imports, isNot(contains('.dartc.clock')));
-      if (managed) {
+  test(
+    'programs without scheduling retain only the managed lifecycle hook',
+    () {
+      final eventLoopRun = heapRuntime.program.functions
+          .singleWhere(
+            (body) =>
+                body.target.owner?.name == 'EventLoop' &&
+                body.target.name == 'run',
+          )
+          .target;
+      for (final managed in [false, true]) {
+        final program = IrProgram([], [mainBody(managed)]);
+        final prepared = Compiler(generator.target)
+            .prepare(program, roots: [entry], runtime: heapRuntime);
+        final module = generator.generate(prepared);
+        expect(prepared.definitions, isNot(contains(eventLoopRun)));
+        for (final target in [heapRuntime.allocate, heapRuntime.release]) {
+          expect(module.symbols.any((s) => s.name == target.name), managed);
+        }
         expect(
-          () => generator.generate(
-            Compiler(generator.target).prepare(program, roots: [entry]),
-          ),
-          throwsArgumentError,
+          module.symbols.any((s) => s.name == heapRuntime.runEvents.name),
+          managed,
         );
+        expect(module.imports, isNot(contains('.dartc.clock')));
+        expect(module.imports, isNot(contains('.dartc.sleep')));
+        if (managed) {
+          expect(
+            () => generator.generate(
+              Compiler(generator.target).prepare(program, roots: [entry]),
+            ),
+            throwsArgumentError,
+          );
+        }
       }
-    }
-  });
+    },
+  );
 
   test(
     'ordinary pointer helpers cross branches and return in critical closures',

@@ -13,7 +13,7 @@ final class HeapEntry<R extends Object>(
   final FunctionEmitter<R> emitter,
   final FunctionTarget releaseFunction,
   final FunctionTarget isOutOfMemory,
-  final FunctionTarget? runEvents,
+  final FunctionTarget runEvents,
   final void Function(Fixup) roots,
   final void Function(Fixup) error,
   final void Function(Fixup) uncaught,
@@ -150,37 +150,35 @@ final class HeapEntry<R extends Object>(
               .resultRegister!;
     if (result != null) emitter.storeStack(result, frame.localOffset + _result);
     emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
-    if (runEvents case final events?) {
-      final idle = emitter.label(), finished = emitter.label();
-      emitter.jumpIfZero(emitter.failureRegister, idle);
+    final idle = emitter.label(), finished = emitter.label();
+    emitter.jumpIfZero(emitter.failureRegister, idle);
+    emitter.jump(finished);
+    emitter.bind(idle);
+    if (persistent) {
+      emitter.loadStack(
+        emitter.failureRegister,
+        frame.localOffset + RuntimeContext.previousEntry,
+      );
+      final outermost = emitter.label();
+      emitter.jumpIfZero(emitter.failureRegister, outermost);
       emitter.jump(finished);
-      emitter.bind(idle);
-      if (persistent) {
-        emitter.loadStack(
-          emitter.failureRegister,
-          frame.localOffset + RuntimeContext.previousEntry,
-        );
-        final outermost = emitter.label();
-        emitter.jumpIfZero(emitter.failureRegister, outermost);
-        emitter.jump(finished);
-        emitter.bind(outermost);
-      }
-      final arguments = emitter.convention
-          .classify(NativeSignature(Void, [Int64, Bool]))
-          .parameters;
-      emitter.move(
-        (arguments[0] as RegisterArgument<R>).register,
-        emitter.heapRegister,
-      );
-      emitter.loadImmediate(
-        (arguments[1] as RegisterArgument<R>).register,
-        release ? 1 : 0,
-      );
-      call(emitter.call(), events);
-      safepoint(emitter.position);
-      emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
-      emitter.bind(finished);
+      emitter.bind(outermost);
     }
+    final arguments = emitter.convention
+        .classify(NativeSignature(Void, [Int64, Bool]))
+        .parameters;
+    emitter.move(
+      (arguments[0] as RegisterArgument<R>).register,
+      emitter.heapRegister,
+    );
+    emitter.loadImmediate(
+      (arguments[1] as RegisterArgument<R>).register,
+      release ? 1 : 0,
+    );
+    call(emitter.call(), runEvents);
+    safepoint(emitter.position);
+    emitter.storeStack(emitter.failureRegister, frame.localOffset + _failure);
+    emitter.bind(finished);
     if (processExitCode != null) {
       final ready = emitter.label(), finished = emitter.label();
       emitter.loadStack(emitter.failureRegister, frame.localOffset + _failure);

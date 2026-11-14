@@ -33,7 +33,6 @@ final class HeapRuntime(
   required final FunctionTarget isOutOfMemory,
   required final FunctionTarget release,
   required final FunctionTarget runEvents,
-  required final FunctionTarget eventAccess,
   final FunctionTarget? processExitCode,
   required final FunctionTarget copyBytes,
   required final FunctionTarget captureStackTrace,
@@ -89,7 +88,6 @@ final class HeapRuntime(
       (isOutOfMemory, FunctionType(.boolean, [.object])),
       (release, FunctionType(.voidType, [.integer])),
       (runEvents, FunctionType(.voidType, [.integer, .boolean])),
-      (eventAccess, FunctionType(eventAccess.returnType, [])),
       if (processExitCode case final target?)
         (target, FunctionType(.integer, [])),
       (

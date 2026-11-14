@@ -23,6 +23,7 @@ final class Allocator(
   int _identityHash = 0;
   int _allocatedBytes = 0, _collectionBudget = 65536;
   int _externalAtCollection = 0;
+  void Function(EventLoop, bool)? _drainEvents;
 
   void _collect() {
     heap.collect();
@@ -157,9 +158,16 @@ Allocator _allocator(int context) {
   return allocator;
 }
 
-/// Selects event delivery only for programs that use scheduling facilities.
-@RuntimeEntry(.events)
-EventLoop events() => _allocator(Memory.context()).events;
+/// Registers event delivery when scheduling facilities are first used.
+EventLoop events() {
+  final allocator = _allocator(Memory.context());
+  // Control storage does not trace managed closures; this tear-off is constant.
+  allocator._drainEvents = _drain;
+  return allocator.events;
+}
+
+void _drain(EventLoop loop, bool waitForCallbacks) =>
+    loop.run(waitForCallbacks: waitForCallbacks);
 
 /// Runs pending work while the entry frame and heap are still available.
 @RuntimeEntry(.runEvents)
@@ -168,7 +176,7 @@ void runEvents(int context, bool waitForCallbacks) {
     Pointer<Int64>.fromAddress(context + RuntimeContext.heap).value,
   );
   if (allocator != null) {
-    allocator.events.run(waitForCallbacks: waitForCallbacks);
+    allocator._drainEvents?.call(allocator.events, waitForCallbacks);
   }
 }
 

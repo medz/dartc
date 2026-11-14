@@ -290,8 +290,12 @@ final class ProgramSelection(
       }
     }
     if (managed) {
-      implicitCalls.addAll([heap.allocate, heap.release, heap.isOutOfMemory]);
-      if (calls.contains(heap.eventAccess)) implicitCalls.add(heap.runEvents);
+      implicitCalls.addAll([
+        heap.allocate,
+        heap.release,
+        heap.isOutOfMemory,
+        heap.runEvents,
+      ]);
     }
     if (capture) implicitCalls.add(heap.runtime!.captureStackTrace);
     calls.addAll(implicitCalls);

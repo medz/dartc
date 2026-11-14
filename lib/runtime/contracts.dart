@@ -10,7 +10,6 @@ enum RuntimeRole() {
   isOutOfMemory,
   release,
   runEvents,
-  events,
   copyBytes,
   invocation,
   dispatchFailure,

@@ -45,6 +45,8 @@ Compiler 为固定 SDK 的原生公开库提供值为 `true` 的 `dart.library.<
 
 `Stream` 和 `StreamController` 的普通 Dart 正文已接入原生执行，支持单订阅、同步与异步广播、asBroadcastStream、暂停/恢复、取消及错误事件。流变换复用 SDK 的 map/where、asyncMap/asyncExpand 和 StreamTransformer；async* 与 await for 共享同一订阅和调度路径，取消会等待异步清理，回调与生成器在监听 Zone 中执行。见[原生流验证](../test/compiler/async_generators_test.dart)。
 
+调度设施通过普通 Dart 状态注册事件处理；内联辅助函数后仍保留事件与 keepIsolateAlive 生命周期，无调度程序不保留事件循环及时钟、等待依赖。
+
 动态库在最外层同步 Dart 入口返回前处理待执行事件。重入的 FFI 入口不启动第二个事件循环；持续活动的周期定时器会使这次调用保持运行。卸载库只释放存储，不启动新回调。外部线程和异步宿主驱动入口尚未接通。
 
 ## 日期时间
