@@ -37,8 +37,9 @@ void main() {
     ('pairedFactories', source.pairedFactories),
     ('nestedCallbacks', source.nestedCallbacks),
     ('recursiveCallback', source.recursiveCallback),
+    ('nestedThrow', source.nestedThrow),
   ]) {
-    test('source loop retains $name for runtime input', () {
+    test('source execution retains $name for runtime input', () {
       final function = program.functions.singleWhere(
         (body) => body.target.name == name,
       );
@@ -62,7 +63,7 @@ void main() {
           reason: '$name($count)',
         );
       }
-      if (name == 'nestedCallbacks') {
+      if (name == 'nestedCallbacks' || name == 'nestedThrow') {
         expect(
           rewritten.blocks
               .expand(
