@@ -303,50 +303,71 @@ final class FlowValue {
     );
   }
 
-  /// Filters values by a runtime type check without losing successful aliases.
-  ({FlowValue value, bool mayFail}) check(ValueType type) {
+  /// Filters a runtime type test, retaining aliases on the selected outcome.
+  /// The `mayFail` result reports whether values can take the opposite outcome.
+  ({FlowValue value, bool mayFail}) check(
+    ValueType type, {
+    bool negated = false,
+  }) {
     var checked = const FlowValue.bottom();
     var mayFail = false;
+    bool retain(ValueType actual) {
+      final bool? matches = type.accepts(actual)
+          ? true
+          : type == ValueType.never ||
+                actual == ValueType.nullType && !type.mayBeNull
+          ? false
+          : type.freeTypeParameters.isNotEmpty ||
+                actual.freeTypeParameters.isNotEmpty
+          ? null
+          : false;
+      mayFail |= matches == null || matches == negated;
+      return matches == null || matches != negated;
+    }
+
     for (final constant in constants) {
-      if (type.freeTypeParameters.isNotEmpty) {
-        mayFail = true;
-        checked = checked.join(.constant(constant));
-      } else if (type.accepts(constant.type)) {
-        checked = checked.join(.constant(constant));
-      } else {
-        mayFail = true;
-      }
+      if (retain(constant.type)) checked = checked.join(.constant(constant));
     }
     for (final object in objects) {
-      if (type.freeTypeParameters.isNotEmpty ||
-          object.type.freeTypeParameters.isNotEmpty) {
-        mayFail = true;
-        checked = checked.join(.object(object));
-      } else if (type.accepts(object.type)) {
-        checked = checked.join(.object(object));
-      } else {
-        mayFail = true;
-      }
+      if (retain(object.type)) checked = checked.join(.object(object));
     }
     for (final address in addresses) {
-      if (type.freeTypeParameters.isNotEmpty ||
-          address.type.freeTypeParameters.isNotEmpty) {
-        mayFail = true;
-        checked = checked.join(.address(address));
-      } else if (type.accepts(address.type)) {
-        checked = checked.join(.address(address));
-      } else {
-        mayFail = true;
-      }
+      if (retain(address.type)) checked = checked.join(.address(address));
     }
     for (final bound in unknownTypes) {
-      if (type.freeTypeParameters.isEmpty &&
-          bound.freeTypeParameters.isEmpty &&
-          type.accepts(bound)) {
-        checked = checked.join(.unknown(bound));
+      if (bound == ValueType.never) continue;
+      if (bound == ValueType.nullType) {
+        if (retain(bound)) {
+          checked = checked.join(.constant(const Constant.nullValue()));
+        }
+        continue;
+      }
+      if (type.accepts(bound)) {
+        mayFail |= negated;
+        if (!negated) checked = checked.join(.unknown(bound));
+        continue;
+      }
+      if (type == ValueType.never) {
+        mayFail |= !negated;
+        if (negated) checked = checked.join(.unknown(bound));
+        continue;
+      }
+      mayFail = true;
+      if (!negated) {
+        checked = checked.join(
+          .unknown(type.accepts(bound.nonNullable) ? bound.nonNullable : type),
+        );
+      } else if (type.accepts(ValueType.nullType)) {
+        final narrowed = bound.nonNullable;
+        checked = checked.join(
+          .unknown(narrowed.mayBeNull ? ValueType.object : narrowed),
+        );
+      } else if (type.accepts(bound.nonNullable)) {
+        if (bound.mayBeNull) {
+          checked = checked.join(.constant(const Constant.nullValue()));
+        }
       } else {
-        mayFail = true;
-        checked = checked.join(.unknown(type));
+        checked = checked.join(.unknown(bound));
       }
     }
     return (

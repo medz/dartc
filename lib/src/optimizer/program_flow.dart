@@ -484,8 +484,13 @@ final class ProgramFlow(
       switch (value) {
         case Constant():
           return FlowValue.constant(value);
-        case TestedValue(:final test):
-          return read(test.operand);
+        case TestedValue(:final test, :final outcome):
+          return read(test.operand)
+              .check(
+                test.testedType.substitute(activation.environment),
+                negated: outcome == test.negated,
+              )
+              .value;
         case UnwindValue():
           return FlowValue.unknown(value.type);
         default:
@@ -1052,9 +1057,11 @@ final class ProgramFlow(
           normal: state.copy(),
           exceptional: operation.mayThrow ? state.copy() : null,
         );
-      case TypeCast():
+      case TypeCast() || NullCheck():
         final checked = inputs.single.check(
-          operation.type.substitute(activation.environment),
+          operation is NullCheck
+              ? ValueType.object
+              : operation.type.substitute(activation.environment),
         );
         activation.operationEffects[operation] = {
           if (checked.mayFail) Effect.mayThrow,
@@ -1065,36 +1072,13 @@ final class ProgramFlow(
           exceptional: checked.mayFail ? state.copy() : null,
         );
       case TypeView() || UncheckedCast():
-        if (inputs.single.constant != null) {
-          activation.operationEffects[operation] = const {};
-          return FlowResult(
-            value: inputs.single,
-            normal: state.copy(),
-            exceptional: null,
-          );
-        }
-        activation.operationEffects[operation] = operation.effects;
+        final value = inputs.single
+            .check(operation.type.substitute(activation.environment))
+            .value;
+        activation.operationEffects[operation] = const {};
         return FlowResult(
-          value: inputs.single,
-          normal: state.copy(),
-          exceptional: operation.mayThrow ? state.copy() : null,
-        );
-      case NullCheck():
-        final known = inputs.single.constant;
-        activation.operationEffects[operation] = operation.effects;
-        if (known case ScalarConstant(value: null)) {
-          return FlowResult(
-            value: const FlowValue.bottom(),
-            normal: null,
-            exceptional: state.copy(),
-          );
-        }
-        return FlowResult(
-          value: inputs.single,
-          normal: state.copy(),
-          exceptional: inputs.single.types.every((type) => !type.mayBeNull)
-              ? null
-              : state.copy(),
+          value: value,
+          normal: value.isBottom ? null : state.copy(),
         );
       default:
         final folded = _fold(operation, inputs);
@@ -2205,6 +2189,24 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     return [activation];
   }
 
+  /// Whether a summary allocation is the other allocation's renamed instance.
+  /// Sibling call instances stay distinct; this relation only serves cross-body demand.
+  bool mayAliasAcrossSummaries(FlowObject left, FlowObject right) {
+    _check();
+    bool descendsFrom(FlowObject value, FlowObject ancestor) {
+      while (value != ancestor) {
+        if (value.activation case _AllocationContext(:final original)) {
+          value = original;
+        } else {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    return descendsFrom(left, right) || descendsFrom(right, left);
+  }
+
   /// Whether a value is queryable in this graph, including graph-independent constants.
   bool owns(Value value) {
     _check();
@@ -2241,8 +2243,24 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     _check();
     if (value is Constant) return FlowValue.constant(value);
     if (value is TestedValue) {
-      _at(value.test, activation);
-      return valueOf(value.test.operand, activation: activation);
+      var result = const FlowValue.bottom();
+      for (final item in _at(value.test, activation)) {
+        final condition = item.values[value.test];
+        if (condition == null || condition.isBottom) continue;
+        if (condition.constant case ScalarConstant(value: final bool outcome)
+            when outcome != value.outcome) {
+          continue;
+        }
+        result = result.join(
+          valueOf(value.test.operand, activation: item)
+              .check(
+                value.test.testedType.substitute(item.environment),
+                negated: value.outcome == value.test.negated,
+              )
+              .value,
+        );
+      }
+      return result;
     }
     var result = const FlowValue.bottom();
     for (final item in _at(value, activation)) {
@@ -2256,8 +2274,13 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     _check();
     if (value is Constant) return Set.unmodifiable({value});
     if (value is TestedValue) {
-      _at(value.test, activation);
-      return equivalentsOf(value.test.operand, activation: activation);
+      Set<Value>? common;
+      for (final item in _at(value.test, activation)) {
+        if (valueOf(value, activation: item).isBottom) continue;
+        final local = equivalentsOf(value.test.operand, activation: item);
+        common = common == null ? local : common.intersection(local);
+      }
+      return Set.unmodifiable(common ?? const <Value>{});
     }
     Set<Value>? common;
     for (final item in _at(value, activation)) {

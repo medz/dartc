@@ -321,6 +321,13 @@ void main() {
     final facts = _flow(program, main).facts;
     expect(IrInterpreter(program, {}).run(main, []), 0);
     expect(facts.activationsOf(factory), hasLength(1));
+    final original = facts.returnedBy(factory).objects.single;
+    final firstObject = facts.valueOf(first).objects.single;
+    final secondObject = facts.valueOf(second).objects.single;
+    expect(facts.mayAliasAcrossSummaries(original, firstObject), isTrue);
+    expect(facts.mayAliasAcrossSummaries(secondObject, original), isTrue);
+    expect(facts.mayAliasAcrossSummaries(firstObject, firstObject), isTrue);
+    expect(facts.mayAliasAcrossSummaries(firstObject, secondObject), isFalse);
     expect(
       facts.valueOf(first).objects.single,
       isNot(facts.valueOf(second).objects.single),

@@ -220,6 +220,31 @@ void main() {
     expect(optional.check(.integer).mayFail, isTrue);
   });
 
+  test(
+    'checked bounds retain non-null precision and generic null exclusions',
+    () {
+      final nullable = FlowValue.unknown(ValueType.integer.nullable);
+      expect(nullable.check(.object).value.unknownTypes, {ValueType.integer});
+      expect(nullable.check(.nullType, negated: true).value.unknownTypes, {
+        ValueType.integer,
+      });
+      expect(
+        nullable.check(.integer, negated: true).value.constant?.structuralKey,
+        const Constant.nullValue().structuralKey,
+      );
+      final parameter = TypeParameterType('T')
+        ..initializeBound(.object.nullable);
+      final nullValue = FlowValue.constant(const Constant.nullValue());
+      expect(nullValue.check(parameter.nonNullable).value.isBottom, isTrue);
+      expect(
+        nullValue.check(parameter.nonNullable, negated: true).value,
+        nullValue,
+      );
+      expect(nullable.check(.never).value.isBottom, isTrue);
+      expect(nullable.check(.never, negated: true).value, nullable);
+    },
+  );
+
   test('floating constants retain signed zero and stable NaN identity', () {
     final positive = FlowValue.constant(const Constant.floating(0.0));
     final negative = FlowValue.constant(const Constant.floating(-0.0));
