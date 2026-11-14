@@ -1,6 +1,8 @@
 import 'package:dartc/ir.dart';
 
+import 'flow_memory.dart';
 import 'flow_value.dart';
+import 'memory_layout.dart';
 import 'state_map.dart';
 
 /// Normal and exceptional state, including the actual thrown values.
@@ -50,13 +52,16 @@ typedef FlowCall = FlowResult Function(
 final class FlowState {
   /// The immutable semantic graph whose declarations identify slots.
   final IrProgram program;
+
+  /// Explicit output storage; absent layouts never imply host memory facts.
+  final FlowMemoryLayout? memoryLayout;
   final Set<GlobalVariable> _declaredGlobals;
   final Map<ClassType, IrClass> _classes;
   StateMap<GlobalVariable, _Slot> _globals;
   StateMap<FlowObject, _ObjectState> _objects;
   FlowValue _escaped;
 
-  new(this.program)
+  new(this.program, {this.memoryLayout})
     : _declaredGlobals = Set.unmodifiable(program.globals),
       _classes = Map.unmodifiable({for (final c in program.classes) c.type: c}),
       _globals = const .empty(),
@@ -65,6 +70,7 @@ final class FlowState {
 
   new _(
     this.program,
+    this.memoryLayout,
     this._declaredGlobals,
     this._classes,
     this._globals,
@@ -75,6 +81,7 @@ final class FlowState {
   /// Shares immutable storage versions; taking a point snapshot is O(1).
   FlowState copy() => FlowState._(
     program,
+    memoryLayout,
     _declaredGlobals,
     _classes,
     _globals,
@@ -84,8 +91,11 @@ final class FlowState {
 
   /// Adds an executable alternative, skipping unchanged storage subtrees.
   bool join(FlowState incoming) {
-    if (!identical(program, incoming.program)) {
-      throw ArgumentError('Cannot join storage from a different IR graph.');
+    if (!identical(program, incoming.program) ||
+        !identical(memoryLayout, incoming.memoryLayout)) {
+      throw ArgumentError(
+        'Cannot join storage from a different graph or target layout.',
+      );
     }
     final globals = _globals.merge(incoming._globals, (global, left, right) {
       final value = (left ?? _initial(global)).join(right ?? _initial(global));
@@ -120,7 +130,8 @@ final class FlowState {
       : const _Slot.unbound();
 
   /// An immutable key for the current version, safe after this wrapper changes.
-  Object get structuralKey => (program, _globals, _objects, _escaped);
+  Object get structuralKey =>
+      (program, memoryLayout, _globals, _objects, _escaped);
 
   @override
   bool operator ==(Object other) =>
@@ -145,6 +156,7 @@ final class FlowState {
     }
     return FlowState._(
       program,
+      memoryLayout,
       _declaredGlobals,
       _classes,
       _globals,
@@ -163,8 +175,12 @@ final class FlowState {
     required FlowValue Function(FlowValue) mapValue,
   }) {
     if (!identical(program, before.program) ||
-        !identical(program, after.program)) {
-      throw ArgumentError('A call summary belongs to one immutable IR graph.');
+        !identical(program, after.program) ||
+        !identical(memoryLayout, before.memoryLayout) ||
+        !identical(memoryLayout, after.memoryLayout)) {
+      throw ArgumentError(
+        'A call summary belongs to one graph and target layout.',
+      );
     }
     final result = copy();
     for (final change in after._globals.differences(before._globals)) {
@@ -197,7 +213,11 @@ final class FlowState {
               ? null
               : List.unmodifiable(next.captures!.map(mapValue)),
           current.summary,
+          current.memory,
         );
+      }
+      if (next.memory != prior.memory) {
+        current = current.withMemory(next.memory?.map(mapValue));
       }
       result._objects = result._objects.withEntry(object, current);
     }
@@ -253,6 +273,7 @@ final class FlowState {
       if (globals)
         for (final slot in _globals.values) ...[slot.value, slot.initializer],
     ]);
+    final raw = reachableValues([for (final root in roots) root.references]);
     for (final object in reachable.objects) {
       final state = _objects[object];
       if (state == null) continue;
@@ -267,9 +288,13 @@ final class FlowState {
             : (object.type as CellType).isFinal;
         next = next.withSlot(
           key,
-          entry.value.invalidate(type, isFinal: isFinal),
+          entry.value.invalidate(
+            type,
+            isFinal: isFinal && !raw.objects.contains(object),
+          ),
         );
       }
+      next = next.withMemory(state.memory?.invalidate());
       _objects = _objects.withEntry(object, next);
     }
     if (globals) {
@@ -330,6 +355,108 @@ final class FlowState {
       throw ArgumentError('Storage transfer requires every operand.');
     }
     switch (operation) {
+      case NewPayload():
+        if (operands.single.isBottom) return _unreachable;
+        final object = allocate(operation);
+        final size = operands.single.constant;
+        final length = size is ScalarConstant && size.value is int
+            ? size.value as int
+            : null;
+        final start = memoryLayout?.objectLayout(object.type as ClassType).size;
+        final valid =
+            length != null &&
+            length >= 0 &&
+            (start == null || length <= 0x7fffffffffffffff - start);
+        final next = copy()
+          .._allocate(
+            object,
+            _ObjectState(
+              {},
+              summary: repeated,
+              memory: start == null
+                  ? null
+                  : FlowMemory(start, valid ? length : null),
+            ),
+          );
+        return FlowResult(
+          value: .object(object),
+          normal: next,
+          exceptional: valid ? null : copy(),
+          effects: const {Effect.allocates},
+        );
+      case LoadNative(:final nativeType):
+        if (operands.single.isBottom) return _unreachable;
+        var value = const FlowValue.bottom();
+        final layout = memoryLayout?.nativeLayout;
+        final size = layout?.of(nativeType).size;
+        for (final address in operands.single.addresses) {
+          final memory = address.base is FlowObject
+              ? _objects[address.base as FlowObject]?.memory
+              : null;
+          value = value.join(
+            layout != null &&
+                    size != null &&
+                    address.offset != null &&
+                    memory != null &&
+                    memory.contains(address.offset!, size)
+                ? memory.read(address.offset!, nativeType, layout)
+                : FlowValue.unknown(operation.type)
+                      .withReferences([address.reference]),
+          );
+        }
+        if (operands.single.addresses.isEmpty ||
+            operands.single.unknownTypes.isNotEmpty ||
+            operands.single.constants.isNotEmpty) {
+          value = value.join(
+            FlowValue.unknown(operation.type)
+                .withReferences([operands.single.references]),
+          );
+        }
+        return _withEffects(_normal(value, copy()), const {
+          Effect.readsStorage,
+        });
+      case StoreNative(:final nativeType):
+        if (operands.any((v) => v.isBottom)) return _unreachable;
+        final layout = memoryLayout?.nativeLayout;
+        final size = layout?.of(nativeType).size;
+        final next = _writeNative(
+          operands.first,
+          size,
+          operands.last,
+          (memory, offset) =>
+              memory.write(offset, nativeType, operands.last, layout!),
+        );
+        return _withEffects(_normal(_null, next), const {Effect.writesStorage});
+      case CopyNative(:final nativeType):
+        if (operands.any((v) => v.isBottom)) return _unreachable;
+        final size = memoryLayout?.nativeLayout.of(nativeType).size;
+        if (size == 0) return _normal(_null, copy());
+        final source = operands.last;
+        final next = _writeNative(operands.first, size, source.references, (
+          memory,
+          offset,
+        ) {
+          FlowMemory? result;
+          for (final address in source.addresses) {
+            final from = address.base is FlowObject
+                ? _objects[address.base as FlowObject]?.memory
+                : null;
+            final copied = from != null && address.offset != null
+                ? memory.copyFrom(offset, from, address.offset!, size!)
+                : memory.forget(offset, size!, retained: source.references);
+            result = result == null ? copied : result.join(copied);
+          }
+          if (result == null ||
+              source.unknownTypes.isNotEmpty ||
+              source.constants.isNotEmpty) {
+            result = memory.forget(offset, size!, retained: source.references);
+          }
+          return result;
+        });
+        return _withEffects(_normal(_null, next), const {
+          Effect.readsStorage,
+          Effect.writesStorage,
+        });
       case Construct(:final initializer):
         return construct(
           allocate(operation),
@@ -440,6 +567,87 @@ final class FlowState {
       default:
         return null;
     }
+  }
+
+  FlowState _writeNative(
+    FlowValue address,
+    int? size,
+    FlowValue stored,
+    FlowMemory Function(FlowMemory, int) write,
+  ) {
+    final next = copy();
+    final known =
+        size != null &&
+        address.addresses.isNotEmpty &&
+        address.constants.isEmpty &&
+        address.unknownTypes.isEmpty &&
+        address.addresses.every(
+          (a) =>
+              a.base is FlowObject &&
+              a.offset != null &&
+              (_objects[a.base as FlowObject]?.memory?.contains(
+                    a.offset!,
+                    size,
+                  ) ??
+                  false),
+        );
+    if (!known) {
+      // An unbounded offset can reach other allocations, not just its base.
+      next._invalidateRaw();
+      next.escape([stored]);
+      return next;
+    }
+    final strong = address.addresses.length == 1;
+    for (final pointer in address.addresses) {
+      final object = pointer.base as FlowObject;
+      final state = _objects[object]!;
+      final memory = write(state.memory!, pointer.offset!);
+      next._objects = next._objects.withEntry(
+        object,
+        next._objects[object]!.withMemory(
+          strong && !state.summary
+              ? memory
+              : next._objects[object]!.memory!.join(memory),
+        ),
+      );
+    }
+    next.escape(const []);
+    return next;
+  }
+
+  void _invalidateRaw() {
+    for (final global in _declaredGlobals) {
+      _setGlobal(
+        global,
+        (_globals[global] ?? _initial(global)).invalidate(
+          global.type,
+          isFinal: false,
+        ),
+      );
+    }
+    _objects = _objects.mapValues((object, state) {
+      final slots = state.slots.mapValues((key, slot) {
+        final type = key is InstanceField
+            ? key.typeFor(object.type as ClassType)
+            : (object.type as CellType).content;
+        return slot.invalidate(type, isFinal: false);
+      });
+      return _ObjectState._(
+        slots,
+        state.captures
+            ?.map(
+              (v) => v.join(
+                v.types.fold<FlowValue>(
+                  const .bottom(),
+                  (value, type) => value.join(FlowValue.unknown(type)),
+                ),
+              ),
+            )
+            .toList(growable: false),
+        state.summary,
+        state.memory?.invalidate(),
+      );
+    });
   }
 
   FlowResult _readObjects(
@@ -865,6 +1073,9 @@ final class FlowState {
         if (!objects.add((object, raw))) continue;
         final state = _objects[object];
         if (state == null) continue;
+        if (state.memory case final memory?) {
+          pending.add((memory.references, true));
+        }
         if (raw) {
           pending.addAll([
             for (final capture in state.captures ?? const <FlowValue>[])
@@ -990,35 +1201,43 @@ final class _ObjectState {
   final StateMap<Object, _Slot> slots;
   final List<FlowValue>? captures;
   final bool summary;
+  final FlowMemory? memory;
 
   new(
     Map<Object, _Slot> slots, {
     List<FlowValue>? captures,
     this.summary = false,
+    this.memory,
   }) : slots = StateMap.fromEntries(slots.entries),
        captures = captures == null ? null : List.unmodifiable(captures);
 
-  new _(this.slots, this.captures, this.summary);
+  new _(this.slots, this.captures, this.summary, this.memory);
 
   _ObjectState withSlot(Object key, _Slot value) {
     final next = slots.withEntry(key, value);
     return identical(next, slots)
         ? this
-        : _ObjectState._(next, captures, summary);
+        : _ObjectState._(next, captures, summary, memory);
   }
 
-  _ObjectState withFlags({bool summary = false}) =>
-      !summary || this.summary ? this : _ObjectState._(slots, captures, true);
+  _ObjectState withFlags({bool summary = false}) => !summary || this.summary
+      ? this
+      : _ObjectState._(slots, captures, true, memory);
+
+  _ObjectState withMemory(FlowMemory? value) =>
+      value == memory ? this : _ObjectState._(slots, captures, summary, value);
 
   _ObjectState map(FlowValue Function(FlowValue) transform) {
     final mappedSlots = slots.mapValues((_, value) => value.map(transform));
     final mappedCaptures = captures == null
         ? null
         : List<FlowValue>.unmodifiable(captures!.map(transform));
-    return identical(mappedSlots, slots) &&
+    final mappedMemory = memory?.map(transform);
+    return mappedMemory == memory &&
+            identical(mappedSlots, slots) &&
             _sameCaptures(mappedCaptures, captures)
         ? this
-        : _ObjectState._(mappedSlots, mappedCaptures, summary);
+        : _ObjectState._(mappedSlots, mappedCaptures, summary, mappedMemory);
   }
 
   @override
@@ -1027,6 +1246,7 @@ final class _ObjectState {
       other is _ObjectState &&
           slots == other.slots &&
           summary == other.summary &&
+          memory == other.memory &&
           _sameCaptures(captures, other.captures);
 
   @override
@@ -1035,6 +1255,7 @@ final class _ObjectState {
     captures != null,
     Object.hashAll(captures ?? const <FlowValue>[]),
     summary,
+    memory,
   );
 
   _ObjectState join(_ObjectState incoming) {
@@ -1047,8 +1268,15 @@ final class _ObjectState {
           ? left
           : left.join(right),
     );
+    final joinedMemory = memory == null
+        ? incoming.memory?.invalidate()
+        : incoming.memory == null
+        ? memory!.invalidate()
+        : memory!.join(incoming.memory!);
     var changed =
-        !identical(joinedSlots, slots) || incoming.summary && !summary;
+        joinedMemory != memory ||
+        !identical(joinedSlots, slots) ||
+        incoming.summary && !summary;
     var joinedCaptures = captures;
     if (incoming.captures case final other?) {
       if (captures == null) {
@@ -1074,6 +1302,7 @@ final class _ObjectState {
             joinedSlots,
             joinedCaptures,
             summary || incoming.summary,
+            joinedMemory,
           )
         : this;
   }

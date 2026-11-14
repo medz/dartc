@@ -1,0 +1,312 @@
+import 'dart:ffi';
+
+import 'package:dartc/abi.dart';
+import 'package:dartc/interop.dart';
+import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
+import 'package:dartc/optimizer.dart';
+import 'package:dartc/src/optimizer/flow_state.dart';
+import 'package:dartc/target.dart';
+import 'package:test/test.dart';
+
+final _type = ClassType(null, 'Bytes');
+final _program = IrProgram([IrClass(_type, [])], []);
+final _layout = _Layout();
+final _activation = Object();
+final _u8 = NativeScalarType(Uint8);
+final _u32 = NativeScalarType(Uint32);
+final _i64 = NativeScalarType(Int64);
+const _placeholder = Constant.integer(0);
+
+void main() {
+  test(
+    'zeroed payload excludes the header and requires an explicit target',
+    () {
+      final allocation = _allocate(
+        FlowState(_program, memoryLayout: _layout),
+        16,
+      );
+      final start = _layout.objectLayout(_type).size;
+      expect(
+        _load(allocation.state, allocation.address, _i64).constant,
+        isA<ScalarConstant>().having((c) => c.value, 'value', 0),
+      );
+      for (final offset in [0, start - 1, start + 12, start + 16]) {
+        final address = FlowValue.address(
+          FlowAddress(allocation.object.objects.single, offset),
+        );
+        expect(_load(allocation.state, address, _i64).constant, isNull);
+      }
+      final unknown = _allocate(FlowState(_program), 16);
+      expect(_load(unknown.state, unknown.address, _u8).constant, isNull);
+      expect(
+        () =>
+            allocation.state.join(FlowState(_program, memoryLayout: _Layout())),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test('native aliases observe truncated, signed and overlapping writes', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+    final first = _store(a.state, a.address, _u32, _integer(0x12345678));
+    final byte = _offset(a.address, 1);
+    expect(_number(_load(first, byte, NativeScalarType(Uint16))), 0x3456);
+    final second = _store(first, byte, _u8, _integer(0x1ff));
+    expect(_number(_load(second, a.address, _u32)), 0x1234ff78);
+    expect(_number(_load(second, byte, NativeScalarType(Int8))), -1);
+    expect(_number(_load(a.state, a.address, _u32)), 0);
+    expect(_number(_load(first, a.address, _u32)), 0x12345678);
+  });
+
+  test(
+    'native precision, negative zero and boolean storage match their types',
+    () {
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+      final f32 = NativeScalarType(Float), f64 = NativeScalarType(Double);
+      final rounded = _store(
+        a.state,
+        a.address,
+        f32,
+        .constant(const Constant.floating(16777217.0)),
+      );
+      expect(_number(_load(rounded, a.address, f32)), 16777216.0);
+      final signed = _store(
+        rounded,
+        a.address,
+        f64,
+        .constant(const Constant.floating(-0.0)),
+      );
+      expect(
+        1 / (_number(_load(signed, a.address, f64)) as double),
+        double.negativeInfinity,
+      );
+      final boolean = _store(signed, a.address, _u8, _integer(128));
+      expect(
+        _load(
+          boolean,
+          a.address,
+          NativeScalarType(Bool),
+        ).constant?.structuralKey,
+        const Constant.boolean(true).structuralKey,
+      );
+    },
+  );
+
+  test(
+    'joins retain untouched bytes and weaken ambiguous or repeated writes',
+    () {
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+      final b = _allocate(a.state, 16);
+      final left = _store(b.state, a.address, _u8, _integer(1));
+      final right = _store(b.state, a.address, _u8, _integer(2));
+      final joined = left.copy()..join(right);
+      expect(_load(joined, a.address, _u8).constant, isNull);
+      expect(_number(_load(joined, _offset(a.address, 1), _u8)), 0);
+      final uncertain = _store(
+        b.state,
+        a.address.join(b.address),
+        _u8,
+        _integer(9),
+      );
+      expect(_load(uncertain, a.address, _u8).constant, isNull);
+      expect(_load(uncertain, b.address, _u8).constant, isNull);
+
+      final operation = NewPayload(_type, const Constant.integer(16));
+      final result = _step(b.state, operation, repeated: true);
+      final address = FlowValue.address(
+        FlowAddress(
+          result.value.objects.single,
+          _layout.objectLayout(_type).size,
+        ),
+      );
+      final repeated = _store(result.normal!, address, _u8, _integer(3));
+      expect(_load(repeated, address, _u8).constant, isNull);
+    },
+  );
+
+  test('external writes invalidate exposed storage, unbounded addresses do not guess bounds', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final b = _allocate(a.state, 8);
+    final external = b.state.copy()..invalidate([a.address]);
+    expect(_load(external, a.address, _i64).constant, isNull);
+    expect(_number(_load(external, b.address, _i64)), 0);
+    final unbounded = FlowValue.address(
+      FlowAddress(a.object.objects.single, null),
+    );
+    final unknown = _store(b.state, unbounded, _u8, _integer(7));
+    expect(_load(unknown, a.address, _u8).constant, isNull);
+    expect(_load(unknown, b.address, _u8).constant, isNull);
+    expect(_load(b.state, unbounded, _u8).constant, isNull);
+  });
+
+  test('unknown copy sources invalidate only the destination range', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+    final copied = _step(
+      a.state,
+      CopyNative(_placeholder, _placeholder, NativeArrayType(_u8, 4)),
+      operands: [_offset(a.address, 4), .unknown(.integer)],
+    ).normal!;
+    expect(_number(_load(copied, a.address, _u32)), 0);
+    expect(_load(copied, _offset(a.address, 4), _u32).constant, isNull);
+    expect(_number(_load(copied, _offset(a.address, 8), _i64)), 0);
+    final empty = _step(
+      a.state,
+      CopyNative(
+        _placeholder,
+        _placeholder,
+        NativeArrayType(_u8, 0, variableLength: true),
+      ),
+      operands: [.unknown(.integer), .unknown(.integer)],
+    );
+    expect(empty.effects, isEmpty);
+    expect(empty.normal, a.state);
+  });
+
+  test('native copies use the source snapshot across overlapping ranges', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+    final first = _store(
+      a.state,
+      a.address,
+      _i64,
+      _integer(0x0807060504030201),
+    );
+    final copied = _step(
+      first,
+      CopyNative(_placeholder, _placeholder, NativeArrayType(_u8, 8)),
+      operands: [_offset(a.address, 2), a.address],
+    ).normal!;
+    expect(
+      _number(_load(copied, _offset(a.address, 2), _i64)),
+      0x0807060504030201,
+    );
+    expect(_number(_load(copied, a.address, _u32)), 0x02010201);
+  });
+
+  test(
+    'large zeroed allocations and copies do not enumerate their byte range',
+    () {
+      const size = 1 << 30;
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), size);
+      final b = _allocate(a.state, size);
+      final source = _store(
+        b.state,
+        _offset(a.address, size - 1),
+        _u8,
+        _integer(42),
+      );
+      final copied = _step(
+        source,
+        CopyNative(_placeholder, _placeholder, NativeArrayType(_u8, size)),
+        operands: [b.address, a.address],
+      ).normal!;
+      expect(_number(_load(copied, _offset(b.address, size - 1), _u8)), 42);
+      expect(_number(_load(copied, _offset(b.address, size - 8), _u32)), 0);
+    },
+  );
+
+  test('stored addresses retain allocation identities through projection and summaries', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+    final b = _allocate(a.state, 8);
+    final input = b.state.project([a.address, b.address]);
+    final output = _store(input, a.address, _i64, b.address);
+    final mapped = FlowObject(b.object.objects.single.site, Object());
+    FlowObject object(FlowObject value) =>
+        value == b.object.objects.single ? mapped : value;
+    FlowValue value(FlowValue source) => source.mapObjects(object);
+    final applied = b.state.applySummary(
+      input,
+      output,
+      mapObject: object,
+      mapValue: value,
+    );
+    final address = _load(applied, a.address, _i64).addresses.single;
+    expect(address.base, mapped);
+    expect(address.offset, b.address.addresses.single.offset);
+    expect(applied.reachableValues([a.object]).objects, contains(mapped));
+    expect(_number(_load(b.state, a.address, _i64)), 0);
+  });
+
+  test('partial writes destroy a stored address without losing its reachable owner', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final b = _allocate(a.state, 8);
+    final stored = _store(b.state, a.address, _i64, b.address);
+    final overwritten = _store(stored, _offset(a.address, 3), _u8, _integer(0));
+    final value = _load(overwritten, a.address, _i64);
+    expect(value.addresses, isEmpty);
+    expect(value.references.objects, contains(b.object.objects.single));
+    final exposed = stored.copy()..invalidate([a.address]);
+    expect(_load(exposed, a.address, _i64).addresses, isEmpty);
+    expect(
+      exposed.reachableValues([a.object]).objects,
+      contains(b.object.objects.single),
+    );
+  });
+}
+
+final class _Layout() implements FlowMemoryLayout {
+  @override
+  final nativeLayout = NativeLayout(const Target(.linux, .x64));
+
+  @override
+  ObjectLayout objectLayout(ClassType type) =>
+      ObjectLayout([.word, .reference]);
+}
+
+({FlowState state, FlowValue object, FlowValue address}) _allocate(
+  FlowState state,
+  int bytes,
+) {
+  final result = _step(state, NewPayload(_type, Constant.integer(bytes)));
+  return (
+    state: result.normal!,
+    object: result.value,
+    address: FlowValue.address(
+      FlowAddress(
+        result.value.objects.single,
+        _layout.objectLayout(_type).size,
+      ),
+    ),
+  );
+}
+
+FlowValue _offset(FlowValue value, int amount) {
+  final address = value.addresses.single;
+  return FlowValue.address(FlowAddress(address.base, address.offset! + amount));
+}
+
+FlowValue _integer(int value) => .constant(Constant.integer(value));
+Object? _number(FlowValue value) => (value.constant as ScalarConstant?)?.value;
+
+FlowValue _load(FlowState state, FlowValue address, NativeTypeRef type) =>
+    _step(state, LoadNative(_placeholder, type), operands: [address]).value;
+
+FlowState _store(
+  FlowState state,
+  FlowValue address,
+  NativeTypeRef type,
+  FlowValue value,
+) => _step(
+  state,
+  StoreNative(
+    _placeholder,
+    type,
+    type.isFloating ? const Constant.floating(0) : _placeholder,
+  ),
+  operands: [address, value],
+).normal!;
+
+FlowResult _step(
+  FlowState state,
+  Instruction operation, {
+  List<FlowValue>? operands,
+  bool repeated = false,
+}) => state.transfer(
+  operation,
+  operands ??
+      operation.inputs.map((v) => FlowValue.constant(v as Constant)).toList(),
+  allocate: (site) => FlowObject(site, _activation),
+  repeated: repeated,
+  invoke: (_, _, _) => throw StateError('Unexpected call'),
+  call: (_, _, _) => throw StateError('Unexpected closure'),
+)!;
