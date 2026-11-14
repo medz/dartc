@@ -145,6 +145,8 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 头文件保留合法且不冲突的 C 类型和字段名；跨库同名类型、私有字段及 C/C++ 保留名使用 `dartc_type_N`、`dartc_field_N`，并避开已有同名声明。重命名仅作用于 C 文本，递归指针、嵌套函数签名和声明顺序共用映射；Dart 名称、字段顺序、对象布局及导出函数符号不变。见[命名与递归声明验证](../test/interop/native_signature_test.dart)和[结构体及回调执行验证](../test/compiler/native_names_test.dart)。
 
+原生布局计算在数组长度乘法、字段偏移累加和对齐之前检查有符号 64 位尺寸上限。超过可表示字节数的布局抛出 RangeError，不将回绕后的尺寸用于分配、寻址或发码；有效边界、嵌套数组、union 尾部对齐与零尺寸元素见[布局验证](../test/abi/aggregates_test.dart)。
+
 | 项目 | 当前原生范围与缺口 |
 | --- | --- |
 | 导出签名 | 同步、非泛型的顶层函数；参数和结果支持 `Int8/16/32/64`、`Uint8/16/32/64`、`IntPtr`、`UintPtr`、`Bool`、`Float`、`Double`、`Pointer<T>` 和 Struct/Union 按值传递。对应 Dart `int`、`bool`、`double`、保留元素类型的指针及原聚合声明类型；`Void` 只用于结果。指针可嵌套并指向 NativeFunction 或 Opaque。聚合按输出目标分类到整数/浮点寄存器、栈或间接存储，保留按值复制；不把 Dart 对象引用当作 C 地址。 |

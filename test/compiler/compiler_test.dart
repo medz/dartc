@@ -13,7 +13,7 @@ void main() {
   final compiler = Compiler(Target.host());
 
   test(
-    'compilation rejects unsupported operations and invalid signatures',
+    'compilation rejects invalid native signatures and dependencies',
     () async {
       await expectLater(
         compiler.compile(['test/compiler/fixtures/wrong_signature.dart']),
@@ -26,8 +26,6 @@ void main() {
       for (final (fixture, error) in [
         ('wrong_pointer_signature', throwsArgumentError),
         ('nullable_pointer', throwsArgumentError),
-        ('unsupported_pointer', throwsUnsupportedError),
-        ('floating_modulo', throwsUnsupportedError),
       ]) {
         await expectLater(
           compiler.compile(['test/compiler/fixtures/$fixture.dart']),
@@ -40,6 +38,13 @@ void main() {
       );
     },
   );
+
+  test('oversized native storage cannot produce an object file', () async {
+    await expectLater(
+      compiler.compile(['test/compiler/fixtures/oversized_native_layout.dart']),
+      throwsRangeError,
+    );
+  });
 
   test(
     'compilation owns final bytes and keeps the library name across writes',

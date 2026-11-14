@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Reject overflowing native array sizes, field offsets and alignment padding before allocation or code generation. Oversized FFI layouts can no longer wrap to a small or zero size.
 - Support `Directory.systemTemp` and synchronous temporary directory creation on macOS and Linux. Read live environment settings, create unique private directories through the target OS, and preserve SDK path handling, `IOOverrides` and filesystem errors.
 
 - Export native structs with the same Dart name from different libraries and with private or C-reserved field names. Generated headers assign distinct C names while preserving Dart identities, layouts and callback signatures.

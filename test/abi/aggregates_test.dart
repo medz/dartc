@@ -25,6 +25,54 @@ void main() {
     NativeField('value', real),
   ], packing: 1);
 
+  test(
+    'native layouts reject arithmetic overflow before producing offsets',
+    () {
+      const maximum = 0x7fffffffffffffff;
+      final byte = NativeScalarType(Uint8);
+      final hugeBytes = NativeArrayType(byte, maximum);
+      final empty = NativeCompoundType('Empty', [
+        NativeField('tail', NativeArrayType(real, 0, variableLength: true)),
+      ]);
+      final invalid = [
+        NativeArrayType(real, 1 << 60),
+        NativeArrayType(real, (1 << 61) + 1),
+        NativeArrayType(NativeArrayType(real, 1 << 30), 1 << 30),
+        NativeCompoundType('Addition', [
+          NativeField('a', hugeBytes),
+          NativeField('b', byte),
+        ]),
+        NativeCompoundType('Alignment', [
+          NativeField('a', hugeBytes),
+          NativeField('b', real),
+        ]),
+        NativeCompoundType('TailPadding', [
+          NativeField('a', real),
+          NativeField('b', hugeBytes),
+        ], isUnion: true),
+      ];
+      for (final os in OperatingSystem.values) {
+        for (final architecture in Architecture.values) {
+          final layout = NativeLayout(Target(os, architecture));
+          expect(layout.of(hugeBytes).size, maximum);
+          expect(
+            layout.of(NativeArrayType(real, maximum ~/ 8)).size,
+            maximum - 7,
+          );
+          for (final type in invalid) {
+            expect(() => layout.of(type), throwsRangeError);
+            expect(() => layout.leaves(type).first, throwsRangeError);
+            expect(() => layout.homogeneous(type), throwsRangeError);
+          }
+          expect(layout.leaves(byte, maximum - 1).single.offset, maximum - 1);
+          expect(() => layout.leaves(byte, maximum).first, throwsRangeError);
+          expect(() => layout.leaves(byte, -1).first, throwsRangeError);
+          expect(layout.leaves(NativeArrayType(empty, maximum)), isEmpty);
+        }
+      }
+    },
+  );
+
   test('variable array dimensions contribute only their declared minimum', () {
     final empty = NativeArrayType(real, 0, variableLength: true);
     final initial = NativeArrayType(real, 1, variableLength: true);
