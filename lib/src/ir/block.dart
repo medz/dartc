@@ -4,7 +4,24 @@ import 'type.dart';
 import 'value.dart';
 
 /// The control transfer executed after a block's last instruction.
-sealed class const Terminator();
+sealed class const Terminator() {
+  /// The outgoing edges, with the exceptional edge last when present.
+  Iterable<Jump> get successors => switch (this) {
+    Return() || Unreachable() => const [],
+    Throw(:final onThrow) ||
+    ExhaustivenessFailure(:final onThrow) => [?onThrow],
+    Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
+    Yield(:final onResume, :final onCancel) => [onResume, ?onCancel],
+    YieldStream(:final onResume, :final onCancel, :final onThrow) => [
+      onResume,
+      onCancel,
+      ?onThrow,
+    ],
+    Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
+    final Jump jump => [jump],
+    Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
+  };
+}
 
 /// Ends this activation with an optional result.
 ///
@@ -190,22 +207,8 @@ final class Block([Iterable<ValueType> types = const []]) {
   /// Reading this before [finish] throws [StateError].
   Terminator get end => _end ?? (throw StateError('Unterminated block.'));
 
-  /// The outgoing edges of [end], with the exceptional edge last when present.
-  Iterable<Jump> get successors => switch (end) {
-    Return() || Unreachable() => const [],
-    Throw(:final onThrow) ||
-    ExhaustivenessFailure(:final onThrow) => [?onThrow],
-    Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
-    Yield(:final onResume, :final onCancel) => [onResume, ?onCancel],
-    YieldStream(:final onResume, :final onCancel, :final onThrow) => [
-      onResume,
-      onCancel,
-      ?onThrow,
-    ],
-    Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
-    final Jump jump => [jump],
-    Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
-  };
+  /// The outgoing edges, with the exceptional edge last when present.
+  Iterable<Jump> get successors => end.successors;
 
   /// Appends [instruction] and returns the same object for use as an SSA operand.
   ///
