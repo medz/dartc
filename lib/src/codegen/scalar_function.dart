@@ -51,7 +51,6 @@ final class ScalarFunction<R extends Object>(
       for (final block in selection.body.blocks) block: emitter.label(),
     };
     if (allocation.frame case final frame?) emitter.prologue(frame);
-    allocation.initialize();
     void edge(Jump jump) {
       allocation.copyArguments(jump);
       emitter.jump(labels[jump.target]!);
@@ -251,7 +250,7 @@ final class ScalarFunction<R extends Object>(
           if (failures && native == null) {
             final returned = emitter.label();
             if (onThrow != null) {
-              allocation.flush(live: selection.liveness.liveOut[block]);
+              allocation.prepareEdges(block);
             }
             emitter.jumpIfZero(emitter.failureRegister, returned);
             if (onThrow != null) {
@@ -611,7 +610,7 @@ final class ScalarFunction<R extends Object>(
           if (onReturn == null) {
             emitter.abort(71);
           } else {
-            allocation.flush(live: selection.liveness.liveOut[block]);
+            allocation.prepareEdges(block);
             edge(onReturn);
           }
         case Throw(:final exception, stackTrace: final trace!, :final onThrow):
@@ -629,11 +628,11 @@ final class ScalarFunction<R extends Object>(
         case Unreachable():
           emitter.abort(71);
         case final Jump jump:
-          allocation.flush(live: selection.liveness.liveOut[block]);
+          allocation.prepareEdges(block);
           edge(jump);
         case Branch(:final condition, :final ifTrue, :final ifFalse):
           final value = allocation.read(condition);
-          allocation.flush(live: selection.liveness.liveOut[block]);
+          allocation.prepareEdges(block);
           final otherwise = emitter.label();
           emitter.jumpIfZero(value, otherwise);
           edge(ifTrue);

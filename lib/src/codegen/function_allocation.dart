@@ -7,22 +7,26 @@ import 'package:dartc/layout.dart';
 import 'function_emitter.dart';
 import 'function_selection.dart';
 
-/// Keeps block-local registers and distinct frame homes for values crossing blocks.
+/// Assigns block-entry registers, edge transfers and distinct frame homes.
 ///
-/// Homes are not reused across SSA definitions. Edge arguments are staged before
-/// assignment so loop-carried swaps and rotations retain simultaneous semantics.
+/// Calls still publish initialized stack roots. Edge transfers preserve parallel
+/// semantics even when loop parameters exchange registers or stack locations.
 final class FunctionAllocation<R extends Object>(
   final FunctionEmitter<R> emitter,
   final FunctionSelection<R> selection,
   final void Function(Constant, R) loadObject,
 ) {
-  final _owners = <Value, Block>{};
-  final _shared = <Value>{};
+  final _entryRegisters = <Block, Map<Value, R>>{};
+  final _edgeScratch = {
+    for (final register in emitter.allocatableRegisters)
+      emitter.bank(register): register,
+  };
   final _slots = <Value, int>{};
   final _registers = <Value, R>{};
   final _spilled = <Value>{};
   final _free = <R>[];
   late Map<Value, int> _uses;
+  late Set<Value> _liveOut;
   late final int _stagingOffset;
 
   /// Stack locations fixed before emission; only the return PCs remain unknown.
@@ -32,12 +36,13 @@ final class FunctionAllocation<R extends Object>(
   late final FrameLayout<R>? frame;
 
   this {
+    final owners = <Value, Block>{}, shared = <Value>{};
     for (final block in selection.body.blocks) {
       for (final value in [
         ...selection.body.parametersOf(block),
         ...selection.body.instructions[block]!,
       ]) {
-        _owners[value] = block;
+        owners[value] = block;
       }
     }
     final liveness = selection.liveness;
@@ -46,9 +51,9 @@ final class FunctionAllocation<R extends Object>(
     for (final block in selection.body.blocks) {
       for (final value in liveness.liveIn[block]!) {
         if (selection.cells.contains(value)) continue;
-        if (_owners[value] != block ||
+        if (owners[value] != block ||
             block != selection.body.entry && value is BlockParameter) {
-          _shared.add(value);
+          shared.add(value);
         }
       }
       for (final edge in selection.body.successors(block)) {
@@ -56,6 +61,7 @@ final class FunctionAllocation<R extends Object>(
         if (words > edgeWords) edgeWords = words;
       }
     }
+    _assignEntries();
     final incoming = <Value, int>{
       for (final (i, location) in selection.entry.parameters.indexed)
         if (location case StackArgument(:final offset))
@@ -67,7 +73,7 @@ final class FunctionAllocation<R extends Object>(
         incoming.isNotEmpty ||
         selection.calls.isNotEmpty ||
         selection.binaries.values.any((b) => b.encoding.fixed != null) ||
-        _shared.isNotEmpty ||
+        shared.isNotEmpty ||
         liveness.uses.values.any(
           (uses) => RegisterBank.values.any(
             (bank) =>
@@ -84,9 +90,9 @@ final class FunctionAllocation<R extends Object>(
           ),
         );
     if (framed) {
-      for (final value in _owners.keys) {
+      for (final value in owners.keys) {
         if (!incoming.containsKey(value) &&
-            (used.contains(value) || _shared.contains(value))) {
+            (used.contains(value) || shared.contains(value))) {
           _slots[value] = _slots.length * 8;
         }
       }
@@ -152,51 +158,88 @@ final class FunctionAllocation<R extends Object>(
       ? null
       : _slot(selection.body.stackContext!);
 
-  /// Saves incoming arguments whose homes must survive beyond entry.
-  void initialize() {
+  void _assignEntries() {
+    final preferred = <Value, R>{};
+    final predecessors = <Block, List<Jump>>{};
+    for (final block in selection.body.blocks) {
+      for (final edge in selection.body.successors(block)) {
+        (predecessors[edge.target] ??= []).add(edge);
+      }
+    }
+    final entry = selection.body.entry;
+    final incoming = _entryRegisters[entry] = <Value, R>{};
     for (final (i, parameter) in selection.body.entryParameters.indexed) {
-      if (_shared.contains(parameter)) {
-        if (selection.entry.parameters[i] case RegisterArgument(
-          :final register,
-        )) {
-          emitter.storeStack(register, _slot(parameter));
+      if (!selection.liveness.liveIn[entry]!.contains(parameter)) continue;
+      switch (selection.entry.parameters[i]) {
+        case RegisterAggregate() || IndirectArgument():
+          throw StateError('Internal aggregate values require storage.');
+        case RegisterArgument(:final register):
+          incoming[parameter] = preferred[parameter] = register;
+        case StackArgument():
+          break;
+      }
+    }
+    for (final block in selection.body.blocks) {
+      if (block == entry) continue;
+      final assigned = _entryRegisters[block] = <Value, R>{};
+      final available = emitter.allocatableRegisters
+          .where((register) => !_edgeScratch.containsValue(register))
+          .toList();
+      final parameters = selection.body.parametersOf(block);
+      for (final value in selection.liveness.liveIn[block]!) {
+        if (selection.cells.contains(value)) continue;
+        final bank = selection.bank(selection.body.typeOf(value));
+        var register = preferred[value];
+        final index = value is BlockParameter ? parameters.indexOf(value) : -1;
+        if (register == null && index >= 0) {
+          for (final edge in predecessors[block] ?? const <Jump>[]) {
+            final argument = selection.body.argumentsOf(edge)[index];
+            register =
+                preferred[argument is TestedValue
+                    ? argument.test.operand
+                    : argument];
+            if (register != null && available.contains(register)) break;
+          }
+        }
+        if (register == null ||
+            emitter.bank(register) != bank ||
+            !available.contains(register)) {
+          register = available
+              .where((register) => emitter.bank(register) == bank)
+              .lastOrNull;
+        }
+        if (register != null) {
+          assigned[value] = register;
+          preferred.putIfAbsent(value, () => register!);
+          available.remove(register);
         }
       }
     }
   }
 
-  /// Starts independent register-use accounting at a block boundary.
+  /// Adopts locations established by every incoming edge, independent of order.
   void begin(Block block) {
     _uses = Map.of(selection.liveness.uses[block]!);
-    _registers.clear();
+    _liveOut = selection.liveness.liveOut[block]!;
+    _registers
+      ..clear()
+      ..addAll(_entryRegisters[block]!);
     _free
       ..clear()
-      ..addAll(emitter.allocatableRegisters);
+      ..addAll(
+        emitter.allocatableRegisters.where(
+          (register) => !_registers.containsValue(register),
+        ),
+      );
     _spilled
       ..clear()
       ..addAll(
         selection.liveness.liveIn[block]!.where(
-          (v) =>
-              !selection.cells.contains(v) &&
-              _shared.contains(v) &&
-              (v is BlockParameter || _owners[v] != block),
+          (value) =>
+              !selection.cells.contains(value) &&
+              !_registers.containsKey(value),
         ),
       );
-    if (block == selection.body.entry) {
-      for (final (i, parameter) in selection.body.entryParameters.indexed) {
-        if (_uses.containsKey(parameter)) {
-          switch (selection.entry.parameters[i]) {
-            case RegisterAggregate() || IndirectArgument():
-              throw StateError('Internal aggregate values require storage.');
-            case RegisterArgument(:final register):
-              _registers[parameter] = register;
-              _free.remove(register);
-            case StackArgument():
-              _spilled.add(parameter);
-          }
-        }
-      }
-    }
   }
 
   /// Reads an operand without evicting registers in [except].
@@ -247,6 +290,7 @@ final class FunctionAllocation<R extends Object>(
     R destination, {
     Iterable<R> except = const [],
     ValueType? asType,
+    bool fromHome = false,
   }) {
     if (value is TestedValue) {
       // A refinement changes the type, not the original value's storage.
@@ -265,7 +309,7 @@ final class FunctionAllocation<R extends Object>(
             throw StateError('Allocating conversion was not selected.');
           }
           final no = emitter.label(), done = emitter.label();
-          load(value, destination, except: except);
+          load(value, destination, except: except, fromHome: fromHome);
           emitter.jumpIfZero(destination, no);
           loadObject(const Constant.boolean(true), destination);
           emitter.jump(done);
@@ -277,7 +321,7 @@ final class FunctionAllocation<R extends Object>(
         final source = emitter.bank(destination) == .general
             ? destination
             : allocate(.general, except: except);
-        load(value, source, except: except);
+        load(value, source, except: except, fromHome: fromHome);
         emitter.loadMemory(
           destination,
           source,
@@ -287,7 +331,7 @@ final class FunctionAllocation<R extends Object>(
         );
         if (source != destination) releaseTemporary(source);
       }
-    } else if (_registers[value] case final register?) {
+    } else if (_registers[value] case final register? when !fromHome) {
       emitter.move(destination, register);
     } else if (value case ScalarConstant(value: final int number)) {
       emitter.loadImmediate(destination, number);
@@ -362,13 +406,9 @@ final class FunctionAllocation<R extends Object>(
     _free.removeWhere(registers.contains);
   }
 
-  /// Publishes a result and stores its home if other blocks can read it.
+  /// Keeps a result resident until its final local use or outgoing edge.
   void define(Value value, R register) {
-    if (_shared.contains(value)) {
-      emitter.storeStack(register, _slot(value));
-      _spilled.add(value);
-    }
-    if (_uses.containsKey(value)) {
+    if (_uses.containsKey(value) || _liveOut.contains(value)) {
       _registers[value] = register;
       _free.remove(register);
     } else if (!_free.contains(register)) {
@@ -381,7 +421,9 @@ final class FunctionAllocation<R extends Object>(
     final count = _uses[value]! - 1;
     if (count == 0) {
       _uses.remove(value);
-      if (_registers.remove(value) case final register?) _free.add(register);
+      if (!_liveOut.contains(value)) {
+        if (_registers.remove(value) case final register?) _free.add(register);
+      }
     } else {
       _uses[value] = count;
     }
@@ -480,28 +522,82 @@ final class FunctionAllocation<R extends Object>(
     }
   }
 
-  /// Assigns block parameters simultaneously after [flush], using one register.
-  void copyArguments(Jump edge) {
-    final parameters = selection.liveness.liveParameters[edge.target]!;
-    for (final (slot, i) in parameters.indexed) {
-      final argument = selection.body.argumentsOf(edge)[i];
-      final type = selection.body.typeOf(
-        selection.body.parametersOf(edge.target)[i],
+  Iterable<(Value, Value)> _edgeValues(Jump edge) sync* {
+    final parameters = selection.body.parametersOf(edge.target);
+    for (final value in selection.liveness.liveIn[edge.target]!) {
+      if (selection.cells.contains(value)) continue;
+      final index = value is BlockParameter ? parameters.indexOf(value) : -1;
+      yield (
+        value,
+        index < 0 ? value : selection.body.argumentsOf(edge)[index],
       );
-      final scratch = emitter.allocatableRegisters.lastWhere(
-        (r) => emitter.bank(r) == selection.bank(type),
-      );
-      load(argument, scratch, asType: type);
-      emitter.storeStack(scratch, _stagingOffset + slot * 8);
     }
-    for (final (slot, i) in parameters.indexed) {
-      final parameter = selection.body.parametersOf(edge.target)[i];
-      final scratch = emitter.allocatableRegisters.lastWhere(
-        (r) =>
-            emitter.bank(r) == selection.bank(selection.body.typeOf(parameter)),
+  }
+
+  bool _sameRegister(Value value, Value argument, R? register) {
+    if (register == null) return false;
+    final stored = argument is TestedValue ? argument.test.operand : argument;
+    return _registers[stored] == register &&
+        selection.layouts.representation(selection.body.typeOf(stored)) ==
+            selection.layouts.representation(selection.body.typeOf(value));
+  }
+
+  /// Homes changed transfers before branching, keeping identical locations live.
+  void prepareEdges(Block block) {
+    final needed = <Value>{};
+    for (final edge in selection.body.successors(block)) {
+      final assigned = _entryRegisters[edge.target]!;
+      for (final (value, argument) in _edgeValues(edge)) {
+        if (!_sameRegister(value, argument, assigned[value])) {
+          needed.add(
+            argument is TestedValue ? argument.test.operand : argument,
+          );
+        }
+      }
+    }
+    _registers.removeWhere((value, register) {
+      if (needed.contains(value)) _spill(value, register);
+      if (_liveOut.contains(value) && !_edgeScratch.containsValue(register)) {
+        return false;
+      }
+      _free.add(register);
+      return true;
+    });
+  }
+
+  /// Transfers an edge without overwriting simultaneous sources on either path.
+  void copyArguments(Jump edge) {
+    final assigned = _entryRegisters[edge.target]!;
+    final protected = assigned.values.toSet();
+    final stacked = <Value>[];
+    for (final (value, argument) in _edgeValues(edge)) {
+      if (assigned.containsKey(value)) continue;
+      if (value == argument && _spilled.contains(value)) continue;
+      final type = selection.body.typeOf(value);
+      final scratch = _edgeScratch[selection.bank(type)]!;
+      load(argument, scratch, asType: type, except: protected, fromHome: true);
+      emitter.storeStack(scratch, _stagingOffset + stacked.length * 8);
+      stacked.add(value);
+    }
+    // shortcut: changed locations reload homes; add register-cycle moves if edge traffic dominates.
+    for (final (value, argument) in _edgeValues(edge)) {
+      final register = assigned[value];
+      if (register == null || _sameRegister(value, argument, register)) {
+        continue;
+      }
+      load(
+        argument,
+        register,
+        asType: selection.body.typeOf(value),
+        except: protected,
+        fromHome: true,
       );
+    }
+    for (final (slot, value) in stacked.indexed) {
+      final scratch =
+          _edgeScratch[selection.bank(selection.body.typeOf(value))]!;
       emitter.loadStack(scratch, _stagingOffset + slot * 8);
-      emitter.storeStack(scratch, _slot(parameter));
+      emitter.storeStack(scratch, _slot(value));
     }
   }
 

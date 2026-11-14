@@ -12,11 +12,101 @@ import 'package:test/test.dart';
 
 void main() {
   final uri = Uri.parse('memory:allocation');
-  SelectedFunction select(FunctionTarget target, Block block) =>
-      SelectedFunction(target, ProgramLayout([]), block)
-        ..blocks.add(block)
-        ..instructions[block] = block.instructions.toList()
-        ..ends[block] = block.end;
+  SelectedFunction select(FunctionTarget target, List<Block> blocks) {
+    final body = SelectedFunction(target, ProgramLayout([]), blocks.first);
+    for (final block in blocks) {
+      body.blocks.add(block);
+      body.instructions[block] = block.instructions.toList();
+      body.ends[block] = block.end;
+    }
+    return body;
+  }
+
+  test('matching block-entry registers require no edge loads or stores', () {
+    final target = FunctionTarget(uri, 'forward', .integer, [
+      .integer,
+      .integer,
+      .integer,
+    ]);
+    final entry = Block(target.parameterTypes);
+    final next = Block(target.parameterTypes);
+    final edge = Jump(next, entry.parameters);
+    entry.finish(edge);
+    next.emit(KeepAlive(next.parameters[1]));
+    next.emit(KeepAlive(next.parameters[2]));
+    next.finish(Return(next.parameters.first));
+    final emitter = _Emitter()
+      ..registers[Register.x0] = 11
+      ..registers[Register.x1] = 22
+      ..registers[Register.x2] = 33;
+    final selection = FunctionSelection(select(target, [entry, next]), emitter);
+    final allocation = FunctionAllocation(emitter, selection, (_, _) {});
+    allocation.begin(entry);
+    allocation.prepareEdges(entry);
+    allocation.copyArguments(edge);
+    allocation.begin(next);
+    expect(
+      [
+        for (final value in next.parameters)
+          emitter.registers[allocation.read(value)],
+      ],
+      [11, 22, 33],
+    );
+    expect(emitter.position, 0);
+  });
+
+  test(
+    'critical loop edges preserve register and stack parameter rotations',
+    () {
+      for (final reverse in [false, true]) {
+        final target = FunctionTarget(
+          uri,
+          'rotate',
+          .integer,
+          List.filled(4, ValueType.integer),
+        );
+        final entry = Block(target.parameterTypes);
+        final loop = Block(target.parameterTypes);
+        final entryEdge = Jump(loop, entry.parameters);
+        entry.finish(entryEdge);
+        final rotate = Jump(loop, [
+          ...loop.parameters.skip(1),
+          loop.parameters.first,
+        ]);
+        final backwards = Jump(loop, loop.parameters.reversed);
+        for (final value in loop.parameters) {
+          loop.emit(KeepAlive(value));
+        }
+        loop.finish(Branch(const Constant.boolean(true), rotate, backwards));
+        final emitter = _Emitter()
+          ..registers[Register.x0] = 11
+          ..registers[Register.x1] = 22
+          ..registers[Register.x2] = 33
+          ..registers[Register.x3] = 44;
+        final selection = FunctionSelection(
+          select(target, [entry, loop]),
+          emitter,
+        );
+        final allocation = FunctionAllocation(emitter, selection, (_, _) {});
+        allocation.begin(entry);
+        allocation.prepareEdges(entry);
+        allocation.copyArguments(entryEdge);
+        var expected = [11, 22, 33, 44];
+        for (var i = 0; i < 7; i++) {
+          allocation.begin(loop);
+          expect([
+            for (final value in loop.parameters)
+              emitter.registers[allocation.read(value)],
+          ], expected);
+          allocation.prepareEdges(loop);
+          allocation.copyArguments(reverse ? backwards : rotate);
+          expected = reverse
+              ? expected.reversed.toList()
+              : [...expected.skip(1), expected.first];
+        }
+      }
+    },
+  );
 
   test(
     'preassigned roots exclude consumed arguments and reload relocated homes',
@@ -34,7 +124,7 @@ void main() {
       block.emit(KeepAlive(block.parameters[0]));
       block.emit(KeepAlive(block.parameters[1]));
       block.finish(Return(block.parameters[8]));
-      final body = select(target, block)..invocations[call] = callee;
+      final body = select(target, [block])..invocations[call] = callee;
       final emitter = _Emitter()
         ..registers[Register.x0] = 0x100
         ..registers[Register.x1] = 0x200
@@ -45,7 +135,6 @@ void main() {
       expect(emitter.position, 0);
       expect(roots.offsets, hasLength(2));
       emitter.stack[allocation.frame!.incomingStackOffset] = 0x900;
-      allocation.initialize();
       allocation.begin(block);
       allocation.prepareCall(call);
       expect(roots.offsets.map((offset) => emitter.stack[offset]).toSet(), {
@@ -79,9 +168,8 @@ void main() {
         ..registers[Register.x0] = 3
         ..registers[Register.x1] = 20
         ..registers[Register.x2] = 99;
-      final selection = FunctionSelection(select(target, block), emitter);
+      final selection = FunctionSelection(select(target, [block]), emitter);
       final allocation = FunctionAllocation(emitter, selection, (_, _) {});
-      allocation.initialize();
       allocation.begin(block);
       final operands = allocation.binaryOperands(operation);
       selection.binaries[operation]!.encoding.emit(
