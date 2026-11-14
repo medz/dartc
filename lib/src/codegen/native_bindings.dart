@@ -22,7 +22,8 @@ final class NativeBindings(
   this {
     final externals = source.externals.toList();
     for (final MapEntry(key: target, value: binding) in sourceImports.entries) {
-      if (source.implementationOf(target) is! IrExternal ||
+      final declaration = source.implementationOf(target);
+      if (declaration is! IrExternal ||
           target.kind.hasReceiver ||
           !FfiTypes.canCall(binding.signature, target.signature)) {
         throw ArgumentError(
@@ -32,7 +33,7 @@ final class NativeBindings(
       if (_needsBridge(binding.signature)) {
         final raw = _bridge(target, intoDart: false);
         externals.removeWhere((declaration) => declaration.target == target);
-        externals.add(IrExternal(raw));
+        externals.add(IrExternal(raw, effects: declaration.effects));
         imports[raw] = binding;
       } else {
         imports[target] = binding;

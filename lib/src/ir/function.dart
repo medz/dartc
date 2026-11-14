@@ -80,7 +80,17 @@ sealed class IrCallable(
 ///
 /// Calls retain normal Dart argument and return types. A native binding must
 /// separately specify the platform ABI and any necessary conversions.
-final class IrExternal(super.target, {super.defaults}) extends IrCallable {
+final class IrExternal(
+  super.target, {
+  super.defaults,
+  Iterable<Effect> effects = Effect.values,
+}) extends IrCallable {
+  /// Effects promised by the external implementation, conservative by default.
+  ///
+  /// This is a trusted contract, not a conclusion derived from the signature.
+  /// It does not promise termination or make unknown results constant.
+  final Set<Effect> effects = .unmodifiable(effects);
+
   this {
     if (target.kind == .closure || target.kind == .fieldInitializer) {
       throw ArgumentError('Invalid external declaration ${target.name}.');

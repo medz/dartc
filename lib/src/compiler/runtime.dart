@@ -151,14 +151,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     bodies.add(IrFunction(target, [block]));
   }
   final supplied = bodies.map((body) => body.target).toSet();
-  program = IrProgram(
-    program.classes,
-    [...program.functions, ...bodies],
-    globals: program.globals,
-    externals: program.externals.where(
-      (external) => !supplied.contains(external.target),
-    ),
-  );
   final allocate = annotations.entries[RuntimeRole.allocate],
       isOutOfMemory = annotations.entries[RuntimeRole.isOutOfMemory],
       release = annotations.entries[RuntimeRole.release],
@@ -181,6 +173,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
   };
   for (final MapEntry(:key, :value) in nativeContracts.entries) {
     if (program.implementationOf(key) is! IrExternal ||
+        supplied.contains(key) ||
         value.type is! NativeFunctionType ||
         !FfiTypes.canCall(
           (value.type as NativeFunctionType).signature,
@@ -191,6 +184,31 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       );
     }
   }
+  final externals = <IrExternal>[];
+  for (final external in program.externals) {
+    if (supplied.contains(external.target)) continue;
+    final effects =
+        primitives[external.target]?.effects ??
+        (nativeContracts.containsKey(external.target) ||
+                (lowered.imports[external.target]?.isLeaf ?? false)
+            ? const {Effect.readsStorage, Effect.writesStorage}
+            : null);
+    externals.add(
+      effects == null
+          ? external
+          : IrExternal(
+              external.target,
+              defaults: external.defaults,
+              effects: effects,
+            ),
+    );
+  }
+  program = IrProgram(
+    program.classes,
+    [...program.functions, ...bodies],
+    globals: program.globals,
+    externals: externals,
+  );
   return HeapRuntime(
     program,
     types: TypeRuntime(

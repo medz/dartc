@@ -7,6 +7,7 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/src/codegen/native_bindings.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -29,6 +30,35 @@ void main() {
     externals: [IrExternal(first), IrExternal(second)],
   );
   final binding = NativeImport('actual_native', NativeSignature(Int8, [Int8]));
+
+  test('native pointer bridges preserve external effect contracts', () {
+    final pointer = FfiTypes.resolve(
+      NativePointerType(NativeScalarType(Uint8)),
+    );
+    final target = FunctionTarget(library, 'readByte', .integer, [pointer]);
+    final declaration = IrExternal(
+      target,
+      effects: const {Effect.readsStorage},
+    );
+    final source = IrProgram([], [], externals: [declaration]);
+    final bindings = NativeBindings(
+      source,
+      {
+        target: NativeImport(
+          'read_byte',
+          NativeSignature(Int64, [Pointer<Uint8>]),
+        ),
+      },
+      {},
+      [target],
+    );
+    final raw = bindings.program.externals.single;
+    expect(raw.target.parameterTypes, [ValueType.integer]);
+    expect(raw.effects, {Effect.readsStorage});
+    expect((bindings.program.implementationOf(target) as IrFunction).callees, {
+      raw.target,
+    });
+  });
 
   for (final os in OperatingSystem.values) {
     for (final arch in Architecture.values) {

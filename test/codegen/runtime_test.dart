@@ -67,6 +67,34 @@ void main() {
     return IrFunction(entry, [block]);
   }
 
+  test('runtime external effects reach the semantic program', () {
+    for (final MapEntry(key: target, value: operation)
+        in heapRuntime.primitives.entries) {
+      final external =
+          heapRuntime.program.implementationOf(target) as IrExternal;
+      expect(external.effects, operation.effects, reason: target.name);
+    }
+    final readonly = heapRuntime.primitives.entries
+        .singleWhere((entry) => entry.value == .context)
+        .key;
+    expect(
+      (heapRuntime.program.implementationOf(readonly) as IrExternal).effects,
+      {Effect.readsStorage},
+    );
+    final native = lowered.imports.entries.where(
+      (entry) =>
+          lowered.runtime.nonAllocating.contains(entry.key) ||
+          entry.value.isLeaf,
+    );
+    for (final entry in native) {
+      expect(
+        (heapRuntime.program.implementationOf(entry.key) as IrExternal).effects,
+        {Effect.readsStorage, Effect.writesStorage},
+        reason: entry.key.name,
+      );
+    }
+  });
+
   test('runtime entries must implement their machine boundary signatures', () {
     for (final target in [
       ...lowered.runtime.entries.values,

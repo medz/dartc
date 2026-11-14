@@ -212,8 +212,10 @@ void main() {
       constructors: [ctor],
     );
     final defaults = {0: _one};
-    final external = IrExternal(method, defaults: defaults);
+    final effects = {Effect.readsStorage};
+    final external = IrExternal(method, defaults: defaults, effects: effects);
     defaults.clear();
+    effects.add(Effect.writesStorage);
     final entry = Block();
     final instance = entry.emit(Construct(ctor, []));
     entry.finish(Return(entry.emit(InstanceCall(method, instance, []))));
@@ -228,6 +230,9 @@ void main() {
     expect(program.dispatch(owner, method), same(method));
     expect(program.implementationOf(method), same(external));
     expect(external.defaults, {0: _one});
+    expect(external.effects, {Effect.readsStorage});
+    expect(() => external.effects.clear(), throwsUnsupportedError);
+    expect(IrExternal(ctor).effects, Effect.values.toSet());
     final text = StringBuffer();
     program.writeTo(text);
     expect('$text', contains('external method memory:references::Api.read'));
