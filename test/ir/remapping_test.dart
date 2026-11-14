@@ -104,6 +104,79 @@ void main() {
     },
   );
 
+  test(
+    'generic remapping substitutes storage and lexical call types together',
+    () {
+      final parameter = TypeParameterType('T')
+        ..initializeBound(.object.nullable);
+      final box = ClassType(null, 'Box', typeParameters: [parameter]);
+      final field = InstanceField(box, 'value', parameter);
+      final initializer = FunctionTarget(
+        null,
+        'new',
+        .voidType,
+        [parameter],
+        owner: box,
+        kind: .initializer,
+      );
+      final method = FunctionTarget(
+        null,
+        'read',
+        parameter,
+        [],
+        owner: box,
+        kind: .getter,
+      );
+      final before = Block([box, parameter]);
+      final actual = box.instantiate([ValueType.integer]);
+      final after = Block([actual, ValueType.integer]);
+      Value replace(Value value) => value is BlockParameter
+          ? after.parameters[before.parameters.indexOf(value)]
+          : value;
+      const one = Constant.integer(1);
+      final environment = {parameter: ValueType.integer};
+      final load = LoadField(
+        field,
+        before.parameters[0],
+      ).mapInputs(replace, environment: environment) as LoadField;
+      expect(load.type, ValueType.integer);
+      expect(load.field, same(field));
+      final construct = Construct(initializer, [
+        before.parameters[1],
+      ]).mapInputs(replace, environment: environment) as Construct;
+      expect(construct.instantiatedType, actual);
+      final call = DirectCall(
+        method,
+        [before.parameters[0]],
+        ownerType: box,
+      ).mapInputs(replace, environment: environment) as DirectCall;
+      expect(call.type, ValueType.integer);
+      expect(call.target, same(method));
+      expect(call.ownerType, actual);
+      final reified = ReifyType(
+        CoreTypes.listOf(parameter),
+      ).mapInputs(replace, environment: environment) as ReifyType;
+      expect(reified.template, CoreTypes.listOf(.integer));
+      final write = StoreField(
+        field,
+        before.parameters[0],
+        before.parameters[1],
+      );
+      expect(() => write.mapInputs(replace), throwsArgumentError);
+      final mapped =
+          write.mapInputs(replace, environment: environment) as StoreField;
+      expect(mapped.receiver, same(after.parameters[0]));
+      expect(mapped.value, same(after.parameters[1]));
+      expect(
+        () => LoadField(
+          field,
+          before.parameters[0],
+        ).mapInputs((_) => one, environment: environment),
+        throwsArgumentError,
+      );
+    },
+  );
+
   test('named order, type arguments and storage flags survive remapping', () {
     final before = Block([ValueType.object, ValueType.integer]);
     final after = Block([ValueType.object, ValueType.integer]);

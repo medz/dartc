@@ -3,6 +3,7 @@ library;
 
 export 'src/codegen/type_runtime.dart' show TypeRuntime;
 export 'src/codegen/code_generator.dart' show CodeGenerator;
+export 'src/codegen/program_normalization.dart' show ProgramNormalization;
 export 'src/codegen/program_preparation.dart'
     show
         ProgramPreparation,

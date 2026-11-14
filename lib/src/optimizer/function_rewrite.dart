@@ -60,6 +60,7 @@ final class FunctionRewrite(
     final expansions = <DirectCall, List<Instruction>>{};
     final continuations = <Instruction, Block>{};
     late Value Function(Value) value;
+    late Value Function(Value, Value) viewed;
 
     void locate(
       Object source,
@@ -81,6 +82,12 @@ final class FunctionRewrite(
     Value expand(DirectCall call) {
       final site = inlined[call]!;
       final body = site.body;
+      final environment = {
+        if (call.ownerType case final owner?)
+          ...body.target.environmentFor(owner),
+        for (final (i, type) in call.typeArguments.indexed)
+          body.target.typeParameters[i]: type,
+      };
       final output = expansions[call] = [];
       final locals = <Value, Value>{};
       Value read(Value operand) =>
@@ -97,17 +104,24 @@ final class FunctionRewrite(
 
       for (final (i, parameter) in body.entry.parameters.indexed) {
         final argument = value(call.inputs[i]);
-        locals[parameter] = argument.type == parameter.type
+        final type = parameter.type.substitute(environment);
+        locals[parameter] = argument.type == type
             ? argument
-            : append(TypeView(argument, parameter.type), parameter);
+            : append(TypeView(argument, type), parameter);
       }
       for (final operation in body.entry.instructions) {
-        locals[operation] = append(operation.mapInputs(read), operation);
+        locals[operation] = append(
+          operation.mapInputs(read, environment: environment),
+          operation,
+        );
       }
       final returned = (body.entry.end as Return).value;
       final result = returned == null
           ? const Constant.nullValue()
           : read(returned);
+      if (call.target.requiresResultCheck) {
+        return append(TypeCast(result, call.type), body.entry);
+      }
       return result.type == call.type
           ? result
           : append(TypeView(result, call.type), body.entry);
@@ -119,7 +133,9 @@ final class FunctionRewrite(
         throw ArgumentError('Cyclic operation templates.');
       }
       final template = operations[original] ?? original;
-      final result = template.mapInputs(value);
+      final result = template.mapInputs(
+        (operand) => viewed(operand, value(operand)),
+      );
       copying.remove(original);
       changed |= !identical(template, original);
       values[original] = result;
@@ -127,6 +143,28 @@ final class FunctionRewrite(
       locate(original, result, function);
       return result;
     }
+
+    viewed = (original, actual) {
+      if (original.type == actual.type) return actual;
+      if (!original.type.accepts(actual.type)) {
+        throw ArgumentError('Rewritten value violates its source type.');
+      }
+      if (actual is Constant) {
+        return constantViews.putIfAbsent(
+          (original.type, actual.structuralKey),
+          () {
+            final view = TypeView(actual, original.type);
+            instructions[blocks[function.entry]!]!.insert(0, view);
+            return view;
+          },
+        );
+      }
+      return localViews.putIfAbsent((current, original.type, actual), () {
+        final view = TypeView(actual, original.type);
+        instructions[current]!.add(view);
+        return view;
+      });
+    };
 
     value = (original) {
       if (original is Constant || original is UnwindValue) return original;
@@ -138,22 +176,7 @@ final class FunctionRewrite(
         final actual = value(replacement);
         replacing.remove(original);
         changed = true;
-        if (original.type == actual.type) return actual;
-        if (actual is Constant) {
-          return constantViews.putIfAbsent(
-            (original.type, actual.structuralKey),
-            () {
-              final view = TypeView(actual, original.type);
-              instructions[blocks[function.entry]!]!.insert(0, view);
-              return view;
-            },
-          );
-        }
-        return localViews.putIfAbsent((current, original.type, actual), () {
-          final view = TypeView(actual, original.type);
-          instructions[current]!.add(view);
-          return view;
-        });
+        return actual;
       }
       if (values[original] case final known?) return known;
       final Value result;
@@ -170,7 +193,8 @@ final class FunctionRewrite(
       } else {
         throw StateError('Unexpected value in an IR graph.');
       }
-      return values[original] = result;
+      values[original] = result;
+      return result;
     };
     Value refined(TestedValue refinement) {
       final operand = value(refinement.test.operand);

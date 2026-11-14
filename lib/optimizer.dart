@@ -16,3 +16,4 @@ library;
 export 'src/optimizer/call_type_flow.dart' show CallTypeFlow, CallTypeFacts;
 export 'src/optimizer/reachability.dart' show reachableDefinitions;
 export 'src/optimizer/inlining.dart' show inlineDirectCalls;
+export 'src/optimizer/function_rewrite.dart' show FunctionRewrite;

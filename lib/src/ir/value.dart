@@ -429,24 +429,29 @@ sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
 
-  /// Copies this operation with remapped operands and unchanged semantic types.
+  /// Copies operands and substitutes free types through [environment].
   ///
-  /// Declaration identities, type arguments, flags and native signatures are
-  /// retained. Each replacement must have the original operand type; checked
-  /// constructors also validate operation-specific requirements. The result is
-  /// a fresh instruction, including for operations without operands.
-  Instruction mapInputs(Value Function(Value) replace) {
+  /// Declaration identities, flags and native signatures are retained. Each
+  /// operand must have its substituted type; constructors validate remaining
+  /// operation contracts. Lexical declarations require their own rebinding.
+  Instruction mapInputs(
+    Value Function(Value) replace, {
+    Map<TypeParameterType, ValueType> environment = const {},
+  }) {
+    ValueType type(ValueType value) => value.substitute(environment);
     Value map(Value value) {
       final result = replace(value);
-      if (result.type != value.type) {
-        throw ArgumentError('Operand remapping must preserve its IR type.');
+      if (result.type != type(value.type)) {
+        throw ArgumentError(
+          'Operand remapping must preserve its substituted IR type.',
+        );
       }
       return result;
     }
 
     Value? optional(Value? value) => value == null ? null : map(value);
     return switch (this) {
-      final ReifyType v => ReifyType(v.template),
+      final ReifyType v => ReifyType(type(v.template)),
       final ObjectRuntimeType v => ObjectRuntimeType(
         map(v.operand),
         direct: v.direct,
@@ -464,23 +469,23 @@ sealed class Instruction(super.type) extends Value {
       ),
       final NativeClosureEntryAddress v => NativeClosureEntryAddress(
         v.lookup,
-        v.callbackType,
+        type(v.callbackType) as FunctionType,
         v.nativeType,
         exceptionalReturn: v.exceptionalReturn,
       ),
       final ReferenceAddress v => ReferenceAddress(map(v.object)),
       final ReferenceFromAddress v => ReferenceFromAddress(
         map(v.address),
-        v.type,
+        type(v.type),
       ),
       final PointerFromAddress v => PointerFromAddress(
         map(v.address),
-        v.type as ClassType,
+        type(v.type) as ClassType,
       ),
       final PointerAddress v => PointerAddress(map(v.pointer)),
-      final NewPayload v => NewPayload(v.type as ClassType, map(v.bytes)),
+      final NewPayload v => NewPayload(type(v.type) as ClassType, map(v.bytes)),
       final NativeView v => NativeView(
-        v.type as ClassType,
+        type(v.type) as ClassType,
         address: optional(v.address),
         owner: map(v.owner),
         copy: v.copy,
@@ -526,7 +531,7 @@ sealed class Instruction(super.type) extends Value {
       final AssertionFailure v => AssertionFailure(optional(v.message)),
       final MakeClosure v => MakeClosure(v.target, v.inputs.map(map)),
       final NewCell v => NewCell(
-        v.type as CellType,
+        type(v.type) as CellType,
         optional(v.initial),
         initializer: optional(v.initializer),
       ),
@@ -537,11 +542,11 @@ sealed class Instruction(super.type) extends Value {
         v.method,
         map(v.receiver),
         direct: v.direct,
-        ownerType: v.ownerType,
+        ownerType: v.ownerType == null ? null : type(v.ownerType!) as ClassType,
       ),
       final InstantiateFunction v => InstantiateFunction(
         map(v.function),
-        v.typeArguments,
+        v.typeArguments.map(type),
       ),
       final InstantiateFunctionFrom v => InstantiateFunctionFrom(
         map(v.function),
@@ -552,7 +557,7 @@ sealed class Instruction(super.type) extends Value {
         map(v.function),
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
-        v.typeArguments,
+        v.typeArguments.map(type),
       ),
       final LoadGlobal v => LoadGlobal(v.global),
       final StoreGlobal v => StoreGlobal(v.global, map(v.value)),
@@ -563,37 +568,40 @@ sealed class Instruction(super.type) extends Value {
         map(v.receiver),
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
-        v.ownerType,
-        v.typeArguments,
+        v.ownerType == null ? null : type(v.ownerType!) as ClassType,
+        v.typeArguments.map(type),
       ),
       final DynamicDispatch v => DynamicDispatch(
         map(v.receiver),
         v.selector,
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
-        v.typeArguments,
+        v.typeArguments.map(type),
       ),
       final MakeInvocation v => MakeInvocation(
         v.selector,
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
-        v.typeArguments,
+        v.typeArguments.map(type),
       ),
       final Construct v => Construct(
         v.initializer,
         v.inputs.map(map),
-        instantiatedType: v.instantiatedType,
+        instantiatedType: type(v.instantiatedType) as ClassType,
       ),
-      final MakeRecord v => MakeRecord(v.type as RecordType, v.inputs.map(map)),
+      final MakeRecord v => MakeRecord(
+        type(v.type) as RecordType,
+        v.inputs.map(map),
+      ),
       final RecordGet v => RecordGet(map(v.record), v.slot),
       final TypeTest v => TypeTest(
         map(v.operand),
-        v.testedType,
+        type(v.testedType),
         negated: v.negated,
       ),
-      final TypeView v => TypeView(map(v.operand), v.type),
-      final UncheckedCast v => UncheckedCast(map(v.operand), v.type),
-      final TypeCast v => TypeCast(map(v.operand), v.type),
+      final TypeView v => TypeView(map(v.operand), type(v.type)),
+      final UncheckedCast v => UncheckedCast(map(v.operand), type(v.type)),
+      final TypeCast v => TypeCast(map(v.operand), type(v.type)),
       final NullCheck v => NullCheck(map(v.operand)),
       final Equals v => Equals(map(v.left), map(v.right), negated: v.negated),
       final Identical v => Identical(map(v.left), map(v.right)),
@@ -609,7 +617,7 @@ sealed class Instruction(super.type) extends Value {
                 pointer.reference.isLeaf == v.isLeaf =>
           NativeCall.symbol(
             pointer,
-            v.dartSignature,
+            type(v.dartSignature) as FunctionType,
             v.arguments.map(map),
             borrowedOwners: {
               for (final e in v.borrowedOwners.entries) e.key: map(e.value),
@@ -627,8 +635,8 @@ sealed class Instruction(super.type) extends Value {
       final DirectCall v => DirectCall(
         v.target,
         v.inputs.map(map),
-        ownerType: v.ownerType,
-        typeArguments: v.typeArguments,
+        ownerType: v.ownerType == null ? null : type(v.ownerType!) as ClassType,
+        typeArguments: v.typeArguments.map(type),
       ),
       final NumericNegate v => NumericNegate(map(v.operand)),
       final NumericToDouble v => NumericToDouble(map(v.operand)),
@@ -649,17 +657,17 @@ sealed class Instruction(super.type) extends Value {
       final StringLength v => StringLength(map(v.string)),
       final StringCodeUnitAt v => StringCodeUnitAt(map(v.string), map(v.index)),
       final NewCollection v => NewCollection(
-        v.collectionType,
+        type(v.collectionType) as ClassType,
         growable: optional(v.growable),
       ),
       final ListFilled v => ListFilled(
-        v.type as ClassType,
+        type(v.type) as ClassType,
         map(v.length),
         map(v.fill),
         map(v.growable),
       ),
       final ListFrom v => ListFrom(
-        v.type as ClassType,
+        type(v.type) as ClassType,
         map(v.elements),
         map(v.growable),
       ),
