@@ -435,20 +435,36 @@ final class ProgramFlow(
     }
     final incoming = <Block, FlowState>{body.entry: activation.input!.copy()};
     final pending = <Block>{body.entry};
+    final readers = <Value, Set<Block>>{};
+    late Block readingBlock;
+    bool mergeValue(Value value, FlowValue incoming) {
+      if (!activation.mergeValue(value, incoming)) return false;
+      pending.addAll(readers[value] ?? const []);
+      return true;
+    }
+
     for (final (index, parameter) in body.entry.parameters.indexed) {
-      activation.mergeValue(
+      mergeValue(
         parameter,
         activation.arguments[index].withSource(parameter, activation),
       );
     }
     var summaryChanged = false;
 
-    FlowValue read(Value value) => switch (value) {
-      Constant() => FlowValue.constant(value),
-      TestedValue(:final test) => read(test.operand),
-      UnwindValue() => FlowValue.unknown(value.type),
-      _ => activation.values[value] ?? const FlowValue.bottom(),
-    };
+    FlowValue read(Value value) {
+      switch (value) {
+        case Constant():
+          return FlowValue.constant(value);
+        case TestedValue(:final test):
+          return read(test.operand);
+        case UnwindValue():
+          return FlowValue.unknown(value.type);
+        default:
+          (readers[value] ??= {}).add(readingBlock);
+          return activation.values[value] ?? const FlowValue.bottom();
+      }
+    }
+
     void edge(
       Jump jump,
       FlowState state, {
@@ -460,7 +476,7 @@ final class ProgramFlow(
       var changed = false;
       for (final (index, parameter) in jump.target.parameters.indexed) {
         changed =
-            activation.mergeValue(
+            mergeValue(
               parameter,
               (switch (jump.arguments[index]) {
                 UnwindValue.exception =>
@@ -504,6 +520,7 @@ final class ProgramFlow(
     while (pending.isNotEmpty) {
       final block = pending.first;
       pending.remove(block);
+      readingBlock = block;
       activation.blocks.add(block);
       FlowState? state = incoming[block]!.copy();
       FlowResult evaluate(Instruction operation) {
@@ -516,10 +533,7 @@ final class ProgramFlow(
           state,
           read,
         );
-        activation.mergeValue(
-          operation,
-          result.value.withSource(operation, activation),
-        );
+        mergeValue(operation, result.value.withSource(operation, activation));
         if (result.normal != null) {
           activation.mergePoint(activation.after, operation, result.normal!);
         }

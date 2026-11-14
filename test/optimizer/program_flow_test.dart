@@ -127,6 +127,45 @@ void main() {
     },
   );
 
+  test('loop values reschedule consumers across parameterless edges', () {
+    final target = FunctionTarget(_uri, 'sum', .integer, [.integer]);
+    final entry = Block(target.parameterTypes);
+    final loop = Block([ValueType.integer, ValueType.integer]);
+    final body = Block();
+    final done = Block();
+    final exit = Block();
+    entry.finish(
+      Jump(loop, [const Constant.integer(0), const Constant.integer(0)]),
+    );
+    loop.finish(
+      Branch(
+        loop.emit(
+          IntBinary(.lessThan, loop.parameters.first, entry.parameters.single),
+        ),
+        Jump(body),
+        Jump(done),
+      ),
+    );
+    final sum = body.emit(
+      IntBinary(.add, loop.parameters.last, loop.parameters.first),
+    );
+    final next = body.emit(
+      IntBinary(.add, loop.parameters.first, const Constant.integer(1)),
+    );
+    body.finish(Jump(loop, [next, sum]));
+    done.finish(Jump(exit));
+    exit.finish(Return(loop.parameters.last));
+    final function = IrFunction(target, [entry, loop, body, done, exit]);
+    final program = IrProgram([], [function]);
+    final facts = _flow(program, function, [FlowValue.unknown(.integer)]).facts;
+    expect(IrInterpreter(program, {}).run(function, [0]), 0);
+    expect(IrInterpreter(program, {}).run(function, [5]), 10);
+    expect(facts.valueOf(next).constant, isNull);
+    expect(facts.valueOf(sum).constant, isNull);
+    expect(facts.returnedBy(target).constant, isNull);
+    expect(facts.returnedBy(target).unknownTypes, contains(ValueType.integer));
+  });
+
   test('repeated semantic inputs do not expand every call path', () {
     final functions = <IrFunction>[];
     var child = FunctionTarget(_uri, 'leaf', .integer, [.integer]);
