@@ -40,7 +40,7 @@ final class FlowObject(
   );
 }
 
-/// An address relative to one managed allocation or canonical constant.
+/// An address relative to a managed allocation, constant or native callback entry.
 ///
 /// A null offset is unknown and does not establish that access stays in bounds.
 final class FlowAddress(
@@ -49,7 +49,9 @@ final class FlowAddress(
   final ValueType type = ValueType.integer,
 }) {
   this {
-    if (base is! FlowObject && base is! Constant ||
+    if (base is! FlowObject &&
+            base is! Constant &&
+            base is! NativeCallbackTarget ||
         type != ValueType.integer && !FfiTypes.isPointer(type)) {
       throw ArgumentError(
         'An address requires a known base and an address type.',
@@ -63,10 +65,18 @@ final class FlowAddress(
     _ => base,
   };
 
-  /// The reference retained by this raw memory capability.
+  /// The capability retained by this address, without a concrete numeric value.
   FlowValue get reference => switch (base) {
     final FlowObject object => FlowValue.object(object),
     final Constant constant => FlowValue.constant(constant),
+    final NativeCallbackTarget target => FlowValue._(
+      const {},
+      const {},
+      const {},
+      const {},
+      null,
+      {FlowAddress(target, 0)},
+    ),
     _ => throw StateError('Invalid address base.'),
   };
 
@@ -104,9 +114,9 @@ final class FlowValue {
   final Set<FlowSource> sources;
   final FlowValue? _references;
 
-  /// Managed values still reachable through a raw address or native pointer.
+  /// Capabilities retained through raw memory: managed values and callback entries.
   ///
-  /// These are capabilities, not additional alternatives for this value's type.
+  /// These are not additional alternatives for this value's type.
   FlowValue get references => _references ?? const FlowValue.bottom();
 
   const new bottom()

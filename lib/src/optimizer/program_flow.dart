@@ -33,6 +33,8 @@ final class ProgramFlow(
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
   final _escapingActivations = <_Activation>{};
+  final _nativeActivations = <_Activation>{};
+  final _nativeLookups = <_Activation>{};
   final _constructedReturns = <_Activation, FlowValue>{};
   ProgramFlowFacts? _facts;
 
@@ -142,6 +144,19 @@ final class ProgramFlow(
         throw ArgumentError(
           'Entry argument $index violates its semantic bound.',
         );
+      }
+      for (final address in [
+        ...value.addresses,
+        ...value.references.addresses,
+      ]) {
+        final target = switch (address.base) {
+          StaticCallbackTarget(:final function) => function,
+          ClosureCallbackTarget(:final lookup) => lookup,
+          _ => null,
+        };
+        if (target != null && program.implementationOf(target) == null) {
+          throw ArgumentError('Entry callback belongs to another program.');
+        }
       }
       final pending = [...value.constants, ...value.references.constants];
       final visited = <Constant>{};
@@ -439,9 +454,10 @@ final class ProgramFlow(
       );
     }
     final escapes =
-        _escapingActivations.contains(activation) ||
-        (_escapingReturns.contains(body.target) &&
-            identical(_roots[body.target], activation));
+        !_nativeLookups.contains(activation) &&
+        (_escapingActivations.contains(activation) ||
+            (_escapingReturns.contains(body.target) &&
+                identical(_roots[body.target], activation)));
     final incoming = <Block, FlowState>{body.entry: activation.input!.copy()};
     final pending = <Block>{body.entry};
     final readers = <Value, Set<Block>>{};
@@ -511,7 +527,7 @@ final class ProgramFlow(
       FlowValue exception,
       FlowValue stackTrace,
     ) {
-      if (escapes) {
+      if (escapes && !_nativeActivations.contains(activation)) {
         state.escape([exception, stackTrace]);
         _admitEscaped(state);
       }
@@ -854,13 +870,8 @@ final class ProgramFlow(
         return result;
       case NativeCallbackAddress(:final target):
         activation.operationEffects[operation] = operation.effects;
-        final function = switch (target) {
-          StaticCallbackTarget(:final function) => function,
-          ClosureCallbackTarget(:final lookup) => lookup,
-        };
         return FlowResult(
-          value: FlowValue.unknown(.integer)
-              .withReferences([FlowValue.constant(FunctionConstant(function))]),
+          value: FlowValue.address(FlowAddress(target, 0)),
           normal: state.copy(),
         );
       case ReferenceAddress():
@@ -1863,24 +1874,76 @@ final class ProgramFlow(
       FunctionTarget target,
       List<FlowValue> arguments, {
       Map<TypeParameterType, ValueType> environment = const {},
+      bool native = false,
     }) {
       final activation = prepare(key, target, environment);
-      if (activation != null) _supply(activation, arguments, state);
+      if (activation != null) {
+        if (native) _nativeActivations.add(activation);
+        _supply(activation, arguments, state);
+      }
     }
 
-    final visited = <(FlowObject, Object?)>{};
+    final visited = <(FlowObject, Object?, NativeCallbackTarget?)>{};
+    final callbacks = <NativeCallbackTarget>{};
     void visit(
       FlowValue value, {
       List<ValueType> typeArguments = const [],
       Object? identity,
+      NativeCallbackTarget? callback,
     }) {
       List<FlowValue> parameters(
         FunctionTarget target,
         Map<TypeParameterType, ValueType> environment,
-      ) => [
-        for (final type in target.signature.parameters)
-          FlowValue.unknown(type.substitute(environment)),
-      ];
+      ) => callback == null
+          ? [
+              for (final type in target.signature.parameters)
+                FlowValue.unknown(type.substitute(environment)),
+            ]
+          : target.signature.bind<FlowValue>(
+              callback.dartSignature.parameters.map(FlowValue.unknown).toList(),
+              const {},
+              (index) => FlowValue.constant(
+                program.implementationOf(target)!.defaults[index]!,
+              ),
+            );
+
+      for (final address in value.addresses) {
+        if (address.base case final NativeCallbackTarget definition
+            when !callbacks.add(definition)) {
+          continue;
+        }
+        switch (address.base) {
+          case final StaticCallbackTarget definition:
+            final target = definition.function;
+            final args = target.signature.bind<FlowValue>(
+              definition.dartSignature.parameters
+                  .map(FlowValue.unknown)
+                  .toList(),
+              const {},
+              (index) => FlowValue.constant(
+                program.implementationOf(target)!.defaults[index]!,
+              ),
+            );
+            admit(definition, target, args, native: true);
+          case final ClosureCallbackTarget definition:
+            final lookup = prepare(
+              (definition, 'lookup'),
+              definition.lookup,
+              const {},
+            );
+            if (lookup == null) continue;
+            _nativeLookups.add(lookup);
+            _supply(lookup, [FlowValue.unknown(.integer)], state);
+            if (lookup.normal case final normal?) {
+              state.join(normal);
+              visit(
+                lookup.returned,
+                identity: definition,
+                callback: definition,
+              );
+            }
+        }
+      }
 
       for (final constant in value.constants.whereType<FunctionConstant>()) {
         final (:target, :owner, typeArguments: applied) = _constantCall(
@@ -1894,10 +1957,18 @@ final class ProgramFlow(
           for (final (i, type) in applied.indexed)
             target.typeParameters[i]: type,
         };
-        final key = identity ?? constant.structuralKey;
+        final key = callback == null
+            ? identity ?? constant.structuralKey
+            : (identity, constant.structuralKey);
         final arguments = parameters(target, environment);
         if (target.kind != .initializer) {
-          admit(key, target, arguments, environment: environment);
+          admit(
+            key,
+            target,
+            arguments,
+            environment: environment,
+            native: callback != null,
+          );
           continue;
         }
         final activation = prepare(key, target, environment);
@@ -1927,7 +1998,7 @@ final class ProgramFlow(
         );
       }
       for (final object in value.objects) {
-        if (!visited.add((object, _typeKey(typeArguments)))) continue;
+        if (!visited.add((object, _typeKey(typeArguments), callback))) continue;
         final captures = state.capturesOf(object);
         if (captures == null) continue;
         final creator = _creator(object);
@@ -1936,6 +2007,7 @@ final class ProgramFlow(
             captures.single,
             typeArguments: arguments,
             identity: identity ?? object,
+            callback: callback,
           );
           continue;
         }
@@ -1945,11 +2017,17 @@ final class ProgramFlow(
             for (final (i, type) in typeArguments.indexed)
               target.typeParameters[i]: type,
           };
-          admit(identity ?? object, target, [
-            FlowValue.object(object),
-            ...captures,
-            ...parameters(target, environment),
-          ], environment: environment);
+          admit(
+            callback == null ? identity ?? object : (identity, object),
+            target,
+            [
+              FlowValue.object(object),
+              ...captures,
+              ...parameters(target, environment),
+            ],
+            environment: environment,
+            native: callback != null,
+          );
         } else {
           for (final target
               in creator.boundMethods[_original(object)] ??
@@ -1969,6 +2047,7 @@ final class ProgramFlow(
                   ...parameters(target, environment),
                 ],
                 environment: environment,
+                native: callback != null,
               );
             }
           }
@@ -2646,6 +2725,23 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
 }
 
 Constant? _fold(Instruction operation, List<FlowValue> inputs) {
+  if (operation case Equals(:final negated)) {
+    if (inputs.every(
+      (value) =>
+          value.constants.isEmpty &&
+          value.objects.isEmpty &&
+          value.unknownTypes.isEmpty &&
+          value.addresses.length == 1,
+    )) {
+      final left = inputs.first.addresses.single,
+          right = inputs.last.addresses.single;
+      if (left.identity == right.identity &&
+          left.offset != null &&
+          right.offset != null) {
+        return Constant.boolean((left.offset == right.offset) != negated);
+      }
+    }
+  }
   final constants = inputs.map((value) => value.constant).toList();
   if (constants.any((value) => value == null)) return null;
   final scalars = constants
