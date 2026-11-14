@@ -549,6 +549,116 @@ final class FunctionRewrite(
       locate(original, current, function);
     }
 
+    final parameterOwners = {
+      for (final block in instructions.keys)
+        for (final parameter in block.parameters) parameter: block,
+    };
+    final usedOutside = <Value>{};
+    for (final block in instructions.keys) {
+      final terminal = ends[block]!;
+      for (final operand in [
+        for (final operation in [
+          ...instructions[block]!,
+          if (terminal case Invoke(:final operation)) operation,
+        ])
+          ...operation.inputs,
+        ..._endValues(terminal),
+      ]) {
+        if (parameterOwners[operand] case final owner? when owner != block) {
+          usedOutside.add(operand);
+        }
+      }
+    }
+
+    Jump thread(Jump original, {Value? condition, bool outcome = false}) {
+      Value known(Value value) =>
+          identical(value, condition) ? Constant.boolean(outcome) : value;
+      var edge = original;
+      if (condition != null &&
+          edge.arguments.any((value) => identical(value, condition))) {
+        edge = Jump(edge.target, edge.arguments.map(known));
+      }
+      final visited = <Block>{};
+      while (instructions[edge.target]!.isEmpty &&
+          !edge.target.parameters.any(usedOutside.contains)) {
+        if (!visited.add(edge.target)) return original;
+        Value bind(Value value) {
+          final index = value is BlockParameter
+              ? edge.target.parameters.indexOf(value)
+              : -1;
+          return known(index < 0 ? value : edge.arguments[index]);
+        }
+
+        final terminal = ends[edge.target]!;
+        final Jump next;
+        if (terminal is Jump) {
+          next = terminal;
+        } else if (terminal is Branch) {
+          if (bind(terminal.condition) case ScalarConstant(
+            value: final bool yes,
+          )) {
+            next = yes ? terminal.ifTrue : terminal.ifFalse;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
+        edge = Jump(next.target, next.arguments.map(bind));
+      }
+      changed |= !identical(edge, original);
+      return edge;
+    }
+
+    for (final entry in ends.entries.toList()) {
+      ends[entry.key] = switch (entry.value) {
+        final Jump edge => thread(edge),
+        Branch(:final condition, :final ifTrue, :final ifFalse) => Branch(
+          condition,
+          thread(ifTrue, condition: condition, outcome: true),
+          thread(ifFalse, condition: condition, outcome: false),
+        ),
+        Invoke(:final operation, :final onReturn, :final onThrow) => Invoke(
+          operation,
+          onReturn: onReturn == null ? null : thread(onReturn),
+          onThrow: thread(onThrow),
+        ),
+        Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
+          exception,
+          stackTrace: stackTrace,
+          onThrow: onThrow == null ? null : thread(onThrow),
+        ),
+        ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(
+          onThrow == null ? null : thread(onThrow),
+        ),
+        Await(:final operand, :final result, :final onResume, :final onThrow) =>
+          Await(
+            operand,
+            result,
+            onResume: onResume == null ? null : thread(onResume),
+            onThrow: onThrow == null ? null : thread(onThrow),
+          ),
+        Yield(:final value, :final onResume, :final onCancel) => Yield(
+          value,
+          thread(onResume),
+          onCancel: onCancel == null ? null : thread(onCancel),
+        ),
+        YieldStream(
+          :final stream,
+          :final onResume,
+          :final onCancel,
+          :final onThrow,
+        ) =>
+          YieldStream(
+            stream,
+            thread(onResume),
+            onCancel: thread(onCancel),
+            onThrow: onThrow == null ? null : thread(onThrow),
+          ),
+        final terminal => terminal,
+      };
+    }
+
     final predecessors = <Block, int>{};
     for (final terminal in ends.values) {
       for (final edge in terminal.successors) {
@@ -598,31 +708,7 @@ final class FunctionRewrite(
           retain(operation);
         }
       }
-      final terminal = ends[block]!;
-      for (final edge in terminal.successors) {
-        edge.arguments.forEach(retain);
-      }
-      switch (terminal) {
-        case Return(:final value?):
-          retain(value);
-        case Branch(:final condition):
-          retain(condition);
-        case Invoke(:final operation):
-          retain(operation);
-        case Throw(:final exception, :final stackTrace):
-          retain(exception);
-          if (stackTrace != null) retain(stackTrace);
-        case Unreachable(:final cause):
-          retain(cause);
-        case Await(:final operand):
-          retain(operand);
-        case Yield(:final value):
-          retain(value);
-        case YieldStream(:final stream):
-          retain(stream);
-        default:
-          break;
-      }
+      _endValues(ends[block]!).forEach(retain);
     }
     final owned = <Object>{...reachable};
     for (final block in reachable) {
@@ -927,3 +1013,18 @@ final class FunctionRewrite(
     );
   }
 }
+
+Iterable<Value> _endValues(Terminator terminal) => [
+  for (final edge in terminal.successors) ...edge.arguments,
+  ...switch (terminal) {
+    Return(:final value) => [?value],
+    Branch(:final condition) => [condition],
+    Invoke(:final operation) => [operation],
+    Throw(:final exception, :final stackTrace) => [exception, ?stackTrace],
+    Unreachable(:final cause) => [cause],
+    Await(:final operand) => [operand],
+    Yield(:final value) => [value],
+    YieldStream(:final stream) => [stream],
+    _ => const <Value>[],
+  },
+];

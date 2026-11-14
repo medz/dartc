@@ -197,16 +197,32 @@ void main() {
       expect(first.unknownTypes, isEmpty);
       expect(first.objects, isEmpty);
       expect(first.references.objects, {base});
-      expect(joined.addresses, {FlowAddress(base, null)});
-      expect(joined.join(FlowValue.address(FlowAddress(base, 8))), joined);
+      expect(joined.addresses, {
+        FlowAddress.ranged(base, FlowIntegerRange(0, 4)),
+      });
+      final widened = joined.join(
+        FlowValue.address(FlowAddress(base, 8)),
+        widen: true,
+      );
+      expect(
+        widened.addresses.single.offsets,
+        FlowIntegerRange(0, FlowIntegerRange.maximum),
+      );
+      expect(widened.join(FlowValue.address(FlowAddress(base, 16))), widened);
+      expect(
+        joined.join(FlowValue.address(FlowAddress(base, null))).addresses,
+        {FlowAddress(base, null)},
+      );
       expect(joined.join(FlowValue.unknown(.integer)).unknownTypes, {
         ValueType.integer,
       });
       expect(first.check(.integer).value.addresses, first.addresses);
       expect(first.check(.string).value.isBottom, isTrue);
       final replacement = FlowObject(site, Object());
-      final rebased = first.mapObjects((_) => replacement);
-      expect(rebased.addresses, {FlowAddress(replacement, 0)});
+      final rebased = joined.mapObjects((_) => replacement);
+      expect(rebased.addresses, {
+        FlowAddress.ranged(replacement, FlowIntegerRange(0, 4)),
+      });
       expect(rebased.references.objects, {replacement});
       expect(first.withSource(site, Object()).addresses, first.addresses);
       expect(first.withSources(const []).addresses, first.addresses);

@@ -44,12 +44,27 @@ final class FlowObject(
 
 /// An address relative to a managed allocation, constant or native callback entry.
 ///
-/// A null offset is unknown and does not establish that access stays in bounds.
-final class FlowAddress(
+/// Unknown offsets do not establish that access stays in bounds.
+final class FlowAddress.ranged(
   final Object base,
-  final int? offset, {
+  FlowIntegerRange? offsets, {
   final ValueType type = ValueType.integer,
 }) {
+  /// Inclusive byte offsets, or null when the displacement is unbounded.
+  final FlowIntegerRange? offsets = offsets == FlowIntegerRange.full
+      ? null
+      : offsets;
+
+  new(Object base, int? offset, {ValueType type = ValueType.integer})
+    : this.ranged(
+        base,
+        offset == null ? null : FlowIntegerRange(offset, offset),
+        type: type,
+      );
+
+  /// The exact displacement when every alternative has the same offset.
+  int? get offset => offsets?.constant;
+
   this {
     if (base is! FlowObject &&
             base is! Constant &&
@@ -86,11 +101,11 @@ final class FlowAddress(
   bool operator ==(Object other) =>
       other is FlowAddress &&
       identity == other.identity &&
-      offset == other.offset &&
+      offsets == other.offsets &&
       type == other.type;
 
   @override
-  int get hashCode => Object.hash(identity, offset, type);
+  int get hashCode => Object.hash(identity, offsets, type);
 }
 
 /// Values arriving on executable paths, including explicit unknown bounds.
@@ -297,11 +312,11 @@ final class FlowValue {
     final references = _references?.mapObjects(transform);
     final mappedAddresses = {
       for (final address in addresses)
-        FlowAddress(
+        FlowAddress.ranged(
           address.base is FlowObject
               ? transform(address.base as FlowObject)
               : address.base,
-          address.offset,
+          address.offsets,
           type: address.type,
         ),
     };
@@ -473,9 +488,15 @@ final class FlowValue {
     for (final address in [...this.addresses, ...other.addresses]) {
       final key = (address.identity, address.type);
       final previous = addresses[key];
-      addresses[key] = previous == null || previous.offset == address.offset
+      addresses[key] = previous == null || previous == address
           ? address
-          : FlowAddress(address.base, null, type: address.type);
+          : FlowAddress.ranged(
+              address.base,
+              previous.offsets == null || address.offsets == null
+                  ? null
+                  : previous.offsets!.join(address.offsets!, widen: widen),
+              type: address.type,
+            );
     }
     return FlowValue._(
       constants,

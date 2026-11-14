@@ -8,6 +8,166 @@ final _uri = Uri.parse('memory:rewrite');
 final _tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
 
 void main() {
+  test('constant incoming branches preserve parallel parameter swaps', () {
+    final target = FunctionTarget(_uri, 'swapped', .integer, [
+      .integer,
+      .integer,
+      .boolean,
+    ]);
+    final entry = Block(target.parameterTypes);
+    final dispatch = Block([.boolean, .integer, .integer]);
+    final done = Block([.integer, .integer]);
+    entry.finish(
+      Branch(
+        entry.parameters[2],
+        Jump(dispatch, [
+          const Constant.boolean(true),
+          ...entry.parameters.take(2),
+        ]),
+        Jump(dispatch, [
+          const Constant.boolean(false),
+          ...entry.parameters.take(2),
+        ]),
+      ),
+    );
+    dispatch.finish(
+      Branch(
+        dispatch.parameters[0],
+        Jump(done, [dispatch.parameters[2], dispatch.parameters[1]]),
+        Jump(done, [dispatch.parameters[1], dispatch.parameters[2]]),
+      ),
+    );
+    done.finish(
+      Return(
+        done.emit(IntBinary(.subtract, done.parameters[0], done.parameters[1])),
+      ),
+    );
+    final before = IrFunction(target, [entry, dispatch, done]);
+    final after = FunctionRewrite(before).run();
+    expect(
+      after.blocks.map((block) => block.end).whereType<Branch>(),
+      hasLength(1),
+    );
+    for (final function in [before, after]) {
+      final runner = IrInterpreter(IrProgram([], [function]), {});
+      expect(runner.run(function, [7, 2, true]), -5);
+      expect(runner.run(function, [7, 2, false]), 5);
+    }
+  });
+
+  test(
+    'threading preserves effects and bindings used by descendant blocks',
+    () {
+      for (final effectful in [false, true]) {
+        final target = FunctionTarget(_uri, 'retained', .integer, [
+          .integer,
+          .integer,
+          .boolean,
+        ]);
+        final entry = Block(target.parameterTypes);
+        final dispatch = Block([.boolean, .integer]);
+        final yes = Block(effectful ? [.integer] : []);
+        final no = Block(effectful ? [.integer] : []);
+        entry.finish(
+          Branch(
+            entry.parameters[2],
+            Jump(dispatch, [const Constant.boolean(true), entry.parameters[0]]),
+            Jump(dispatch, [
+              const Constant.boolean(false),
+              entry.parameters[1],
+            ]),
+          ),
+        );
+        if (effectful) {
+          dispatch.emit(DirectCall(_tick, [dispatch.parameters[1]]));
+        }
+        dispatch.finish(
+          Branch(
+            dispatch.parameters[0],
+            Jump(yes, effectful ? [dispatch.parameters[1]] : []),
+            Jump(no, effectful ? [dispatch.parameters[1]] : []),
+          ),
+        );
+        yes.finish(
+          Return(effectful ? yes.parameters.single : dispatch.parameters[1]),
+        );
+        no.finish(
+          Return(
+            no.emit(
+              IntBinary(
+                .add,
+                effectful ? no.parameters.single : dispatch.parameters[1],
+                const Constant.integer(100),
+              ),
+            ),
+          ),
+        );
+        final before = IrFunction(target, [entry, dispatch, yes, no]);
+        final after = FunctionRewrite(before).run();
+        for (final function in [before, after]) {
+          final events = <int>[];
+          final runner = IrInterpreter(
+            IrProgram([], [function], externals: [IrExternal(_tick)]),
+            {
+              (_uri, 'tick'): (value) {
+                events.add(value);
+                return value;
+              },
+            },
+          );
+          expect(runner.run(function, [7, 2, true]), 7);
+          expect(runner.run(function, [7, 2, false]), 102);
+          expect(events, effectful ? [7, 2] : isEmpty);
+        }
+      }
+    },
+  );
+
+  test('empty control cycles preserve their changing branch arguments', () {
+    final target = FunctionTarget(_uri, 'cycle', .integer, [
+      .integer,
+      .integer,
+      .boolean,
+    ]);
+    final entry = Block(target.parameterTypes);
+    final first = Block([.boolean, .integer, .integer]);
+    final second = Block([.boolean, .integer, .integer]);
+    final done = Block([.integer, .integer]);
+    entry.finish(
+      Jump(first, [entry.parameters[2], ...entry.parameters.take(2)]),
+    );
+    first.finish(
+      Jump(second, [
+        first.parameters[0],
+        first.parameters[2],
+        first.parameters[1],
+      ]),
+    );
+    second.finish(
+      Branch(
+        second.parameters[0],
+        Jump(first, [
+          const Constant.boolean(false),
+          ...second.parameters.skip(1),
+        ]),
+        Jump(done, second.parameters.skip(1)),
+      ),
+    );
+    done.finish(
+      Return(
+        done.emit(IntBinary(.subtract, done.parameters[0], done.parameters[1])),
+      ),
+    );
+    final before = IrFunction(target, [entry, first, second, done]);
+    final after = FunctionRewrite(before).run();
+    final repeated = FunctionRewrite(after).run();
+    for (final function in [before, after, repeated]) {
+      final runner = IrInterpreter(IrProgram([], [function]), {});
+      expect(runner.run(function, [7, 2, true]), 5);
+      expect(runner.run(function, [7, 2, false]), -5);
+    }
+  });
+
   test(
     'inlined entry arguments must dominate the call and match its types',
     () {

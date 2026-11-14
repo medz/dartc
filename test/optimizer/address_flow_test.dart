@@ -1,12 +1,16 @@
 import 'dart:ffi' show Uint8, Int64;
 
 import 'package:dartc/abi.dart';
+import 'package:dartc/frontend.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
+
+import '../support/ir_interpreter.dart';
+import 'fixtures/address_paths.dart' as source;
 
 final _uri = Uri.parse('memory:address-flow');
 final _type = ClassType(_uri, 'Storage');
@@ -33,6 +37,123 @@ ProgramFlowFacts _analyze(
 }
 
 void main() {
+  test(
+    'source guards constrain scaled addresses and preserve runtime results',
+    () async {
+      final program = await AnalysisSession([
+        'test/optimizer/fixtures/address_paths.dart',
+      ]).use((input) async => (await Lowering().lower(input)).program);
+      final function = program.functions.singleWhere(
+        (body) => body.target.name == 'boundedOffset',
+      );
+      final facts = ProgramOptimizer(const [ProgramSimplification()])
+          .run(program, [
+            (
+              target: function.target,
+              arguments: [
+                FlowValue.address(
+                  FlowAddress(const Constant.string('storage'), 0),
+                ),
+                FlowValue.unknown(.integer),
+              ],
+            ),
+          ], memoryLayoutFor: (_) => _Memory());
+      final rewritten =
+          facts.program.implementationOf(function.target) as IrFunction;
+      final offset = rewritten.blocks
+          .expand((block) => block.instructions)
+          .whereType<PointerOffset>()
+          .single;
+      expect(
+        facts.valueOf(offset).addresses.single.offsets,
+        FlowIntegerRange(0, 24),
+      );
+      expect(
+        facts.returnedBy(function.target).integers,
+        FlowIntegerRange(-1, 24),
+      );
+      for (final index in [-2, -1, 0, 1, 3, 4, 8]) {
+        expect(
+          IrInterpreter(facts.program, {}).run(rewritten, [0x1000, index]),
+          source.boundedOffset(0x1000, index),
+        );
+      }
+    },
+  );
+
+  test('bounded integer inputs survive scaled pointer views and relative arithmetic', () {
+    final block = Block([ValueType.integer]);
+    final base = block.emit(ReferenceAddress(_object));
+    final pointer = block.emit(PointerFromAddress(base, FfiTypes.int64Pointer));
+    final scaled = block.emit(PointerOffset(pointer, block.parameters.single));
+    final address = block.emit(PointerAddress(scaled));
+    final added = block.emit(
+      IntBinary(.add, address, const Constant.integer(4)),
+    );
+    final shifted = block.emit(
+      IntBinary(.subtract, added, const Constant.integer(8)),
+    );
+    final distance = block.emit(IntBinary(.subtract, shifted, base));
+    block.finish(Return(distance));
+    final facts = _analyze(
+      block,
+      arguments: [FlowValue.integerRange(FlowIntegerRange(1, 3))],
+      memoryLayout: _Memory(),
+    );
+    expect(
+      facts.valueOf(scaled).addresses.single.offsets,
+      FlowIntegerRange(8, 24),
+    );
+    expect(
+      facts.valueOf(address).addresses.single.offsets,
+      FlowIntegerRange(8, 24),
+    );
+    expect(
+      facts.valueOf(shifted).addresses.single.offsets,
+      FlowIntegerRange(4, 20),
+    );
+    expect(facts.valueOf(distance).integers, FlowIntegerRange(4, 20));
+    expect(facts.valueOf(address).addresses.single.type, ValueType.integer);
+  });
+
+  test(
+    'constant pointer overflow wraps and interval overflow loses its bound',
+    () {
+      final block = Block([ValueType.integer]);
+      final pointer = block.emit(
+        PointerFromAddress(
+          block.emit(ReferenceAddress(_object)),
+          FfiTypes.int64Pointer,
+        ),
+      );
+      final shifted = block.emit(
+        PointerOffset(pointer, block.parameters.single),
+      );
+      block.finish(Return(shifted));
+      final exact = _analyze(
+        block,
+        arguments: [
+          FlowValue.constant(const Constant.integer(FlowIntegerRange.maximum)),
+        ],
+        memoryLayout: _Memory(),
+      );
+      expect(exact.valueOf(shifted).addresses.single.offset, -8);
+      final ranged = _analyze(
+        block,
+        arguments: [
+          FlowValue.integerRange(
+            FlowIntegerRange(
+              FlowIntegerRange.maximum - 1,
+              FlowIntegerRange.maximum,
+            ),
+          ),
+        ],
+        memoryLayout: _Memory(),
+      );
+      expect(ranged.valueOf(shifted).addresses.single.offsets, isNull);
+    },
+  );
+
   test('generic address operations retain the actual invocation types', () {
     final t = TypeParameterType('T')..initializeBound(FfiTypes.nativeType);
     final pointerType = FfiTypes.pointer.instantiate([

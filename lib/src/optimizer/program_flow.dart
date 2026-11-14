@@ -1049,7 +1049,11 @@ final class ProgramFlow(
         for (final address in input.addresses) {
           value = value.join(
             FlowValue.address(
-              FlowAddress(address.base, address.offset, type: resultType),
+              FlowAddress.ranged(
+                address.base,
+                address.offsets,
+                type: resultType,
+              ),
             ),
           );
         }
@@ -1078,22 +1082,28 @@ final class ProgramFlow(
       case PointerOffset():
         final input = inputs.first;
         final layout = memoryLayout?.nativeLayout;
-        final constant = inputs.last.constant;
-        final index = constant is ScalarConstant && constant.value is int
-            ? constant.value as int
-            : null;
+        final index = inputs.last.integers;
         final stride = layout?.of(FfiTypes.pointerElement(resultType)!).size;
+        FlowIntegerRange? amount;
+        if (index != null && stride != null) {
+          final count = index.constant;
+          amount = count == null
+              ? index.multiply(FlowIntegerRange(stride, stride))
+              : FlowIntegerRange(count * stride, count * stride);
+        }
         var value = const FlowValue.bottom();
         for (final address in input.addresses) {
-          final offset =
-              address.offset == null || index == null || stride == null
-              ? null
-              : (address.offset! + index * stride).toSigned(
-                  layout!.target.wordSize * 8,
-                );
           value = value.join(
             FlowValue.address(
-              FlowAddress(address.base, offset, type: resultType),
+              FlowAddress.ranged(
+                address.base,
+                _shiftOffsets(
+                  address.offsets,
+                  amount,
+                  bits: (layout?.target.wordSize ?? 8) * 8,
+                ),
+                type: resultType,
+              ),
             ),
           );
         }
@@ -3095,22 +3105,13 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
       value.unknownTypes.isNotEmpty ||
       value.constants.isNotEmpty ||
       value.objects.isNotEmpty;
-  int? integer(FlowValue value) => switch (value.constant) {
-    ScalarConstant(value: final int value) => value,
-    _ => null,
-  };
   void shifted(FlowValue base, FlowValue offset, {required bool negative}) {
-    final amount = integer(offset);
     for (final address in base.addresses) {
       result = result.join(
         FlowValue.address(
-          FlowAddress(
+          FlowAddress.ranged(
             address.base,
-            address.offset == null || amount == null
-                ? null
-                : (address.offset! + (negative ? -amount : amount)).toSigned(
-                    64,
-                  ),
+            _shiftOffsets(address.offsets, offset.integers, subtract: negative),
           ),
         ),
       );
@@ -3123,9 +3124,9 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
     for (final a in left.addresses) {
       for (final b in right.addresses) {
         result = result.join(
-          a.identity == b.identity && a.offset != null && b.offset != null
-              ? FlowValue.constant(
-                  Constant.integer((a.offset! - b.offset!).toSigned(64)),
+          a.identity == b.identity && a.offsets != null && b.offsets != null
+              ? FlowValue.integerRange(
+                  _shiftOffsets(a.offsets, b.offsets, subtract: true)!,
                 )
               : FlowValue.unknown(.integer),
         );
@@ -3139,6 +3140,25 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
     result = result.join(FlowValue.unknown(.integer));
   }
   return result.withReferences([left.references, right.references]);
+}
+
+FlowIntegerRange? _shiftOffsets(
+  FlowIntegerRange? base,
+  FlowIntegerRange? amount, {
+  bool subtract = false,
+  int bits = 64,
+}) {
+  if (base == null || amount == null) return null;
+  if ((base.constant, amount.constant) case (final left?, final right?)) {
+    final value = (subtract ? left - right : left + right).toSigned(bits);
+    return FlowIntegerRange(value, value);
+  }
+  final result = subtract ? base.subtract(amount) : base.add(amount);
+  if (bits < 64 &&
+      (result.lower < -(1 << (bits - 1)) || result.upper >= 1 << (bits - 1))) {
+    return FlowIntegerRange.full;
+  }
+  return result;
 }
 
 Constant? _fold(
