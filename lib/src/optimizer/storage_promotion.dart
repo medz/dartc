@@ -10,10 +10,7 @@ import 'program_pass.dart';
 ///
 /// The shared solver supplies values and state. This pass reconstructs their SSA
 /// joins; writes, lazy reads and opaque effects remain explicit proof boundaries.
-final class const ProgramStoragePromotion() implements ProgramPass {
-  @override
-  bool get repeatUntilStable => true;
-
+final class const ProgramStoragePromotion() extends ProgramPass {
   @override
   IrProgram run(ProgramFlowFacts facts) {
     facts.checkProgram(facts.program);

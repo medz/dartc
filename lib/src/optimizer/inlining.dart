@@ -12,27 +12,34 @@ import 'program_pass.dart';
 /// synchronous bodies that can be copied with their parameter and type bindings.
 /// Arguments retain evaluation order, effects and exceptional continuations.
 ///
-/// This expansion runs once per pipeline position; subsequent shrinking passes
-/// may simplify its results without resetting and repeatedly spending its budget.
+/// Each compilation retains per-function budgets while fresh facts expose more
+/// candidates after shrinking passes; repeated rounds never reset spent growth.
 final class const DirectCallInlining({
   final int maxCalleeCost = 12,
   final int maxCallerGrowth = 64,
-}) implements ProgramPass {
+}) extends ProgramPass {
   @override
-  bool get repeatUntilStable => false;
+  bool get expandsCode => true;
 
   @override
-  IrProgram run(ProgramFlowFacts facts) {
-    facts.checkProgram(facts.program);
+  IrProgram run(ProgramFlowFacts facts) => bind()(facts);
+
+  @override
+  ProgramTransform bind() {
     RangeError.checkNotNegative(maxCalleeCost, 'maxCalleeCost');
     RangeError.checkNotNegative(maxCallerGrowth, 'maxCallerGrowth');
-    if (maxCalleeCost == 0 || maxCallerGrowth == 0) return facts.program;
-    return _inlineSelected(
-      facts.program,
-      facts,
-      maxCalleeCost,
-      maxCallerGrowth,
-    );
+    final remaining = <FunctionTarget, int>{};
+    return (facts) {
+      facts.checkProgram(facts.program);
+      if (maxCalleeCost == 0 || maxCallerGrowth == 0) return facts.program;
+      return _inlineSelected(
+        facts.program,
+        facts,
+        maxCalleeCost,
+        maxCallerGrowth,
+        remaining,
+      );
+    };
   }
 }
 
@@ -41,6 +48,7 @@ IrProgram _inlineSelected(
   ProgramFlowFacts facts,
   int maxCalleeCost,
   int maxCallerGrowth,
+  Map<FunctionTarget, int> remaining,
 ) {
   final expanded =
       <FunctionTarget, ({IrFunction body, int copies, int allocations})>{};
@@ -59,7 +67,7 @@ IrProgram _inlineSelected(
   ({IrFunction body, int copies, int allocations}) expand(IrFunction function) {
     if (expanded[function.target] case final result?) return result;
     visiting.add(function.target);
-    var budget = maxCallerGrowth, allocations = 0;
+    var budget = remaining[function.target] ?? maxCallerGrowth, allocations = 0;
     final executable = facts.definitions.contains(function.target);
     if (executable) {
       for (final block in function.blocks) {
@@ -231,6 +239,7 @@ IrProgram _inlineSelected(
       }
     }
     visiting.remove(function.target);
+    remaining[function.target] = budget;
     return expanded[function.target] = (
       body: body,
       copies: copies(body),

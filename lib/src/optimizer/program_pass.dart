@@ -2,17 +2,20 @@ import 'package:dartc/ir.dart';
 
 import 'program_flow.dart';
 
+/// One compilation's transform, retaining only its own bounded work state.
+typedef ProgramTransform = IrProgram Function(ProgramFlowFacts facts);
+
 /// A semantic transformation consuming facts for exactly one immutable program.
 ///
 /// Returns the same program when unchanged. Changed graphs invalidate all
 /// previous facts; the driver solves the new graph from its original entries.
-abstract interface class ProgramPass() {
-  /// Whether this pass joins the transformations solved to a common fixed point.
-  ///
-  /// Repeated passes must make progress toward a fixed point. Expansion passes
-  /// can instead run once, with shrinking passes scheduled after them.
-  bool get repeatUntilStable;
+abstract class const ProgramPass() {
+  /// Whether shrinking passes must converge before this pass can add code.
+  bool get expandsCode => false;
 
-  /// Transforms the checked program described by [facts].
+  /// Starts one compilation; expansion budgets survive every subsequent rewrite.
+  ProgramTransform bind() => run;
+
+  /// Transforms one graph with fresh work state for a standalone invocation.
   IrProgram run(ProgramFlowFacts facts);
 }

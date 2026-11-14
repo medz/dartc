@@ -5,10 +5,7 @@ import 'program_flow.dart';
 import 'program_pass.dart';
 
 /// Binds proven dispatch targets using their own defaults and generic signature.
-final class const ProgramCallSpecialization() implements ProgramPass {
-  @override
-  bool get repeatUntilStable => true;
-
+final class const ProgramCallSpecialization() extends ProgramPass {
   @override
   IrProgram run(ProgramFlowFacts facts) {
     facts.checkProgram(facts.program);

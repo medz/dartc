@@ -10,10 +10,7 @@ import 'program_pass.dart';
 ///
 /// Demands come from executable operations after value and control-flow rewrites.
 /// A new graph must be solved before another elimination pass consumes its facts.
-final class const ProgramStorageElimination() implements ProgramPass {
-  @override
-  bool get repeatUntilStable => true;
-
+final class const ProgramStorageElimination() extends ProgramPass {
   @override
   IrProgram run(ProgramFlowFacts facts) {
     final program = facts.program;

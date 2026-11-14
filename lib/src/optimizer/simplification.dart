@@ -5,10 +5,7 @@ import 'program_flow.dart';
 import 'program_pass.dart';
 
 /// Replaces proven values and removes computations without execution obligations.
-final class const ProgramSimplification() implements ProgramPass {
-  @override
-  bool get repeatUntilStable => true;
-
+final class const ProgramSimplification() extends ProgramPass {
   @override
   IrProgram run(ProgramFlowFacts facts) {
     final program = facts.program;

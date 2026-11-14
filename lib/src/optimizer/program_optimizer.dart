@@ -7,7 +7,8 @@ import 'program_pass.dart';
 /// Runs semantic passes with fresh facts after every program change.
 ///
 /// The caller supplies the pipeline order. Shrinking passes converge together
-/// before and after each expansion; expansion budgets are spent only once.
+/// before and after each expansion. Pass state belongs to one compilation, so
+/// later rounds use new facts while retaining spent expansion budgets.
 /// Retained definitions never become new entry points.
 final class ProgramOptimizer(Iterable<ProgramPass> passes) {
   /// The execution order, including each pass's convergence policy.
@@ -43,35 +44,45 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       memoryLayout: memoryLayoutFor?.call(input),
     ).facts;
     var facts = analyze(program);
-    final reductions = <ProgramPass>[];
-    bool apply(ProgramPass pass) {
+    final stages = [
+      for (final pass in passes) (expands: pass.expandsCode, run: pass.bind()),
+    ];
+    bool apply(ProgramTransform transform) {
       final before = facts.program;
-      final after = pass.run(facts);
+      final after = transform(facts);
       facts.checkProgram(before);
       if (identical(before, after)) return false;
       facts = analyze(after);
       return true;
     }
 
-    void converge() {
+    bool converge(List<ProgramTransform> reductions) {
+      var progress = false;
       bool changed;
       do {
         changed = false;
-        for (final pass in reductions) {
-          changed |= apply(pass);
+        for (final transform in reductions) {
+          changed |= apply(transform);
         }
+        progress |= changed;
       } while (changed);
+      return progress;
     }
 
-    for (final pass in passes) {
-      if (pass.repeatUntilStable) {
-        reductions.add(pass);
-      } else {
-        converge();
-        apply(pass);
+    bool changed;
+    do {
+      changed = false;
+      final reductions = <ProgramTransform>[];
+      for (final stage in stages) {
+        if (stage.expands) {
+          changed |= converge(reductions);
+          changed |= apply(stage.run);
+        } else {
+          reductions.add(stage.run);
+        }
       }
-    }
-    converge();
+      changed |= converge(reductions);
+    } while (changed);
     return facts;
   }
 }

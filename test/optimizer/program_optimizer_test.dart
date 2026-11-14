@@ -46,6 +46,52 @@ void main() {
     expect(() => original.checkProgram(changed.program), throwsArgumentError);
   });
 
+  test(
+    'expansion rounds share a budget and independent compilations do not',
+    () {
+      final step = FunctionTarget(_uri, 'step', .integer, [.integer]);
+      final body = Block(step.parameterTypes);
+      body.finish(
+        Return(
+          body.emit(
+            IntBinary(.add, body.parameters.single, const Constant.integer(1)),
+          ),
+        ),
+      );
+      final root = FunctionTarget(_uri, 'root', .integer, [.integer]);
+      final entry = Block(root.parameterTypes);
+      Value value = entry.parameters.single;
+      for (var i = 0; i < 3; i++) {
+        value = entry.emit(DirectCall(step, [value]));
+      }
+      entry.finish(Return(value));
+      final program = IrProgram([], [
+        IrFunction(step, [body]),
+        IrFunction(root, [entry]),
+      ]);
+      final optimizer = ProgramOptimizer(const [
+        ProgramSimplification(),
+        DirectCallInlining(maxCallerGrowth: 1),
+      ]);
+      for (var compilation = 0; compilation < 2; compilation++) {
+        final result = optimizer.run(program, const [], openEntries: [root]);
+        final rewritten = result.program.implementationOf(root) as IrFunction;
+        expect(
+          rewritten.blocks
+              .expand((block) => block.instructions)
+              .whereType<DirectCall>(),
+          hasLength(2),
+        );
+        for (final input in [-2, 0, 41]) {
+          expect(
+            IrInterpreter(result.program, {}).run(rewritten, [input]),
+            input + 3,
+          );
+        }
+      }
+    },
+  );
+
   test('actual call arguments remove dead dependencies without inlining', () {
     final equals = FunctionTarget(_uri, 'equals', .boolean, [
       .integer,
@@ -260,14 +306,12 @@ final class _Layout(final IrProgram program) implements FlowMemoryLayout {
   ]);
 }
 
-final class _AddField() implements ProgramPass {
-  @override
-  bool get repeatUntilStable => false;
-
+final class _AddField() extends ProgramPass {
   @override
   IrProgram run(ProgramFlowFacts facts) {
     final program = facts.program;
     final type = program.classes.single.type;
+    if (program.classes.single.fields.isNotEmpty) return program;
     return IrProgram([
       IrClass(type, [InstanceField(type, 'prefix', .integer)]),
     ], program.functions);
