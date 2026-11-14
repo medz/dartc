@@ -55,8 +55,9 @@ final class ValueDominance(final IrFunction function) {
   /// Whether [value] can be passed on this exact control-flow edge.
   bool onEdge(Value value, Jump edge) {
     final owners = _edges[edge];
-    if (owners == null)
+    if (owners == null) {
       throw ArgumentError('Edge belongs to another function.');
+    }
     return owners.every((block) => _onEdge(value, edge, block));
   }
 
