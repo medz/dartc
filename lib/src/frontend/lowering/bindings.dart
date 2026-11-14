@@ -2140,7 +2140,8 @@ final class Bindings({
     type.initializeHierarchy(
       superclass: parent,
       interfaces: [
-        ...element.interfaces,
+        // Canonical core types omit SDK-private ancestors from their IR hierarchy.
+        ...element.allSupertypes,
         if (element is MixinElement) ...element.superclassConstraints,
       ].map((interface) => valueType(interface, unit, site) as ClassType),
     );

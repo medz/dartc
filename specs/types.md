@@ -7,7 +7,7 @@ IR 保存值的 Dart 类型。寄存器宽度、装箱和原生调用约定由�
 | 类型名、前缀、嵌套实参、可空类型 | 支持已表示的核心类型、类和 record 的可空形式，以及嵌套的类类型实参。带导入前缀的类型仍指向声明库中的类。 |
 | 核心标量、`Object`、`dynamic`、`void`、`Never` | 支持这些类型及 Null；dynamic 与 Object? 保持不同类型身份和双向顶类型关系。typed 存储、参数、返回值和 bool 上下文保留逐次隐式检查。dynamic 接收者的成员、函数和运算符通过统一运行时派发，未建模 SDK 成员明确拒绝。Never 没有正常返回值，Never? 等价于 Null。 |
 | 异常及栈轨迹 | 支持 Error、TypeError、NoSuchMethodError、AssertionError、StateError、UnsupportedError、StackTrace，以及按用户声明的类和接口捕获异常。 |
-| `List<T>` 及实际类型检查 | 支持 List、Set、Map、MapEntry、Iterable 和 Iterator 的参数化类型及其继承关系。字面量保留实际类型实参，宽化引用不绕过写入类型检查。 |
+| `List<T>` 及实际类型检查 | 支持 List、Set、Map、MapEntry、Iterable 和 Iterator 的参数化类型及其继承关系。字面量保留实际类型实参，宽化引用不绕过写入类型检查。普通类保留 analyzer 已实例化的完整父类型关系，包括内建 IR 类型未展开的 SDK 隐藏接口；各类 List 的 followedBy、泛型实参检查与迭代器跨回收存活见[原生回归](../test/compiler/iterable_chaining_test.dart)。 |
 | Type 值和类型参数实化 | 支持已表示类型的 Type 字面量、别名与泛型 T 值，以及类型相等、哈希和集合键。IR 常量身份、复合常量的类型实参和泛型函数引用使用规范化类型；支持泛型函数的 Never 界限及嵌套绑定，不合并不同顶类型。闭包保留实化环境。支持 Type/Type? 测试和转换；dynamic runtimeType 支持已表示的具体用户类、函数、record、List 及标量。Set/Map 使用实际 SDK 实现类的类型信息；尚未建模的 SDK 类型不以公开接口冒充。静态 runtimeType 读取和 object pattern 字段复用相同虚分派，保持用户 override、实际泛型类型和模式 getter 缓存；super.runtimeType 直接调用选中的祖先实现，不重新分派到 override。见[类型值样本](../test/frontend/lowering/fixtures/type_values.dart)及[runtimeType 样本](../test/frontend/lowering/fixtures/runtime_type.dart)。 |
 | 函数签名 | 顶层函数、方法和构造器保留必需及可选形参。实例调用在选定实现后按其签名绑定参数。函数类型按参数逆变、返回值协变、位置参数范围及命名参数的必需性判断子类型。 |
 | 泛型函数类型与泛型函数值签名 | 支持独立绑定的函数类型参数、界限、嵌套泛型函数类型及显式实例化。类型相等、哈希和子类型比较忽略绑定参数名称；外层自由类型参数仍按声明身份区分，类型代换避免捕获。 |

@@ -117,6 +117,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'working_directory',
     'temporary_directories',
     'resolve_symbolic_links',
+    'iterable_chaining',
     'descriptor_write',
     'futures',
     'async_functions',
@@ -305,6 +306,7 @@ Future<void> main(List<String> args) async {
       ('constants', 'constants', 'entry_constants'),
       ('forwarders', 'forwarders', 'entry_forwarders'),
       ('mixins', 'mixins', 'entry_mixins'),
+      ('iterable_chaining', 'iterable_chaining', 'entry_iterable_chaining'),
       ('json_utf8', 'json_utf8', 'entry_json_utf8'),
       ('working_directory', 'working_directory', 'entry_working_directory'),
       (

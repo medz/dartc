@@ -5,6 +5,30 @@ import 'package:test/test.dart';
 
 void main() {
   test(
+    'canonical core ancestors retain checked SDK interface relationships',
+    () async {
+      final sources = await SdkSources.load();
+      final program = await AnalysisSession(
+        ['test/compiler/fixtures/iterable_chaining.dart'],
+        includeDependencies: true,
+        sources: sources,
+      ).use((input) async => (await Lowering().lower(input)).program);
+      final factory = program.functions
+          .singleWhere((function) => function.target.name == 'firstEfficient')
+          .target;
+      final efficient = factory.parameterTypes.first as ClassType;
+      for (final name in ['ListBase', '_GrowableList', 'UserList']) {
+        final declaration = program.classes.singleWhere(
+          (c) => c.type.name == name,
+        );
+        final applied = declaration.type.instantiate([ValueType.integer]);
+        expect(applied.asInstanceOf(efficient.declaration)?.typeArguments, [
+          ValueType.integer,
+        ]);
+      }
+    },
+  );
+  test(
     'target SDK storage retains nominal classes and inherited bodies',
     () async {
       final sources = await SdkSources.load();

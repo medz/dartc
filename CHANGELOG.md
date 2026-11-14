@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Preserve checked SDK ancestor interfaces when binding ordinary classes, including ancestors hidden by canonical core types. `List.followedBy` now works across growable, fixed, constant, typed and user-defined lists while retaining generic argument checks.
+
 - Reject overflowing native array sizes, field offsets and alignment padding before allocation or code generation. Oversized FFI layouts can no longer wrap to a small or zero size.
 - Resolve filesystem symbolic links synchronously on macOS and Linux through the SDK public methods, preserving target path semantics and filesystem errors. Preserve leading U+FEFF in OS strings, including relative `Directory.systemTemp` paths.
 
