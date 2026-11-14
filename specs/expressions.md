@@ -125,7 +125,7 @@ List.addAll 支持普通调用、方法提取及用户重写，先检查实际�
 
 `sublist` 支持省略或显式 null 的 end、空范围和边界错误。内置 List、const/固定长度列表与 String.codeUnits 的切片返回独立的可增长 List，保留实际元素类型和共享对象；用户重写和方法值使用选中实现的默认参数。列表模式中的命名 rest 同样复制相应元素。依据为 [List.sublist](https://api.dart.dev/stable/3.13.7/dart-core/List/sublist.html)，验证见[SDK 与原生 List 对照](../test/compiler/lists_test.dart)。
 
-`List.generate` 按索引顺序调用生成器，支持固定长度结果；`List.unmodifiable` 复制元素槽。不可修改列表拒绝修改操作，包括空源、空范围和不命中元素的操作。列表支持默认 Comparable 排序、重叠 setRange、insertAll、replaceRange、removeWhere、reversed、asMap 和 cast 视图。惰性 Iterable 的 where/map/take/skip/fold/any/every 保留遍历顺序与回调。标量 typed_data 的范围见[标准库](libraries.md)。
+`List.generate` 按索引顺序调用生成器，支持固定长度结果；`List.unmodifiable` 复制元素槽。不可修改列表拒绝修改操作，包括空源、空范围和不命中元素的操作。列表支持默认 Comparable 排序、重叠 setRange、insertAll、replaceRange、removeWhere、reversed、asMap 和 cast 视图。惰性 Iterable 的 where/map/take/skip/fold/any/every 保留遍历顺序与回调。generate/withIterator/empty 工厂、构造器值、whereType/cast、followedBy/indexed/expand、查找/归约、提前停止、异常身份以及回收后的迭代状态复用 SDK 正文，在 macOS/Linux ARM64 [原生验证](../test/compiler/iterables_test.dart)。标量 typed_data 的范围见[标准库](libraries.md)。
 
 非空 `setRange` 要求非负 skipCount，且跳过后有足够的源元素。固定 SDK 3.14.0 的 VM 固定长度列表对一般 Iterable 漏检这两项，可能只写入部分元素而正常返回；dartc 对负 skipCount 抛出 RangeError，对不足的输入抛出 StateError。依据为[公开范围复制契约](../sdk/std/lib/core/list.dart)与[通用 List 实现](../sdk/std/lib/collection/list.dart)，[独立预期验证](../test/compiler/object_text_test.dart)不采用该 VM 行为。
 
