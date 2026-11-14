@@ -524,6 +524,33 @@ final class FunctionRewrite(
       locate(original, current, function);
     }
 
+    final predecessors = <Block, int>{};
+    for (final terminal in ends.values) {
+      for (final edge in terminal.successors) {
+        predecessors.update(
+          edge.target,
+          (count) => count + 1,
+          ifAbsent: () => 1,
+        );
+      }
+    }
+    for (final block in instructions.keys.toList()) {
+      if (!instructions.containsKey(block)) continue;
+      while (ends[block] is Jump) {
+        final target = (ends[block]! as Jump).target;
+        if (target == block ||
+            target.parameters.isNotEmpty ||
+            predecessors[target] != 1 ||
+            target == blocks[function.entry]) {
+          break;
+        }
+        instructions[block]!.addAll(instructions.remove(target)!);
+        ends[block] = ends.remove(target)!;
+        if (locations[target] case final location?) locations[block] = location;
+        changed = true;
+      }
+    }
+
     final reachable = <Block>{}, pending = [blocks[function.entry]!];
     while (pending.isNotEmpty) {
       final block = pending.removeLast();

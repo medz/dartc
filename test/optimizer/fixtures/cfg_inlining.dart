@@ -81,3 +81,19 @@ int closureCells(int value) {
     current++;
   }
 }
+
+T forward<T>(
+  T Function() action, {
+  bool first = false,
+  bool second = false,
+  bool third = false,
+  bool fourth = false,
+}) {
+  if (first) return action();
+  if (second) return action();
+  if (third) return action();
+  if (fourth) return action();
+  return action();
+}
+
+int closureThroughBranches(int value) => forward(() => value + 1);

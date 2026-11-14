@@ -58,6 +58,7 @@ void main() {
   }
   for (final (name, invoke) in [
     ('closureThroughCall', source.closureThroughCall),
+    ('closureThroughBranches', source.closureThroughBranches),
     ('closureGeneric', source.closureGeneric),
     ('closureCells', source.closureCells),
   ]) {

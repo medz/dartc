@@ -35,12 +35,11 @@ void main() {
     final middle = FunctionTarget(_uri, 'middle', .integer, [.integer]);
     final root = FunctionTarget(_uri, 'root', .integer, [.integer]);
     final last = Block(leaf.parameterTypes);
+    final added = last.emit(
+      IntBinary(.add, last.parameters.single, const Constant.integer(1)),
+    );
     last.finish(
-      Return(
-        last.emit(
-          IntBinary(.add, last.parameters.single, const Constant.integer(1)),
-        ),
-      ),
+      Return(last.emit(IntBinary(.multiply, added, const Constant.integer(2)))),
     );
     IrFunction forward(FunctionTarget target, FunctionTarget callee) {
       final block = Block(target.parameterTypes);
@@ -61,7 +60,7 @@ void main() {
         expect(_run(after, root, [input]), _run(program, root, [input]));
       }
       final bounded = _inline(program, [root], maxCallerGrowth: 1);
-      expect((bounded.implementationOf(root) as IrFunction).callees, {middle});
+      expect((bounded.implementationOf(root) as IrFunction).callees, {leaf});
     }
   });
 
@@ -411,10 +410,16 @@ void main() {
   );
 
   test('cost bounds and selected callers limit expansion without changing semantics', () {
-    final helper = FunctionTarget(_uri, 'identity', .integer, [.integer]);
-    final identity = IrFunction(helper, [
-      Block(helper.parameterTypes)..finish(Return(const Constant.integer(5))),
-    ]);
+    final helper = FunctionTarget(_uri, 'increment', .integer, [.integer]);
+    final body = Block(helper.parameterTypes);
+    body.finish(
+      Return(
+        body.emit(
+          IntBinary(.add, body.parameters.single, const Constant.integer(1)),
+        ),
+      ),
+    );
+    final increment = IrFunction(helper, [body]);
     final root = FunctionTarget(_uri, 'root', .integer, []);
     IrFunction calls(FunctionTarget target) {
       final entry = Block();
@@ -425,20 +430,20 @@ void main() {
     }
 
     final unused = calls(FunctionTarget(_uri, 'unused', .integer, []));
-    final program = IrProgram([], [identity, calls(root), unused]);
-    expect(_inline(program, [root], maxCalleeCost: 1), same(program));
+    final program = IrProgram([], [increment, calls(root), unused]);
+    expect(_inline(program, [root], maxCalleeCost: 0), same(program));
     expect(_inline(program, [root], maxCallerGrowth: 0), same(program));
     expect(
       () => _inline(program, [root], maxCallerGrowth: -1),
       throwsRangeError,
     );
     final result = _inline(program, [root], maxCallerGrowth: 2);
-    expect(_run(result, root, []), 5);
+    expect(_run(result, root, []), 4);
     expect(
       (result.implementationOf(root) as IrFunction).entry.instructions
           .whereType<DirectCall>()
           .length,
-      2,
+      1,
     );
     expect(result.implementationOf(unused.target), same(unused));
   });
@@ -479,7 +484,7 @@ void main() {
     expect(_inline(result, [root]), same(result));
   });
 
-  test('default costs prefer leaf work over calls and allocation', () {
+  test('default expansion preserves external calls and allocation effects', () {
     final wrapper = FunctionTarget(_uri, 'wrapper', .integer, [.integer]);
     final forwarding = Block(wrapper.parameterTypes);
     forwarding.finish(
@@ -526,10 +531,14 @@ void main() {
       externals: [IrExternal(_tick)],
     );
     final result = _inline(program, [root]);
-    expect((result.implementationOf(root) as IrFunction).callees, {
-      wrapper,
-      allocate,
-    });
+    final rewritten = result.implementationOf(root) as IrFunction;
+    expect(rewritten.callees, {_tick});
+    expect(
+      rewritten.blocks
+          .expand((block) => block.instructions)
+          .whereType<StringConcat>(),
+      hasLength(1),
+    );
     expect(
       result.implementationOf(wrapper),
       same(program.implementationOf(wrapper)),

@@ -48,7 +48,10 @@ IrProgram _inlineSelected(
   int copies(IrFunction function) => function.blocks.fold(
     0,
     (count, block) =>
-        count + block.instructions.length + block.parameters.length + 1,
+        count +
+        block.instructions.length +
+        (block == function.entry ? 0 : block.parameters.length) +
+        (function.blocks.length == 1 && block.end is Return ? 0 : 1),
   );
   bool allocates(Instruction operation) =>
       facts.effectsOf(operation).contains(Effect.allocates);
@@ -189,7 +192,19 @@ IrProgram _inlineSelected(
       }
       return sites.isEmpty
           ? input
-          : FunctionRewrite(input, inlined: sites).run();
+          : FunctionRewrite(
+              input,
+              inlined: sites,
+              discardable: {
+                if (sourceFacts)
+                  for (final block in input.blocks)
+                    for (final operation in [
+                      ...block.instructions,
+                      if (block.end case Invoke(:final operation)) operation,
+                    ])
+                      if (facts.canDiscard(operation)) operation,
+              },
+            ).run();
     }
 
     var body = function;

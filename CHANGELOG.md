@@ -12,7 +12,7 @@
 
 - Skip callback reachability analysis when a program has no native callback entries, preserving native binding and rewritten-program checks.
 
-- Inline small direct calls and lexical closures, including calls exposed by inlining their callers. Preserve generic captures, shared mutable cells, evaluation order and exception paths while eliminating unused closure environments. `FunctionRewrite` now accepts explicit entry arguments and type bindings for expansion.
+- Inline small direct calls and lexical closures, including calls exposed by inlining their callers. Collapse linear control flow and budget actual copied operations, so eliminated branches and unused entry parameters do not obstruct expansion. Preserve generic captures, shared mutable cells, evaluation order and exception paths while eliminating unused closure environments. `FunctionRewrite` now accepts explicit entry arguments and type bindings for expansion.
 
 - Retain explicit reference lifetime markers during inline cleanup, preserving resources across preceding calls and accesses without introducing allocation or exceptions.
 
