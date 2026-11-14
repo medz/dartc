@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 
 import 'program_flow.dart';
+import 'memory_layout.dart';
 import 'program_pass.dart';
 
 /// Runs semantic passes with fresh facts after every program change.
@@ -16,11 +17,14 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
   ///
   /// Returns stable facts bound to the final program. Rewriting always restarts
   /// analysis from [entries] and [openEntries], never from the old call closure.
+  /// [memoryLayoutFor] selects storage for each graph being analyzed; a rewrite
+  /// must not silently reuse the replaced graph's layout decisions.
   ProgramFlowFacts run(
     IrProgram program,
     Iterable<FlowEntry> entries, {
     Iterable<FunctionTarget> openEntries = const [],
     Iterable<FunctionTarget> escapingReturns = const [],
+    FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
   }) {
     final initial = [
       for (final entry in entries)
@@ -36,6 +40,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       initial,
       openEntries: open,
       escapingReturns: escaping,
+      memoryLayout: memoryLayoutFor?.call(input),
     ).facts;
     var facts = analyze(program);
     final reductions = <ProgramPass>[];

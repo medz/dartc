@@ -1,4 +1,10 @@
+import 'dart:ffi' show Uint8;
+
+import 'package:dartc/abi.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
+import 'package:dartc/target.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
@@ -7,6 +13,39 @@ import '../support/ir_interpreter.dart';
 final _uri = Uri.parse('memory:program-optimizer');
 
 void main() {
+  test('rewritten storage is analyzed using the new graph layout', () {
+    final storage = ClassType(null, 'Payload');
+    final root = FunctionTarget(null, 'read', .integer, []);
+    final block = Block();
+    final object = block.emit(NewPayload(storage, const Constant.integer(8)));
+    final address = block.emit(
+      IntBinary(
+        .add,
+        block.emit(ReferenceAddress(object)),
+        Constant.integer(ObjectLayout([]).size),
+      ),
+    );
+    final read = block.emit(LoadNative(address, NativeScalarType(Uint8)));
+    block.finish(Return(read));
+    final program = IrProgram(
+      [IrClass(storage, [])],
+      [
+        IrFunction(root, [block]),
+      ],
+    );
+    final entries = [(target: root, arguments: <FlowValue>[])];
+    final original = ProgramOptimizer(const [])
+        .run(program, entries, memoryLayoutFor: _Layout.new);
+    expect(
+      original.valueOf(read).constant?.structuralKey,
+      const Constant.integer(0).structuralKey,
+    );
+    final changed = ProgramOptimizer([_AddField()])
+        .run(program, entries, memoryLayoutFor: _Layout.new);
+    expect(changed.valueOf(read).constant, isNull);
+    expect(() => original.checkProgram(changed.program), throwsArgumentError);
+  });
+
   test('actual call arguments remove dead dependencies without inlining', () {
     final equals = FunctionTarget(_uri, 'equals', .boolean, [
       .integer,
@@ -209,4 +248,28 @@ void main() {
       same(result.program),
     );
   });
+}
+
+final class _Layout(final IrProgram program) implements FlowMemoryLayout {
+  @override
+  final nativeLayout = NativeLayout(const Target(.linux, .arm64));
+
+  @override
+  ObjectLayout objectLayout(ClassType type) => ObjectLayout([
+    for (final _ in program.classes.single.fields) ValueRepresentation.word,
+  ]);
+}
+
+final class _AddField() implements ProgramPass {
+  @override
+  bool get repeatUntilStable => false;
+
+  @override
+  IrProgram run(ProgramFlowFacts facts) {
+    final program = facts.program;
+    final type = program.classes.single.type;
+    return IrProgram([
+      IrClass(type, [InstanceField(type, 'prefix', .integer)]),
+    ], program.functions);
+  }
 }
