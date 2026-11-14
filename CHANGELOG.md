@@ -2,6 +2,7 @@
 
 - Support `Directory.systemTemp` and synchronous temporary directory creation on macOS and Linux. Read live environment settings, create unique private directories through the target OS, and preserve SDK path handling, `IOOverrides` and filesystem errors.
 
+- Export native structs with the same Dart name from different libraries and with private or C-reserved field names. Generated headers assign distinct C names while preserving Dart identities, layouts and callback signatures.
 - Read the running process ID, processor count, hostname and resolved executable path through `dart:io` on macOS and Linux, including executable symlinks and long paths.
 - Support `dart:io`'s `exitCode`, `exit` and `sleep` on macOS and Linux. Read the final exit status after pending events, preserve `IOOverrides.exit`, and keep immediate exit separate from normal heap cleanup.
 - Read and change `Directory.current` through the target process on macOS and Linux. Reuse SDK path conversion, `IOOverrides` and filesystem error classification; preserve snapshots and recovery after failed changes or a removed current directory.

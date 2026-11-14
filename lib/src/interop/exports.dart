@@ -21,9 +21,11 @@ final class NativeExports(Iterable<NativeExport> functions) {
   /// Writes declarations usable from both C and C++.
   ///
   /// [abi] is required for declarations containing ABI-specific integers.
+  /// Invalid or conflicting C tags and field names receive unique generated names.
+  /// Dart identities, field order and native storage remain unchanged.
   void writeHeader(StringSink output, {Abi? abi}) {
     final compounds = <NativeCompoundType>[];
-    final declarations = <String, NativeTypeRef>{};
+    final declarations = <NativeTypeRef, String>{};
     final visited = <NativeTypeRef>{};
     final active = <NativeCompoundType>{};
     void collect(NativeTypeRef type, {bool pointer = false}) {
@@ -34,12 +36,7 @@ final class NativeExports(Iterable<NativeExport> functions) {
             NativeOpaqueType(:final name) => name,
             _ => throw StateError('Expected native declaration'),
           };
-          checkCIdentifier(name);
-          if (declarations[name] case final previous?
-              when !identical(previous, type)) {
-            throw ArgumentError('Conflicting native type names: $name');
-          }
-          declarations[name] = type;
+          declarations[type] = name;
           return;
         }
       }
@@ -52,7 +49,6 @@ final class NativeExports(Iterable<NativeExport> functions) {
           collect(type, pointer: true);
           active.add(type);
           for (final field in fields) {
-            checkCIdentifier(field.name);
             collect(field.type);
           }
           active.remove(type);
@@ -77,30 +73,53 @@ final class NativeExports(Iterable<NativeExport> functions) {
     }
     // Pointees need definitions too; following them later permits pointer cycles.
     for (var i = 0; i < declarations.length; i++) {
-      final type = declarations.values.elementAt(i);
+      final type = declarations.keys.elementAt(i);
       if (type is NativeCompoundType) collect(type);
     }
+    final typeNames = Map<NativeTypeRef, String>.fromIterables(
+      declarations.keys,
+      _names(declarations.values, 'type'),
+    );
     output.writeln(
       '#pragma once\n#include <stdint.h>\n#include <stdbool.h>\n\n#ifdef __cplusplus\nextern "C" {\n#endif\n',
     );
-    for (final type in declarations.values) {
-      output.writeln('${type.declaration('')};');
+    for (final type in declarations.keys) {
+      output.writeln('${type.declaration('', typeNames: typeNames)};');
     }
     for (final type in compounds) {
       if (type.packing case final packing?) {
         output.writeln('#pragma pack(push, $packing)');
       }
-      output.writeln('${type.declaration('')} {');
+      output.writeln('${type.declaration('', typeNames: typeNames)} {');
+      final names = _names(type.fields.map((f) => f.name), 'field').iterator;
       for (final field in type.fields) {
-        output.writeln('  ${field.type.declaration(field.name, abi: abi)};');
+        names.moveNext();
+        output.writeln(
+          '  ${field.type.declaration(names.current, abi: abi, typeNames: typeNames)};',
+        );
       }
       output.writeln('};');
       if (type.packing != null) output.writeln('#pragma pack(pop)');
     }
     if (declarations.isNotEmpty) output.writeln();
     for (final function in functions) {
-      function.writeDeclaration(output, abi: abi);
+      function.writeDeclaration(output, abi: abi, typeNames: typeNames);
     }
     output.writeln('\n#ifdef __cplusplus\n}\n#endif');
+  }
+}
+
+Iterable<String> _names(Iterable<String> requested, String kind) sync* {
+  final reserved = requested.where(isCIdentifier).toSet();
+  final used = <String>{};
+  var suffix = 0;
+  for (var name in requested) {
+    if (!isCIdentifier(name) || used.contains(name)) {
+      do {
+        name = 'dartc_${kind}_${++suffix}';
+      } while (reserved.contains(name));
+    }
+    used.add(name);
+    yield name;
   }
 }

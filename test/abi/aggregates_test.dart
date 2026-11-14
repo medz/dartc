@@ -242,15 +242,15 @@ void main() {
       () => NativeCompoundType('', [NativeField('x', integer)]),
       throwsArgumentError,
     );
-    for (final name in ['struct', 'a; int injected', '_Reserved']) {
+    for (final name in ['struct', 'a; int injected', '_Reserved', 'uint8_t']) {
       final declaration = NativeCompoundType(name, [NativeField('x', integer)]);
       expect(NativeLayout(const Target(.linux, .x64)).of(declaration).size, 4);
-      expect(
-        () => NativeExports([
-          NativeExport('value', NativeSignature.types(declaration, [])),
-        ]).writeHeader(StringBuffer()),
-        throwsArgumentError,
-      );
+      final header = StringBuffer();
+      NativeExports([
+        NativeExport('value', NativeSignature.types(declaration, [])),
+      ]).writeHeader(header);
+      expect(header.toString(), contains('struct dartc_type_1 value(void);'));
+      expect(header.toString(), isNot(contains('struct $name {')));
     }
   });
 

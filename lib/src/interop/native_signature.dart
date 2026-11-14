@@ -63,15 +63,24 @@ final class NativeSignature.types(
   /// Formats a C function declarator, including nested pointer types.
   ///
   /// [abi] is required when a declaration contains an ABI-specific integer.
-  String declaration(String name, {Abi? abi}) {
+  /// [typeNames] supplies C tags without changing native declaration identities.
+  String declaration(
+    String name, {
+    Abi? abi,
+    Map<NativeTypeRef, String> typeNames = const {},
+  }) {
     final arguments = [
       if (parameters.isEmpty && variadicStart == null) 'void',
       ...parameters
           .take(variadicStart ?? parameters.length)
-          .map((p) => p.declaration('', abi: abi)),
+          .map((p) => p.declaration('', abi: abi, typeNames: typeNames)),
       if (variadicStart != null) '...',
     ];
-    return result.declaration('$name(${arguments.join(', ')})', abi: abi);
+    return result.declaration(
+      '$name(${arguments.join(', ')})',
+      abi: abi,
+      typeNames: typeNames,
+    );
   }
 
   @override
@@ -166,7 +175,12 @@ sealed class const NativeTypeRef() {
   /// Formats a C declarator with [name], or an unnamed type when it is empty.
   ///
   /// ABI-specific integers require [abi] and use its fixed-width C type.
-  String declaration(String name, {Abi? abi}) => switch (this) {
+  /// [typeNames] overrides compound and opaque tags, including nested types.
+  String declaration(
+    String name, {
+    Abi? abi,
+    Map<NativeTypeRef, String> typeNames = const {},
+  }) => switch (this) {
     NativeAbiIntegerType() =>
       abi == null
           ? throw ArgumentError('An ABI is required for $this.')
@@ -174,24 +188,27 @@ sealed class const NativeTypeRef() {
     NativeScalarType(:final type) =>
       '${type.cType}${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativePointerType(element: final NativeFunctionType function) =>
-      function.declaration('(*$name)', abi: abi),
+      function.declaration('(*$name)', abi: abi, typeNames: typeNames),
     NativePointerType(element: final NativeArrayType array) =>
-      array.declaration('(*$name)', abi: abi),
+      array.declaration('(*$name)', abi: abi, typeNames: typeNames),
     NativePointerType(:final element) => element.declaration(
       '*${name.isEmpty ? '' : ' '}$name',
       abi: abi,
+      typeNames: typeNames,
     ),
     NativeFunctionType(:final signature) => signature.declaration(
       name,
       abi: abi,
+      typeNames: typeNames,
     ),
     NativeCompoundType(name: final tag, :final isUnion) =>
-      '${isUnion ? 'union' : 'struct'} $tag${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
+      '${isUnion ? 'union' : 'struct'} ${typeNames[this] ?? tag}${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativeOpaqueType(name: final tag) =>
-      'struct $tag${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
+      'struct ${typeNames[this] ?? tag}${name.isEmpty || name.startsWith('*') ? '' : ' '}$name',
     NativeArrayType(:final element, :final length) => element.declaration(
       '$name[${length == 0 ? '' : length}]',
       abi: abi,
+      typeNames: typeNames,
     ),
   };
 

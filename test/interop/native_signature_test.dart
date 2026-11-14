@@ -4,6 +4,55 @@ import 'package:dartc/interop.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'header names avoid collisions without changing recursive native types',
+    () {
+      final left = NativeCompoundType.declare('Point');
+      final right = NativeCompoundType.declare('Point');
+      left.define([
+        NativeField('other', NativePointerType(right)),
+        NativeField('_private', NativeScalarType(Int32)),
+        NativeField('dartc_field_1', NativeScalarType(Int32)),
+      NativeField('grid', NativeArrayType(right, 2)),
+      ]);
+      right.define([NativeField('other', NativePointerType(left))]);
+      final reserved = NativeOpaqueType('dartc_type_1');
+      final callback = NativePointerType(
+        NativeFunctionType(
+          NativeSignature.types(NativePointerType(right), [
+            NativePointerType(left),
+          ]),
+        ),
+      );
+      final exports = NativeExports([
+        NativeExport(
+          'visit',
+          NativeSignature.types(NativePointerType(left), [
+            NativePointerType(right),
+            callback,
+            NativePointerType(reserved),
+          ]),
+        ),
+      ]);
+      final first = StringBuffer(), second = StringBuffer();
+      exports.writeHeader(first);
+      exports.writeHeader(second);
+      expect(first.toString(), second.toString());
+      expect(first.toString(), contains('struct dartc_type_2* other;'));
+      expect(first.toString(), contains('struct Point* other;'));
+      expect(first.toString(), contains('int32_t dartc_field_2;'));
+      expect(first.toString(), contains('int32_t dartc_field_1;'));
+    expect(first.toString(), contains('struct dartc_type_2 grid[2];'));
+      expect(
+        first.toString(),
+        contains('struct dartc_type_2* (*)(struct Point*)'),
+      );
+      expect(left.name, 'Point');
+      expect(right.name, 'Point');
+      expect(left.fields[1].name, '_private');
+    },
+  );
+
   test('variadic signatures retain call shape and declare the C ellipsis', () {
     final signature = NativeSignature(Int32, [
       Pointer<Uint8>,

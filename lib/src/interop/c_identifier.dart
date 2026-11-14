@@ -1,11 +1,24 @@
 void checkCIdentifier(String name) {
-  if (!RegExp(r'^[A-Za-z][A-Za-z0-9_]*$').hasMatch(name) ||
-      _keywords.contains(name)) {
+  if (!isCIdentifier(name)) {
     throw ArgumentError('Expected a non-reserved C identifier: $name');
   }
 }
 
+bool isCIdentifier(String name) =>
+    RegExp(r'^[A-Za-z][A-Za-z0-9_]*$').hasMatch(name) &&
+    !_keywords.contains(name);
+
 final _keywords = {
+  // The generated header includes stdint.h; C++ shares its typedef namespace.
+  for (final prefix in ['int', 'uint']) ...{
+    '${prefix}ptr_t',
+    '${prefix}max_t',
+    for (final width in [8, 16, 32, 64]) ...{
+      '$prefix${width}_t',
+      '${prefix}_least${width}_t',
+      '${prefix}_fast${width}_t',
+    },
+  },
   ...('alignas alignof asm auto bool break case catch char char8_t char16_t char32_t '
           'class compl concept const consteval constexpr constinit const_cast continue '
           'co_await co_return co_yield decltype default delete do double dynamic_cast '

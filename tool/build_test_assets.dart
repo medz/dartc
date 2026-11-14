@@ -84,6 +84,7 @@ const _compilerLibraries = {
   'varargs_scalar',
   'dynamic_library_provider',
   'native_aggregates',
+  'native_names',
   'typed_data',
   'managed_objects',
   'heap_runtime',
@@ -464,7 +465,8 @@ Future<void> main(List<String> args) async {
           'native_function_pointers' ||
           'native_imports' ||
           'native_symbols' ||
-          'native_aggregates' => assets.file('compiler/$fixture.h'),
+          'native_aggregates' ||
+          'native_names' => assets.file('compiler/$fixture.h'),
           _ => null,
         },
       );

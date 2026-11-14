@@ -12,7 +12,14 @@ final class NativeExport(final String symbol, final NativeSignature signature) {
   /// Writes a C prototype retaining scalar, pointer and native function types.
   ///
   /// [abi] selects storage for ABI-specific integers in the signature.
-  void writeDeclaration(StringSink output, {Abi? abi}) {
-    output.writeln('${signature.declaration(symbol, abi: abi)};');
+  /// [typeNames] supplies the C tags selected for a complete header.
+  void writeDeclaration(
+    StringSink output, {
+    Abi? abi,
+    Map<NativeTypeRef, String> typeNames = const {},
+  }) {
+    output.writeln(
+      '${signature.declaration(symbol, abi: abi, typeNames: typeNames)};',
+    );
   }
 }
