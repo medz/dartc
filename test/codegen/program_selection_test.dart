@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/global_storage.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
@@ -105,7 +106,7 @@ void main() {
           callTypes: CallTypeFlow(
             origin == 'generated' ? IrProgram([], [body]) : program,
             origin == 'generated' ? [callee] : [root],
-          ),
+          ).facts,
         ),
         NumericOperations(),
         GlobalStorage([]),

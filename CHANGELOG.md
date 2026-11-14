@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Move program reachability and call-type analysis to `package:dartc/optimizer.dart`. Call facts are read-only, tied to their input IR, and invalidated when supplemental facts change; rewritten programs are analyzed again from their roots.
+
 - Avoid temporary owner-type metadata during ordinary generic member reads. Keep virtual calls and type metadata limited to the values that can reach each call, while preserving generic checks, exceptions and native callback entry points.
 - Bundle generated Unicode case tables and their license without the original regeneration inputs; packaged compilers continue to work offline.
 

@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:test/test.dart';
 
@@ -45,9 +46,10 @@ void main() {
           ]),
       ],
     );
-    final facts = CallTypeFlow(program, [
+    final flow = CallTypeFlow(program, [
       root.target,
     ], instantiatedTypes: classes);
+    final facts = flow.facts;
     final calls = MemberCalls(
       program,
       facts.definitions,
@@ -70,6 +72,45 @@ void main() {
     expect(
       calls.targetsFor(base, methods.first.selector, receiverValue: generated),
       calls.targetsFor(base, methods.first.selector),
+    );
+
+    final replacement = Block();
+    replacement.finish(
+      Return(
+        replacement.emit(DirectCall(forward, [ObjectConstant(classes[1], {})])),
+      ),
+    );
+    final rewritten = IrProgram(program.classes, [
+      IrFunction(root.target, [replacement]),
+      ...program.functions.skip(1),
+    ]);
+    expect(rewritten.functions.length, program.functions.length);
+    expect(
+      () => MemberCalls(rewritten, facts.definitions, callTypes: facts),
+      throwsArgumentError,
+    );
+    final helper = IrFunction(FunctionTarget(null, 'helper', .voidType, []), [
+      Block()..finish(const Return()),
+    ]);
+    final expanded = IrProgram(program.classes, [...program.functions, helper]);
+    expect(
+      MemberCalls(
+        expanded,
+        facts.definitions,
+        callTypes: facts,
+      ).dynamicTargets(call),
+      {classes.first: methods.first},
+    );
+    flow.extend(unknownCalls: [forward]);
+    expect(() => calls.dynamicTargets(call), throwsStateError);
+    expect(
+      MemberCalls(
+        program,
+        flow.facts.definitions,
+        instantiatedTypes: classes,
+        callTypes: flow.facts,
+      ).dynamicTargets(call),
+      {for (final (i, type) in classes.indexed) type: methods[i]},
     );
   });
 
@@ -131,7 +172,7 @@ void main() {
       classes[0]: reads[0],
       classes[2]: reads[2],
     });
-    expect(program.reachableFrom([root], instantiatedTypes: classes), {
+    expect(reachableDefinitions(program, [root], instantiatedTypes: classes), {
       root,
       reads[0],
       reads[2],

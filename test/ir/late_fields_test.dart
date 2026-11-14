@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -139,12 +140,12 @@ void main() {
     );
     expect(read.callees, {initializer});
     expect(write.callees, isEmpty);
-    expect(program.reachableFrom([read.target]), {
+    expect(reachableDefinitions(program, [read.target]), {
       read.target,
       initializer,
       dependency,
     });
-    expect(program.reachableFrom([write.target]), {write.target});
+    expect(reachableDefinitions(program, [write.target]), {write.target});
   });
 
   group('late field declarations', () {

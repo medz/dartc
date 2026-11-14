@@ -3,6 +3,7 @@ import 'dart:ffi' as ffi;
 import 'package:dartc/interop.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
@@ -317,7 +318,7 @@ void main() {
         function,
         ProgramLayout(program.classes),
         CheckedCasts(),
-        MemberCalls(program, program.reachableFrom([function.target])),
+        MemberCalls(program, reachableDefinitions(program, [function.target])),
         HeapPlan(),
       );
       final selected = body.invocations.keys.single;

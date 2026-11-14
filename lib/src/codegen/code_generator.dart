@@ -1,3 +1,6 @@
+/// @docImport 'package:dartc/optimizer.dart';
+library;
+
 import 'package:dartc/object.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
@@ -14,7 +17,7 @@ abstract interface class CodeGenerator() {
   ///
   /// [definitions] must belong to [program] and include every directly called
   /// body or external declaration and every selected virtual implementation.
-  /// [IrProgram.reachableFrom] selects these for a closed program. [roots]
+  /// [reachableDefinitions] selects these for a closed program. [roots]
   /// identifies independently callable entries for target-code selection; when
   /// omitted, every supplied definition remains a possible entry. Exports and the
   /// process entry always remain roots. Required class
