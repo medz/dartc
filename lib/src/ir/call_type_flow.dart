@@ -27,7 +27,11 @@ final class CallTypeFlow(
   final _definitions = <FunctionTarget>{};
   final _pending = <FunctionTarget>{};
   final _unscanned = <FunctionTarget>[];
-  final _virtuals = <FunctionTarget>{};
+  final _subscribers =
+      <
+        MemberSelector,
+        Set<({FunctionTarget caller, Value receiver, bool bound})>
+      >{};
   final _instances = <ClassType>{};
   final _parameters = <BlockParameter, Set<ValueType>>{};
   final _returns = <FunctionTarget, Set<ValueType>>{};
@@ -56,13 +60,11 @@ final class CallTypeFlow(
     Iterable<FunctionTarget> unknownCalls = const [],
     Iterable<ClassType> instantiatedTypes = const [],
   }) {
-    final before = _instances.length;
-    _instances.addAll(instantiatedTypes.map((type) => type.declaration));
-    if (_instances.length != before) _pending.addAll(_virtuals);
+    final instancesChanged = _addInstances(instantiatedTypes);
     for (final target in unknownCalls) {
       _include(target, unknown: true);
     }
-    final changed = _pending.isNotEmpty || _instances.length != before;
+    final changed = _pending.isNotEmpty || instancesChanged;
     while (_pending.isNotEmpty) {
       // Discover direct dependencies before revisiting virtual calls for new classes.
       while (_unscanned.isNotEmpty) {
@@ -134,6 +136,25 @@ final class CallTypeFlow(
     return into.length != before;
   }
 
+  bool _addInstances(Iterable<ClassType> types) {
+    var changed = false;
+    for (final type in types.map((type) => type.declaration)) {
+      if (!_instances.add(type)) continue;
+      changed = true;
+      for (final MapEntry(:key, :value) in _subscribers.entries) {
+        if (program.lookupMember(type, key).target == null) continue;
+        for (final (:caller, :receiver, :bound) in value) {
+          if (bound
+              ? receiver.unviewedType.mayHaveInstance(type)
+              : allows(receiver, type)) {
+            _pending.add(caller);
+          }
+        }
+      }
+    }
+    return changed;
+  }
+
   void _include(FunctionTarget target, {bool unknown = false}) {
     target = target.implementation;
     final body = program.implementationOf(target);
@@ -154,14 +175,12 @@ final class CallTypeFlow(
           }
         }
       }
-      final before = _instances.length;
-      _instances.addAll([
+      _addInstances([
         ...?body?.instantiatedClasses,
         if (body != null && body.recordTypes.isNotEmpty)
           for (final declaration in program.classes)
             if (declaration.recordStorage) declaration.type,
       ]);
-      if (before != _instances.length) _pending.addAll(_virtuals);
     }
     if (unknown && body is IrFunction) {
       for (final parameter in body.entry.parameters) {
@@ -197,7 +216,13 @@ final class CallTypeFlow(
     Iterable<MemberSelector> selectors, {
     bool bound = false,
   }) sync* {
-    _virtuals.add(caller);
+    for (final selector in selectors) {
+      (_subscribers[selector] ??= {}).add((
+        caller: caller,
+        receiver: receiver,
+        bound: bound,
+      ));
+    }
     final declared = receiver.unviewedType;
     var observed = bound ? null : _types(receiver, caller).toList();
     if (observed != null && observed.isEmpty) return;
@@ -256,7 +281,8 @@ final class CallTypeFlow(
             for (final selected in _members(target, receiver, [
               member.selector,
             ])) {
-              targets.add(selected);
+              // A result use may precede this block and see no targets yet.
+              if (targets.add(selected)) _pending.add(target);
               final definition = program.implementationOf(selected);
               if (definition == null) {
                 _include(selected);

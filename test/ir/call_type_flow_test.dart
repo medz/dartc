@@ -46,6 +46,50 @@ void main() {
     expect(program.reachableFrom([root.target]), contains(model.members.last));
   });
 
+  test('new virtual targets propagate returns across unordered blocks', () {
+    final model = _dispatch();
+    final holder = ClassType(_uri, 'Holder');
+    final produce = FunctionTarget(
+      _uri,
+      'produce',
+      model.face,
+      [],
+      owner: holder,
+      kind: .method,
+    );
+    final producing = Block(produce.parameterTypes)
+      ..finish(Return(ObjectConstant(model.types.first, {})));
+    final root = FunctionTarget(_uri, 'main', .integer, [holder]);
+    final entry = Block(root.parameterTypes);
+    final definition = Block(), consumer = Block();
+    final returned = definition.emit(
+      InstanceCall(produce, entry.parameters.single, []),
+    );
+    entry.finish(Jump(definition));
+    definition.finish(Jump(consumer));
+    consumer.finish(
+      Return(consumer.emit(InstanceCall(model.member, returned, []))),
+    );
+    final program = IrProgram(
+      [
+        ...model.classes,
+        IrClass(holder, [], members: [produce]),
+      ],
+      [
+        ...model.bodies,
+        IrFunction(produce, [producing]),
+        IrFunction(root, [entry, consumer, definition]),
+      ],
+    );
+    final flow = CallTypeFlow(program, [produce], instantiatedTypes: [holder]);
+    expect(flow.definitions, {produce});
+    expect(flow.extend(unknownCalls: [root]), isTrue);
+    expect(flow.definitions, {produce, root, model.members.first});
+    expect(flow.allows(returned, model.types.first), isTrue);
+    expect(flow.allows(returned, model.types.last), isFalse);
+    expect(flow.extend(unknownCalls: [root]), isFalse);
+  });
+
   test('joins loop parameters and recursive returns to a fixed point', () {
     final model = _dispatch();
     final recursive = FunctionTarget(_uri, 'recursive', model.face, [
@@ -215,6 +259,89 @@ void main() {
     expect(dormant.extend(instantiatedTypes: [model.types.first]), isTrue);
     expect(dormant.definitions, isEmpty);
     expect(dormant.extend(instantiatedTypes: [model.types.first]), isFalse);
+  });
+
+  test('unrelated selectors do not widen dynamic calls', () {
+    final model = _dispatch();
+    final other = ClassType(_uri, 'OtherSelector');
+    final unrelated = FunctionTarget(
+      _uri,
+      'other',
+      .integer,
+      [],
+      owner: other,
+      kind: .method,
+    );
+    final root = FunctionTarget(_uri, 'main', .dynamicType, [.object]);
+    final entry = Block(root.parameterTypes);
+    entry.finish(
+      Return(
+        entry.emit(
+          DynamicDispatch(entry.parameters.single, model.member.selector, []),
+        ),
+      ),
+    );
+    final program = IrProgram(
+      [
+        ...model.classes,
+        IrClass(other, [], members: [unrelated]),
+      ],
+      [
+        ...model.bodies,
+        IrFunction(unrelated, [
+          Block(unrelated.parameterTypes)
+            ..finish(const Return(Constant.integer(0))),
+        ]),
+        IrFunction(root, [entry]),
+      ],
+    );
+    final flow = CallTypeFlow(
+      program,
+      [root],
+      instantiatedTypes: [model.types.first],
+    );
+    final selected = flow.definitions.toSet();
+    expect(selected, {root, model.members.first});
+    expect(flow.allows(entry.parameters.single, other), isTrue);
+    expect(flow.extend(instantiatedTypes: [other]), isTrue);
+    expect(flow.definitions, selected);
+    expect(flow.extend(instantiatedTypes: [other]), isFalse);
+  });
+
+  test('new instances respect call facts and tear-off declaration bounds', () {
+    final model = _dispatch();
+    final identity = FunctionTarget(_uri, 'identity', model.face, [model.face]);
+    for (final bound in [false, true]) {
+      final entry = Block();
+      final receiver = entry.emit(
+        DirectCall(identity, [ObjectConstant(model.types.first, {})]),
+      );
+      entry.emit(
+        bound
+            ? BindMethod(model.member, receiver)
+            : InstanceCall(model.member, receiver, []),
+      );
+      entry.finish(const Return());
+      final root = IrFunction(FunctionTarget(_uri, 'main', .voidType, []), [
+        entry,
+      ]);
+      final program = IrProgram(model.classes, [
+        ...model.bodies,
+        _identity(identity),
+        root,
+      ]);
+      final flow = CallTypeFlow(program, [root.target]);
+      expect(flow.definitions.intersection(model.members.toSet()), {
+        model.members.first,
+      });
+      expect(flow.allows(receiver, model.types[1]), isFalse);
+      expect(flow.extend(instantiatedTypes: [model.types[1]]), isTrue);
+      expect(flow.definitions.intersection(model.members.toSet()), {
+        model.members.first,
+        if (bound) model.members[1],
+      });
+      expect(flow.allows(receiver, model.types[1]), isFalse);
+    }
   });
 
   test(
