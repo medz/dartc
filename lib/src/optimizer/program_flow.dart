@@ -2399,9 +2399,9 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
       return false;
     }
     final callees = activation.calls[operation] ?? const <_Activation>{};
+    // Pure initialization may wait until a later read, even for writable storage.
     final binding =
         operation is LoadGlobal &&
-        !operation.global.isWritable &&
         operation.global.initializer != null &&
         callees.isNotEmpty &&
         callees.every(

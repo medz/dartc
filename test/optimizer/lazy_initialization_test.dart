@@ -8,37 +8,71 @@ final _uri = Uri.parse('memory:lazy-initialization');
 const _one = Constant.integer(1);
 
 void main() {
-  test(
-    'an unused pure final initializer disappears through ordinary calls',
-    () {
-      final initializer = FunctionTarget(_uri, 'initialize', .integer, []);
-      final binding = _binding(initializer);
-      final root = FunctionTarget(_uri, 'run', .integer, [.integer]);
-      final entry = Block(root.parameterTypes);
-      entry.emit(DirectCall(binding.getter.target, []));
-      entry.finish(Return(entry.parameters.single));
-      final program = IrProgram(
-        [],
-        [
-          IrFunction(initializer, [Block()..finish(const Return(_one))]),
-          binding.getter,
-          IrFunction(root, [entry]),
-        ],
-        globals: [binding.global],
-      );
-      final optimized = _optimize(program, root);
-      expect(optimized.definitions, {root});
-      for (final graph in [program, optimized.program]) {
-        final runner = IrInterpreter(graph, {});
-        for (final input in [-3, 0, 41]) {
-          expect(
-            runner.run(graph.implementationOf(root) as IrFunction, [input]),
-            input,
-          );
-        }
+  for (final isFinal in [true, false]) {
+    group(isFinal ? 'final binding' : 'mutable binding', () {
+      _contracts(isFinal: isFinal);
+    });
+  }
+  test('a later assignment replaces a deferred pure initializer', () {
+    final initializer = FunctionTarget(_uri, 'initialize', .integer, []);
+    final binding = _binding(initializer, isFinal: false);
+    final root = FunctionTarget(_uri, 'run', .integer, [.integer]);
+    final entry = Block(root.parameterTypes);
+    entry.emit(DirectCall(binding.getter.target, []));
+    entry.emit(StoreGlobal(binding.global, entry.parameters.single));
+    entry.finish(Return(entry.emit(DirectCall(binding.getter.target, []))));
+    final program = IrProgram(
+      [],
+      [
+        IrFunction(initializer, [Block()..finish(const Return(_one))]),
+        binding.getter,
+        IrFunction(root, [entry]),
+      ],
+      globals: [binding.global],
+    );
+    final optimized = _optimize(program, root);
+    for (final graph in [program, optimized.program]) {
+      final runner = IrInterpreter(graph, {});
+      for (final input in [-3, 0, 41]) {
+        expect(
+          runner.run(graph.implementationOf(root) as IrFunction, [input]),
+          input,
+        );
       }
-    },
-  );
+    }
+    expect(optimized.definitions, {root});
+  });
+}
+
+void _contracts({required bool isFinal}) {
+  test('an unused pure initializer disappears through ordinary calls', () {
+    final initializer = FunctionTarget(_uri, 'initialize', .integer, []);
+    final binding = _binding(initializer, isFinal: isFinal);
+    final root = FunctionTarget(_uri, 'run', .integer, [.integer]);
+    final entry = Block(root.parameterTypes);
+    entry.emit(DirectCall(binding.getter.target, []));
+    entry.finish(Return(entry.parameters.single));
+    final program = IrProgram(
+      [],
+      [
+        IrFunction(initializer, [Block()..finish(const Return(_one))]),
+        binding.getter,
+        IrFunction(root, [entry]),
+      ],
+      globals: [binding.global],
+    );
+    final optimized = _optimize(program, root);
+    expect(optimized.definitions, {root});
+    for (final graph in [program, optimized.program]) {
+      final runner = IrInterpreter(graph, {});
+      for (final input in [-3, 0, 41]) {
+        expect(
+          runner.run(graph.implementationOf(root) as IrFunction, [input]),
+          input,
+        );
+      }
+    }
+  });
 
   test(
     'an unused initialized value keeps observable initialization exactly once',
@@ -49,7 +83,7 @@ void main() {
       initializing.finish(
         Return(initializing.emit(DirectCall(output, [_one]))),
       );
-      final binding = _binding(initializer);
+      final binding = _binding(initializer, isFinal: isFinal);
       final root = FunctionTarget(_uri, 'run', .integer, []);
       final entry = Block()
         ..emit(DirectCall(binding.getter.target, []))
@@ -81,7 +115,7 @@ void main() {
     final initializer = FunctionTarget(_uri, 'initialize', .integer, []);
     final initializing = Block();
     initializing.finish(Return(initializing.emit(DirectCall(output, [_one]))));
-    final binding = _binding(initializer);
+    final binding = _binding(initializer, isFinal: isFinal);
     final root = FunctionTarget(_uri, 'run', .integer, []);
     final entry = Block(), normal = Block(), failed = Block();
     entry.finish(
@@ -131,7 +165,7 @@ void main() {
       final initializer = FunctionTarget(_uri, 'initialize', mutable.type, []);
       final initializing = Block();
       initializing.finish(Return(initializing.emit(LoadGlobal(mutable))));
-      final binding = _binding(initializer);
+      final binding = _binding(initializer, isFinal: isFinal);
       final root = FunctionTarget(_uri, 'run', mutable.type, [.integer]);
       final entry = Block(root.parameterTypes);
       entry.emit(StoreGlobal(mutable, entry.parameters.single));
@@ -166,7 +200,7 @@ void main() {
     final initializing = Block(), loop = Block();
     initializing.finish(Jump(loop));
     loop.finish(Jump(loop));
-    final binding = _binding(initializer);
+    final binding = _binding(initializer, isFinal: isFinal);
     final root = FunctionTarget(_uri, 'run', .integer, []);
     final entry = Block()
       ..emit(DirectCall(binding.getter.target, []))
@@ -189,13 +223,14 @@ void main() {
 }
 
 ({GlobalVariable global, IrFunction getter}) _binding(
-  FunctionTarget initializer,
-) {
+  FunctionTarget initializer, {
+  required bool isFinal,
+}) {
   final global = GlobalVariable(
     _uri,
     'value',
     initializer.returnType,
-    isFinal: true,
+    isFinal: isFinal,
     initializer: initializer,
   );
   final target = FunctionTarget(_uri, 'get', global.type, []);
