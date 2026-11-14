@@ -24,6 +24,7 @@ final class CallTypeFlow(
 }) {
   final _definitions = <FunctionTarget>{};
   final _pending = <FunctionTarget>{};
+  final _unscanned = <FunctionTarget>[];
   final _virtuals = <FunctionTarget>{};
   final _instances = <ClassType>{};
   final _parameters = <BlockParameter, Set<ValueType>>{};
@@ -41,6 +42,10 @@ final class CallTypeFlow(
       _include(target, unknown: true);
     }
     while (_pending.isNotEmpty) {
+      // Discover direct dependencies before revisiting virtual calls for new classes.
+      while (_unscanned.isNotEmpty) {
+        _scan(_unscanned.removeLast());
+      }
       final target = _pending.first;
       _pending.remove(target);
       _visit(target);
@@ -50,37 +55,59 @@ final class CallTypeFlow(
   /// Whether [receiver] can hold an instance of [actual] at any observed call.
   ///
   /// Values outside the analyzed source graphs retain their static bounds.
-  bool allows(Value receiver, ClassType actual) =>
-      receiver.unviewedType.mayHaveInstance(actual) &&
-      _types(receiver).any((type) => type.mayHaveInstance(actual));
+  bool allows(Value receiver, ClassType actual) {
+    final declared = receiver.unviewedType;
+    return _types(receiver)
+            .any((type) => type == declared || type.mayHaveInstance(actual)) &&
+        declared.mayHaveInstance(actual);
+  }
 
-  Iterable<ValueType> _types(Value value) => switch (value) {
-    TypeView(:final operand) ||
-    TypeCast(:final operand) ||
-    UncheckedCast(:final operand) ||
-    NullCheck(:final operand) => _types(operand),
-    TestedValue(:final test) => _types(test.operand),
-    BlockParameter() => _parameters[value] ?? [value.type],
-    DirectCall(:final target) when _directCalls.contains(value) => _result(
-      target,
-      value.type,
-    ),
-    InstanceCall() when _targets.containsKey(value) => _targets[value]!.expand(
-      (target) => _result(target, value.type),
-    ),
-    _ => [value.type],
-  };
-
-  Iterable<ValueType> _result(FunctionTarget target, ValueType fallback) =>
-      switch (program.implementationOf(target)) {
-        IrFunction(bodyKind: FunctionBodyKind.synchronous) =>
-          _returns[target] ?? const [],
-        _ => [fallback],
+  Iterable<ValueType> _types(Value value, [FunctionTarget? reader]) =>
+      switch (value) {
+        TypeView(:final operand) ||
+        TypeCast(:final operand) ||
+        UncheckedCast(:final operand) ||
+        NullCheck(:final operand) => _types(operand, reader),
+        TestedValue(:final test) => _types(test.operand, reader),
+        BlockParameter() => _parameters[value] ?? [value.type],
+        DirectCall(:final target) when _directCalls.contains(value) => _result(
+          target,
+          value.type,
+          reader,
+        ),
+        InstanceCall() when _targets.containsKey(value) =>
+          _targets[value]!.expand(
+            (target) => _result(target, value.type, reader),
+          ),
+        _ => [value.type],
       };
 
-  bool _merge(Set<ValueType> into, Iterable<ValueType> types) {
+  Iterable<ValueType> _result(
+    FunctionTarget target,
+    ValueType fallback,
+    FunctionTarget? reader,
+  ) sync* {
+    if (program.implementationOf(target) case IrFunction(
+      bodyKind: FunctionBodyKind.synchronous,
+    )) {
+      if (reader != null) (_callers[target] ??= {}).add(reader);
+      yield* _returns[target] ?? const [];
+    } else {
+      yield fallback;
+    }
+  }
+
+  bool _merge(Set<ValueType> into, Iterable<ValueType> types, ValueType bound) {
+    if (into.contains(bound)) return false;
+    final incoming = types.toSet();
+    if (incoming.contains(bound)) {
+      into
+        ..clear()
+        ..add(bound);
+      return true;
+    }
     final before = into.length;
-    into.addAll(types.toList());
+    into.addAll(incoming);
     return into.length != before;
   }
 
@@ -89,6 +116,7 @@ final class CallTypeFlow(
     final body = program.implementationOf(target);
     if (_definitions.add(target)) {
       _pending.add(target);
+      _unscanned.add(target);
       if (body is IrFunction) {
         for (final block in body.blocks) {
           for (final parameter in block.parameters) {
@@ -114,7 +142,9 @@ final class CallTypeFlow(
     }
     if (unknown && body is IrFunction) {
       for (final parameter in body.entry.parameters) {
-        if (_parameters[parameter]!.add(parameter.type)) _pending.add(target);
+        if (_merge(_parameters[parameter]!, [parameter.type], parameter.type)) {
+          _pending.add(target);
+        }
       }
     }
   }
@@ -125,11 +155,14 @@ final class CallTypeFlow(
     List<Value> arguments,
   ) {
     _include(target);
-    (_callers[target] ??= {}).add(caller);
     final body = program.implementationOf(target);
     if (body is! IrFunction) return;
     for (final (i, parameter) in body.entry.parameters.indexed) {
-      if (_merge(_parameters[parameter]!, _types(arguments[i]))) {
+      if (_merge(
+        _parameters[parameter]!,
+        _types(arguments[i], caller),
+        parameter.type,
+      )) {
         _pending.add(target);
       }
     }
@@ -142,24 +175,32 @@ final class CallTypeFlow(
     bool bound = false,
   }) sync* {
     _virtuals.add(caller);
+    final declared = receiver.unviewedType;
+    var observed = bound ? null : _types(receiver, caller).toList();
+    if (observed != null && observed.isEmpty) return;
+    if (observed?.contains(declared) ?? false) observed = null;
     // Selecting a member can discover more instances while this loop is active.
     for (final type in _instances.toList()) {
-      if (bound
-          ? !receiver.unviewedType.mayHaveInstance(type)
-          : !allows(receiver, type)) {
+      final targets = [
+        for (final selector in selectors)
+          ?program.lookupMember(type, selector).target,
+      ];
+      if (targets.isEmpty) continue;
+      if (observed != null &&
+              !observed.any((bound) => bound.mayHaveInstance(type)) ||
+          !declared.mayHaveInstance(type)) {
         continue;
       }
-      for (final selector in selectors) {
-        if (program.lookupMember(type, selector).target case final target?) {
-          yield target;
-        }
-      }
+      yield* targets;
     }
   }
 
-  void _visit(FunctionTarget target) {
+  void _scan(FunctionTarget target) {
     final body = program.implementationOf(target);
     if (body == null) return;
+    for (final callee in body.callees) {
+      _include(callee);
+    }
     for (final value in body.functionConstants) {
       _include(value.target, unknown: true);
     }
@@ -172,6 +213,11 @@ final class CallTypeFlow(
         _include(initializer, unknown: true);
       }
     }
+  }
+
+  void _visit(FunctionTarget target) {
+    final body = program.implementationOf(target);
+    if (body is! IrFunction) return;
     for (final block in body.blocks) {
       for (final operation in [
         ...block.instructions,
@@ -249,7 +295,11 @@ final class CallTypeFlow(
       }
       for (final edge in block.successors) {
         for (final (i, parameter) in edge.target.parameters.indexed) {
-          if (_merge(_parameters[parameter]!, _types(edge.arguments[i]))) {
+          if (_merge(
+            _parameters[parameter]!,
+            _types(edge.arguments[i], target),
+            parameter.type,
+          )) {
             _pending.add(target);
           }
         }
@@ -258,7 +308,8 @@ final class CallTypeFlow(
           when body.bodyKind == .synchronous) {
         if (_merge(
           _returns[target] ??= {},
-          value == null ? [.nullType] : _types(value),
+          value == null ? [.nullType] : _types(value, target),
+          target.returnType,
         )) {
           _pending.addAll(_callers[target] ?? const []);
         }

@@ -214,6 +214,38 @@ void main() {
     expect(flow.allows(value, model.types.last), isFalse);
   });
 
+  test('a later escaping function widens prior parameters and returns', () {
+    final model = _dispatch();
+    final identity = FunctionTarget(_uri, 'identity', model.face, [model.face]);
+    final escape = FunctionTarget(_uri, 'escape', identity.signature, []);
+    final escaping = IrFunction(escape, [
+      Block()..finish(Return(FunctionConstant(identity))),
+    ]);
+    final entry = Block();
+    final value = entry.emit(
+      DirectCall(identity, [ObjectConstant(model.types.first, {})]),
+    );
+    final read = entry.emit(InstanceCall(model.member, value, []));
+    entry.emit(DirectCall(escape, []));
+    entry.finish(Return(read));
+    final root = IrFunction(FunctionTarget(_uri, 'main', .integer, []), [
+      entry,
+    ]);
+    final program = IrProgram(model.classes, [
+      ...model.bodies,
+      _identity(identity),
+      escaping,
+      root,
+    ]);
+    final flow = CallTypeFlow(program, [
+      root.target,
+    ], instantiatedTypes: model.types);
+    expect(flow.definitions, containsAll(model.members));
+    for (final type in model.types) {
+      expect(flow.allows(value, type), isTrue);
+    }
+  });
+
   test('function values and lexical captures remain conservative', () {
     final model = _dispatch();
     final reader = _reader(model);
