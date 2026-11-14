@@ -426,6 +426,264 @@ sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
 
+  /// Copies this operation with remapped operands and unchanged semantic types.
+  ///
+  /// Declaration identities, type arguments, flags and native signatures are
+  /// retained. Each replacement must have the original operand type; checked
+  /// constructors also validate operation-specific requirements. The result is
+  /// a fresh instruction, including for operations without operands.
+  Instruction mapInputs(Value Function(Value) replace) {
+    Value map(Value value) {
+      final result = replace(value);
+      if (result.type != value.type) {
+        throw ArgumentError('Operand remapping must preserve its IR type.');
+      }
+      return result;
+    }
+
+    Value? optional(Value? value) => value == null ? null : map(value);
+    return switch (this) {
+      final ReifyType v => ReifyType(v.template),
+      final ObjectRuntimeType v => ObjectRuntimeType(
+        map(v.operand),
+        direct: v.direct,
+      ),
+      final ObjectHashCode v => ObjectHashCode(
+        map(v.operand),
+        direct: v.direct,
+      ),
+      final ObjectClassName v => ObjectClassName(map(v.operand)),
+      final NativeSymbolAddress v => NativeSymbolAddress(v.reference),
+      final NativeCallbackAddress v => NativeCallbackAddress(
+        v.function,
+        v.nativeType,
+        exceptionalReturn: v.exceptionalReturn,
+      ),
+      final NativeClosureEntryAddress v => NativeClosureEntryAddress(
+        v.lookup,
+        v.callbackType,
+        v.nativeType,
+        exceptionalReturn: v.exceptionalReturn,
+      ),
+      final ReferenceAddress v => ReferenceAddress(map(v.object)),
+      final ReferenceFromAddress v => ReferenceFromAddress(
+        map(v.address),
+        v.type,
+      ),
+      final PointerFromAddress v => PointerFromAddress(
+        map(v.address),
+        v.type as ClassType,
+      ),
+      final PointerAddress v => PointerAddress(map(v.pointer)),
+      final NewPayload v => NewPayload(v.type as ClassType, map(v.bytes)),
+      final NativeView v => NativeView(
+        v.type as ClassType,
+        address: optional(v.address),
+        owner: map(v.owner),
+        copy: v.copy,
+      ),
+      final NativeAddress v => NativeAddress(map(v.view)),
+      final NativeSize v => NativeSize(v.nativeType),
+      final NativeFieldOffset v => NativeFieldOffset(v.owner, v.index),
+      final CopyNative v => CopyNative(
+        map(v.destination),
+        map(v.source),
+        v.nativeType,
+      ),
+      final KeepAlive v => KeepAlive(map(v.value)),
+      final PointerOffset v => PointerOffset(map(v.pointer), map(v.index)),
+      final LoadNative v => LoadNative(map(v.address), v.nativeType),
+      final StoreNative v => StoreNative(
+        map(v.address),
+        v.nativeType,
+        map(v.value),
+      ),
+      final LoadObjectData v => LoadObjectData(
+        map(v.object),
+        map(v.byteOffset),
+        v.nativeType,
+      ),
+      final StoreObjectData v => StoreObjectData(
+        map(v.object),
+        map(v.byteOffset),
+        v.nativeType,
+        map(v.value),
+      ),
+      final LoadObjectReference v => LoadObjectReference(
+        map(v.object),
+        map(v.byteOffset),
+      ),
+      final StoreObjectReference v => StoreObjectReference(
+        map(v.object),
+        map(v.byteOffset),
+        map(v.value),
+      ),
+      final LoadLibrary v => LoadLibrary(v.reference),
+      final CheckLibraryLoaded v => CheckLibraryLoaded(v.reference),
+      final AssertionFailure v => AssertionFailure(optional(v.message)),
+      final MakeClosure v => MakeClosure(v.target, v.inputs.map(map)),
+      final NewCell v => NewCell(
+        v.type as CellType,
+        optional(v.initial),
+        initializer: optional(v.initializer),
+      ),
+      final ReadCell v => ReadCell(map(v.cell)),
+      final CopyCell v => CopyCell(map(v.cell)),
+      final WriteCell v => WriteCell(map(v.cell), map(v.value)),
+      final BindMethod v => BindMethod(
+        v.method,
+        map(v.receiver),
+        direct: v.direct,
+        ownerType: v.ownerType,
+      ),
+      final InstantiateFunction v => InstantiateFunction(
+        map(v.function),
+        v.typeArguments,
+      ),
+      final InstantiateFunctionFrom v => InstantiateFunctionFrom(
+        map(v.function),
+        map(v.instance),
+        v.declaration,
+      ),
+      final FunctionCall v => FunctionCall(
+        map(v.function),
+        v.positional.map(map),
+        {for (final e in v.named.entries) e.key: map(e.value)},
+        v.typeArguments,
+      ),
+      final LoadGlobal v => LoadGlobal(v.global),
+      final StoreGlobal v => StoreGlobal(v.global, map(v.value)),
+      final LoadField v => LoadField(v.field, map(v.receiver)),
+      final StoreField v => StoreField(v.field, map(v.receiver), map(v.value)),
+      final InstanceCall v => InstanceCall(
+        v.member,
+        map(v.receiver),
+        v.positional.map(map),
+        {for (final e in v.named.entries) e.key: map(e.value)},
+        v.ownerType,
+        v.typeArguments,
+      ),
+      final DynamicDispatch v => DynamicDispatch(
+        map(v.receiver),
+        v.selector,
+        v.positional.map(map),
+        {for (final e in v.named.entries) e.key: map(e.value)},
+        v.typeArguments,
+      ),
+      final MakeInvocation v => MakeInvocation(
+        v.selector,
+        v.positional.map(map),
+        {for (final e in v.named.entries) e.key: map(e.value)},
+        v.typeArguments,
+      ),
+      final Construct v => Construct(
+        v.initializer,
+        v.inputs.map(map),
+        instantiatedType: v.instantiatedType,
+      ),
+      final MakeRecord v => MakeRecord(v.type as RecordType, v.inputs.map(map)),
+      final RecordGet v => RecordGet(map(v.record), v.slot),
+      final TypeTest v => TypeTest(
+        map(v.operand),
+        v.testedType,
+        negated: v.negated,
+      ),
+      final TypeView v => TypeView(map(v.operand), v.type),
+      final UncheckedCast v => UncheckedCast(map(v.operand), v.type),
+      final TypeCast v => TypeCast(map(v.operand), v.type),
+      final NullCheck v => NullCheck(map(v.operand)),
+      final Equals v => Equals(map(v.left), map(v.right), negated: v.negated),
+      final Identical v => Identical(map(v.left), map(v.right)),
+      final IntBinary v => IntBinary(v.operator, map(v.left), map(v.right)),
+      final NumericBinary v => NumericBinary(
+        v.operator,
+        map(v.left),
+        map(v.right),
+      ),
+      final NativeCall v => switch (map(v.pointer)) {
+        final NativeSymbolAddress pointer
+            when pointer.reference.type == NativeFunctionType(v.signature) &&
+                pointer.reference.isLeaf == v.isLeaf =>
+          NativeCall.symbol(
+            pointer,
+            v.dartSignature,
+            v.arguments.map(map),
+            borrowedOwners: {
+              for (final e in v.borrowedOwners.entries) e.key: map(e.value),
+            },
+          ),
+        final pointer => NativeCall(
+          pointer,
+          v.arguments.map(map),
+          isLeaf: v.isLeaf,
+          borrowedOwners: {
+            for (final e in v.borrowedOwners.entries) e.key: map(e.value),
+          },
+        ),
+      },
+      final DirectCall v => DirectCall(
+        v.target,
+        v.inputs.map(map),
+        ownerType: v.ownerType,
+        typeArguments: v.typeArguments,
+      ),
+      final NumericNegate v => NumericNegate(map(v.operand)),
+      final NumericToDouble v => NumericToDouble(map(v.operand)),
+      final NumericSquareRoot v => NumericSquareRoot(map(v.operand)),
+      final FloatBitCast v => FloatBitCast(map(v.operand), width: v.width),
+      final NumericToInt v => NumericToInt(map(v.operand), v.rounding),
+      final NumericRoundToDouble v => NumericRoundToDouble(
+        map(v.operand),
+        v.rounding,
+      ),
+      final StringConcat v => StringConcat(map(v.left), map(v.right)),
+      final StringFromCharCode v => StringFromCharCode(map(v.code)),
+      final StringFromCharCodes v => StringFromCharCodes(
+        map(v.codes),
+        map(v.start),
+        map(v.end),
+      ),
+      final StringLength v => StringLength(map(v.string)),
+      final StringCodeUnitAt v => StringCodeUnitAt(map(v.string), map(v.index)),
+      final NewCollection v => NewCollection(
+        v.collectionType,
+        growable: optional(v.growable),
+      ),
+      final ListFilled v => ListFilled(
+        v.type as ClassType,
+        map(v.length),
+        map(v.fill),
+        map(v.growable),
+      ),
+      final ListFrom v => ListFrom(
+        v.type as ClassType,
+        map(v.elements),
+        map(v.growable),
+      ),
+      final CollectionAdd v => CollectionAdd(map(v.collection), map(v.value)),
+      final CollectionSpread v => CollectionSpread(
+        map(v.collection),
+        map(v.source),
+        isMethodCall: v.isMethodCall,
+      ),
+      final MapPut v => MapPut(map(v.map), map(v.key), map(v.value)),
+      final GetIterator v => GetIterator(map(v.iterable)),
+      final IteratorMoveNext v => IteratorMoveNext(map(v.iterator)),
+      final IteratorCurrent v => IteratorCurrent(map(v.iterator)),
+      final MapEntries v => MapEntries(map(v.map)),
+      final CollectionLength v => CollectionLength(map(v.collection)),
+      final CollectionGet v => CollectionGet(map(v.collection), map(v.key)),
+      final ListSublist v => ListSublist(
+        map(v.list),
+        map(v.start),
+        optional(v.end),
+      ),
+      final MapContainsKey v => MapContainsKey(map(v.map), map(v.key)),
+      PatternMatchFailure() => PatternMatchFailure(),
+      final ListSet v => ListSet(map(v.collection), map(v.key), map(v.value)),
+    };
+  }
+
   /// The virtual member invoked by an operation with a built-in spelling.
   ({ValueType receiver, MemberSelector selector})? get implicitMember =>
       switch (this) {
@@ -649,7 +907,8 @@ final class NativeSymbolAddress(final NativeReference reference)
 
 /// A typed native entry whose escaping exceptions return a declared value.
 sealed class NativeCallbackEntry(
-  FunctionType nativeType,
+  /// The declared FFI function type, including nominal native types.
+  final FunctionType nativeType,
   final FunctionType callbackType,
   final Constant? exceptionalReturn,
 ) extends Instruction {
@@ -1827,6 +2086,9 @@ final class NativeCall._(
   /// The evaluated Dart arguments in native parameter order.
   final List<Value> arguments,
 
+  /// The checked Dart signature before native boundary conversions.
+  final FunctionType dartSignature,
+
   /// The native signature derived from [pointer]'s type.
   final NativeSignature signature,
 
@@ -1921,7 +2183,15 @@ final class NativeCall._(
       for (final (i, type) in dartSignature.parameters.indexed)
         owners.containsKey(i) ? ValueType.integer : type,
     ], values);
-    return ._(pointer, values, signature, isLeaf, owners, dartSignature.result);
+    return ._(
+      pointer,
+      values,
+      dartSignature,
+      signature,
+      isLeaf,
+      owners,
+      dartSignature.result,
+    );
   }
 
   @override
