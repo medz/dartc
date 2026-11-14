@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Retain explicit reference lifetime markers during inline cleanup, preserving resources across preceding calls and accesses without introducing allocation or exceptions.
+
 - Register event delivery through ordinary Dart state so inlining scheduling helpers preserves pending callbacks and process keep-alive. Programs without scheduling still omit the event loop and its clock/wait dependencies.
 
 - Keep live values in registers across branches and loops, skipping unchanged edge transfers while preserving simultaneous parameter swaps, exceptions and initialized GC stack roots.

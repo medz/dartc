@@ -419,6 +419,9 @@ enum Effect() {
 
   /// May transfer control to a Dart exception handler.
   mayThrow,
+
+  /// Extends the lifetime of referenced values through this point.
+  keepsAlive,
 }
 
 /// An operation executed at its position in a block's instruction list.
@@ -761,6 +764,7 @@ sealed class Instruction(super.type) extends Value {
     .allocates,
     .callsUserCode,
     .mayThrow,
+    .keepsAlive,
   };
   static const _allocate = <Effect>{.allocates, .mayThrow};
   static const _checkedWrite = <Effect>{.writesStorage, .mayThrow};
@@ -772,6 +776,7 @@ sealed class Instruction(super.type) extends Value {
   /// the operation itself; temporary boxes and GC safepoints depend on the backend.
   Set<Effect> get effects => switch (this) {
     NativeCallbackEntry() => const {.readsStorage, .writesStorage},
+    KeepAlive() => const {.keepsAlive},
     ObjectHashCode(direct: true) => _bindOnce,
     ObjectRuntimeType(direct: true) => const {.readsStorage},
     ObjectClassName() => const {.readsStorage},
@@ -888,8 +893,7 @@ sealed class Instruction(super.type) extends Value {
     NativeAddress() ||
     NativeSymbolAddress() ||
     NativeSize() ||
-    NativeFieldOffset() ||
-    KeepAlive() => const {},
+    NativeFieldOffset() => const {},
   };
 
   /// Whether evaluation can transfer control to a Dart exception handler.
@@ -1138,7 +1142,8 @@ final class CopyNative(
   Iterable<Value> get inputs => [destination, source];
 }
 
-/// Retains a managed owner through preceding native accesses or calls.
+/// Keeps [value] live through this point, including preceding calls or accesses.
+/// This lifetime obligation remains observable without emitting machine code.
 final class KeepAlive(final Value value) extends Instruction {
   this : super(.voidType);
   @override

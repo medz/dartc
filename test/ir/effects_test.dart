@@ -6,6 +6,13 @@ import '../support/ir_interpreter.dart';
 void main() {
   const n = Constant.integer(1);
   final uri = Uri.parse('memory:effects');
+  test('lifetime effects are distinct from allocation and exceptions', () {
+    final value = Block([ValueType.object]).parameters.single;
+    final marker = KeepAlive(value);
+    expect(marker.effects, {Effect.keepsAlive});
+    expect(marker.mayThrow, isFalse);
+    expect(marker.inputs, [value]);
+  });
   test('non-covariant field results can throw before their value is used', () {
     final t = TypeParameterType('T')..initializeBound(.object.nullable);
     final owner = ClassType(uri, 'Callbacks', typeParameters: [t]);

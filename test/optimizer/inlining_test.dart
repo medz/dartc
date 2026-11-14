@@ -20,6 +20,45 @@ Object? _run(
 }).run(program.implementationOf(target) as IrFunction, arguments);
 
 void main() {
+  test('cleanup retains caller and inlined lifetime markers after calls', () {
+    final helper = FunctionTarget(_uri, 'retain', .voidType, [.object]);
+    final body = Block(helper.parameterTypes);
+    body.emit(DirectCall(_tick, [const Constant.integer(1)]));
+    body.emit(KeepAlive(body.parameters.single));
+    body.finish(const Return());
+    final root = FunctionTarget(_uri, 'root', .integer, [.object]);
+    final entry = Block(root.parameterTypes);
+    entry.emit(
+      IntBinary(.add, const Constant.integer(1), const Constant.integer(2)),
+    );
+    entry.emit(DirectCall(helper, entry.parameters));
+    final result = entry.emit(DirectCall(_tick, [const Constant.integer(2)]));
+    entry.emit(KeepAlive(entry.parameters.single));
+    entry.finish(Return(result));
+    final program = IrProgram(
+      [],
+      [
+        IrFunction(helper, [body]),
+        IrFunction(root, [entry]),
+      ],
+      externals: [IrExternal(_tick)],
+    );
+    final rewritten = inlineDirectCalls(
+      program,
+      CallTypeFlow(program, [root]).facts,
+    ).implementationOf(root) as IrFunction;
+    expect(rewritten.callees, {_tick});
+    expect(rewritten.entry.instructions.map((op) => op.runtimeType), [
+      DirectCall,
+      KeepAlive,
+      DirectCall,
+      KeepAlive,
+    ]);
+    for (final marker in rewritten.entry.instructions.whereType<KeepAlive>()) {
+      expect(marker.value, same(rewritten.entry.parameters.single));
+    }
+  });
+
   test(
     'arguments and effects execute once in order, including unused inputs',
     () {
