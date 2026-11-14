@@ -5,13 +5,13 @@ import 'package:test/test.dart';
 
 const fixture = 'test/frontend/lowering/fixtures/source_locations.dart';
 
-SourceLocation at(int line, int column, {bool part = false}) => (
+SourceLocation at(int line, int column, {bool part = false}) => SourceLocation((
   uri: Uri.base.resolve(
     part ? fixture.replaceFirst('.dart', '_part.dart') : fixture,
   ),
   line: line,
   column: column,
-);
+));
 
 Iterable<Instruction> operations(IrFunction function) sync* {
   for (final block in function.blocks) {
@@ -53,7 +53,7 @@ void main() {
       (f) => f.target.enclosing?.name == 'nested',
     );
     expect(local.target.declarationLocation, at(16, 12));
-    final sqrt = function('sqrt').target.declarationLocation!;
+    final sqrt = function('sqrt').target.declarationLocation!.position!;
     expect(
       sqrt.uri.path,
       endsWith('/sdk/std/lib/_internal/vm/lib/math_patch.dart'),
@@ -119,7 +119,7 @@ void main() {
           .singleWhere((call) => call.target.owner?.name == 'SourceParent');
       expect(initializer.sourceLocations[parent], at(41, 10));
 
-      final squareRootCall = calls(function('sqrt'), '_sqrt').single!;
+      final squareRootCall = calls(function('sqrt'), '_sqrt').single!.position!;
       expect((squareRootCall.line, squareRootCall.column), (132, 23));
       expect(
         squareRootCall.uri.path,

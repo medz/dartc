@@ -33,7 +33,8 @@ final class ExtensionApplication(
 /// Maps analyzer declarations and formal parameters to their IR identities.
 final class Bindings({
   final bool enableAssertions = false,
-  final SourceLocation Function(ast.CompilationUnit, int)? sourceLocation,
+  final ({Uri uri, int line, int column}) Function(ast.CompilationUnit, int)?
+  sourceLocation,
   ConstantEvaluation? constants,
   final Uri? runtimeContracts,
   final Set<Uri> runtimeSources = const {},
@@ -353,12 +354,14 @@ final class Bindings({
     if (site == null) return null;
     final source = site.root as ast.CompilationUnit;
     final location = source.lineInfo.getLocation(site.offset);
-    return sourceLocation?.call(source, site.offset) ??
-        (
-          uri: source.declaredFragment!.source.uri,
-          line: location.lineNumber,
-          column: location.columnNumber,
-        );
+    return SourceLocation(
+      sourceLocation?.call(source, site.offset) ??
+          (
+            uri: source.declaredFragment!.source.uri,
+            line: location.lineNumber,
+            column: location.columnNumber,
+          ),
+    );
   }
 
   Iterable<(ResolvedUnitResult, ast.AstNode)> fragmentsOf(

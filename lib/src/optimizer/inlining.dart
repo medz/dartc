@@ -13,7 +13,8 @@ import 'call_type_flow.dart';
 /// return, without lexical captures, constructor-only writes or callback entries
 /// whose native addresses belong to the original instruction site. Call arguments
 /// still execute in order, including unused arguments with effects. Throwing
-/// operations keep the call site's exceptional continuation. Cleanup removes
+/// operations keep the call site's exceptional continuation and logical frame
+/// chain, including inlined function identities and call sites. Cleanup removes
 /// constant branches, unreachable blocks and unused operations without effects.
 ///
 /// Unchanged input is returned by identity. Otherwise only changed functions
@@ -113,11 +114,17 @@ IrFunction _inline(
     Object source,
     Object copy,
     IrFunction owner, [
-    Object? fallback,
+    Object? callSite,
   ]) {
-    final location =
-        owner.sourceLocations[source] ?? function.sourceLocations[fallback];
-    if (location != null) locations[copy] = location;
+    final location = owner.sourceLocations[source];
+    if (identical(owner, function)) {
+      if (location != null) locations[copy] = location;
+    } else {
+      locations[copy] = (location ?? SourceLocation(null)).inlinedAt(
+        owner.target,
+        function.sourceLocations[callSite] ?? SourceLocation(null),
+      );
+    }
   }
 
   Value expand(DirectCall call) {

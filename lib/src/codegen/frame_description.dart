@@ -1,8 +1,7 @@
 import 'package:dartc/ir.dart';
 
-/// Describes a source callable and optional original source position.
+/// Describes logical source frames, innermost first, separated by newlines.
 String? frameDescription(FunctionTarget function, [SourceLocation? location]) {
-  if (function.library == null) return null;
   String name(FunctionTarget target) {
     final prefix = target.enclosing == null
         ? target.owner?.name
@@ -14,8 +13,20 @@ String? frameDescription(FunctionTarget function, [SourceLocation? location]) {
         : '$prefix.${target.name}';
   }
 
-  final label = name(function);
-  return location == null
-      ? label
-      : '$label (${location.uri}:${location.line}:${location.column})';
+  final frames = <String>[];
+  var current = location;
+  do {
+    final target = current?.function ?? function;
+    if (target.library != null) {
+      final label = name(target);
+      final position = current?.position;
+      frames.add(
+        position == null
+            ? label
+            : '$label (${position.uri}:${position.line}:${position.column})',
+      );
+    }
+    current = current?.caller;
+  } while (current != null);
+  return frames.isEmpty ? null : frames.join('\n');
 }

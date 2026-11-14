@@ -111,9 +111,9 @@ final class IrFunction(
   /// The reachable blocks in the supplied order, starting with [entry].
   final List<Block> blocks = .unmodifiable(blocks);
 
-  /// Positions of instructions and terminating blocks in this graph.
+  /// Source positions and logical frames of instructions and terminators.
   ///
-  /// A [Block] key locates its terminator; omitted entries have no source position.
+  /// A [Block] key locates its terminator; omitted entries have no source origin.
   final Map<Object, SourceLocation> sourceLocations = .unmodifiable(
     sourceLocations,
   );
@@ -132,8 +132,8 @@ final class IrFunction(
   /// Throws [ArgumentError] when the entry parameters differ from the signature.
   /// Throws [StateError] for an empty or malformed graph. Every block must be
   /// sealed and reachable, and each SSA definition must dominate its uses.
-  /// Source positions require a graph-owned instruction or block, an absolute URI
-  /// and positive line and column coordinates; invalid positions throw [ArgumentError].
+  /// Source origins require a graph-owned instruction or block; foreign keys
+  /// throw [ArgumentError]. [SourceLocation] validates any supplied coordinates.
   /// Ordinary returns must match the callable result. Generator returns complete
   /// iteration and supply only `null`; yields must match [yieldType].
   this {
@@ -177,11 +177,8 @@ final class IrFunction(
           if (block.end case Invoke(:final operation)) operation,
         ],
       };
-      for (final MapEntry(:key, :value) in sourceLocations.entries) {
-        if (!sites.contains(key) ||
-            !value.uri.isAbsolute ||
-            value.line < 1 ||
-            value.column < 1) {
+      for (final key in sourceLocations.keys) {
+        if (!sites.contains(key)) {
           throw ArgumentError('Invalid source location for ${target.name}.');
         }
       }
