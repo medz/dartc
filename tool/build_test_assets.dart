@@ -130,6 +130,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'constants',
     'forwarders',
     'mixins',
+    'json_utf8',
     'symbols',
     'base64_conversion',
     'math_random',
@@ -303,6 +304,7 @@ Future<void> main(List<String> args) async {
       ('constants', 'constants', 'entry_constants'),
       ('forwarders', 'forwarders', 'entry_forwarders'),
       ('mixins', 'mixins', 'entry_mixins'),
+      ('json_utf8', 'json_utf8', 'entry_json_utf8'),
       ('working_directory', 'working_directory', 'entry_working_directory'),
       (
         'temporary_directories',
