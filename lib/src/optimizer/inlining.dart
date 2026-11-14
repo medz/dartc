@@ -1,13 +1,19 @@
 import 'package:dartc/ir.dart';
 
-import 'call_type_flow.dart';
+import 'reachability.dart';
 
-/// Inlines small direct callees in the functions selected by [facts].
+/// Inlines small direct callees reachable from [roots] in this [program].
 ///
 /// A single pass visits original call sites, without recursively expanding new
-/// calls. Cost counts copied operations, parameter views and return adaptation;
-/// [maxCallerGrowth] also charges exceptional continuations. Both limits must
-/// be nonnegative, and zero disables expansion.
+/// calls. Selection follows direct and nominal virtual dependencies, including
+/// [instantiatedTypes], without solving argument and result types. Supply actual
+/// roots, never retained definitions from a previous program.
+///
+/// Cost counts copied operations, parameter views and return adaptation. An
+/// operation that can allocate (including calls) costs twelve ordinary operations,
+/// since expansion retains that work and adds logical frame metadata. Caller
+/// growth counts copies and exceptional continuations without that penalty.
+/// Both limits must be nonnegative, and zero disables expansion.
 ///
 /// Candidates are synchronous, nongeneric, single-block bodies ending in a
 /// return, without lexical captures, constructor-only writes or callback entries
@@ -23,20 +29,25 @@ import 'call_type_flow.dart';
 /// facts, never from the old retained definitions.
 IrProgram inlineDirectCalls(
   IrProgram program,
-  CallTypeFacts facts, {
+  Iterable<FunctionTarget> roots, {
+  Iterable<ClassType> instantiatedTypes = const [],
   int maxCalleeCost = 12,
   int maxCallerGrowth = 64,
 }) {
-  facts.checkProgram(program);
   RangeError.checkNotNegative(maxCalleeCost, 'maxCalleeCost');
   RangeError.checkNotNegative(maxCallerGrowth, 'maxCallerGrowth');
   if (maxCalleeCost == 0 || maxCallerGrowth == 0) return program;
+  final definitions = reachableDefinitions(
+    program,
+    roots,
+    instantiatedTypes: instantiatedTypes,
+  );
   var changed = false;
   final functions = <IrFunction>[];
   for (final function in program.functions) {
     final sites = <DirectCall, ({IrFunction body, Jump? handler})>{};
     var budget = maxCallerGrowth;
-    if (facts.definitions.contains(function.target) &&
+    if (definitions.contains(function.target) &&
         function.bodyKind == .synchronous) {
       for (final block in function.blocks) {
         for (final (operation, handler) in [
@@ -64,9 +75,15 @@ IrProgram inlineDirectCalls(
               )) {
             continue;
           }
-          final cost =
+          final copies =
               body.entry.instructions.length + body.entry.parameters.length + 1;
-          final growth = cost + (handler == null ? 0 : 2 * cost);
+          final cost =
+              copies +
+              11 *
+                  body.entry.instructions
+                      .where((op) => op.effects.contains(Effect.allocates))
+                      .length;
+          final growth = copies + (handler == null ? 0 : 2 * copies);
           if (cost > maxCalleeCost || growth > budget) continue;
           budget -= growth;
           sites[operation] = (body: body, handler: handler);

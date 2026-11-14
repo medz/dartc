@@ -70,11 +70,10 @@ void main() {
         externals: [IrExternal(failure)],
       );
       IrProgram inline(IrProgram program) =>
-          inlineDirectCalls(program, CallTypeFlow(program, [root]).facts);
-      final preparedCallee = inlineDirectCalls(
-        source,
-        CallTypeFlow(source, [middle]).facts,
-      );
+          inlineDirectCalls(program, [root], maxCalleeCost: 32);
+      final preparedCallee = inlineDirectCalls(source, [
+        middle,
+      ], maxCalleeCost: 32);
       for (final result in [inline(inline(source)), inline(preparedCallee)]) {
         expect(CallTypeFlow(result, [root]).facts.definitions, {root, failure});
         final rewritten = result.implementationOf(root) as IrFunction;
