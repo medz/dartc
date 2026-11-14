@@ -40,6 +40,47 @@ final class FlowObject(
   );
 }
 
+/// An address relative to one managed allocation or canonical constant.
+///
+/// A null offset is unknown and does not establish that access stays in bounds.
+final class FlowAddress(
+  final Object base,
+  final int? offset, {
+  final ValueType type = ValueType.integer,
+}) {
+  this {
+    if (base is! FlowObject && base is! Constant ||
+        type != ValueType.integer && !FfiTypes.isPointer(type)) {
+      throw ArgumentError(
+        'An address requires a known base and an address type.',
+      );
+    }
+  }
+
+  /// Storage identity, independent of this address's offset and pointer view.
+  Object get identity => switch (base) {
+    Constant(:final structuralKey) => structuralKey,
+    _ => base,
+  };
+
+  /// The reference retained by this raw memory capability.
+  FlowValue get reference => switch (base) {
+    final FlowObject object => FlowValue.object(object),
+    final Constant constant => FlowValue.constant(constant),
+    _ => throw StateError('Invalid address base.'),
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is FlowAddress &&
+      identity == other.identity &&
+      offset == other.offset &&
+      type == other.type;
+
+  @override
+  int get hashCode => Object.hash(identity, offset, type);
+}
+
 /// Values arriving on executable paths, including explicit unknown bounds.
 ///
 /// Empty facts mean no value has arrived. Distinct scalar constants widen to
@@ -49,6 +90,9 @@ final class FlowValue {
 
   /// Runtime allocations, without assuming that a site denotes one object.
   final Set<FlowObject> objects;
+
+  /// Address alternatives, separate from completely unknown scalar values.
+  final Set<FlowAddress> addresses;
 
   /// Bounds for values whose identity or contents are not established.
   final Set<ValueType> unknownTypes;
@@ -70,6 +114,7 @@ final class FlowValue {
       objects = const {},
       unknownTypes = const {},
       sources = const {},
+      addresses = const {},
       _references = null;
 
   new constant(Constant value)
@@ -77,6 +122,7 @@ final class FlowValue {
       objects = const {},
       unknownTypes = const {},
       sources = const {},
+      addresses = const {},
       _references = null;
 
   new object(FlowObject value)
@@ -84,6 +130,7 @@ final class FlowValue {
       objects = Set.unmodifiable({value}),
       unknownTypes = const {},
       sources = const {},
+      addresses = const {},
       _references = null;
 
   new unknown(ValueType type)
@@ -91,7 +138,16 @@ final class FlowValue {
       objects = const {},
       unknownTypes = Set.unmodifiable({type}),
       sources = const {},
+      addresses = const {},
       _references = null;
+
+  new address(FlowAddress address)
+    : _constants = const {},
+      objects = const {},
+      unknownTypes = const {},
+      sources = const {},
+      addresses = Set.unmodifiable({address}),
+      _references = address.reference;
 
   new _(
     Map<Object, Constant> constants,
@@ -99,10 +155,12 @@ final class FlowValue {
     Set<ValueType> unknownTypes, [
     Set<FlowSource> sources = const {},
     FlowValue? references,
+    Set<FlowAddress> addresses = const {},
   ]) : _constants = Map.unmodifiable(constants),
        objects = Set.unmodifiable(objects),
        unknownTypes = Set.unmodifiable(unknownTypes),
        sources = Set.unmodifiable(sources),
+       addresses = Set.unmodifiable(addresses),
        _references = references;
 
   /// Constants identified structurally, without invoking user equality.
@@ -110,11 +168,17 @@ final class FlowValue {
 
   /// Whether no executable input has supplied a value.
   bool get isBottom =>
-      _constants.isEmpty && objects.isEmpty && unknownTypes.isEmpty;
+      _constants.isEmpty &&
+      objects.isEmpty &&
+      addresses.isEmpty &&
+      unknownTypes.isEmpty;
 
   /// The unique established constant, if no other value is admitted.
   Constant? get constant =>
-      _constants.length == 1 && objects.isEmpty && unknownTypes.isEmpty
+      _constants.length == 1 &&
+          objects.isEmpty &&
+          addresses.isEmpty &&
+          unknownTypes.isEmpty
       ? _constants.values.single
       : null;
 
@@ -123,6 +187,7 @@ final class FlowValue {
     yield* unknownTypes;
     yield* constants.map((value) => value.type);
     yield* objects.map((value) => value.type);
+    yield* addresses.map((value) => value.type);
   }
 
   /// Whether a nominal receiver candidate matches known values or unknown bounds.
@@ -134,6 +199,7 @@ final class FlowValue {
     return [
       ...constants.map((value) => value.type),
       ...objects.map((value) => value.type),
+      ...addresses.map((value) => value.type),
     ].any((actual) {
       if (actual == .nullType) return type == ValueType.nullClass;
       return actual is ClassType &&
@@ -147,23 +213,48 @@ final class FlowValue {
     if (isBottom) return this;
     final source = FlowSource(value, activation);
     if (sources.contains(source)) return this;
-    return FlowValue._(_constants, objects, unknownTypes, {
-      ...sources,
-      source,
-    }, _references);
+    return FlowValue._(
+      _constants,
+      objects,
+      unknownTypes,
+      {...sources, source},
+      _references,
+      addresses,
+    );
   }
 
   /// Changes analysis allocation identities while preserving semantic values.
   FlowValue mapObjects(FlowObject Function(FlowObject) transform) {
-    if (objects.isEmpty && _references == null) return this;
+    if (objects.isEmpty && addresses.isEmpty && _references == null) {
+      return this;
+    }
     final mapped = objects.map(transform).toSet();
     final references = _references?.mapObjects(transform);
+    final mappedAddresses = {
+      for (final address in addresses)
+        FlowAddress(
+          address.base is FlowObject
+              ? transform(address.base as FlowObject)
+              : address.base,
+          address.offset,
+          type: address.type,
+        ),
+    };
     if (mapped.length == objects.length &&
         mapped.containsAll(objects) &&
+        mappedAddresses.length == addresses.length &&
+        mappedAddresses.containsAll(addresses) &&
         references == _references) {
       return this;
     }
-    return FlowValue._(_constants, mapped, unknownTypes, sources, references);
+    return FlowValue._(
+      _constants,
+      mapped,
+      unknownTypes,
+      sources,
+      references,
+      mappedAddresses,
+    );
   }
 
   /// Replaces equivalent SSA definitions at a call or graph boundary.
@@ -173,7 +264,14 @@ final class FlowValue {
     if (mapped.length == sources.length && mapped.containsAll(sources)) {
       return this;
     }
-    return FlowValue._(_constants, objects, unknownTypes, mapped, _references);
+    return FlowValue._(
+      _constants,
+      objects,
+      unknownTypes,
+      mapped,
+      _references,
+      addresses,
+    );
   }
 
   /// Retains address provenance without changing the represented Dart value.
@@ -185,7 +283,14 @@ final class FlowValue {
           .join(value.references);
     }
     if (retained == references) return this;
-    return FlowValue._(_constants, objects, unknownTypes, sources, retained);
+    return FlowValue._(
+      _constants,
+      objects,
+      unknownTypes,
+      sources,
+      retained,
+      addresses,
+    );
   }
 
   /// Filters values by a runtime type check without losing successful aliases.
@@ -213,6 +318,17 @@ final class FlowValue {
         mayFail = true;
       }
     }
+    for (final address in addresses) {
+      if (type.freeTypeParameters.isNotEmpty ||
+          address.type.freeTypeParameters.isNotEmpty) {
+        mayFail = true;
+        checked = checked.join(.address(address));
+      } else if (type.accepts(address.type)) {
+        checked = checked.join(.address(address));
+      } else {
+        mayFail = true;
+      }
+    }
     for (final bound in unknownTypes) {
       if (type.freeTypeParameters.isEmpty &&
           bound.freeTypeParameters.isEmpty &&
@@ -232,6 +348,7 @@ final class FlowValue {
               checked.unknownTypes,
               sources,
               _references,
+              checked.addresses,
             ),
       mayFail: mayFail,
     );
@@ -257,6 +374,14 @@ final class FlowValue {
     constants.removeWhere(
       (_, value) => value is ScalarConstant && unknown.contains(value.type),
     );
+    final addresses = <(Object, ValueType), FlowAddress>{};
+    for (final address in [...this.addresses, ...other.addresses]) {
+      final key = (address.identity, address.type);
+      final previous = addresses[key];
+      addresses[key] = previous == null || previous.offset == address.offset
+          ? address
+          : FlowAddress(address.base, null, type: address.type);
+    }
     return FlowValue._(
       constants,
       objects,
@@ -265,6 +390,7 @@ final class FlowValue {
       references.isBottom && other.references.isBottom
           ? null
           : references.join(other.references),
+      addresses.values.toSet(),
     );
   }
 
@@ -275,6 +401,8 @@ final class FlowValue {
       _constants.keys.every(other._constants.containsKey) &&
       objects.length == other.objects.length &&
       objects.containsAll(other.objects) &&
+      addresses.length == other.addresses.length &&
+      addresses.containsAll(other.addresses) &&
       unknownTypes.length == other.unknownTypes.length &&
       unknownTypes.containsAll(other.unknownTypes) &&
       sources.length == other.sources.length &&
@@ -285,6 +413,7 @@ final class FlowValue {
   int get hashCode => Object.hash(
     Object.hashAllUnordered(_constants.keys),
     Object.hashAllUnordered(objects),
+    Object.hashAllUnordered(addresses),
     Object.hashAllUnordered(unknownTypes),
     Object.hashAllUnordered(sources),
     _references,

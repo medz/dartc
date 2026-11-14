@@ -139,6 +139,58 @@ void main() {
     },
   );
 
+  test(
+    'address alternatives preserve storage identity and bound loop offsets',
+    () {
+      final site = NewCell(CellType(.integer), const Constant.integer(7));
+      final base = FlowObject(site, Object());
+      final first = FlowValue.address(FlowAddress(base, 0));
+      final second = FlowValue.address(FlowAddress(base, 4));
+      final joined = first.join(second);
+      expect(first.types, [ValueType.integer]);
+      expect(first.unknownTypes, isEmpty);
+      expect(first.objects, isEmpty);
+      expect(first.references.objects, {base});
+      expect(joined.addresses, {FlowAddress(base, null)});
+      expect(joined.join(FlowValue.address(FlowAddress(base, 8))), joined);
+      expect(joined.join(FlowValue.unknown(.integer)).unknownTypes, {
+        ValueType.integer,
+      });
+      expect(first.check(.integer).value.addresses, first.addresses);
+      expect(first.check(.string).value.isBottom, isTrue);
+      final replacement = FlowObject(site, Object());
+      final rebased = first.mapObjects((_) => replacement);
+      expect(rebased.addresses, {FlowAddress(replacement, 0)});
+      expect(rebased.references.objects, {replacement});
+      expect(first.withSource(site, Object()).addresses, first.addresses);
+      expect(first.withSources(const []).addresses, first.addresses);
+      expect(first.constant, isNull);
+    },
+  );
+
+  test(
+    'address constants share canonical storage and validate address views',
+    () {
+      final first = FlowAddress(const Constant.string('same'), 0);
+      final second = FlowAddress(const Constant.string('same'), 0);
+      expect(first, second);
+      expect(first.hashCode, second.hashCode);
+      expect(
+        FlowValue.address(first).join(FlowValue.address(second)).addresses,
+        {first},
+      );
+      expect(
+        FlowValue.address(first).references.constants.single.structuralKey,
+        const Constant.string('same').structuralKey,
+      );
+      expect(() => FlowAddress(Object(), 0), throwsArgumentError);
+      expect(
+        () => FlowAddress(const Constant.string('same'), 0, type: .string),
+        throwsArgumentError,
+      );
+    },
+  );
+
   test('address reachability does not change a scalar value type', () {
     final cell = NewCell(CellType(.integer), const Constant.integer(7));
     final object = FlowObject(cell, Object());
