@@ -1,5 +1,10 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/function_rewrite.dart';
+import 'package:dartc/src/optimizer/flow_value.dart';
+import 'package:dartc/src/optimizer/program_optimizer.dart';
+import 'package:dartc/src/optimizer/simplification.dart';
+import 'package:dartc/src/optimizer/storage_promotion.dart';
+import 'package:dartc/src/optimizer/storage_elimination.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -53,6 +58,20 @@ void main() {
       rewritten.blocks
           .expand((b) => b.instructions)
           .where((i) => i is NewCell || i is ReadCell || i is WriteCell),
+      isEmpty,
+    );
+    final promoted = _promote(source);
+    for (final args in [
+      [true, 3, 5],
+      [false, 3, 5],
+      [false, -2, -4],
+    ]) {
+      expect(_run(promoted, args), _run(source, args));
+    }
+    expect(
+      promoted.blocks
+          .expand((block) => block.instructions)
+          .where((op) => op is NewCell || op is ReadCell || op is WriteCell),
       isEmpty,
     );
     final dominance = ValueDominance(source);
@@ -134,6 +153,20 @@ void main() {
       }
       expect(
         rewritten.blocks.expand((b) => b.instructions).whereType<NewCell>(),
+        isEmpty,
+      );
+      final promoted = _promote(source);
+      for (final args in [
+        [0, 7],
+        [1, 7],
+        [5, -2],
+      ]) {
+        expect(_run(promoted, args), _run(source, args));
+      }
+      expect(
+        promoted.blocks
+            .expand((block) => block.instructions)
+            .where((op) => op is NewCell || op is ReadCell || op is WriteCell),
         isEmpty,
       );
       expect(ValueDominance(source).onEdge(sum, back), isTrue);
@@ -288,3 +321,21 @@ void main() {
 
 Object? _run(IrFunction function, List<Object> arguments) =>
     IrInterpreter(IrProgram([], [function]), {}).run(function, arguments);
+
+IrFunction _promote(IrFunction source) =>
+    ProgramOptimizer(const [
+              ProgramSimplification(),
+              ProgramStoragePromotion(),
+              ProgramStorageElimination(),
+            ])
+            .run(IrProgram([], [source]), [
+              (
+                target: source.target,
+                arguments: source.target.parameterTypes
+                    .map(FlowValue.unknown)
+                    .toList(),
+              ),
+            ])
+            .program
+            .implementationOf(source.target)
+        as IrFunction;
