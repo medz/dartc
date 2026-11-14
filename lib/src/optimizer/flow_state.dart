@@ -96,11 +96,11 @@ final class FlowState {
   }
 
   /// Values that an external operation may still reach after earlier escapes.
-  FlowValue get escapedValues => _reachable([_escaped]);
+  FlowValue get escapedValues => reachableValues([_escaped]);
 
   /// Records external reachability, including nested closures and shared cells.
   FlowValue escape(Iterable<FlowValue> roots) {
-    final reachable = _reachable(roots);
+    final reachable = reachableValues(roots);
     _escaped = _escaped.join(reachable);
     for (final object in reachable.objects) {
       _objects[object]?.escaped = true;
@@ -112,7 +112,7 @@ final class FlowState {
   ///
   /// The caller supplies previously escaped roots and global access explicitly.
   void invalidate(Iterable<FlowValue> roots, {bool globals = false}) {
-    final reachable = _reachable([
+    final reachable = reachableValues([
       ...roots,
       if (globals)
         for (final slot in _globals.values) ...[slot.value, slot.initializer],
@@ -141,6 +141,37 @@ final class FlowState {
     }
   }
 
+  /// Allocates one source instance and runs its generative initializer.
+  ///
+  /// Direct construction and constructor-valued calls share these state rules.
+  FlowResult construct(
+    FlowObject object,
+    FunctionTarget initializer,
+    List<FlowValue> arguments, {
+    required bool repeated,
+    required FlowInvoke invoke,
+  }) {
+    if (arguments.any((value) => value.isBottom)) return _unreachable;
+    final type = object.type as ClassType;
+    final next = copy();
+    final slots = <Object, _Slot>{};
+    for (ClassType? view = type; view != null; view = view.superclass) {
+      for (final field in _class(view)?.fields ?? <InstanceField>[]) {
+        slots[field] = !field.isLate && field.typeFor(type).mayBeNull
+            ? _Slot.bound(_null)
+            : const _Slot.unbound();
+      }
+    }
+    next._allocate(object, _ObjectState(slots, summary: repeated));
+    final value = FlowValue.object(object);
+    final result = invoke(initializer, [value, ...arguments], next);
+    return (
+      value: result.normal == null ? const .bottom() : value,
+      normal: result.normal,
+      exceptional: result.exceptional,
+    );
+  }
+
   /// Evaluates storage operations; null leaves other operations to the solver.
   FlowResult? transfer(
     Instruction operation,
@@ -155,25 +186,12 @@ final class FlowState {
     }
     switch (operation) {
       case Construct(:final initializer):
-        if (operands.any((value) => value.isBottom)) return _unreachable;
-        final object = allocate(operation);
-        final type = object.type as ClassType;
-        final next = copy();
-        final slots = <Object, _Slot>{};
-        for (ClassType? view = type; view != null; view = view.superclass) {
-          for (final field in _class(view)?.fields ?? <InstanceField>[]) {
-            slots[field] = !field.isLate && field.typeFor(type).mayBeNull
-                ? _Slot.bound(_null)
-                : const _Slot.unbound();
-          }
-        }
-        next._allocate(object, _ObjectState(slots, summary: repeated));
-        final value = FlowValue.object(object);
-        final result = invoke(initializer, [value, ...operands], next);
-        return (
-          value: result.normal == null ? const .bottom() : value,
-          normal: result.normal,
-          exceptional: result.exceptional,
+        return construct(
+          allocate(operation),
+          initializer,
+          operands,
+          repeated: repeated,
+          invoke: invoke,
         );
       case NewCell(:final initial, :final initializer):
         if (operands.any((value) => value.isBottom)) return _unreachable;
@@ -580,7 +598,13 @@ final class FlowState {
             definition.ephemerons.containsValue(field));
   }
 
-  FlowValue _reachable(Iterable<FlowValue> roots) {
+  /// Bound field contents, without running an unbound initializer.
+  FlowValue storedValue(FlowObject object, InstanceField field) =>
+      _objects[object]?.slots[field]?.value ??
+      FlowValue.unknown(field.typeFor(object.type as ClassType));
+
+  /// Values accessible through current fields, cells and closure captures.
+  FlowValue reachableValues(Iterable<FlowValue> roots) {
     var result = const FlowValue.bottom();
     final pending = roots.toList();
     final objects = <FlowObject>{};
