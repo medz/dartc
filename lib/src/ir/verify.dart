@@ -1,5 +1,6 @@
 import 'type_metadata.dart';
 import 'block.dart';
+import 'dominance.dart';
 import 'core_types.dart';
 import 'ffi_types.dart';
 import 'signature.dart';
@@ -237,7 +238,7 @@ FunctionReferences verifyCallable(
   }
   final idom = predecessors == null
       ? const <Block, Block>{}
-      : _dominators(entry, predecessors);
+      : immediateDominators(entry, predecessors);
   for (final block in blocks) {
     void use(Value value, int position) {
       if (value is Constant) {
@@ -501,6 +502,11 @@ FunctionReferences verifyCallable(
         if (stackTrace != null) use(stackTrace, count);
         if (onThrow != null) useEdge(onThrow, unwinding: true);
       case Unreachable(:final cause):
+        if (cause.type != .never &&
+            (block.instructions.isEmpty ||
+                !identical(block.instructions.last, cause))) {
+          throw StateError('A non-returning instruction must end its block.');
+        }
         use(cause, count);
       case ExhaustivenessFailure(:final onThrow):
         if (onThrow != null) useEdge(onThrow, unwinding: true);
@@ -521,52 +527,3 @@ FunctionReferences verifyCallable(
 }
 
 Set<T> _snapshot<T>(Set<T>? values) => Set<T>.unmodifiable(values ?? const []);
-
-Map<Block, Block> _dominators(
-  Block entry,
-  Map<Block, List<Block>> predecessors,
-) {
-  final visited = <Block>{};
-  final order = <Block, int>{};
-  final stack = [(entry, false)];
-  while (stack.isNotEmpty) {
-    final (block, leaving) = stack.removeLast();
-    if (leaving) {
-      order[block] = order.length;
-    } else if (visited.add(block)) {
-      stack.add((block, true));
-      for (final next in block.successors) {
-        stack.add((next.target, false));
-      }
-    }
-  }
-  if (order.length != predecessors.length) {
-    throw StateError('Unreachable block.');
-  }
-  final reversePostorder = order.keys.toList().reversed.skip(1);
-  final idom = {entry: entry};
-  bool changed;
-  do {
-    changed = false;
-    for (final block in reversePostorder) {
-      Block? parent;
-      for (var incoming in predecessors[block]!) {
-        if (!idom.containsKey(incoming)) continue;
-        parent ??= incoming;
-        // A strict dominator has a larger DFS postorder number than its descendants.
-        while (parent != incoming) {
-          if (order[parent]! < order[incoming]!) {
-            parent = idom[parent]!;
-          } else {
-            incoming = idom[incoming]!;
-          }
-        }
-      }
-      if (parent != idom[block]) {
-        idom[block] = parent!;
-        changed = true;
-      }
-    }
-  } while (changed);
-  return idom;
-}

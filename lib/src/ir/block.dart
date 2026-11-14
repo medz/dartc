@@ -89,13 +89,20 @@ final class Await(
   }
 }
 
-/// The end of a path whose [cause] cannot return a value.
+/// A path whose [cause] cannot complete normally.
+///
+/// The producer must prove non-completion when the cause is not typed `Never`.
+/// Effects of the cause still execute; reaching this end is an internal error.
 final class Unreachable(
-  /// The operand of type `Never` that makes normal completion impossible.
+  /// A `Never` value or the final, proven non-returning instruction.
   final Value cause,
 ) extends Terminator {
   this {
-    if (cause.type != .never) throw ArgumentError('Expected a Never operand.');
+    if (cause.type != .never && cause is! Instruction) {
+      throw ArgumentError(
+        'Expected a Never value or non-returning instruction.',
+      );
+    }
   }
 }
 
@@ -135,15 +142,14 @@ final class Invoke(
   /// The operation performed once at the end of the block.
   final Instruction operation, {
 
-  /// The success edge, absent for an operation returning `Never`.
+  /// The success edge, absent when normal completion is proved impossible.
   required final Jump? onReturn,
 
   /// The handler edge used if evaluation throws.
   required final Jump onThrow,
 }) extends Terminator {
   this {
-    if (!operation.mayThrow ||
-        (operation.type == .never) != (onReturn == null)) {
+    if (!operation.mayThrow || operation.type == .never && onReturn != null) {
       throw ArgumentError('Invalid continuations for the invoked operation.');
     }
   }

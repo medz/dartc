@@ -435,10 +435,6 @@ void main() {
     final misplaced = Block(target.parameterTypes)
       ..finish(Return(UnwindValue.exception));
     expect(() => IrFunction(target, [misplaced]), throwsStateError);
-    expect(
-      () => Invoke(cast, onReturn: null, onThrow: caught),
-      throwsArgumentError,
-    );
     expect(() => Throw(one, stackTrace: one), throwsArgumentError);
   });
 

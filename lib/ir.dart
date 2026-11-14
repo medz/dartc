@@ -27,6 +27,7 @@
 /// @docImport 'src/ir/value.dart';
 library;
 
+export 'src/ir/dominance.dart' show ValueDominance;
 export 'src/ir/block.dart'
     show
         Await,
@@ -68,6 +69,7 @@ export 'src/ir/type.dart'
         PromotedTypeParameterType;
 export 'src/ir/value.dart'
     show
+        blockParameters,
         NativeCallbackEntry,
         NativeCallbackAddress,
         NativeClosureEntryAddress,
