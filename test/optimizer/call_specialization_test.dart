@@ -68,6 +68,32 @@ void main() {
     }
   });
 
+  for (final example in <String, int Function(int)>{
+    'narrowedReceiver': source.narrowedReceiver,
+    'covariantReceiver': source.covariantReceiver,
+    'negatedEquality': source.negatedEquality,
+  }.entries) {
+    test('proven member calls preserve ${example.key}', () {
+      final function = program.functions.singleWhere(
+        (body) => body.target.name == example.key,
+      );
+      final facts = ProgramFlow(program, [
+        (target: function.target, arguments: [FlowValue.unknown(.integer)]),
+      ]).facts;
+      final specialized = const ProgramCallSpecialization().run(facts);
+      final body = specialized.implementationOf(function.target) as IrFunction;
+      if (example.key != 'negatedEquality') {
+        expect(body.virtualMembers, isEmpty);
+      }
+      for (final value in [-37, 0, 19]) {
+        expect(
+          IrInterpreter(specialized, {}).run(body, [value]),
+          example.value(value),
+        );
+      }
+    });
+  }
+
   for (final entry in <String, int Function()>{
     'rejectedWrite': source.rejectedWrite,
     'defaultArgument': source.defaultArgument,

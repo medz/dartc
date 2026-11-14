@@ -22,9 +22,12 @@ final class const ProgramCallSpecialization() implements ProgramPass {
             ...block.instructions,
             if (block.end case Invoke(:final operation)) operation,
           ]) {
-            if (operation is! InstanceCall &&
+            // Equality also applies the null rule and optional negation.
+            if (operation is Equals ||
+                operation is! InstanceCall &&
                     operation is! DynamicDispatch &&
-                    operation is! FunctionCall ||
+                    operation is! FunctionCall &&
+                    operation.implicitMember == null ||
                 !facts.reachesOperation(operation) ||
                 facts.hasUnknownCall(operation)) {
               continue;
@@ -113,16 +116,19 @@ final class const ProgramCallSpecialization() implements ProgramPass {
                 :final typeArguments,
               ) =>
                 (receiver, selector, positional, named, typeArguments),
+              _ when operation.implicitMember != null => (
+                operation.inputs.first,
+                operation.implicitMember!.selector,
+                operation.inputs.skip(1).toList(),
+                const <String, Value>{},
+                const <ValueType>[],
+              ),
               _ => throw StateError('Expected a dispatch operation.'),
             };
-            if (!target.kind.isVirtual ||
-                target.selector != selector ||
-                receiver.type is! ClassType) {
+            if (!target.kind.isVirtual || target.selector != selector) {
               continue;
             }
-            final owner = (receiver.type as ClassType).asInstanceOf(
-              target.owner!,
-            );
+            final owner = _receiverOwner(facts, receiver, target.owner!);
             if (owner == null) continue;
             final signature = target.signatureFor(owner);
             if (!signature.acceptsShape(positional.length, named.keys)) {
@@ -159,7 +165,12 @@ final class const ProgramCallSpecialization() implements ProgramPass {
             }
             operations[operation] = DirectCall(
               target,
-              [receiver, ...inputs],
+              [
+                owner.accepts(receiver.type)
+                    ? receiver
+                    : UncheckedCast(receiver, owner),
+                ...inputs,
+              ],
               ownerType: owner,
               typeArguments: arguments,
             );
@@ -181,4 +192,24 @@ final class const ProgramCallSpecialization() implements ProgramPass {
           )
         : facts.program;
   }
+}
+
+ClassType? _receiverOwner(
+  ProgramFlowFacts facts,
+  Value receiver,
+  ClassType declaration,
+) {
+  if (declaration.typeParameters.isEmpty && receiver.type is ClassType) {
+    final owner = (receiver.type as ClassType).asInstanceOf(declaration);
+    if (owner != null) return owner;
+  }
+  final actual = facts.valueOf(receiver);
+  if (actual.isBottom || actual.unknownTypes.isNotEmpty) return null;
+  final owners = <ClassType>{};
+  for (final type in actual.types) {
+    final owner = type is ClassType ? type.asInstanceOf(declaration) : null;
+    if (owner == null) return null;
+    owners.add(owner);
+  }
+  return owners.length == 1 ? owners.single : null;
 }

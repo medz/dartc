@@ -122,3 +122,29 @@ int throwingValue(int value) {
 }
 
 int unknownFunction(int Function(int) function, int value) => function(value);
+
+int narrowedReceiver(int value) {
+  final Parent receiver = Child();
+  return receiver.read(value) + receiver.read();
+}
+
+final class GenericReceiver<T>() {
+  int identify(int value) => value + (T == int ? 1 : 2);
+}
+
+int covariantReceiver(int value) {
+  final GenericReceiver<num> receiver = GenericReceiver<int>();
+  return receiver.identify(value);
+}
+
+final class EqualityBox(final int value) {
+  @override
+  bool operator ==(Object other) =>
+      other is EqualityBox && other.value == value;
+
+  @override
+  int get hashCode => value;
+}
+
+int negatedEquality(int value) =>
+    EqualityBox(value) != EqualityBox(value + 1) ? 7 : 9;
