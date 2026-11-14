@@ -158,6 +158,22 @@ void main() {
           );
         }
       }
+      for (final graph in [program, optimized.program]) {
+        final runner = IrInterpreter(graph, {});
+        final factory = graph.implementationOf(
+          body('changingObserver').target,
+        ) as IrFunction;
+        final entry = graph.implementationOf(function.target) as IrFunction;
+        for (final delta in [-2, 7]) {
+          final observer = runner.run(factory, [delta]);
+          for (final value in [-4, 0, 41]) {
+            expect(
+              runner.run(entry, [value, observer]),
+              source.observedInteger(value, source.changingObserver(delta)),
+            );
+          }
+        }
+      }
     },
   );
 

@@ -42,3 +42,7 @@ int checkedInteger(int value, int index) {
   final values = <int>[value];
   return values[index];
 }
+
+void Function(List<int>) changingObserver(int delta) => (values) {
+  values[0] = values[0] + delta;
+};
