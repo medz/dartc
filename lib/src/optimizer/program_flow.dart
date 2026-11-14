@@ -614,7 +614,7 @@ final class ProgramFlow(
       FlowState? state = incoming[block]!.copy();
       FlowResult evaluate(Instruction operation) {
         activation.mergePoint(activation.before, operation, state!);
-        final result = _operation(
+        var result = _operation(
           activation,
           block,
           operation,
@@ -622,6 +622,19 @@ final class ProgramFlow(
           state,
           read,
         );
+        final type = operation.type.substitute(activation.environment);
+        if (result.value.types.any((actual) => !type.accepts(actual))) {
+          // Caller bounds also constrain unresolved receiver type arguments.
+          final bounded = result.value.check(type).value;
+          result = FlowResult(
+            value: bounded,
+            normal: bounded.isBottom ? null : result.normal,
+            exceptional: result.exceptional,
+            exception: result.exception,
+            stackTrace: result.stackTrace,
+            effects: result.effects,
+          );
+        }
         mergeValue(operation, result.value.withSource(operation, activation));
         ranges.remove(operation);
         if (result.value.integers case final range?

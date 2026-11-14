@@ -206,6 +206,30 @@ void main() {
     }
   });
 
+  test('caller result bounds constrain open generic receiver results', () {
+    final function = sourceProgram.functions.singleWhere(
+      (body) => body.target.name == 'readBag',
+    );
+    final facts = ProgramFlow(sourceProgram, [
+      (
+        target: function.target,
+        arguments: function.target.parameterTypes
+            .map(FlowValue.unknown)
+            .toList(),
+      ),
+    ]).facts;
+    expect(facts.returnedBy(function.target).unknownTypes, {ValueType.integer});
+    expect(facts.thrownBy(function.target).exception.isBottom, isTrue);
+    final read = function.entry.instructions
+        .whereType<InstanceCall>()
+        .firstWhere(
+          (call) =>
+              call.type is ClassType &&
+              (call.type as ClassType).name == 'Receiver',
+        );
+    expect(facts.valueOf(read).unknownTypes, {read.type});
+  });
+
   for (final example in <String, int Function(bool)>{
     'nullableGuard': source.nullableGuard,
     'nullAssertion': source.nullAssertion,

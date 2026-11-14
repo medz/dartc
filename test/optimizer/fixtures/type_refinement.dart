@@ -44,3 +44,7 @@ class StorageReader<T>() implements Reader {
 
 int readCount(Reader reader, bool selected) =>
     (selected ? const ConstantReader<int>() : reader).count;
+
+class Bag<T>(final T item);
+
+int readBag(Bag<Receiver> bag) => bag.item.read();
