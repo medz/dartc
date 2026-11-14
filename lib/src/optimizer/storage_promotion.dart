@@ -83,9 +83,8 @@ final class _Promotion(
               ? operation.byteOffset
               : null;
           final access = (read: operation, receiver: receiver, offset: offset);
+          // Access operands select storage facts; only emitted phi inputs need dominance.
           if (facts.canDiscard(operation) &&
-              (receiver == null || dominance.atEntry(receiver, block)) &&
-              (offset == null || dominance.atEntry(offset, block)) &&
               prior.every((instruction) => _preserves(access, instruction))) {
             final before = cache.keys.toSet();
             final value = _atEntry(access, block);
@@ -181,12 +180,6 @@ final class _Promotion(
     final predecessors = owners[edge]!;
     if (predecessors.length != 1) return null;
     final block = predecessors.single;
-    if ([
-      access.receiver,
-      access.offset,
-    ].nonNulls.any((value) => !dominance.atEntry(value, block))) {
-      return null;
-    }
     for (final operation in [
       ...block.instructions,
       if (block.end case Invoke(:final operation)) operation,
