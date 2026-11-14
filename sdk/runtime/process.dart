@@ -6,6 +6,16 @@ import '../../lib/runtime/contracts.dart';
 /// Invokes main with OS-owned arguments, excluding the executable name.
 @RuntimeEntry(.processMain)
 void runMain(int argc, int argv, Function main) {
+  if (main is Function(Never, Never)) {
+    (main as Function)(_arguments(argc, argv), null);
+  } else if (main is Function(Never)) {
+    (main as Function)(_arguments(argc, argv));
+  } else {
+    main();
+  }
+}
+
+List<String> _arguments(int argc, int argv) {
   final arguments = List<String>.filled(argc > 0 ? argc - 1 : 0, '');
   final pointers = Pointer<Pointer<Uint8>>.fromAddress(argv);
   for (var i = 1; i < argc; i++) {
@@ -24,11 +34,5 @@ void runMain(int argc, int argv, Function main) {
         ? '\ufeff$decoded'
         : decoded;
   }
-  if (main is Function(Never, Never)) {
-    (main as Function)(arguments, null);
-  } else if (main is Function(Never)) {
-    (main as Function)(arguments);
-  } else {
-    main();
-  }
+  return arguments;
 }
