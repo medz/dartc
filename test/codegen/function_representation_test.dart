@@ -29,6 +29,94 @@ void main() {
   );
   final members = MemberCalls(IrProgram([], []), {});
 
+  test(
+    'a proven closure calls its own entry without redispatching its carrier',
+    () {
+      final outer = FunctionTarget(uri, 'capture', .integer, [.integer]);
+      final selected = FunctionTarget(
+        uri,
+        'selected',
+        .integer,
+        [.integer],
+        kind: .closure,
+        enclosing: outer,
+        sourceOffset: 1,
+        captures: [.integer],
+      );
+      final other = FunctionTarget(
+        uri,
+        'other',
+        .integer,
+        [.integer],
+        kind: .closure,
+        enclosing: outer,
+        sourceOffset: 2,
+        captures: [.integer],
+      );
+      final entry = Block(outer.parameterTypes);
+      final closure = entry.emit(MakeClosure(selected, entry.parameters));
+      entry.finish(
+        Return(
+          entry.emit(
+            FunctionCall(
+              closure,
+              [const Constant.integer(7)],
+              const {},
+              const [],
+              selected,
+            ),
+          ),
+        ),
+      );
+      final source = IrFunction(outer, [entry]);
+      final bodies = [
+        source,
+        for (final target in [selected, other])
+          IrFunction(target, [
+            Block(target.parameterTypes)
+              ..finish(const Return(Constant.integer(0))),
+          ]),
+      ];
+      final storage = ClosureStorage(bodies);
+      final layout = ProgramLayout(
+        storage.classes,
+        closureStorage: storage,
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+        typeRuntime: heapRuntime.types,
+      );
+      final body = FunctionRepresentation(
+        source,
+        layout,
+        CheckedCasts(),
+        MemberCalls(IrProgram([], bodies), {}),
+        HeapPlan(),
+      )..prune();
+      final operations = body.instructions.values.expand((values) => values);
+      final call = operations
+          .whereType<FunctionCall>()
+          .where(body.invocations.containsKey)
+          .single;
+      expect(body.invocations[call], same(selected));
+      expect(body.invocations.values, isNot(contains(other)));
+      expect(body.ends.values.whereType<Branch>(), isEmpty);
+      final capture = operations.whereType<StorageRead>().singleWhere(
+        (read) => read.field == storage.closures[selected]!.captures.single,
+      );
+      expect(capture.receiver, same(closure));
+      expect(body.inputsOf(call), [
+        closure,
+        capture,
+        const Constant.integer(7),
+      ]);
+      expect(
+        operations.whereType<StorageRead>().where(
+          (read) => read.field == storage.tag,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
   test('non-generic member access does not prepare owner type arguments', () {
     final t = TypeParameterType('T')..initializeBound(.object.nullable);
     final owner = ClassType(uri, 'Container', typeParameters: [t]);

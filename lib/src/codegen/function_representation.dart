@@ -943,7 +943,7 @@ final class FunctionRepresentation(
               instruction is Equals ||
               instruction is ObjectRuntimeType ||
               instruction is ObjectHashCode;
-          final virtual =
+          var virtual =
               instruction is! DirectCall &&
               !(instruction is BindMethod && instruction.direct);
           final targets = dynamicCall != null
@@ -966,7 +966,11 @@ final class FunctionRepresentation(
                   for (final closure in layouts.closures.targetsFor(
                     receiver.type as FunctionType,
                   ))
-                    closure.type: (target: closure.target, closure: closure),
+                    if (instruction is! FunctionCall ||
+                        instruction.target == null ||
+                        closure.sourceTarget.implementation ==
+                            instruction.target)
+                      closure.type: (target: closure.target, closure: closure),
                 }
               : {
                   for (final entry
@@ -993,6 +997,14 @@ final class FunctionRepresentation(
                             .constantFalse)
                       entry.key: (target: entry.value, closure: null),
                 };
+          if (instruction case FunctionCall(target: final target?)) {
+            if (targets.isEmpty) {
+              throw StateError(
+                'Missing representation for proven function ${target.name}.',
+              );
+            }
+            if (targets.length == 1) virtual = false;
+          }
           final plainObject =
               receiver.type.nonNullable is ClassType &&
               ![
@@ -1066,7 +1078,7 @@ final class FunctionRepresentation(
               );
             }
           }
-          final actual = layouts.types.runtimeTypeOf(receiver, body);
+          late final actual = layouts.types.runtimeTypeOf(receiver, body);
           final dynamicKind = dynamicCall == null
               ? null
               : _load(TypeMetadata.kind, actual, body);
@@ -1075,7 +1087,9 @@ final class FunctionRepresentation(
               : targets.isEmpty
               ? null
               : functionValue
-              ? _load(layouts.closures.tag, receiver, body)
+              ? virtual
+                    ? _load(layouts.closures.tag, receiver, body)
+                    : null
               : virtual
               ? LoadField(TypeMetadata.shape, actual)
               : null;
@@ -1623,8 +1637,13 @@ final class FunctionRepresentation(
                   failure,
                   getterCalls,
                 ),
-              FunctionCall(:final function, :final positional, :final named) =>
-                FunctionCall(function, positional, named, typeArguments),
+              FunctionCall(
+                :final function,
+                :final positional,
+                :final named,
+                target: final bound,
+              ) =>
+                FunctionCall(function, positional, named, typeArguments, bound),
               InstanceCall(:final positional, :final named, :final ownerType) =>
                 InstanceCall(
                   member!,

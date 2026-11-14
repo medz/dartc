@@ -121,7 +121,8 @@ void writeFunction(
     InstantiateFunctionFrom() =>
       'instantiate ${value(op.function)} from ${value(op.instance)} as ${op.declaration.dartName}',
     FunctionCall() =>
-      'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
+      'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})'
+          '${op.target == null ? "" : " target ${symbol(op.target!)}"}',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
     NewPayload() => 'payload ${op.type.dartName} ${value(op.bytes)}',
     NativeView() =>

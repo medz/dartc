@@ -22,7 +22,9 @@ final class const ProgramCallSpecialization() implements ProgramPass {
             ...block.instructions,
             if (block.end case Invoke(:final operation)) operation,
           ]) {
-            if (operation is! InstanceCall && operation is! DynamicDispatch ||
+            if (operation is! InstanceCall &&
+                    operation is! DynamicDispatch &&
+                    operation is! FunctionCall ||
                 !facts.reachesOperation(operation) ||
                 facts.hasUnknownCall(operation)) {
               continue;
@@ -30,6 +32,54 @@ final class const ProgramCallSpecialization() implements ProgramPass {
             final targets = facts.targetsOf(operation);
             if (targets.length != 1) continue;
             final target = targets.single;
+            if (operation is FunctionCall) {
+              if (facts.valueOf(operation.function).constant
+                  case final FunctionConstant value) {
+                final binding = value.resolveInvocation(
+                  operation.typeArguments,
+                );
+                final destination = binding.target;
+                final body = facts.program.implementationOf(destination)!;
+                final signature = binding.owner == null
+                    ? destination.signature
+                    : destination.signatureFor(binding.owner!);
+                final applied = signature.instantiate(binding.typeArguments);
+                final inputs = applied.bind<Value>(
+                  operation.positional,
+                  operation.named,
+                  (slot) => body.defaults[slot]!,
+                );
+                if (inputs.indexed.every(
+                      (entry) =>
+                          applied.parameters[entry.$1].accepts(entry.$2.type),
+                    ) &&
+                    operation.type.accepts(applied.result)) {
+                  operations[operation] = destination.kind == .initializer
+                      ? Construct(
+                          destination,
+                          inputs,
+                          instantiatedType: binding.owner,
+                        )
+                      : DirectCall(
+                          destination,
+                          inputs,
+                          ownerType: binding.owner,
+                          typeArguments: binding.typeArguments,
+                        );
+                  continue;
+                }
+              }
+              if (operation.target != target) {
+                operations[operation] = FunctionCall(
+                  operation.function,
+                  operation.positional,
+                  operation.named,
+                  operation.typeArguments,
+                  target,
+                );
+              }
+              continue;
+            }
             if (operation is DynamicDispatch &&
                 (operation.failure == target ||
                     operation.getterCalls.containsValue(target))) {

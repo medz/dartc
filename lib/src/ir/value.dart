@@ -271,6 +271,39 @@ final class FunctionConstant._(
       throw ArgumentError('Expected a callable without a bound receiver.');
     }
   }
+
+  /// Resolves this callable's actual declaration, owner and applied arguments.
+  /// Redirecting constructors and erased aliases retain their checked binders.
+  ({FunctionTarget target, ClassType? owner, List<ValueType> typeArguments})
+  resolveInvocation(List<ValueType> arguments) {
+    var destination = target;
+    final signature = (type as FunctionType).instantiate(arguments);
+    var owner = ownerType;
+    var applied = typeArguments ?? arguments;
+    if (constructorTypeArguments case final template?) {
+      applied = [
+        for (final type in template)
+          type.substitute({
+            for (final (index, parameter)
+                in constructorSignature!.typeParameters.indexed)
+              parameter: applied[index],
+          }),
+      ];
+    }
+    if (destination.kind == .initializer || destination.kind == .factory) {
+      final resolved = destination.resolveConstruction(
+        signature.result as ClassType,
+      );
+      destination = resolved.target;
+      owner = resolved.ownerType;
+      applied = const [];
+    }
+    return (
+      target: destination.implementation,
+      owner: owner,
+      typeArguments: applied,
+    );
+  }
 }
 
 /// A scalar literal with its Dart value and static type.
@@ -548,6 +581,7 @@ sealed class Instruction(super.type) extends Value {
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
         v.typeArguments.map(type),
+        v.target,
       ),
       final LoadGlobal v => LoadGlobal(v.global),
       final StoreGlobal v => StoreGlobal(v.global, map(v.value)),
@@ -1516,17 +1550,23 @@ final class FunctionCall._(
   /// Supplied named arguments.
   final Map<String, Value> named,
   final List<ValueType> typeArguments,
+
+  /// The proven implementation; the function value still supplies its environment.
+  /// A rewrite may bind this only when every executable value selects this target.
+  final FunctionTarget? target,
 ) extends Instruction {
   new(
     Value function,
     Iterable<Value> positional, [
     Map<String, Value> named = const {},
     Iterable<ValueType> typeArguments = const [],
+    FunctionTarget? target,
   ]) : this._(
          function,
          .unmodifiable(positional),
          .unmodifiable(named),
          .unmodifiable(typeArguments),
+         target,
        );
   this
     : super(
@@ -1535,7 +1575,22 @@ final class FunctionCall._(
           positional,
           named,
         ),
-      );
+      ) {
+    if (target case final bound?) {
+      if (bound != bound.implementation ||
+          bound.isAbstract ||
+          bound.kind == .fieldInitializer ||
+          !bound.signature.acceptsShape(positional.length, named.keys)) {
+        throw ArgumentError('Invalid proven function call target.');
+      }
+      if (function case final FunctionConstant constant
+          when constant.resolveInvocation(typeArguments).target != bound) {
+        throw ArgumentError(
+          'Function constant does not select the bound target.',
+        );
+      }
+    }
+  }
   @override
   Iterable<Value> get inputs => [function, ...positional, ...named.values];
 }

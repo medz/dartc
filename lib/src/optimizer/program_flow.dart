@@ -239,6 +239,10 @@ final class ProgramFlow(
   }) {
     if (arguments.any((value) => value.isBottom)) return _unreachable;
     final target = source.implementation;
+    if (operation case FunctionCall(target: final bound?)
+        when bound != target) {
+      throw StateError('Function value violates its proven call target.');
+    }
     environment = {...environment};
     if (target.kind.hasReceiver && arguments.isNotEmpty) {
       final types = arguments.first.types.toSet();
@@ -1639,7 +1643,7 @@ final class ProgramFlow(
       })
       binding;
       try {
-        binding = _constantCall(constant, effective);
+        binding = constant.resolveInvocation(effective);
       } on ArgumentError {
         result = _joinResult(result, FlowResult(exceptional: state.copy()));
         activation.operationEffects[site] = {
@@ -1779,6 +1783,11 @@ final class ProgramFlow(
     }
     if (function.unknownTypes.isNotEmpty ||
         activation.unknownCalls.contains(site)) {
+      if (site case FunctionCall(target: final bound?)) {
+        throw StateError(
+          'Unresolved function value for proven target ${bound.name}.',
+        );
+      }
       activation.unknownCalls.add(site);
       result = _joinResult(
         result,
@@ -1949,12 +1958,12 @@ final class ProgramFlow(
       }
 
       for (final constant in value.constants.whereType<FunctionConstant>()) {
-        final (:target, :owner, typeArguments: applied) = _constantCall(
-          constant,
-          typeArguments.isEmpty
-              ? (constant.type as FunctionType).typeParameters
-              : typeArguments,
-        );
+        final (:target, :owner, typeArguments: applied) = constant
+            .resolveInvocation(
+              typeArguments.isEmpty
+                  ? (constant.type as FunctionType).typeParameters
+                  : typeArguments,
+            );
         final environment = {
           if (owner != null) ...target.environmentFor(owner),
           for (final (i, type) in applied.indexed)
@@ -2595,31 +2604,6 @@ FlowResult _joinResult(FlowResult left, FlowResult right) {
     stackTrace: left.stackTrace.join(right.stackTrace),
     effects: {...left.effects, ...right.effects},
   );
-}
-
-({FunctionTarget target, ClassType? owner, List<ValueType> typeArguments})
-_constantCall(FunctionConstant constant, List<ValueType> arguments) {
-  var target = constant.target;
-  final signature = (constant.type as FunctionType).instantiate(arguments);
-  var owner = constant.ownerType;
-  var applied = constant.typeArguments ?? arguments;
-  if (constant.constructorTypeArguments case final template?) {
-    applied = [
-      for (final type in template)
-        type.substitute({
-          for (final (index, parameter)
-              in constant.constructorSignature!.typeParameters.indexed)
-            parameter: applied[index],
-        }),
-    ];
-  }
-  if (target.kind == .initializer || target.kind == .factory) {
-    final resolved = target.resolveConstruction(signature.result as ClassType);
-    target = resolved.target;
-    owner = resolved.ownerType;
-    applied = const [];
-  }
-  return (target: target.implementation, owner: owner, typeArguments: applied);
 }
 
 Object? _typeKey(Iterable<ValueType> types) =>

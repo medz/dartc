@@ -84,4 +84,142 @@ void main() {
       expect(IrInterpreter(facts.program, {}).run(body, []), entry.value());
     });
   }
+
+  for (final example in <String, int Function(int)>{
+    'staticValue': source.staticValue,
+    'capturedValue': source.capturedValue,
+    'sharedCapture': source.sharedCapture,
+    'multipleCaptures': source.multipleCaptures,
+    'lexicalTypes': source.lexicalTypes,
+    'genericValue': source.genericValue,
+    'boundValue': source.boundValue,
+    'aliasedConstructor': source.aliasedConstructor,
+    'redirectedConstructor': source.redirectedConstructor,
+    'throwingValue': source.throwingValue,
+  }.entries) {
+    test('known function values preserve ${example.key}', () {
+      final entry = program.functions.singleWhere(
+        (function) => function.target.name == example.key,
+      );
+      final entries = [
+        (target: entry.target, arguments: [FlowValue.unknown(.integer)]),
+      ];
+      final specialized = const ProgramCallSpecialization().run(
+        ProgramFlow(program, entries).facts,
+      );
+      final body = specialized.implementationOf(entry.target) as IrFunction;
+      final originalCalls = [
+        for (final block in entry.blocks)
+          ...block.instructions.whereType<FunctionCall>(),
+        for (final block in entry.blocks)
+          if (block.end case Invoke(operation: final FunctionCall call)) call,
+      ];
+      expect(originalCalls, isNotEmpty);
+      final calls = [
+        for (final block in body.blocks)
+          ...block.instructions.whereType<FunctionCall>(),
+        for (final block in body.blocks)
+          if (block.end case Invoke(operation: final FunctionCall call)) call,
+      ];
+      expect(calls.every((call) => call.target != null), isTrue);
+      if ([
+        'staticValue',
+        'aliasedConstructor',
+        'redirectedConstructor',
+        'throwingValue',
+      ].contains(example.key)) {
+        expect(calls, isEmpty);
+      } else {
+        expect(calls, isNotEmpty);
+      }
+      final optimized = optimizer.run(specialized, entries);
+      final simplified =
+          optimized.program.implementationOf(entry.target) as IrFunction;
+      for (final value in [-37, 0, 19]) {
+        final expected = example.value(value);
+        expect(IrInterpreter(specialized, {}).run(body, [value]), expected);
+        expect(
+          IrInterpreter(optimized.program, {}).run(simplified, [value]),
+          expected,
+        );
+      }
+    });
+  }
+
+  test('an unknown callable retains its open call contract', () {
+    final entry = program.functions.singleWhere(
+      (function) => function.target.name == 'unknownFunction',
+    );
+    final result = const ProgramCallSpecialization().run(
+      ProgramFlow(program, [
+        (
+          target: entry.target,
+          arguments: [
+            FlowValue.unknown(entry.target.parameterTypes.first),
+            FlowValue.unknown(.integer),
+          ],
+        ),
+      ]).facts,
+    );
+    expect(result, same(program));
+  });
+
+  test(
+    'a proven call retains its target and rejects a changed entry contract',
+    () {
+      final uri = Uri.parse('memory:call-target');
+      final first = FunctionTarget(uri, 'first', .integer, []);
+      final second = FunctionTarget(uri, 'second', .integer, []);
+      final target = FunctionTarget(uri, 'call', .integer, [first.signature]);
+      final entry = Block(target.parameterTypes);
+      final call = entry.emit(
+        FunctionCall(entry.parameters.single, [], const {}, const [], first),
+      );
+      entry.finish(Return(call));
+      final body = IrFunction(target, [entry]);
+      expect(body.callees, contains(first));
+      expect(
+        (call.mapInputs((value) => value) as FunctionCall).target,
+        same(first),
+      );
+      expect(
+        () => FunctionCall(
+          FunctionConstant(second),
+          [],
+          const {},
+          const [],
+          first,
+        ),
+        throwsArgumentError,
+      );
+      final program = IrProgram([], [
+        body,
+        IrFunction(first, [Block()..finish(const Return(Constant.integer(1)))]),
+        IrFunction(second, [
+          Block()..finish(const Return(Constant.integer(2))),
+        ]),
+      ]);
+      final facts = ProgramFlow(program, [
+        (
+          target: target,
+          arguments: [FlowValue.constant(FunctionConstant(first))],
+        ),
+      ]).facts;
+      expect(
+        facts.returnedBy(target).constant?.structuralKey,
+        const Constant.integer(1).structuralKey,
+      );
+      for (final invalid in [
+        FlowValue.constant(FunctionConstant(second)),
+        FlowValue.unknown(first.signature),
+      ]) {
+        expect(
+          () => ProgramFlow(program, [
+            (target: target, arguments: [invalid]),
+          ]),
+          throwsStateError,
+        );
+      }
+    },
+  );
 }

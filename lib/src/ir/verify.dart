@@ -328,6 +328,8 @@ FunctionReferences verifyCallable(
         case LoadLibrary(:final reference) ||
             CheckLibraryLoaded(:final reference):
           (deferredImports ??= {}).add(reference);
+        case FunctionCall(:final target?):
+          (callees ??= {}).add(target);
         case MakeInvocation():
           (instantiatedClasses ??= {}).add(CoreTypes.symbolStorage);
         case DynamicDispatch(
