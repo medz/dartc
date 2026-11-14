@@ -253,8 +253,12 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .macos => MachO(target),
       .linux => Elf(target),
     };
+    final requiredImports = object.imports.toSet();
     for (final MapEntry(key: path, value: symbols) in systemSymbols.entries) {
-      inputs.add(.sharedLibrary(path, symbols: symbols));
+      symbols.removeWhere((name, _) => !requiredImports.contains(name));
+      if (symbols.isNotEmpty) {
+        inputs.add(.sharedLibrary(path, symbols: symbols, asNeeded: true));
+      }
     }
     final bytes = switch (output) {
       ObjectOutput() => format.encodeObject(object),
@@ -293,9 +297,10 @@ final class Compilation._(
   /// Immutable final bytes, including any required linking and signing.
   final Uint8List bytes = bytes.asUnmodifiableView();
 
-  /// Native libraries needed when linking an object or archive output.
+  /// Native inputs for linking this compilation.
   ///
-  /// Already linked into shared-library and executable outputs.
+  /// Automatically inferred libraries use [SharedLibraryInput.asNeeded].
+  /// Shared-library and executable outputs have already applied these inputs.
   final List<LinkInput> dependencies = .unmodifiable(dependencies);
 
   final List<Uri> _sources = .unmodifiable(sources);

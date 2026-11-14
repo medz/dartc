@@ -9,7 +9,6 @@ final class NativeBindings(
   Set<FunctionTarget> selected,
 ) {
   late final IrProgram program;
-  final definitions = <FunctionTarget>{};
   final imports = <FunctionTarget, NativeImport>{};
   final exports = <FunctionTarget, NativeExport>{};
   final callbacks =
@@ -90,14 +89,12 @@ final class NativeBindings(
                 : Return(signature.result == .voidType ? null : result),
           );
           _functions.add(IrFunction(target, [entry]));
-          definitions.add(target);
           final address = FunctionTarget(
             null,
             'callbackAddress${callbacks.length}',
             .integer,
             [],
           );
-          definitions.add(address);
           externals.add(IrExternal(address));
           callbacks[instruction] = (
             address: address,
@@ -140,7 +137,6 @@ final class NativeBindings(
         ...dart.parameterTypes.map(rawType),
       ],
     );
-    definitions.add(raw);
     final (source, destination) = intoDart ? (raw, dart) : (dart, raw);
     final entry = Block(source.parameterTypes);
     final offset = intoDart && resultCompound ? 1 : 0;

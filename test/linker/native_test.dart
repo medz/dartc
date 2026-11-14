@@ -18,6 +18,14 @@ void main() {
     expect(calls.hasSymbol('helper'), isFalse);
   });
 
+  test('unused inferred dependencies are not loaded', () {
+    for (final name in ['inferred_dependency', 'inferred_overridden']) {
+      final calls = LinkedCalls('linker/$name');
+      addTearDown(calls.close);
+      expect(calls.forward(), 42, reason: name);
+    }
+  });
+
   test(
     'missing dependencies and missing required symbols fail at load time',
     () {
