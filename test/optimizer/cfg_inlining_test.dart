@@ -60,6 +60,7 @@ void main() {
     ('closureThroughCall', source.closureThroughCall),
     ('closureThroughBranches', source.closureThroughBranches),
     ('closureGeneric', source.closureGeneric),
+    ('closureWidened', source.closureWidened),
     ('closureCells', source.closureCells),
   ]) {
     test('$name expands captures without retaining closure environments', () {

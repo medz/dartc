@@ -147,7 +147,7 @@ IrProgram _inlineSelected(
                 target.typeParameters[i]: type,
             };
             arguments = [
-              operation.function,
+              closure,
               ...closure.inputs,
               ...target.signature
                   .instantiate(operation.typeArguments)

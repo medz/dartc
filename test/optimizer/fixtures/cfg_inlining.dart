@@ -97,3 +97,13 @@ T forward<T>(
 }
 
 int closureThroughBranches(int value) => forward(() => value + 1);
+
+int closureWidened(int value) {
+  Never action() => throw value;
+  final int Function() widened = action;
+  try {
+    return invoke(widened);
+  } on int catch (error) {
+    return error + 2;
+  }
+}
