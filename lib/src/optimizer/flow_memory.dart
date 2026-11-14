@@ -243,7 +243,7 @@ final class FlowMemory {
         : FlowMemory._(start, length, _zeroes, bytes, retained);
   }
 
-  FlowMemory join(FlowMemory other) {
+  FlowMemory join(FlowMemory other, {bool widen = false}) {
     if (this == other) return this;
     if (start != other.start) {
       throw StateError('One allocation has incompatible native storage.');
@@ -270,10 +270,10 @@ final class FlowMemory {
           : other.length,
       _coalesce(zeroes),
       const .empty(),
-      _retained.join(other._retained),
+      _retained.join(other._retained, widen: widen),
     );
     final bytes = _bytes.merge(other._bytes, (key, a, b) {
-      final byte = (a ?? _at(key)).join(b ?? other._at(key));
+      final byte = (a ?? _at(key)).join(b ?? other._at(key), widen: widen);
       return byte == merged._at(key) ? null : byte;
     });
     return FlowMemory._(
@@ -314,19 +314,19 @@ final class _Byte(
 ) {
   FlowValue get references => type == null ? value : value.references;
 
-  _Byte join(_Byte other) {
+  _Byte join(_Byte other, {bool widen = false}) {
     if (type == other.type && index == other.index) {
-      return _Byte(value.join(other.value), type, index);
+      return _Byte(value.join(other.value, widen: widen), type, index);
     }
     if (type == null && other == _zero) {
-      return _Byte(value.join(_null), null, index);
+      return _Byte(value.join(_null, widen: widen), null, index);
     }
     if (this == _zero && other.type == null) {
-      return _Byte(_null.join(other.value), null, other.index);
+      return _Byte(_null.join(other.value, widen: widen), null, other.index);
     }
     return _Byte(
       FlowValue.unknown(.integer)
-          .withReferences([references, other.references]),
+          .withReferences([references.join(other.references, widen: widen)]),
       _uint8,
       0,
     );

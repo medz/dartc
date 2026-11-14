@@ -1,6 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_state.dart';
-import 'package:dartc/src/optimizer/flow_value.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -11,6 +11,50 @@ const _one = Constant.integer(1);
 const _two = Constant.integer(2);
 
 void main() {
+  test('numeric storage joins preserve branch bounds and widen only expanding loop bounds', () {
+    final global = GlobalVariable(_uri, 'number', ValueType.integer.nullable);
+    final initial = FlowState(IrProgram([], [], globals: [global]));
+    final cell = NewCell(CellType(.integer), const Constant.integer(0));
+    final allocated = _step(initial, cell);
+    final before = _step(
+      allocated.normal!,
+      StoreGlobal(global, const Constant.integer(0)),
+    ).normal!;
+    for (final delta in [-1, 1]) {
+      final incoming = _step(
+        before,
+        WriteCell(cell, Constant.integer(delta)),
+        operands: [
+          allocated.value,
+          FlowValue.constant(Constant.integer(delta)),
+        ],
+      ).normal!;
+      final after = _step(
+        incoming,
+        StoreGlobal(global, Constant.integer(delta)),
+      ).normal!;
+      final union = before.copy()..join(after);
+      final widened = before.copy()..join(after, widen: true);
+      final expected = delta < 0
+          ? FlowIntegerRange(FlowIntegerRange.minimum, 0)
+          : FlowIntegerRange(0, FlowIntegerRange.maximum);
+      for (final (read, operands) in [
+        (ReadCell(cell), [allocated.value]),
+        (LoadGlobal(global), <FlowValue>[]),
+      ]) {
+        expect(
+          _step(union, read, operands: operands).value.integers,
+          FlowIntegerRange(delta < 0 ? delta : 0, delta > 0 ? delta : 0),
+        );
+        expect(
+          _step(widened, read, operands: operands).value.integers,
+          expected,
+        );
+      }
+      expect(widened.join(after, widen: true), isFalse);
+    }
+  });
+
   test('unknown storage reads keep the activated generic result type', () {
     final t = TypeParameterType('T')
       ..initializeBound(ValueType.object.nullable);

@@ -19,6 +19,33 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('native integer fragments widen as one stored value at loop joins', () {
+    final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final before = _store(
+      allocation.state,
+      allocation.address,
+      _i64,
+      FlowValue.integerRange(FlowIntegerRange(3, 5)),
+    );
+    final after = _store(
+      before,
+      allocation.address,
+      _i64,
+      FlowValue.integerRange(FlowIntegerRange(3, 9)),
+    );
+    final union = before.copy()..join(after);
+    final widened = before.copy()..join(after, widen: true);
+    expect(
+      _load(union, allocation.address, _i64).integers,
+      FlowIntegerRange(3, 9),
+    );
+    expect(
+      _load(widened, allocation.address, _i64).integers,
+      FlowIntegerRange(3, FlowIntegerRange.maximum),
+    );
+    expect(widened.join(after, widen: true), isFalse);
+  });
+
   test(
     'zeroed payload excludes the header and requires an explicit target',
     () {

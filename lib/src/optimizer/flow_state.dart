@@ -96,7 +96,8 @@ final class FlowState {
   );
 
   /// Adds an executable alternative, skipping unchanged storage subtrees.
-  bool join(FlowState incoming) {
+  /// [widen] drops expanding numeric bounds at a loop or recursive boundary.
+  bool join(FlowState incoming, {bool widen = false}) {
     if (!identical(program, incoming.program) ||
         !identical(memoryLayout, incoming.memoryLayout)) {
       throw ArgumentError(
@@ -104,7 +105,10 @@ final class FlowState {
       );
     }
     final globals = _globals.merge(incoming._globals, (global, left, right) {
-      final value = (left ?? _initial(global)).join(right ?? _initial(global));
+      final value = (left ?? _initial(global)).join(
+        right ?? _initial(global),
+        widen: widen,
+      );
       return value == _initial(global) ? null : value;
     });
     final objects = _objects.isEmpty
@@ -117,9 +121,9 @@ final class FlowState {
                 ? right!
                 : right == null
                 ? left
-                : left.join(right),
+                : left.join(right, widen: widen),
           );
-    final escaped = _escaped.join(incoming._escaped);
+    final escaped = _escaped.join(incoming._escaped, widen: widen);
     final changed =
         !identical(globals, _globals) ||
         !identical(objects, _objects) ||
@@ -1283,10 +1287,10 @@ final class _Slot {
       initializer = .unknown(FunctionType(type, []));
   const new _(this.value, this.unbound, this.initializer);
 
-  _Slot join(_Slot other) => _Slot._(
-    value.join(other.value),
+  _Slot join(_Slot other, {bool widen = false}) => _Slot._(
+    value.join(other.value, widen: widen),
     unbound || other.unbound,
-    initializer.join(other.initializer),
+    initializer.join(other.initializer, widen: widen),
   );
 
   _Slot map(FlowValue Function(FlowValue) transform) {
@@ -1370,7 +1374,7 @@ final class _ObjectState {
     memory,
   );
 
-  _ObjectState join(_ObjectState incoming) {
+  _ObjectState join(_ObjectState incoming, {bool widen = false}) {
     if (identical(this, incoming)) return this;
     final joinedSlots = slots.merge(
       incoming.slots,
@@ -1378,13 +1382,13 @@ final class _ObjectState {
           ? right!
           : right == null
           ? left
-          : left.join(right),
+          : left.join(right, widen: widen),
     );
     final joinedMemory = memory == null
         ? incoming.memory?.invalidate()
         : incoming.memory == null
         ? memory!.invalidate()
-        : memory!.join(incoming.memory!);
+        : memory!.join(incoming.memory!, widen: widen);
     var changed =
         joinedMemory != memory ||
         !identical(joinedSlots, slots) ||
@@ -1401,7 +1405,7 @@ final class _ObjectState {
         final joined = <FlowValue>[];
         var capturesChanged = false;
         for (var i = 0; i < other.length; i++) {
-          final value = captures![i].join(other[i]);
+          final value = captures![i].join(other[i], widen: widen);
           capturesChanged |= value != captures![i];
           joined.add(value);
         }

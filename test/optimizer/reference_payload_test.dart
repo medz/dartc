@@ -23,6 +23,32 @@ final _callback = FunctionTarget(null, 'callback', .integer, [.integer]);
 final _function = FlowValue.constant(FunctionConstant(_callback));
 
 void main() {
+  test('reference payload loop joins widen stored ranges without losing slot bounds', () {
+    final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final before = _store(
+      allocation.state,
+      allocation.value,
+      FlowValue.integerRange(FlowIntegerRange(3, 5)),
+    );
+    final after = _store(
+      before,
+      allocation.value,
+      FlowValue.integerRange(FlowIntegerRange(3, 9)),
+    );
+    final union = before.copy()..join(after);
+    final widened = before.copy()..join(after, widen: true);
+    expect(_load(union, allocation.value).integers, FlowIntegerRange(3, 9));
+    expect(
+      _load(widened, allocation.value).integers,
+      FlowIntegerRange(3, FlowIntegerRange.maximum),
+    );
+    expect(widened.join(after, widen: true), isFalse);
+    expect(
+      _load(widened, allocation.value, offset: _start + 8).constant,
+      isNull,
+    );
+  });
+
   test('immutable payload reads preserve functions, objects and owner alternatives', () {
     final child = ObjectConstant(
       _type,
