@@ -1,6 +1,6 @@
 ## Unreleased
 
-- Track actual function and object values in traced inline payloads through overwrites, copies, aliases and call summaries. Promote proven payload reads to SSA values and remove unused storage while preserving escaped references and raw memory invalidation.
+- Track actual function and object values in traced inline payloads through overwrites, copies, aliases and call summaries. Promote proven payload reads to SSA values and remove unused storage while preserving escaped references and raw memory invalidation. Unobserved intermediate lists and pure final initialization disappear after their stored values are propagated, while observable initialization effects and timing remain.
 
 - Expose Invocation construction and dynamic getter calls before program analysis, preserving actual arguments and generic receiver behavior. Track managed address origins through native pointer arithmetic and shared byte storage before selecting machine representation.
 
