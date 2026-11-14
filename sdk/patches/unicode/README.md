@@ -13,9 +13,11 @@ tailoring is outside String.toLowerCase/toUpperCase.
 
 The SDK source provider checks the input SHA-256 pins and materializes Dart
 constants at sdk/patches/unicode_case_data.dart in its source view. Source
-archives include that module and the original data and license. No network
-lookup or target-side text parsing is needed. Generated files are build
-artifacts; update these original inputs and their pins together.
+directories and archives expose that module and the license, while the three
+original data files remain repository inputs for generation and validation.
+Packaging rejects missing or modified inputs. The archive runs independently
+of those inputs, with no network lookup or target-side text parsing. Generated
+files are build artifacts; update these original inputs and their pins together.
 
 The pinned Dart VM uses an older simple mapping. Full mapping follows the
 [accepted Dart contract correction](https://github.com/dart-lang/sdk/issues/6706#issuecomment-108340484),

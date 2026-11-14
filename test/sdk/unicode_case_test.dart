@@ -19,6 +19,7 @@ void main() {
         'lib/runtime/contracts.dart',
         'lib/layout/memory.dart',
         'lib/src/layout/memory_layout.dart',
+        'sdk/patches/unicode_case.dart',
         ...unicodeCaseInputs.keys,
       ]) {
         final output = File('${directory.path}/$path');
@@ -32,10 +33,43 @@ void main() {
       expect(() => data[0] = 0, throwsUnsupportedError);
       final archive = SourceArchive(SourceArchive.encode(sources));
       expect(archive.read(unicodeCaseSource), data);
+      expect(archive.paths.toSet(), sources.paths.toSet());
+      expect(
+        archive.fingerprint('sdk/patches/'),
+        sources.fingerprint('sdk/patches/'),
+      );
+      for (final path in unicodeCaseInputs.keys) {
+        final input = File('${directory.path}/$path');
+        final original = input.readAsBytesSync();
+        for (final provider in [sources, archive]) {
+          if (path.endsWith('/LICENSE')) {
+            expect(provider.read(path), original);
+          } else {
+            expect(provider.contains(path), isFalse);
+            expect(provider.length(path), isNull);
+            expect(() => provider.read(path), throwsFormatException);
+          }
+        }
+        input.writeAsStringSync('\n', mode: FileMode.append);
+        expect(() => sources.read(unicodeCaseSource), throwsFormatException);
+        expect(() => SourceArchive.encode(sources), throwsFormatException);
+        input.deleteSync();
+        expect(sources.contains(unicodeCaseSource), isFalse);
+        expect(sources.length(unicodeCaseSource), isNull);
+        expect(() => sources.read(unicodeCaseSource), throwsFormatException);
+        expect(() => SourceArchive.encode(sources), throwsFormatException);
+        expect(archive.read(unicodeCaseSource), data);
+        input.writeAsBytesSync(original);
+      }
+      for (final path in unicodeCaseInputs.keys.where(
+        (path) => path.endsWith('.txt'),
+      )) {
+        File('${directory.path}/$path').deleteSync();
+      }
       final generated = File('${directory.path}/unicode_case_data.dart')
-        ..writeAsBytesSync(data);
-      File('sdk/patches/unicode_case.dart')
-          .copySync('${directory.path}/unicode_case.dart');
+        ..writeAsBytesSync(archive.read(unicodeCaseSource));
+      File('${directory.path}/unicode_case.dart')
+          .writeAsBytesSync(archive.read('sdk/patches/unicode_case.dart'));
       final entry = File('${directory.path}/check.dart')
         ..writeAsStringSync(r"""
 import 'unicode_case_data.dart';
@@ -61,14 +95,7 @@ void main() {
         entry.path,
       ]);
       expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
-      final input = File('${directory.path}/${unicodeCaseInputs.keys.first}');
-      input.writeAsStringSync('\n', mode: FileMode.append);
-      expect(() => sources.read(unicodeCaseSource), throwsFormatException);
       expect(archive.read(unicodeCaseSource), generated.readAsBytesSync());
-      input.deleteSync();
-      expect(sources.contains(unicodeCaseSource), isFalse);
-      expect(sources.length(unicodeCaseSource), isNull);
-      expect(() => sources.read(unicodeCaseSource), throwsFormatException);
     },
   );
 }

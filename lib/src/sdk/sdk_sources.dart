@@ -52,6 +52,8 @@ abstract class SdkSources() {
 ///
 /// File contents are read on every request. Symbolic links are rejected so that
 /// resource packaging cannot include files outside the source tree.
+/// Unicode generation inputs stay private; the source view exposes their
+/// derived Dart constants and license for independent archive execution.
 final class SourceDirectory(Directory directory) extends SdkSources {
   final Directory directory = directory.absolute;
 
@@ -68,6 +70,10 @@ final class SourceDirectory(Directory directory) extends SdkSources {
     'lib/layout/memory.dart',
     'lib/src/layout/memory_layout.dart',
   ];
+
+  bool _isUnicodeInput(String path) =>
+      unicodeCaseInputs.containsKey(path) &&
+      path != 'sdk/patches/unicode/LICENSE';
 
   File? _file(String path) {
     final parts = path.split('/');
@@ -89,7 +95,11 @@ final class SourceDirectory(Directory directory) extends SdkSources {
 
   @override
   Iterable<String> get paths sync* {
-    if (contains(unicodeCaseSource)) yield unicodeCaseSource;
+    if (contains(unicodeCaseSource)) {
+      yield unicodeCaseSource;
+    } else if (contains('sdk/patches/unicode_case.dart')) {
+      throw const FormatException('Missing Unicode case generation inputs.');
+    }
     for (final name in _shared) {
       if (!contains(name)) throw FormatException('Missing source file: $name');
       yield name;
@@ -105,9 +115,10 @@ final class SourceDirectory(Directory directory) extends SdkSources {
         if (entry is! File) {
           throw FormatException('Source resource is not a file: ${entry.path}');
         }
-        yield entry.uri.pathSegments
+        final path = entry.uri.pathSegments
             .skip(directory.uri.pathSegments.length - 1)
             .join('/');
+        if (!_isUnicodeInput(path)) yield path;
       }
     }
   }
@@ -117,10 +128,11 @@ final class SourceDirectory(Directory directory) extends SdkSources {
       ? unicodeCaseInputs.keys.every(
           (input) => _file(input)?.existsSync() ?? false,
         )
-      : _file(path)?.existsSync() ?? false;
+      : !_isUnicodeInput(path) && (_file(path)?.existsSync() ?? false);
 
   @override
   int? length(String path) {
+    if (_isUnicodeInput(path)) return null;
     if (path == unicodeCaseSource) {
       return contains(path) ? read(path).length : null;
     }
@@ -130,7 +142,14 @@ final class SourceDirectory(Directory directory) extends SdkSources {
 
   @override
   Uint8List read(String path) {
-    if (path == unicodeCaseSource) return unicodeCaseData(read);
+    if (path == unicodeCaseSource) return unicodeCaseData(_readFile);
+    if (_isUnicodeInput(path)) {
+      throw FormatException('Missing source file: $path');
+    }
+    return _readFile(path);
+  }
+
+  Uint8List _readFile(String path) {
     final file = _file(path);
     if (file == null || !file.existsSync()) {
       throw FormatException('Missing source file: $path');
