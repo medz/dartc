@@ -2,12 +2,31 @@ import 'package:dartc/ir.dart';
 
 import 'flow_value.dart';
 
-/// Normal and exceptional storage snapshots; null denotes an unreachable exit.
-typedef FlowResult = ({
-  FlowValue value,
-  FlowState? normal,
-  FlowState? exceptional,
-});
+/// Normal and exceptional state, including the actual thrown values.
+final class const FlowResult({
+  final FlowValue value = const .bottom(),
+  final FlowState? normal,
+  final FlowState? exceptional,
+
+  /// Effects performed by this transfer itself, excluding source callees.
+  final Set<Effect> effects = const {},
+  FlowValue? exception,
+  FlowValue? stackTrace,
+}) {
+  final FlowValue? _exception = exception;
+  final FlowValue? _stackTrace = stackTrace;
+
+  /// An unreachable exceptional exit carries no thrown value.
+  FlowValue get exception =>
+      exceptional == null ? const .bottom() : _exception ?? _unknownException;
+
+  /// The source trace, or an unknown trace created by a new language error.
+  FlowValue get stackTrace =>
+      exceptional == null ? const .bottom() : _stackTrace ?? _unknownTrace;
+}
+
+final _unknownException = FlowValue.unknown(ValueType.object);
+final _unknownTrace = FlowValue.unknown(ValueType.stackTrace);
 
 /// Queries a source call in the program's shared worklist.
 typedef FlowInvoke = FlowResult Function(
@@ -165,10 +184,13 @@ final class FlowState {
     next._allocate(object, _ObjectState(slots, summary: repeated));
     final value = FlowValue.object(object);
     final result = invoke(initializer, [value, ...arguments], next);
-    return (
+    return FlowResult(
       value: result.normal == null ? const .bottom() : value,
       normal: result.normal,
       exceptional: result.exceptional,
+      exception: result.exception,
+      stackTrace: result.stackTrace,
+      effects: const {Effect.allocates},
     );
   }
 
@@ -199,10 +221,14 @@ final class FlowState {
         final checked = initial == null
             ? (value: const FlowValue.bottom(), mayFail: false)
             : (object.type as CellType).isLate
-            ? _check(operands.first, (object.type as CellType).content)
+            ? operands.first.check((object.type as CellType).content)
             : (value: operands.first, mayFail: false);
         if (initial != null && checked.value.isBottom) {
-          return (value: const .bottom(), normal: null, exceptional: copy());
+          return FlowResult(
+            value: const .bottom(),
+            normal: null,
+            exceptional: copy(),
+          );
         }
         final slot = initial != null
             ? _Slot.bound(checked.value)
@@ -213,10 +239,11 @@ final class FlowState {
               );
         final next = copy();
         next._allocate(object, _ObjectState({_cell: slot}, summary: repeated));
-        return (
+        return FlowResult(
           value: .object(object),
           normal: next,
           exceptional: checked.mayFail ? copy() : null,
+          effects: const {Effect.allocates},
         );
       case CopyCell():
         if (operands.single.isBottom) return _unreachable;
@@ -238,12 +265,17 @@ final class FlowState {
           object,
           _ObjectState({_cell: copied}, summary: repeated),
         );
-        return _normal(.object(object), next);
+        return _withEffects(_normal(.object(object), next), const {
+          Effect.readsStorage,
+          Effect.allocates,
+        });
       case MakeClosure():
         if (operands.any((value) => value.isBottom)) return _unreachable;
         final object = allocate(operation);
         final next = copy()..retain(object, operands, repeated: repeated);
-        return _normal(.object(object), next);
+        return _withEffects(_normal(.object(object), next), const {
+          Effect.allocates,
+        });
       case LoadGlobal(:final global):
         _requireGlobal(global);
         return _read(
@@ -321,10 +353,13 @@ final class FlowState {
             : (input) => call(slot.initializer, [], input),
       );
       if (field != null && _weak(field) && read.normal != null) {
-        read = (
+        read = FlowResult(
           value: read.value.join(_null),
           normal: read.normal,
           exceptional: read.exceptional,
+          exception: read.exception,
+          stackTrace: read.stackTrace,
+          effects: read.effects,
         );
       }
       if (field?.requiresReadCheck ?? false) {
@@ -366,7 +401,7 @@ final class FlowState {
         ),
       );
     }
-    return result;
+    return _withEffects(result, const {Effect.readsStorage});
   }
 
   FlowResult _unknownRead(
@@ -391,30 +426,44 @@ final class FlowState {
           key,
           initialized.value,
         );
-        result = _merge(result, (
-          value: committed.normal == null ? const .bottom() : .unknown(type),
-          normal: committed.normal,
-          exceptional: committed.exceptional,
-        ));
+        result = _merge(
+          result,
+          FlowResult(
+            value: committed.normal == null ? const .bottom() : .unknown(type),
+            normal: committed.normal,
+            exceptional: committed.exceptional,
+            exception: committed.exception,
+            stackTrace: committed.stackTrace,
+            effects: committed.effects,
+          ),
+        );
       }
-      result = _merge(result, (
-        value: const .bottom(),
-        normal: null,
-        exceptional: initialized.exceptional,
-      ));
-      result = _merge(result, (
-        value: const .bottom(),
-        normal: null,
-        exceptional: _joinStates(this, initialized.normal),
-      ));
+      result = _merge(
+        result,
+        FlowResult(
+          value: const .bottom(),
+          normal: null,
+          exceptional: initialized.exceptional,
+          exception: initialized.exception,
+          stackTrace: initialized.stackTrace,
+        ),
+      );
+      result = _merge(
+        result,
+        FlowResult(
+          value: const .bottom(),
+          normal: null,
+          exceptional: _joinStates(this, initialized.normal),
+        ),
+      );
     } else if (field?.requiresReadCheck ?? false) {
-      result = (
+      result = FlowResult(
         value: result.value,
         normal: result.normal,
         exceptional: copy(),
       );
     }
-    return result;
+    return _withEffects(result, const {Effect.readsStorage});
   }
 
   FlowResult _writeObjects(FlowValue receiver, Object key, FlowValue value) {
@@ -463,17 +512,27 @@ final class FlowState {
             ? key.isLate && key.isFinal
             : (object.type as CellType).isFinal;
         if (isFinal && !slot.unbound) continue;
-        final checked = _check(value, type);
+        final checked = value.check(type);
         if (!checked.value.isBottom) {
           state.slots[key] = slot.join(_Slot.bound(checked.value));
           if (state.escaped) next.escape([checked.value]);
         }
       }
-      result = _merge(result, (
-        value: _null,
-        normal: next,
-        exceptional: copy(),
-      ));
+      result = _merge(
+        result,
+        FlowResult(
+          value: _null,
+          normal: next,
+          exceptional: copy(),
+          effects: {
+            Effect.writesStorage,
+            if (key is InstanceField
+                ? key.isLate && key.isFinal
+                : receiver.types.any((t) => t is CellType && t.isFinal))
+              Effect.readsStorage,
+          },
+        ),
+      );
     }
     return result;
   }
@@ -494,17 +553,22 @@ final class FlowState {
       final unbound = copy()
         .._refine(location, _Slot.unbound(initializer: slot.initializer));
       if (initialize == null) {
-        result = _merge(result, (
-          value: const .bottom(),
-          normal: null,
-          exceptional: unbound,
-        ));
+        result = _merge(
+          result,
+          FlowResult(
+            value: const .bottom(),
+            normal: null,
+            exceptional: unbound,
+          ),
+        );
       } else {
         final initialized = initialize(unbound);
-        var bound = (
+        var bound = FlowResult(
           value: const FlowValue.bottom(),
           normal: null as FlowState?,
           exceptional: initialized.exceptional,
+          exception: initialized.exception,
+          stackTrace: initialized.stackTrace,
         );
         if (initialized.normal case final normal?) {
           bound = _merge(
@@ -515,7 +579,7 @@ final class FlowState {
         result = _merge(result, bound);
       }
     }
-    return result;
+    return _withEffects(result, const {Effect.readsStorage});
   }
 
   FlowResult _write(
@@ -524,10 +588,15 @@ final class FlowState {
     ValueType type, {
     required bool isFinal,
   }) {
-    final checked = _check(value, type);
+    final checked = value.check(type);
     FlowState? exceptional = checked.mayFail ? copy() : null;
     if (checked.value.isBottom) {
-      return (value: const .bottom(), normal: null, exceptional: exceptional);
+      return FlowResult(
+        value: const .bottom(),
+        normal: null,
+        exceptional: exceptional,
+        effects: const {Effect.readsStorage},
+      );
     }
     final slot = _slot(location);
     if (isFinal && !slot.value.isBottom) {
@@ -535,14 +604,24 @@ final class FlowState {
       exceptional = _joinStates(exceptional, bound);
     }
     if (isFinal && !slot.unbound) {
-      return (value: const .bottom(), normal: null, exceptional: exceptional);
+      return FlowResult(
+        value: const .bottom(),
+        normal: null,
+        exceptional: exceptional,
+        effects: const {Effect.readsStorage},
+      );
     }
     final next = copy();
     next._set(location, _Slot.bound(checked.value));
     if (location.$1 case final object? when next._objects[object]!.escaped) {
       next.escape([checked.value]);
     }
-    return (value: checked.value, normal: next, exceptional: exceptional);
+    return FlowResult(
+      value: checked.value,
+      normal: next,
+      exceptional: exceptional,
+      effects: {Effect.writesStorage, if (isFinal) Effect.readsStorage},
+    );
   }
 
   void _allocate(FlowObject object, _ObjectState state) {
@@ -640,14 +719,14 @@ final class FlowState {
 
 final _cell = Object();
 final _null = FlowValue.constant(const Constant.nullValue());
-const FlowResult _unreachable = (
+const FlowResult _unreachable = FlowResult(
   value: FlowValue.bottom(),
   normal: null,
   exceptional: null,
 );
 
 FlowResult _normal(FlowValue value, FlowState state) =>
-    (value: value, normal: state, exceptional: null);
+    FlowResult(value: value, normal: state, exceptional: null);
 
 FlowState? _joinStates(FlowState? left, FlowState? right) {
   if (left == null) return right?.copy();
@@ -655,58 +734,37 @@ FlowState? _joinStates(FlowState? left, FlowState? right) {
   return left.copy()..join(right);
 }
 
-FlowResult _merge(FlowResult left, FlowResult right) => (
+FlowResult _merge(FlowResult left, FlowResult right) => FlowResult(
   value: left.value.join(right.value),
   normal: _joinStates(left.normal, right.normal),
   exceptional: _joinStates(left.exceptional, right.exceptional),
+  exception: left.exception.join(right.exception),
+  stackTrace: left.stackTrace.join(right.stackTrace),
+  effects: Set.unmodifiable({...left.effects, ...right.effects}),
 );
 
-({FlowValue value, bool mayFail}) _check(FlowValue value, ValueType type) {
-  var checked = const FlowValue.bottom();
-  var mayFail = false;
-  for (final constant in value.constants) {
-    if (type.freeTypeParameters.isNotEmpty) {
-      mayFail = true;
-      checked = checked.join(.constant(constant));
-    } else if (type.accepts(constant.type)) {
-      checked = checked.join(.constant(constant));
-    } else {
-      mayFail = true;
-    }
-  }
-  for (final object in value.objects) {
-    if (type.freeTypeParameters.isNotEmpty ||
-        object.type.freeTypeParameters.isNotEmpty) {
-      mayFail = true;
-      checked = checked.join(.object(object));
-    } else if (type.accepts(object.type)) {
-      checked = checked.join(.object(object));
-    } else {
-      mayFail = true;
-    }
-  }
-  for (final bound in value.unknownTypes) {
-    if (type.freeTypeParameters.isEmpty &&
-        bound.freeTypeParameters.isEmpty &&
-        type.accepts(bound)) {
-      checked = checked.join(.unknown(bound));
-    } else {
-      mayFail = true;
-      checked = checked.join(.unknown(type));
-    }
-  }
-  return (value: checked, mayFail: mayFail);
-}
+FlowResult _withEffects(FlowResult result, Set<Effect> effects) => FlowResult(
+  value: result.value,
+  normal: result.normal,
+  exceptional: result.exceptional,
+  exception: result.exception,
+  stackTrace: result.stackTrace,
+  effects: Set.unmodifiable({...result.effects, ...effects}),
+);
 
 FlowResult _checkedRead(FlowResult result, ValueType type) {
   if (result.normal == null) return result;
-  final checked = _check(result.value, type);
-  return (
-    value: checked.value,
-    normal: checked.value.isBottom ? null : result.normal,
-    exceptional: checked.mayFail
-        ? _joinStates(result.exceptional, result.normal)
-        : result.exceptional,
+  final checked = result.value.check(type);
+  return _merge(
+    FlowResult(
+      value: checked.value,
+      normal: checked.value.isBottom ? null : result.normal,
+      exceptional: result.exceptional,
+      exception: result.exception,
+      stackTrace: result.stackTrace,
+      effects: result.effects,
+    ),
+    checked.mayFail ? FlowResult(exceptional: result.normal) : _unreachable,
   );
 }
 

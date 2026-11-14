@@ -35,7 +35,10 @@ void main() {
       globals: [global],
     );
     final state = FlowState(program);
-    final after = _step(state, write).normal!;
+    final stored = _step(state, write);
+    expect(stored.effects, {Effect.writesStorage});
+    final after = stored.normal!;
+    expect(_step(after, read).effects, {Effect.readsStorage});
     expect(
       _step(after, read).value.constant?.structuralKey,
       value.structuralKey,
@@ -146,7 +149,11 @@ void main() {
         LoadGlobal(global),
         invoke: (_, _, input) {
           final changed = _step(input, StoreGlobal(progress, _one)).normal!;
-          return (value: const .bottom(), normal: null, exceptional: changed);
+          return FlowResult(
+            value: const .bottom(),
+            normal: null,
+            exceptional: changed,
+          );
         },
       );
       expect(failed.normal, isNull);
@@ -498,7 +505,7 @@ void main() {
       read,
       operands: [allocated.value],
       invoke: (_, _, input) =>
-          (value: const .bottom(), normal: null, exceptional: input),
+          FlowResult(value: const .bottom(), normal: null, exceptional: input),
     );
     expect(
       later.normal,
@@ -543,7 +550,7 @@ FlowResult _step(
 )!;
 
 FlowResult _normal(FlowValue value, FlowState state) =>
-    (value: value, normal: state, exceptional: null);
+    FlowResult(value: value, normal: state, exceptional: null);
 
 IrFunction _body(FunctionTarget target, Terminator exit) =>
     IrFunction(target, [Block(target.parameterTypes)..finish(exit)]);
