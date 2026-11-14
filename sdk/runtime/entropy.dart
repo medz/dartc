@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import '../../lib/layout/memory.dart';
 import 'memory.dart';
 
@@ -10,7 +12,7 @@ int? randomBytes(int count) {
   do {
     status = Memory.entropy(address, count);
   } while (status == -4); // EINTR before Linux's entropy pool is initialized.
-  final value = status == 0 ? Memory.read(address) : null;
+  final value = status == 0 ? Pointer<Int64>.fromAddress(address).value : null;
   Memory.keepAlive(storage);
   return value;
 }

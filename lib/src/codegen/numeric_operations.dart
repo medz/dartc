@@ -35,25 +35,7 @@ final class NumericOperations({
       if (operator == .remainder) return floatingRemainder;
     }
     if (_nativeOperations.contains(instruction)) return null;
-    if (instruction
-        case IntBinary(
-          operator: .shiftLeft || .shiftRight || .unsignedShiftRight,
-          :final right,
-        )
-        when switch (right) {
-          ScalarConstant(value: final int count) => count >= 0 && count < 64,
-          IntBinary(
-            operator: .bitAnd,
-            right: ScalarConstant(value: final int mask),
-          ) ||
-          IntBinary(
-            operator: .bitAnd,
-            left: ScalarConstant(value: final int mask),
-          ) => mask >= 0 && mask < 64,
-          _ => false,
-        }) {
-      return null;
-    }
+    if (_boundedShift(instruction)) return null;
     if (instruction case NumericToInt(:final operand, :final rounding)) {
       return operand.type == .integer
           ? null
@@ -84,6 +66,32 @@ final class NumericOperations({
     final operator = _operator(instruction);
     return operator == null ? null : _function(operator).target;
   }
+
+  /// Effects after checks proven by numeric selection have been discharged.
+  Set<Effect> effectsOf(Instruction instruction) =>
+      _nativeOperations.contains(instruction) || _boundedShift(instruction)
+      ? const {}
+      : instruction.effects;
+
+  bool _boundedShift(Instruction instruction) => switch (instruction) {
+    IntBinary(
+      operator: .shiftLeft || .shiftRight || .unsignedShiftRight,
+      :final right,
+    ) =>
+      switch (right) {
+        ScalarConstant(value: final int count) => count >= 0 && count < 64,
+        IntBinary(
+          operator: .bitAnd,
+          right: ScalarConstant(value: final int mask),
+        ) ||
+        IntBinary(
+          operator: .bitAnd,
+          left: ScalarConstant(value: final int mask),
+        ) => mask >= 0 && mask < 64,
+        _ => false,
+      },
+    _ => false,
+  };
 
   static IntOperator? _operator(Instruction instruction) =>
       switch (instruction) {

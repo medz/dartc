@@ -142,7 +142,13 @@ base class ScalarCodeGenerator<R extends Object>(
       for (final entry in callbacks.entries) entry.value.address: entry.key,
     };
     final sourceProgram = program;
-    sourceRoots.addAll([...exports.keys, ...bindings.definitions]);
+    sourceRoots.addAll([
+      ...exports.keys,
+      for (final callback in callbacks.values) ...[
+        callback.address,
+        callback.target,
+      ],
+    ]);
     final unknownCalls = <FunctionTarget>{};
     final sourceFlow = CallTypeFlow(
       sourceProgram,
@@ -325,6 +331,7 @@ base class ScalarCodeGenerator<R extends Object>(
         globals,
         instances,
         suspensions: suspensions,
+        imports: imports,
         callbacks: {
           for (final entry in callbacks.entries) entry.key: entry.value.address,
         },

@@ -134,24 +134,14 @@ final class FunctionRepresentation(
         if (block.end case Invoke(:final operation)) operation,
       ],
     };
-    // An address-only temporary has no observable object identity.
-    final addressOnly = <Value>{
-      for (final (i, parameter) in function.entry.parameters.indexed)
-        if (layouts.pointerParameters.contains(function.target, i)) parameter,
-      for (final operation in operations)
-        if (operation is PointerFromAddress || operation is PointerOffset)
-          operation,
-    };
+    final addressOnly = layouts.pointerRepresentation.addressesIn(function);
     stackCells.addAll(
       operations.whereType<NewCell>().where(
         (cell) => !(cell.type as CellType).isLate,
       ),
     );
     for (final operation in operations) {
-      for (final (i, input) in operation.inputs.indexed) {
-        if (!layouts.pointerParameters.accepts(operation, i)) {
-          addressOnly.remove(input);
-        }
+      for (final input in operation.inputs) {
         if (!(operation is ReadCell && operation.cell == input ||
             operation is WriteCell && operation.cell == input)) {
           stackCells.remove(input);
@@ -160,26 +150,19 @@ final class FunctionRepresentation(
     }
     for (final block in function.blocks) {
       if (block.end case Return(value: final value?)) stackCells.remove(value);
-      switch (block.end) {
-        case Return(value: final value?) ||
-            Throw(exception: final value) ||
-            Yield(:final value) ||
-            Await(operand: final value):
-          addressOnly.remove(value);
-        default:
-          break;
-      }
       for (final edge in block.successors) {
         stackCells.removeAll(edge.arguments);
-        addressOnly.removeAll(edge.arguments);
+      }
+      for (final parameter in block.parameters) {
+        if (addressOnly.contains(parameter)) resultTypes[parameter] = .integer;
       }
     }
-    for (final parameter in function.entry.parameters) {
-      if (addressOnly.contains(parameter)) resultTypes[parameter] = .integer;
+    for (final operation in operations) {
+      if (addressOnly.contains(operation)) resultTypes[operation] = .integer;
     }
     if (function.bodyKind != .synchronous) stackCells.clear();
     Value pointerAddress(Value pointer, List<Value> into) {
-      if (!addressOnly.contains(pointer)) {
+      if (typeOf(pointer) != .integer) {
         return _load(layouts.pointers.address, pointer, into);
       }
       final address = PointerAddress(pointer);
@@ -323,25 +306,35 @@ final class FunctionRepresentation(
           _ => const <Jump>[],
         },
     };
+    bool needsConversion(Value value, ValueType type) =>
+        type == .integer &&
+            FfiTypes.isPointer(value.type) &&
+            typeOf(value) != .integer ||
+        needsBox(value, type);
+
     Jump edge(Jump jump) {
       if (!jump.arguments.indexed.any(
-        (item) => needsBox(item.$2, jump.target.parameters[item.$1].type),
+        (item) =>
+            needsConversion(item.$2, typeOf(jump.target.parameters[item.$1])),
       )) {
         return jump;
       }
       final inputs = [
         for (final (i, value) in jump.arguments.indexed)
           value is TestedValue &&
-                  needsBox(value, jump.target.parameters[i].type)
+                  needsBox(value, typeOf(jump.target.parameters[i]))
               ? value.test.operand
               : value,
       ];
       final block = Block(inputs.map((v) => v.type));
+      for (final (i, parameter) in block.parameters.indexed) {
+        resultTypes[parameter] = typeOf(inputs[i]);
+      }
       blocks.add(block);
       final body = instructions[block] = <Value>[];
       final arguments = [
         for (final (i, value) in block.parameters.indexed)
-          convert(value, jump.target.parameters[i].type, body),
+          convert(value, typeOf(jump.target.parameters[i]), body),
       ];
       if (unwindEdges.contains(jump)) {
         unwindConversions.addAll(body);
@@ -708,7 +701,7 @@ final class FunctionRepresentation(
             final call = DirectCall(target, [
               pointer is NativeSymbolAddress
                   ? pointer
-                  : _load(layouts.pointers.address, pointer, body),
+                  : pointerAddress(pointer, body),
               if (result != null)
                 _load(
                   layouts.native!.view(result.type as ClassType).address,
@@ -717,7 +710,7 @@ final class FunctionRepresentation(
                 ),
               for (final value in arguments)
                 if (FfiTypes.isPointer(value.type))
-                  _load(layouts.pointers.address, value, body)
+                  pointerAddress(value, body)
                 else if (value.type case ClassType(:final nativeType?)
                     when nativeType is NativeCompoundType)
                   _load(
@@ -737,7 +730,8 @@ final class FunctionRepresentation(
             ]) {
               body.add(KeepAlive(value));
             }
-            if (FfiTypes.isPointer(instruction.type)) {
+            if (FfiTypes.isPointer(instruction.type) &&
+                !addressOnly.contains(instruction)) {
               invocations[instruction] = heap.constructorFor(
                 layouts.pointers.initializer,
                 layouts,
@@ -756,11 +750,11 @@ final class FunctionRepresentation(
           final raw = NativeInvocation(
             pointer is NativeSymbolAddress
                 ? pointer
-                : _load(layouts.pointers.address, pointer, body),
+                : pointerAddress(pointer, body),
             [
               for (final value in arguments)
                 if (FfiTypes.isPointer(value.type))
-                  _load(layouts.pointers.address, value, body)
+                  pointerAddress(value, body)
                 else
                   value,
             ],
@@ -771,7 +765,8 @@ final class FunctionRepresentation(
           for (final owner in borrowedOwners.values) {
             body.add(KeepAlive(owner));
           }
-          if (FfiTypes.isPointer(instruction.type)) {
+          if (FfiTypes.isPointer(instruction.type) &&
+              !addressOnly.contains(instruction)) {
             invocations[instruction] = heap.constructorFor(
               layouts.pointers.initializer,
               layouts,
@@ -882,7 +877,7 @@ final class FunctionRepresentation(
                 FfiTypes.isPointer(operand.type)) {
           block = valueOperations.hashScalar(
             FfiTypes.isPointer(operand.type)
-                ? _load(layouts.pointers.address, operand, body)
+                ? pointerAddress(operand, body)
                 : operand,
             block,
           );
@@ -896,8 +891,8 @@ final class FunctionRepresentation(
             when FfiTypes.isPointer(left.type) &&
                 FfiTypes.isPointer(right.type)) {
           final equal = Equals(
-            _load(layouts.pointers.address, left, body),
-            _load(layouts.pointers.address, right, body),
+            pointerAddress(left, body),
+            pointerAddress(right, body),
             negated: negated,
           );
           body.addAll([equal, instruction]);
@@ -2034,6 +2029,12 @@ final class FunctionRepresentation(
             for (final parameter in check.parameters) _reify(parameter, body),
           ];
         }
+        if (instruction is TypeView && addressOnly.contains(instruction)) {
+          operands[instruction] = [pointerAddress(instruction.operand, body)];
+          aliases.add(instruction);
+          body.add(instruction);
+          continue;
+        }
         if (instruction
             case TypeView(:final operand, :final type) ||
                 UncheckedCast(:final operand, :final type)
@@ -2141,7 +2142,7 @@ final class FunctionRepresentation(
             value ?? const Constant.nullValue(),
             function.bodyKind != .synchronous
                 ? .object.nullable
-                : function.target.returnType,
+                : layouts.returnType(function.target),
             body,
           ),
         ),

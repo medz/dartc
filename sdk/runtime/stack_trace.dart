@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import '../../lib/layout/memory.dart';
 import '../../lib/runtime/contracts.dart';
 import 'memory.dart';
@@ -70,26 +72,33 @@ abstract interface class AsyncStack() {
 }
 
 int _closureMetadata(Function closure) {
-  final descriptor = Memory.read(Memory.addressOf(closure));
-  final references = Memory.read(
+  final descriptor = Pointer<Int64>.fromAddress(Memory.addressOf(closure))
+      .value;
+  final references = Pointer<Int64>.fromAddress(
     descriptor + ObjectDescriptor.referenceCount * 8,
-  );
-  return Memory.read(
+  ).value;
+  return Pointer<Int64>.fromAddress(
     descriptor + (ObjectDescriptor.asyncBase + references) * 8,
-  );
+  ).value;
 }
 
 /// Reads a compiler-described capture without evaluating a late initializer.
 Object? closureLink(Function closure) {
   final metadata = _closureMetadata(closure);
   if (metadata == 0) return null;
-  final link = Memory.read(metadata + ClosureTraceMetadata.link);
+  final link = Pointer<Int64>.fromAddress(metadata + ClosureTraceMetadata.link)
+      .value;
   if (link == 0) return null;
   final value = Memory.readReference(closure, link);
-  final offset = Memory.read(metadata + ClosureTraceMetadata.value);
+  final offset = Pointer<Int64>.fromAddress(
+    metadata + ClosureTraceMetadata.value,
+  ).value;
   if (value == null || offset == 0) return value;
-  final bound = Memory.read(metadata + ClosureTraceMetadata.bound);
-  if (bound != 0 && Memory.read(Memory.addressOf(value) + bound) == 0) {
+  final bound = Pointer<Int64>.fromAddress(
+    metadata + ClosureTraceMetadata.bound,
+  ).value;
+  if (bound != 0 &&
+      Pointer<Int64>.fromAddress(Memory.addressOf(value) + bound).value == 0) {
     return null;
   }
   return Memory.readReference(value, offset);
@@ -99,20 +108,22 @@ Object? closureLink(Function closure) {
 String? closureDescription(Function closure) {
   final metadata = _closureMetadata(closure);
   if (metadata == 0) return null;
-  final name = Memory.read(metadata + ClosureTraceMetadata.description);
+  final name = Pointer<Int64>.fromAddress(
+    metadata + ClosureTraceMetadata.description,
+  ).value;
   return name == 0 ? null : Memory.objectAt<String>(name);
 }
 
 int _traceOffset(Object error) {
-  final descriptor = Memory.read(
+  final descriptor = Pointer<Int64>.fromAddress(
     Memory.addressOf(error) + ObjectHeader.descriptorOffset,
-  );
-  final references = Memory.read(
+  ).value;
+  final references = Pointer<Int64>.fromAddress(
     descriptor + ObjectDescriptor.referenceCount * 8,
-  );
-  return Memory.read(
+  ).value;
+  return Pointer<Int64>.fromAddress(
     descriptor + (ObjectDescriptor.traceBase + references) * 8,
-  );
+  ).value;
 }
 
 /// Reads runtime trace storage without invoking an override of Error.stackTrace.

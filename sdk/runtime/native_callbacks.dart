@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'dart:typed_data';
 
 import '../../lib/runtime/contracts.dart';
@@ -45,8 +47,10 @@ final class _Callbacks() {
     final address = page.address + slot * NativeCallbackLayout.slotBytes;
     try {
       _entries[address] = _Registration(callback, page, slot);
-      Memory.write(address + NativeCallbackLayout.entry, entry);
-      Memory.write(address + NativeCallbackLayout.thread, thread);
+      Pointer<Int64>.fromAddress(address + NativeCallbackLayout.entry).value =
+          entry;
+      Pointer<Int64>.fromAddress(address + NativeCallbackLayout.thread).value =
+          thread;
       return address;
     } catch (_) {
       _entries.remove(address);

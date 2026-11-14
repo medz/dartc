@@ -17,6 +17,7 @@ void main() {
       (entry) => entry.value.symbol == 'clock_gettime',
     );
     expect(result.runtime.systemFunctions.containsKey(user.key), isFalse);
+    expect(result.runtime.nonAllocating, isNot(contains(user.key)));
     expect(result.runtime.systemFunctions[clock.key], SystemLibrary.c);
     expect(clock.value.isLeaf, isTrue);
   });

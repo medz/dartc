@@ -11,6 +11,11 @@ final class NativeImport(
 
   /// Whether the binding promises a short, nonblocking call without callbacks.
   final bool isLeaf = false,
+
+  /// An explicit promise that the native implementation neither allocates Dart
+  /// objects, throws Dart exceptions, nor reenters Dart, including indirectly.
+  /// This is independent of the scheduling promise made by [isLeaf].
+  final bool isNonAllocating = false,
 }) {
   this {
     if (symbol.isEmpty || symbol.contains('\u0000')) {

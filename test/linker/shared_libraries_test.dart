@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:dartc/linker.dart';
 import 'package:dartc/object.dart';
+import 'package:dartc/object/elf.dart';
+import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -82,21 +84,77 @@ void main() {
       );
 
       test(
-        '$target prefers included definitions and coalesces identical dependencies',
+        '$target keeps inferred libraries only for unresolved calls and addresses',
         () {
-          final inputs = modules.map(LinkInput.object).toList();
-          final first = linker.linkSharedLibrary([
-            ...inputs,
-            .sharedLibrary('provider'),
-          ], name: 'consumer');
-          expect(
-            linker.linkSharedLibrary([
-              ...inputs,
-              .sharedLibrary('provider', symbols: {name: 'not_used'}),
-              .sharedLibrary('provider', symbols: {name: 'not_used'}),
-            ], name: 'consumer'),
-            first,
+          final address = ObjectModule(
+            target,
+            [Section.data(Uint8List(8), alignment: 8)],
+            [],
+            imports: [name],
+            relocations: [const .address(0, 0, 0)],
           );
+          for (final consumer in [modules.first, address]) {
+            expect(
+              linker.linkSharedLibrary([
+                .object(consumer),
+                .sharedLibrary('unused', asNeeded: true),
+                .sharedLibrary(
+                  'provider',
+                  symbols: {name: 'actual'},
+                  asNeeded: true,
+                ),
+              ], name: 'consumer'),
+              linker.linkSharedLibrary([
+                .object(consumer),
+                .sharedLibrary('provider', symbols: {name: 'actual'}),
+              ], name: 'consumer'),
+            );
+          }
+        },
+      );
+
+      test(
+        '$target resolves objects and archives before retaining inferred libraries',
+        () {
+          final ObjectFormat format = os == .macos
+              ? MachO(target)
+              : Elf(target);
+          final archive = Archive.decode(
+            ArchiveWriter(format).encode([modules.last]),
+          );
+          for (final definition in <LinkInput>[
+            .object(modules.last),
+            .archive(archive),
+          ]) {
+            final inputs = <LinkInput>[.object(modules.first), definition];
+            final inferred = LinkInput.sharedLibrary(
+              'provider',
+              symbols: {name: 'not_used'},
+              asNeeded: true,
+            );
+            expect(
+              linker.linkSharedLibrary([
+                ...inputs,
+                inferred,
+                inferred,
+              ], name: 'consumer'),
+              linker.linkSharedLibrary(inputs, name: 'consumer'),
+            );
+            for (final requiredFirst in [false, true]) {
+              expect(
+                linker.linkSharedLibrary([
+                  ...inputs,
+                  if (requiredFirst) .sharedLibrary('provider'),
+                  inferred,
+                  if (!requiredFirst) .sharedLibrary('provider'),
+                ], name: 'consumer'),
+                linker.linkSharedLibrary([
+                  ...inputs,
+                  .sharedLibrary('provider'),
+                ], name: 'consumer'),
+              );
+            }
+          }
         },
       );
 

@@ -107,6 +107,7 @@ final class LinkUnit(
     }
 
     final archives = <Archive>[];
+    final requiredLibraries = <int>{};
     final imports = <String, (int, String)>{};
     for (final entry in input) {
       switch (entry) {
@@ -118,12 +119,13 @@ final class LinkUnit(
           } else {
             archives.add(archive);
           }
-        case SharedLibraryInput(:final name, :final symbols):
+        case SharedLibraryInput(:final name, :final symbols, :final asNeeded):
           var library = libraries.indexOf(name);
           if (library < 0) {
             library = libraries.length;
             libraries.add(name);
           }
+          if (!asNeeded) requiredLibraries.add(library);
           for (final entry in symbols.entries) {
             final binding = (library, entry.value);
             if (imports[entry.key] case final previous?
@@ -147,6 +149,7 @@ final class LinkUnit(
         library = libraries.length;
         libraries.add(libraryName);
       }
+      requiredLibraries.add(library);
       for (final service in finalizerServices.entries) {
         if (globals.containsKey(service.key)) {
           throw ArgumentError('Reserved loader service: ${service.key}');
@@ -159,6 +162,20 @@ final class LinkUnit(
     missing.removeAll(dynamicNames);
     if (missing.isNotEmpty) {
       throw ArgumentError('Undefined symbol: ${missing.first}');
+    }
+    requiredLibraries.addAll(dynamicNames.map((name) => imports[name]!.$1));
+    final ordinals = List.filled(libraries.length, -1);
+    var retained = 0;
+    for (var i = 0; i < libraries.length; i++) {
+      if (requiredLibraries.contains(i)) {
+        ordinals[i] = retained;
+        libraries[retained++] = libraries[i];
+      }
+    }
+    libraries.length = retained;
+    for (final name in dynamicNames) {
+      final (library, symbol) = imports[name]!;
+      imports[name] = (ordinals[library], symbol);
     }
     if (objects.isEmpty) {
       throw ArgumentError('Expected at least one included object.');

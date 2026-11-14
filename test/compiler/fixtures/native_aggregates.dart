@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:dartc/interop.dart';
 
+import '../../../sdk/runtime/memory.dart';
+
 final class Point extends Struct {
   @Double()
   external double x;
@@ -404,4 +406,13 @@ double readVariableRow(int count) {
     Struct.create<Arrays>().integers[0] = i;
   }
   return _variableRow![0];
+}
+
+@Export<Void Function(Pointer<Mixed>, Pointer<Mixed>)>()
+void copyNativeState(Pointer<Mixed> destination, Pointer<Mixed> source) {
+  Memory.copyBytes(
+    destination.cast<Uint8>(),
+    source.cast<Uint8>(),
+    sizeOf<Mixed>(),
+  );
 }

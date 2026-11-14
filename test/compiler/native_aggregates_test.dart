@@ -49,6 +49,11 @@ void main() {
     native.accumulate(second, -3.25);
     expect((first.ref.tag, first.ref.value), (50, 25.0));
     expect((second.ref.tag, second.ref.value), (1, -3.25));
+    native.copyNativeState(second, first);
+    expect((second.ref.tag, second.ref.value), (50, 25.0));
+    native.accumulate(first, -1.25);
+    expect((first.ref.tag, first.ref.value), (51, 23.75));
+    expect((second.ref.tag, second.ref.value), (50, 25.0));
   });
   test('packed fields, nested owners and booleans survive allocation', () {
     final packed = Struct.create<PackedValue>()

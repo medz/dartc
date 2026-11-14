@@ -20,6 +20,7 @@ void main() {
   HeapRuntime withCritical(
     FunctionTarget function, {
     IrFunction? processStatus,
+    Iterable<NativeReference> nativeContracts = const [],
   }) => HeapRuntime(
     processStatus == null
         ? heapRuntime.program
@@ -44,6 +45,10 @@ void main() {
     recordError: heapRuntime.recordError,
     primitives: heapRuntime.primitives,
     nonAllocating: [...heapRuntime.nonAllocating, function],
+    nonAllocatingNatives: [
+      ...heapRuntime.nonAllocatingNatives,
+      ...nativeContracts,
+    ],
   );
 
   IrFunction mainBody(bool managed) {
@@ -284,6 +289,63 @@ void main() {
     }
   });
 
+  test(
+    'ordinary pointer helpers cross branches and return in critical closures',
+    () {
+      final pointer = FfiTypes.int64Pointer;
+      final helper = FunctionTarget(uri, 'choosePointer', pointer, [
+        pointer,
+        pointer,
+        .boolean,
+      ]);
+      final begin = Block(helper.parameterTypes), done = Block([pointer]);
+      begin.finish(
+        Branch(
+          begin.parameters[2],
+          Jump(done, [begin.parameters[0]]),
+          Jump(done, [begin.parameters[1]]),
+        ),
+      );
+      done.finish(Return(done.parameters.single));
+      final critical = FunctionTarget(uri, 'criticalPointer', .integer, [
+        pointer,
+        .boolean,
+      ]);
+      final block = Block(critical.parameterTypes);
+      final offset = block.emit(
+        PointerOffset(block.parameters[0], const Constant.integer(1)),
+      );
+      final result = block.emit(
+        DirectCall(helper, [block.parameters[0], offset, block.parameters[1]]),
+      );
+      block.finish(
+        Return(
+          block.emit(
+            LoadNative(
+              block.emit(PointerAddress(result)),
+              NativeScalarType(Int64),
+            ),
+          ),
+        ),
+      );
+      final program = IrProgram([], [
+        IrFunction(helper, [begin, done]),
+        IrFunction(critical, [block]),
+      ]);
+      for (final runtime in [heapRuntime, withCritical(critical)]) {
+        final module = generator.generate(
+          program,
+          definitions: [critical, helper],
+          runtime: runtime,
+        );
+        expect(
+          module.symbols.any((s) => s.name == heapRuntime.allocate.name),
+          isFalse,
+        );
+      }
+    },
+  );
+
   test('critical calls reject transitive allocation and exceptions', () {
     for (final allocates in [true, false]) {
       final leaf = FunctionTarget(uri, 'leaf', .integer, [.integer]);
@@ -319,41 +381,144 @@ void main() {
   });
 
   test(
-    'critical calls reject foreign code even without managed allocation',
+    'foreign effects require an explicit contract independently of leaf calls',
     () {
       for (final managed in [false, true]) {
-        final foreign = FunctionTarget(uri, 'foreign', .integer, []);
-        final critical = FunctionTarget(uri, 'critical', .integer, []);
-        final block = Block();
-        block.finish(Return(block.emit(DirectCall(foreign, []))));
-        expect(
-          () => generator.generate(
-            IrProgram(
-              [],
-              [
-                mainBody(managed),
-                IrFunction(critical, [block]),
-              ],
-              externals: [IrExternal(foreign)],
-            ),
-            definitions: [entry, critical, foreign],
-            imports: {
-              foreign: NativeImport(
-                'foreign',
-                NativeSignature(Int64, []),
-                isLeaf: true,
+        for (final leaf in [false, true]) {
+          for (final permitted in [false, true]) {
+            final foreign = FunctionTarget(uri, 'foreign', .integer, []);
+            final critical = FunctionTarget(uri, 'critical', .integer, []);
+            final block = Block();
+            block.finish(Return(block.emit(DirectCall(foreign, []))));
+            Object generate() => generator.generate(
+              IrProgram(
+                [],
+                [
+                  mainBody(managed),
+                  IrFunction(critical, [block]),
+                ],
+                externals: [IrExternal(foreign)],
               ),
-            },
-            runtime: withCritical(critical),
-          ),
-          throwsA(
-            isA<UnsupportedError>().having(
-              (e) => e.message,
-              'contract',
-              contains('foreign'),
+              definitions: [entry, critical, foreign],
+              imports: {
+                foreign: NativeImport(
+                  'foreign',
+                  NativeSignature(Int64, []),
+                  isLeaf: leaf,
+                  isNonAllocating: permitted,
+                ),
+              },
+              runtime: withCritical(critical),
+            );
+            if (permitted) {
+              expect(generate, returnsNormally);
+            } else {
+              expect(
+                generate,
+                throwsA(
+                  isA<UnsupportedError>().having(
+                    (e) => e.message,
+                    'contract',
+                    contains('foreign'),
+                  ),
+                ),
+              );
+            }
+          }
+        }
+      }
+    },
+  );
+
+  test('native address calls retain their declaration effect contract', () {
+    for (final leaf in [false, true]) {
+      for (final permitted in [false, true]) {
+        final reference = NativeReference(
+          'test',
+          'native_effects',
+          NativeFunctionType(NativeSignature(Int64, [])),
+          isLeaf: leaf,
+        );
+        final critical = FunctionTarget(uri, 'nativeAddressCall', .integer, []);
+        final block = Block();
+        final address = block.emit(NativeSymbolAddress(reference));
+        block.finish(
+          Return(
+            block.emit(
+              NativeCall.symbol(address, FunctionType(.integer, []), []),
             ),
           ),
         );
+        Object generate() => generator.generate(
+          IrProgram([], [
+            IrFunction(critical, [block]),
+          ]),
+          definitions: [critical],
+          nativeSymbols: {reference: 'native_effects'},
+          runtime: withCritical(
+            critical,
+            nativeContracts: permitted ? [reference] : [],
+          ),
+        );
+        if (permitted) {
+          expect(generate, returnsNormally);
+        } else {
+          expect(
+            generate,
+            throwsA(
+              isA<UnsupportedError>().having(
+                (e) => e.message,
+                'contract',
+                contains('unknown effects'),
+              ),
+            ),
+          );
+        }
+      }
+    }
+  });
+
+  test(
+    'critical arithmetic keeps proven bounds and rejects possible errors',
+    () {
+      for (final bounded in [true, false]) {
+        final critical = FunctionTarget(uri, 'shift', .integer, [.integer]);
+        final block = Block(critical.parameterTypes);
+        final count = bounded
+            ? block.emit(
+                IntBinary(
+                  .bitAnd,
+                  block.parameters.single,
+                  const Constant.integer(63),
+                ),
+              )
+            : block.parameters.single;
+        block.finish(
+          Return(
+            block.emit(IntBinary(.shiftLeft, const Constant.integer(1), count)),
+          ),
+        );
+        Object generate() => generator.generate(
+          IrProgram([], [
+            IrFunction(critical, [block]),
+          ]),
+          definitions: [critical],
+          runtime: withCritical(critical),
+        );
+        if (bounded) {
+          expect(generate, returnsNormally);
+        } else {
+          expect(
+            generate,
+            throwsA(
+              isA<UnsupportedError>().having(
+                (e) => e.message,
+                'contract',
+                contains('must not allocate'),
+              ),
+            ),
+          );
+        }
       }
     },
   );

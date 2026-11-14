@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import 'checked_casts.dart';
 import 'function_representation.dart';
@@ -24,6 +25,7 @@ final class ProgramSelection(
   final GlobalStorage globals,
   final InstanceStorage instances, {
   SuspensionFunctions? suspensions,
+  final Map<FunctionTarget, NativeImport> imports = const {},
   final Map<NativeCallbackEntry, FunctionTarget> callbacks = const {},
 }) {
   final suspensions = suspensions ?? SuspensionFunctions(const []);
@@ -34,15 +36,15 @@ final class ProgramSelection(
   /// Source entries reached through generated code rather than checked call sites.
   final implicitCalls = <FunctionTarget>{};
 
-  /// Checks a runtime closure entered with raw native pointer arguments.
-  ///
-  /// Caller-side boxing, allocation, exceptions and foreign calls are rejected.
+  /// Checks the selected operations and transitive call effects of a closure.
   void checkNonAllocating(FunctionTarget entry) {
+    const forbidden = {Effect.allocates, Effect.mayThrow, Effect.callsUserCode};
+    bool invalid(Set<Effect> effects) => effects.any(forbidden.contains);
     for (final (i, type) in entry.parameterTypes.indexed) {
       if (FfiTypes.isPointer(type) &&
-          !layouts.pointerParameters.contains(entry, i)) {
+          !layouts.pointerRepresentation.contains(entry, i)) {
         throw UnsupportedError(
-          'Runtime pointer parameter requires a managed object: ${entry.name}',
+          'Critical pointer parameter requires a managed object: ${entry.name}',
         );
       }
     }
@@ -50,24 +52,55 @@ final class ProgramSelection(
     while (pending.isNotEmpty) {
       final (target, path) = pending.removeLast();
       if (!checked.add(target)) continue;
+      Never reject([Value? operation]) => throw UnsupportedError(
+        'Critical call must not allocate, throw or enter foreign code with unknown effects: '
+        '${[...path, target].map((t) => t.name).join(' -> ')} (${target.signature.dartName})'
+        '${operation == null ? '' : ': ${operation.runtimeType}'}',
+      );
       if (heap.runtime?.primitives[target] case final primitive?) {
-        if (primitive == .captureStackTrace) {
-          pending.add((heap.runtime!.captureStackTrace, [...path, target]));
-        }
+        if (invalid(primitive.effects)) reject();
+        continue;
+      }
+      if (imports[target] case final native?) {
+        if (!native.isNonAllocating) reject();
         continue;
       }
       final body = functions[target];
       if (body == null ||
           target == heap.allocate ||
           heap.allocates([target]) ||
-          body.ends.values.any((end) => end is Throw || end is Invoke) ||
-          body.instructions.values.any(
-            (values) => values.any((value) => value is NativeInvocation),
-          )) {
-        throw UnsupportedError(
-          'Runtime call must not allocate, throw or enter foreign code: '
-          '${[...path, target].map((t) => t.name).join(' -> ')} (${target.signature.dartName})',
-        );
+          body.ends.values.any((end) => end is Throw)) {
+        reject();
+      }
+      for (final operation in body.instructions.values.expand(
+        (values) => values,
+      )) {
+        if (body.aliases.contains(operation) ||
+            body.invocations.containsKey(operation)) {
+          continue;
+        }
+        if (operation is NativeInvocation) {
+          if (operation.address case NativeSymbolAddress(:final reference)
+              when heap.runtime?.nonAllocatingNatives.contains(reference) ==
+                  true) {
+            continue;
+          }
+          reject();
+        }
+        if (operation is NewCell && body.stackCells.contains(operation)) {
+          continue;
+        }
+        if (operation is TypeTest &&
+            switch (body.tests[operation]) {
+              .constantTrue || .constantFalse || .isNull || .isNotNull => true,
+              _ => false,
+            }) {
+          continue;
+        }
+        if (operation is Instruction &&
+            invalid(arithmetic.effectsOf(operation))) {
+          reject(operation);
+        }
       }
       pending.addAll(
         body.invocations.values.map((callee) => (callee, [...path, target])),

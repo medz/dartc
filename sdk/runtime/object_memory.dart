@@ -1,16 +1,20 @@
+import 'dart:ffi';
+
 import '../../lib/layout/memory.dart';
 import 'memory.dart';
 
 /// Interprets object storage shared by the compiler and collector.
 abstract final class ObjectMemory() {
-  static int size(Object object) =>
-      Memory.read(Memory.addressOf(object) + ObjectHeader.sizeOffset);
+  static int size(Object object) => Pointer<Int64>.fromAddress(
+    Memory.addressOf(object) + ObjectHeader.sizeOffset,
+  ).value;
 
   static Object? reference(int slot) =>
-      Memory.objectAt<Object?>(Memory.read(slot));
+      Memory.objectAt<Object?>(Pointer<Int64>.fromAddress(slot).value);
 
-  static void storeReference(int slot, Object? value) =>
-      Memory.write(slot, Memory.addressOf(value));
+  static void storeReference(int slot, Object? value) {
+    Pointer<Int64>.fromAddress(slot).value = Memory.addressOf(value);
+  }
 
   static void initialize(
     int address,
@@ -20,11 +24,14 @@ abstract final class ObjectMemory() {
     Object? page,
   ) {
     for (var offset = 0; offset < size; offset += ObjectHeader.alignment) {
-      Memory.write(address + offset, 0);
+      Pointer<Int64>.fromAddress(address + offset).value = 0;
     }
-    Memory.write(address + ObjectHeader.descriptorOffset, descriptor);
-    Memory.write(address + ObjectHeader.sizeOffset, size);
-    Memory.write(address + ObjectHeader.identityHashOffset, hash);
+    Pointer<Int64>.fromAddress(address + ObjectHeader.descriptorOffset).value =
+        descriptor;
+    Pointer<Int64>.fromAddress(address + ObjectHeader.sizeOffset).value = size;
+    Pointer<Int64>.fromAddress(address + ObjectHeader.identityHashOffset)
+            .value =
+        hash;
     storeReference(address + ObjectHeader.pageOffset, page);
   }
 }

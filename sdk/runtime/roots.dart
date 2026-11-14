@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import '../../lib/layout/memory.dart';
 import 'memory.dart';
 import 'object_memory.dart';
@@ -32,7 +34,9 @@ final class NativeRoots(
   void visit(ReferenceVisitor visitor) {
     if (!_stopped) Memory.fail();
     events.visitRoots(visitor);
-    final global = Memory.read(context + RuntimeContext.globalRoots);
+    final global = Pointer<Int64>.fromAddress(
+      context + RuntimeContext.globalRoots,
+    ).value;
     if (global != 0) {
       objects.visitStrong(Memory.objectAt<Object>(global), visitor);
     }

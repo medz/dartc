@@ -9,7 +9,7 @@ import 'calls.dart';
 import 'functions.dart';
 
 Map<String, List<LinkInput>> sharedLibraries(Target target) {
-  final caller = callModules(target).first;
+  final modules = callModules(target), caller = modules.first;
   final choice = target.nativeSymbol('dartc_shared_choice');
   final inputs = <LinkInput>[
     .object(caller),
@@ -35,6 +35,20 @@ Map<String, List<LinkInput>> sharedLibraries(Target target) {
       dependency(target, 'absent_library', {}),
       dependency(target, 'shared_second', {caller.imports.single: choice}),
     ],
+    'inferred_dependency': [
+      ...inputs,
+      dependency(target, 'absent_library', {}, asNeeded: true),
+      dependency(target, 'shared_second', {
+        caller.imports.single: choice,
+      }, asNeeded: true),
+    ],
+    'inferred_overridden': [
+      ...inputs,
+      .object(modules.last),
+      dependency(target, 'absent_library', {
+        caller.imports.single: choice,
+      }, asNeeded: true),
+    ],
     'missing_symbol': [
       ...inputs,
       dependency(target, 'shared_second', {
@@ -53,10 +67,12 @@ Map<String, List<LinkInput>> sharedLibraries(Target target) {
 SharedLibraryInput dependency(
   Target target,
   String name,
-  Map<String, String> symbols,
-) => SharedLibraryInput(
+  Map<String, String> symbols, {
+  bool asNeeded = false,
+}) => SharedLibraryInput(
   target.operatingSystem == .macos
       ? '@loader_path/$name.dylib'
       : '\$ORIGIN/$name.so',
   symbols: symbols,
+  asNeeded: asNeeded,
 );

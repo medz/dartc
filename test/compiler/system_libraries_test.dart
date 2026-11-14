@@ -20,6 +20,7 @@ void main() {
         for (final (fixture, extra) in [
           ('system_libraries.dart', true),
           ('system_library_unused.dart', false),
+          ('system_library_pruned.dart', false),
         ]) {
           final result = await compiler.compile([
             '/__dartc__/sdk/patches/fixtures/$fixture',
@@ -49,6 +50,13 @@ void main() {
               symbols[os == .macos ? system : 'libdl.so.2'],
               contains('${prefix}dlerror'),
             );
+          } else {
+            expect(
+              symbols.values.expand((symbols) => symbols),
+              isNot(
+                anyOf(contains('${prefix}sin'), contains('${prefix}dlerror')),
+              ),
+            );
           }
           expect(
             symbols.values.expand((symbols) => symbols),
@@ -62,7 +70,11 @@ void main() {
 
 final class _Sources(final SdkSources base) extends SdkSources {
   final _fixtures = {
-    for (final name in ['system_libraries.dart', 'system_library_unused.dart'])
+    for (final name in [
+      'system_libraries.dart',
+      'system_library_unused.dart',
+      'system_library_pruned.dart',
+    ])
       'sdk/patches/fixtures/$name': File('test/compiler/fixtures/$name')
           .readAsBytesSync(),
   };

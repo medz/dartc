@@ -1,6 +1,8 @@
 ## Unreleased
 
 - Add bounded direct-call inlining to `package:dartc/optimizer.dart`, preserving evaluation order and exception handlers while removing unused pure operations and constant branches. Rewritten programs require fresh call and preparation facts.
+- Omit inferred system libraries after their calls are removed or resolved by objects and archives. Explicit shared-library dependencies remain loaded by default; `LinkInput.sharedLibrary(asNeeded: true)` retains them only for unresolved imports.
+- Carry unobserved Pointer values through branches, loops and ordinary function parameters and returns without managed wrappers. Runtime word/byte access and copying now use the same `dart:ffi` operations as user code. Check critical closures using selected operation effects and explicit native contracts; `isLeaf` alone does not grant GC safety.
 
 - Move program reachability and call-type analysis to `package:dartc/optimizer.dart`. Call facts are read-only, tied to their input IR, and invalidated when supplemental facts change; rewritten programs are analyzed again from their roots.
 
