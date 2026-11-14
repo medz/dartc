@@ -1,6 +1,7 @@
 import 'package:dartc/frontend.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/program_flow.dart';
+import 'package:dartc/src/optimizer/flow_value.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -34,6 +35,37 @@ void main() {
     },
   );
 
+  test('recursive input widening still applies changes to this caller', () {
+    final entry = program.functions.singleWhere(
+      (f) => f.target.name == 'recursionEffect',
+    );
+    expect(source.recursionEffect(0), 3);
+    expect(source.recursionEffect(2), 9);
+    final facts = ProgramFlow(program, [
+      (target: entry.target, arguments: [FlowValue.unknown(.integer)]),
+    ]).facts;
+    expect(facts.returnedBy(entry.target).constant, isNull);
+    expect(
+      facts.returnedBy(entry.target).unknownTypes,
+      contains(ValueType.integer),
+    );
+  });
+
+  test('a nullable receiver keeps the null exception alternative', () {
+    expect(source.nullableDynamic(source.ReturnsSeven()), 7);
+    expect(() => source.nullableDynamic(null), throwsNoSuchMethodError);
+    final entry = program.functions.singleWhere(
+      (f) => f.target.name == 'nullableDynamic',
+    );
+    final facts = ProgramFlow(program, [
+      (
+        target: entry.target,
+        arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+      ),
+    ]).facts;
+    expect(facts.thrownBy(entry.target).exception.isBottom, isFalse);
+  });
+
   for (final example in <String, int Function()>{
     'rejectedCovariantCall': source.rejectedCovariantCall,
     'constructorValue': source.constructorValue,
@@ -41,6 +73,13 @@ void main() {
     'genericClosureValue': source.genericClosureValue,
     'genericConstructorValue': source.genericConstructorValue,
     'boundMethodValue': source.boundMethodValue,
+    'returnedClosures': source.returnedClosures,
+    'dynamicEffects': source.dynamicEffects,
+    'dynamicRejectedArgument': source.dynamicRejectedArgument,
+    'noSuchMethodEffects': source.noSuchMethodEffects,
+    'dynamicFunctionValue': source.dynamicFunctionValue,
+    'dynamicFunctionRejectsArgument': source.dynamicFunctionRejectsArgument,
+    'dynamicMethodValue': source.dynamicMethodValue,
   }.entries) {
     test(example.key, () {
       final entry = program.functions.singleWhere(

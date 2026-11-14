@@ -127,6 +127,180 @@ void main() {
     },
   );
 
+  test('repeated semantic inputs do not expand every call path', () {
+    final functions = <IrFunction>[];
+    var child = FunctionTarget(_uri, 'leaf', .integer, [.integer]);
+    final leaf = Block(child.parameterTypes);
+    leaf.finish(Return(leaf.parameters.single));
+    functions.add(IrFunction(child, [leaf]));
+    for (var depth = 0; depth < 12; depth++) {
+      final parent = FunctionTarget(_uri, 'level$depth', .integer, [.integer]);
+      final block = Block(parent.parameterTypes);
+      final left = block.emit(DirectCall(child, [block.parameters.single]));
+      final right = block.emit(DirectCall(child, [block.parameters.single]));
+      block.finish(Return(block.emit(IntBinary(.add, left, right))));
+      functions.add(IrFunction(parent, [block]));
+      child = parent;
+    }
+    final program = IrProgram([], functions);
+    final facts = _flow(program, functions.last, [
+      FlowValue.unknown(.integer),
+    ]).facts;
+    expect(IrInterpreter(program, {}).run(functions.last, [3]), 3 * 4096);
+    for (final function in functions) {
+      expect(facts.activationsOf(function.target), hasLength(1));
+    }
+  });
+
+  test('a shared summary substitutes each callers own SSA argument', () {
+    final identity = FunctionTarget(_uri, 'identity', .integer, [.integer]);
+    final body = Block(identity.parameterTypes);
+    body.finish(Return(body.parameters.single));
+    final target = FunctionTarget(_uri, 'main', .integer, [.integer, .integer]);
+    final entry = Block(target.parameterTypes);
+    final first = entry.emit(DirectCall(identity, [entry.parameters.first]));
+    final second = entry.emit(DirectCall(identity, [entry.parameters.last]));
+    entry.finish(Return(entry.emit(IntBinary(.subtract, first, second))));
+    final main = IrFunction(target, [entry]);
+    final program = IrProgram([], [
+      main,
+      IrFunction(identity, [body]),
+    ]);
+    final facts = _flow(program, main, [
+      FlowValue.unknown(.integer),
+      FlowValue.unknown(.integer),
+    ]).facts;
+    expect(IrInterpreter(program, {}).run(main, [11, 4]), 7);
+    expect(facts.activationsOf(identity), hasLength(1));
+    expect(facts.equivalentsOf(first), contains(entry.parameters.first));
+    expect(facts.equivalentsOf(first), isNot(contains(entry.parameters.last)));
+    expect(facts.equivalentsOf(second), contains(entry.parameters.last));
+    expect(
+      facts.equivalentsOf(second),
+      isNot(contains(entry.parameters.first)),
+    );
+  });
+
+  test('summary reuse returns distinct fresh objects and preserves private caller storage', () {
+    final box = ClassType(_uri, 'Box');
+    final field = InstanceField(box, 'value', .integer);
+    final initializer = FunctionTarget(
+      _uri,
+      '',
+      .voidType,
+      [],
+      owner: box,
+      kind: .initializer,
+    );
+    final init = Block(initializer.parameterTypes);
+    init.emit(
+      StoreField(field, init.parameters.single, const Constant.integer(0)),
+    );
+    init.finish(const Return());
+    final factory = FunctionTarget(_uri, 'makeBox', box, []);
+    final make = Block();
+    make.finish(Return(make.emit(Construct(initializer, []))));
+    final entry = Block();
+    final first = entry.emit(DirectCall(factory, []));
+    final second = entry.emit(DirectCall(factory, []));
+    entry.emit(StoreField(field, first, const Constant.integer(7)));
+    final read = entry.emit(LoadField(field, second));
+    entry.finish(Return(read));
+    final main = IrFunction(FunctionTarget(_uri, 'main', .integer, []), [
+      entry,
+    ]);
+    final program = IrProgram(
+      [
+        IrClass(box, [field], constructors: [initializer]),
+      ],
+      [
+        main,
+        IrFunction(factory, [make]),
+        IrFunction(initializer, [init]),
+      ],
+    );
+    final facts = _flow(program, main).facts;
+    expect(IrInterpreter(program, {}).run(main, []), 0);
+    expect(facts.activationsOf(factory), hasLength(1));
+    expect(
+      facts.valueOf(first).objects.single,
+      isNot(facts.valueOf(second).objects.single),
+    );
+    expect(
+      facts.valueOf(read).constant?.structuralKey,
+      const Constant.integer(0).structuralKey,
+    );
+  });
+
+  test(
+    'implicit member calls propagate actual arguments and storage effects',
+    () {
+      final collection = ClassType(
+        _uri,
+        'ObservedList',
+        interfaces: [CoreTypes.listOf(.integer)],
+      );
+      final length = FunctionTarget(
+        _uri,
+        'length',
+        .integer,
+        [],
+        owner: collection,
+        kind: .getter,
+      );
+      final initializer = FunctionTarget(
+        _uri,
+        '',
+        .voidType,
+        [],
+        owner: collection,
+        kind: .initializer,
+      );
+      final global = GlobalVariable(_uri, 'observed', .integer, isLate: true);
+      final getter = Block(length.parameterTypes);
+      getter.emit(StoreGlobal(global, const Constant.integer(9)));
+      getter.finish(const Return(Constant.integer(2)));
+      final entry = Block();
+      entry.emit(StoreGlobal(global, const Constant.integer(3)));
+      final object = entry.emit(Construct(initializer, []));
+      final measured = entry.emit(CollectionLength(object));
+      final observed = entry.emit(LoadGlobal(global));
+      entry.finish(Return(entry.emit(IntBinary(.add, measured, observed))));
+      final main = IrFunction(FunctionTarget(_uri, 'main', .integer, []), [
+        entry,
+      ]);
+      final program = IrProgram(
+        [
+          IrClass(
+            collection,
+            [],
+            constructors: [initializer],
+            members: [length],
+          ),
+        ],
+        [
+          main,
+          IrFunction(initializer, [
+            Block(initializer.parameterTypes)..finish(const Return()),
+          ]),
+          IrFunction(length, [getter]),
+        ],
+        globals: [global],
+      );
+      final facts = _flow(program, main).facts;
+      expect(
+        facts.valueOf(observed).constant?.structuralKey,
+        const Constant.integer(9).structuralKey,
+      );
+      expect(
+        facts.returnedBy(main.target).constant?.structuralKey,
+        const Constant.integer(11).structuralKey,
+      );
+      expect(facts.targetsOf(measured), {length});
+      expect(facts.effectsOf(measured), contains(Effect.writesStorage));
+    },
+  );
+
   test('a closure reads the same captured cell after its overwrite', () {
     final mainTarget = FunctionTarget(_uri, 'main', .integer, []);
     final cellType = CellType(.integer);

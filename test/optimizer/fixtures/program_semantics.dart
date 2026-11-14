@@ -64,3 +64,96 @@ int boundMethodValue() {
   update(7);
   return box.value;
 }
+
+int Function() makeCounter(int initial) {
+  var value = initial;
+  return () => ++value;
+}
+
+int returnedClosures() {
+  final first = makeCounter(3);
+  final second = makeCounter(3);
+  return first() * 100 + second();
+}
+
+int recursiveValue(int n) {
+  if (n == 0) return observed;
+  observed = 9;
+  return recursiveValue(n - 1);
+}
+
+int recursionEffect(int n) {
+  observed = 3;
+  recursiveValue(n);
+  return observed;
+}
+
+int dynamicEffects() {
+  observed = 3;
+  dynamic box = Box<int>(1);
+  box.update(7);
+  return observed;
+}
+
+int dynamicRejectedArgument() {
+  observed = 3;
+  dynamic box = Box<int>(1);
+  try {
+    box.update('wrong');
+  } catch (_) {
+    return observed;
+  }
+  return -1;
+}
+
+class Missing {
+  @override
+  dynamic noSuchMethod(Invocation invocation) {
+    observed = 41;
+    return 7;
+  }
+}
+
+int noSuchMethodEffects() {
+  observed = 3;
+  dynamic value = Missing();
+  final int answer = value.absent();
+  return observed + answer;
+}
+
+int addAndObserve(int value) {
+  observed = value;
+  return value + 1;
+}
+
+int dynamicFunctionValue() {
+  observed = 3;
+  dynamic function = addAndObserve;
+  final int value = function(7);
+  return observed + value;
+}
+
+int dynamicFunctionRejectsArgument() {
+  observed = 3;
+  dynamic function = addAndObserve;
+  try {
+    function('wrong');
+  } catch (_) {
+    return observed;
+  }
+  return -1;
+}
+
+int dynamicMethodValue() {
+  observed = 3;
+  dynamic box = Box<int>(1);
+  dynamic update = box.update;
+  update(7);
+  return observed;
+}
+
+class ReturnsSeven {
+  int answer() => 7;
+}
+
+int nullableDynamic(ReturnsSeven? value) => (value as dynamic).answer();
