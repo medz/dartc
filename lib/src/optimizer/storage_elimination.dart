@@ -123,9 +123,9 @@ final class const ProgramStorageElimination() extends ProgramPass {
               break;
           }
         }
-        // Exceptional payloads and suspended protocols can expose their objects.
+        // Uncaught payloads and suspended protocols can expose their objects.
         final boundary = switch (block.end) {
-          Throw(:final exception) => exception,
+          Throw(:final exception, onThrow: null) => exception,
           Await(:final operand) => operand,
           Yield(:final value) => value,
           YieldStream(:final stream) => stream,
