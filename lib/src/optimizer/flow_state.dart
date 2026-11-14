@@ -811,6 +811,45 @@ final class FlowState {
             definition.ephemerons.containsValue(field));
   }
 
+  /// Contents already bound on every path, without performing the read.
+  ///
+  /// Lazy, weak and unknown-receiver reads have no unconditional stored value.
+  FlowValue? boundValueOf(Instruction read, List<FlowValue> operands) {
+    if (operands.length != read.inputs.length) {
+      throw ArgumentError('Storage operands must match the read instruction.');
+    }
+    if (read case LoadGlobal(:final global)) {
+      _requireGlobal(global);
+      final slot = _globals[global] ?? _initial(global);
+      return slot.unbound ? null : slot.value;
+    }
+    final Object key;
+    switch (read) {
+      case LoadField(:final field):
+        if (_weak(field)) return null;
+        key = field;
+      case ReadCell():
+        key = _cell;
+      default:
+        throw ArgumentError('Expected a field, cell or global read.');
+    }
+    final receiver = operands.single;
+    if (receiver.isBottom || receiver.unknownTypes.isNotEmpty) return null;
+    var value = const FlowValue.bottom();
+    for (final object in receiver.objects) {
+      final slot = _objects[object]?.slots[key];
+      if (slot == null || slot.unbound) return null;
+      value = value.join(slot.value);
+    }
+    for (final constant in receiver.constants) {
+      if (constant is! ObjectConstant || !constant.fields.containsKey(key)) {
+        return null;
+      }
+      value = value.join(.constant(constant.fields[key]!));
+    }
+    return value;
+  }
+
   /// Bound field contents, without running an unbound initializer.
   FlowValue storedValue(FlowObject object, InstanceField field) =>
       _objects[object]?.slots[field]?.value ??

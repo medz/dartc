@@ -434,6 +434,12 @@ void main() {
         StoreField(field, create, _one),
         operands: [allocated.value, .constant(_one)],
       );
+      expect(
+        written.normal!.boundValueOf(LoadField(field, create), [
+          allocated.value,
+        ]),
+        isNull,
+      );
       final read = _step(
         written.normal!,
         LoadField(field, create),
@@ -741,6 +747,38 @@ void main() {
       _one.structuralKey,
     );
   });
+
+  test(
+    'bound reads distinguish available values from lazy and opaque storage',
+    () {
+      final global = GlobalVariable(_uri, 'pending', .integer, isLate: true);
+      final state = FlowState(IrProgram([], [], globals: [global]));
+      final cell = NewCell(
+        CellType(ValueType.object.nullable),
+        const Constant.nullValue(),
+      );
+      final allocated = _step(state, cell);
+      final read = ReadCell(cell);
+      expect(
+        allocated.normal!
+            .boundValueOf(read, [allocated.value])!
+            .constant
+            ?.structuralKey,
+        const Constant.nullValue().structuralKey,
+      );
+      expect(allocated.normal!.boundValueOf(LoadGlobal(global), []), isNull);
+      expect(
+        allocated.normal!.boundValueOf(read, [FlowValue.unknown(cell.type)]),
+        isNull,
+      );
+      final bound = _step(allocated.normal!, StoreGlobal(global, _one)).normal!;
+      expect(
+        bound.boundValueOf(LoadGlobal(global), [])!.constant?.structuralKey,
+        _one.structuralKey,
+      );
+      expect(() => bound.boundValueOf(read, []), throwsArgumentError);
+    },
+  );
 
   test('storage snapshots reject a different semantic graph', () {
     expect(
