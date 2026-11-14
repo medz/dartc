@@ -43,7 +43,6 @@ export 'src/ir/block.dart'
         Unreachable;
 export 'src/ir/function.dart' show IrCallable, IrExternal, IrFunction;
 export 'src/ir/program.dart' show IrClass, IrProgram;
-export 'src/ir/call_type_flow.dart' show CallTypeFlow;
 export 'src/ir/ffi_types.dart' show FfiTypes;
 export 'src/ir/signature.dart'
     show

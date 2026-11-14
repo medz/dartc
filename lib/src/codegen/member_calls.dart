@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 
 import 'record_storage.dart';
 import 'type_values.dart';
@@ -9,8 +10,25 @@ final class MemberCalls(
   final Set<FunctionTarget> definitions, {
   Iterable<ClassType> instantiatedTypes = const [],
   final RecordStorage? records,
-  final CallTypeFlow? callTypes,
+  final CallTypeFacts? callTypes,
 }) {
+  this {
+    if (callTypes case final facts?) {
+      final source = facts.program;
+      facts.checkProgram(source);
+      // Preparation may append helpers, but cannot replace analyzed definitions.
+      if (!identical(source, program) &&
+          (!program.classes.toSet().containsAll(source.classes) ||
+              !program.globals.toSet().containsAll(source.globals) ||
+              [...source.functions, ...source.externals].any(
+                (body) =>
+                    !identical(program.implementationOf(body.target), body),
+              ))) {
+        throw ArgumentError('Member selection requires unchanged source IR.');
+      }
+    }
+  }
+
   final _instances = {
     ...instantiatedTypes,
     for (final target in definitions)

@@ -8,6 +8,7 @@ void main() {
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
       'ir': {'interop'},
+      'optimizer': {'ir'},
       'target': {},
       'layout': {},
       'sdk': {},
@@ -18,6 +19,7 @@ void main() {
       'object': {'target', 'assembler'},
       'interop': {},
       'codegen': {
+        'optimizer',
         'runtime',
         'abi',
         'assembler',
@@ -29,6 +31,7 @@ void main() {
       },
       'linker': {'object', 'assembler', 'target'},
       'compiler': {
+        'optimizer',
         'abi',
         'runtime',
         'sdk',

@@ -6,6 +6,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/runtime/contracts.dart' show NativeCallbackLayout;
@@ -76,8 +77,10 @@ base class ScalarCodeGenerator<R extends Object>(
         'Expected distinct exports and imports in definitions.',
       );
     }
-    for (final missing
-        in program.reachableFrom(selected).difference(selected)) {
+    for (final missing in reachableDefinitions(
+      program,
+      selected,
+    ).difference(selected)) {
       throw ArgumentError(
         'Missing ${missing.kind.isVirtual ? 'member' : 'call'} definition: ${missing.name}',
       );
@@ -149,7 +152,7 @@ base class ScalarCodeGenerator<R extends Object>(
     late final ProgramSelection resolved;
     while (true) {
       program = sourceProgram;
-      final sourceDefinitions = sourceFlow.definitions;
+      final sourceDefinitions = sourceFlow.facts.definitions;
       selected
         ..clear()
         ..addAll(sourceDefinitions);
@@ -230,11 +233,7 @@ base class ScalarCodeGenerator<R extends Object>(
       if (helpers.isNotEmpty || constantLists) {
         final expanded = IrProgram(
           [
-            for (final declaration in sourceProgram.classes)
-              if (declaration.type == ValueType.string)
-                strings.declaration
-              else
-                declaration,
+            ...sourceProgram.classes,
             if (!globals.isEmpty) globals.declaration,
             for (final declaration in arithmetic.classes)
               if (!sourceProgram.classes.any((c) => c.type == declaration.type))
@@ -253,20 +252,21 @@ base class ScalarCodeGenerator<R extends Object>(
           if (!globals.isEmpty) globals.address,
         ]);
       }
-      final sourceCount = sourceDefinitions.length;
       sourceFlow.extend(
         instantiatedTypes: [
           ...instantiatedTypes,
           for (final function in helpers) ...function.instantiatedClasses,
         ],
       );
-      if (sourceDefinitions.length != sourceCount) continue;
+      if (!sourceDefinitions.containsAll(sourceFlow.facts.definitions)) {
+        continue;
+      }
       final members = MemberCalls(
         program,
         selected,
         records: records,
         instantiatedTypes: instantiatedTypes,
-        callTypes: sourceFlow,
+        callTypes: sourceFlow.facts,
       );
       final suspensions = SuspensionFunctions(
         selected.map(program.implementationOf).whereType<IrFunction>(),

@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -47,7 +48,7 @@ void main() {
         );
         expect(body.recordTypes, {shape});
         expect(shape.mayHaveInstance(carrier), isTrue);
-        expect(program.reachableFrom([body.target]), contains(getter));
+        expect(reachableDefinitions(program, [body.target]), contains(getter));
       }
       expect(
         () => IrClass(carrier, [], recordStorage: true),

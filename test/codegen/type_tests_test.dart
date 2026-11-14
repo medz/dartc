@@ -2,6 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -67,7 +68,7 @@ void main() {
             IrFunction(root, [entry]),
           ],
         );
-        final definitions = program.reachableFrom([root]);
+        final definitions = reachableDefinitions(program, [root]);
         expect(definitions, {root, target, if (!direct) getter});
         expect(
           generator
@@ -136,7 +137,7 @@ void main() {
         () => generator.generate(
           program,
           runtime: heapRuntime,
-          definitions: program.reachableFrom([target]),
+          definitions: reachableDefinitions(program, [target]),
         ),
         throwsA(
           isA<ArgumentError>().having(

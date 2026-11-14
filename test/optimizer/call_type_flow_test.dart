@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 final _uri = Uri.parse('memory:call-types');
@@ -38,12 +39,15 @@ void main() {
       root,
     ]);
     final flow = CallTypeFlow(program, [root.target]);
-    expect(flow.definitions, containsAll(model.members.take(2)));
-    expect(flow.definitions, isNot(contains(model.members.last)));
-    expect(flow.allows(returned, model.types[0]), isTrue);
-    expect(flow.allows(returned, model.types[1]), isTrue);
-    expect(flow.allows(returned, model.types[2]), isFalse);
-    expect(program.reachableFrom([root.target]), contains(model.members.last));
+    expect(flow.facts.definitions, containsAll(model.members.take(2)));
+    expect(flow.facts.definitions, isNot(contains(model.members.last)));
+    expect(flow.facts.allows(returned, model.types[0]), isTrue);
+    expect(flow.facts.allows(returned, model.types[1]), isTrue);
+    expect(flow.facts.allows(returned, model.types[2]), isFalse);
+    expect(
+      reachableDefinitions(program, [root.target]),
+      contains(model.members.last),
+    );
   });
 
   test('new virtual targets propagate returns across unordered blocks', () {
@@ -82,11 +86,11 @@ void main() {
       ],
     );
     final flow = CallTypeFlow(program, [produce], instantiatedTypes: [holder]);
-    expect(flow.definitions, {produce});
+    expect(flow.facts.definitions, {produce});
     expect(flow.extend(unknownCalls: [root]), isTrue);
-    expect(flow.definitions, {produce, root, model.members.first});
-    expect(flow.allows(returned, model.types.first), isTrue);
-    expect(flow.allows(returned, model.types.last), isFalse);
+    expect(flow.facts.definitions, {produce, root, model.members.first});
+    expect(flow.facts.allows(returned, model.types.first), isTrue);
+    expect(flow.facts.allows(returned, model.types.last), isFalse);
     expect(flow.extend(unknownCalls: [root]), isFalse);
   });
 
@@ -149,8 +153,8 @@ void main() {
     final flow = CallTypeFlow(program, [
       root.target,
     ], instantiatedTypes: model.types);
-    expect(flow.definitions, containsAll(model.members.take(2)));
-    expect(flow.definitions, isNot(contains(model.members.last)));
+    expect(flow.facts.definitions, containsAll(model.members.take(2)));
+    expect(flow.facts.definitions, isNot(contains(model.members.last)));
   });
 
   test('unknown callers widen existing functions and add new entry points', () {
@@ -171,7 +175,7 @@ void main() {
     final narrow = CallTypeFlow(program, [
       root.target,
     ], instantiatedTypes: model.types);
-    expect(narrow.definitions.intersection(model.members.toSet()), {
+    expect(narrow.facts.definitions.intersection(model.members.toSet()), {
       model.members.first,
     });
     for (final roots in [
@@ -184,8 +188,8 @@ void main() {
         instantiatedTypes: model.types,
         unknownCalls: [reader.target],
       );
-      expect(flow.definitions, contains(reader.target));
-      expect(flow.definitions, containsAll(model.members));
+      expect(flow.facts.definitions, contains(reader.target));
+      expect(flow.facts.definitions, containsAll(model.members));
     }
   });
 
@@ -213,10 +217,11 @@ void main() {
       root,
     ]);
     final flow = CallTypeFlow(program, [root.target]);
-    final view = flow.definitions;
-    expect(view.intersection(model.members.toSet()), {model.members.first});
-    expect(flow.allows(value, model.types.last), isFalse);
-    expect(() => view.add(late), throwsUnsupportedError);
+    var result = flow.facts;
+    final initial = result.definitions;
+    expect(initial.intersection(model.members.toSet()), {model.members.first});
+    expect(flow.facts.allows(value, model.types.last), isFalse);
+    expect(() => initial.add(late), throwsUnsupportedError);
     expect(flow.extend(unknownCalls: [model.members.first]), isFalse);
     final entries = <FunctionTarget>[], instances = <ClassType>[];
     for (final (calls, types) in [
@@ -237,15 +242,21 @@ void main() {
         unknownCalls: entries,
         instantiatedTypes: instances,
       );
-      expect(view, fresh.definitions);
-      expect(flow.definitions, same(view));
+      expect(() => result.definitions, throwsStateError);
+      expect(() => result.allows(value, model.types.first), throwsStateError);
+      result = flow.facts;
+      expect(result.definitions, fresh.facts.definitions);
+      expect(initial, {root.target, identity, model.members.first});
       for (final receiver in [
         value,
         identityBody.entry.parameters.single,
         forwarding.parameters.single,
       ]) {
         for (final type in model.types) {
-          expect(flow.allows(receiver, type), fresh.allows(receiver, type));
+          expect(
+            flow.facts.allows(receiver, type),
+            fresh.facts.allows(receiver, type),
+          );
         }
       }
       expect(
@@ -253,12 +264,62 @@ void main() {
         isFalse,
       );
     }
-    expect(view, containsAll([late, ...model.members]));
+    expect(result.definitions, containsAll([late, ...model.members]));
     expect(flow.extend(), isFalse);
+    expect(flow.facts, same(result));
     final dormant = CallTypeFlow(program, []);
     expect(dormant.extend(instantiatedTypes: [model.types.first]), isTrue);
-    expect(dormant.definitions, isEmpty);
+    expect(dormant.facts.definitions, isEmpty);
     expect(dormant.extend(instantiatedTypes: [model.types.first]), isFalse);
+  });
+
+  test('rewritten programs replace call facts and remove old dependencies', () {
+    final model = _dispatch();
+    final identity = FunctionTarget(_uri, 'identity', model.face, [model.face]);
+    final identityBody = _identity(identity);
+    final root = FunctionTarget(_uri, 'main', .integer, []);
+    (IrProgram, Value?) rewrite(ClassType? type) {
+      final entry = Block();
+      Value? receiver;
+      if (type == null) {
+        entry.finish(const Return(Constant.integer(7)));
+      } else {
+        receiver = entry.emit(DirectCall(identity, [ObjectConstant(type, {})]));
+        entry.finish(
+          Return(entry.emit(InstanceCall(model.member, receiver, []))),
+        );
+      }
+      return (
+        IrProgram(model.classes, [
+          ...model.bodies,
+          identityBody,
+          IrFunction(root, [entry]),
+        ]),
+        receiver,
+      );
+    }
+
+    final (before, first) = rewrite(model.types.first);
+    final original = CallTypeFlow(before, [root]).facts;
+    expect(original.definitions, {root, identity, model.members.first});
+    expect(original.allows(first!, model.types.first), isTrue);
+    expect(original.allows(first, model.types[1]), isFalse);
+    final (after, second) = rewrite(model.types[1]);
+    expect(after.functions.length, before.functions.length);
+    expect(() => original.checkProgram(after), throwsArgumentError);
+    final replaced = CallTypeFlow(after, [root]).facts;
+    expect(replaced.definitions.length, original.definitions.length);
+    expect(replaced.definitions, {root, identity, model.members[1]});
+    expect(replaced.allows(second!, model.types.first), isFalse);
+    expect(replaced.allows(second, model.types[1]), isTrue);
+    expect(reachableDefinitions(after, [root]), replaced.definitions);
+
+    final (removed, _) = rewrite(null);
+    expect(removed.functions.length, before.functions.length);
+    expect(() => replaced.checkProgram(removed), throwsArgumentError);
+    expect(CallTypeFlow(removed, [root]).facts.definitions, {root});
+    expect(reachableDefinitions(removed, [root]), {root});
+    expect(original.definitions, {root, identity, model.members.first});
   });
 
   test('unrelated selectors do not widen dynamic calls', () {
@@ -300,11 +361,11 @@ void main() {
       [root],
       instantiatedTypes: [model.types.first],
     );
-    final selected = flow.definitions.toSet();
+    final selected = flow.facts.definitions.toSet();
     expect(selected, {root, model.members.first});
-    expect(flow.allows(entry.parameters.single, other), isTrue);
+    expect(flow.facts.allows(entry.parameters.single, other), isTrue);
     expect(flow.extend(instantiatedTypes: [other]), isTrue);
-    expect(flow.definitions, selected);
+    expect(flow.facts.definitions, selected);
     expect(flow.extend(instantiatedTypes: [other]), isFalse);
   });
 
@@ -331,16 +392,16 @@ void main() {
         root,
       ]);
       final flow = CallTypeFlow(program, [root.target]);
-      expect(flow.definitions.intersection(model.members.toSet()), {
+      expect(flow.facts.definitions.intersection(model.members.toSet()), {
         model.members.first,
       });
-      expect(flow.allows(receiver, model.types[1]), isFalse);
+      expect(flow.facts.allows(receiver, model.types[1]), isFalse);
       expect(flow.extend(instantiatedTypes: [model.types[1]]), isTrue);
-      expect(flow.definitions.intersection(model.members.toSet()), {
+      expect(flow.facts.definitions.intersection(model.members.toSet()), {
         model.members.first,
         if (bound) model.members[1],
       });
-      expect(flow.allows(receiver, model.types[1]), isFalse);
+      expect(flow.facts.allows(receiver, model.types[1]), isFalse);
     }
   });
 
@@ -377,7 +438,7 @@ void main() {
         root.target,
       ], instantiatedTypes: model.types);
       expect(
-        narrow.definitions.intersection(model.members.toSet()),
+        narrow.facts.definitions.intersection(model.members.toSet()),
         model.members.take(2).toSet(),
       );
       final open = CallTypeFlow(
@@ -386,7 +447,7 @@ void main() {
         instantiatedTypes: model.types,
         unknownCalls: [identity],
       );
-      expect(open.definitions, containsAll(model.members));
+      expect(open.facts.definitions, containsAll(model.members));
     },
   );
 
@@ -408,9 +469,9 @@ void main() {
       [root.target],
     );
     final value = body.entry.parameters.single;
-    expect(flow.allows(value, ValueType.nullClass), isTrue);
-    expect(flow.allows(value, model.types.first), isTrue);
-    expect(flow.allows(value, model.types.last), isFalse);
+    expect(flow.facts.allows(value, ValueType.nullClass), isTrue);
+    expect(flow.facts.allows(value, model.types.first), isTrue);
+    expect(flow.facts.allows(value, model.types.last), isFalse);
   });
 
   test('a later escaping function widens prior parameters and returns', () {
@@ -439,9 +500,9 @@ void main() {
     final flow = CallTypeFlow(program, [
       root.target,
     ], instantiatedTypes: model.types);
-    expect(flow.definitions, containsAll(model.members));
+    expect(flow.facts.definitions, containsAll(model.members));
     for (final type in model.types) {
-      expect(flow.allows(value, type), isTrue);
+      expect(flow.facts.allows(value, type), isTrue);
     }
   });
 
@@ -481,10 +542,10 @@ void main() {
     ]);
     final flow = CallTypeFlow(program, [root], instantiatedTypes: model.types);
     expect(
-      flow.definitions,
+      flow.facts.definitions,
       containsAll([closure, reader.target, ...model.members]),
     );
-    expect(flow.allows(captured.parameters[1], model.types.last), isTrue);
+    expect(flow.facts.allows(captured.parameters[1], model.types.last), isTrue);
   });
 
   test('native callback entries seed unknown parameter values', () {
@@ -502,9 +563,9 @@ void main() {
       entry,
     ]);
     final flow = CallTypeFlow(IrProgram([], [body, root]), [root.target]);
-    expect(flow.definitions, contains(target));
+    expect(flow.facts.definitions, contains(target));
     expect(
-      flow.allows(body.entry.parameters.single, ValueType.integer),
+      flow.facts.allows(body.entry.parameters.single, ValueType.integer),
       isTrue,
     );
   });
@@ -545,7 +606,7 @@ void main() {
     final flow = CallTypeFlow(program, [
       root.target,
     ], instantiatedTypes: model.types);
-    expect(flow.definitions, containsAll([source, ...model.members]));
+    expect(flow.facts.definitions, containsAll([source, ...model.members]));
     expect(root.entry.end, same(entry.end));
     expect(caught.instructions.first, same(cast));
   });
@@ -589,7 +650,7 @@ void main() {
     final flow = CallTypeFlow(program, [
       root.target,
     ], instantiatedTypes: model.types);
-    expect(flow.definitions.intersection(model.members.toSet()), {
+    expect(flow.facts.definitions.intersection(model.members.toSet()), {
       model.members[1],
     });
   });
@@ -626,7 +687,7 @@ void main() {
       final flow = CallTypeFlow(program, [
         root.target,
       ], instantiatedTypes: model.types);
-      expect(flow.definitions, containsAll(model.members));
+      expect(flow.facts.definitions, containsAll(model.members));
     }
   });
 
@@ -684,10 +745,10 @@ void main() {
       final flow = CallTypeFlow(program, [
         root.target,
       ], instantiatedTypes: model.types);
-      expect(flow.definitions, contains(initialize));
-      expect(flow.definitions, isNot(contains(redirect)));
+      expect(flow.facts.definitions, contains(initialize));
+      expect(flow.facts.definitions, isNot(contains(redirect)));
       expect(
-        flow.definitions.intersection(model.members.toSet()),
+        flow.facts.definitions.intersection(model.members.toSet()),
         tearOff ? model.members.toSet() : {model.members.first},
       );
     }

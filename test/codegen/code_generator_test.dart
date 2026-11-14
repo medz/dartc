@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/object/elf.dart';
@@ -65,7 +66,7 @@ void main() {
         final module = generator.generate(
           lowered.program,
           runtime: heapRuntime,
-          definitions: lowered.program.reachableFrom([entry]),
+          definitions: reachableDefinitions(lowered.program, [entry]),
           roots: [entry],
         );
         final names = module.symbols.map((symbol) => symbol.name);
@@ -102,7 +103,7 @@ void main() {
         final enlarged = generator.generate(
           expanded,
           runtime: heapRuntime,
-          definitions: expanded.reachableFrom([entry]),
+          definitions: reachableDefinitions(expanded, [entry]),
           roots: [entry],
         );
         if (generator.target.operatingSystem == .macos) {

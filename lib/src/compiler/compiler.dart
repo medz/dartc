@@ -9,6 +9,7 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/runtime/contracts.dart' show RuntimeRole;
 import 'package:dartc/linker.dart';
 import 'package:dartc/object.dart';
@@ -159,7 +160,8 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       ...exports.keys,
       if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
     ];
-    final definitions = program.reachableFrom(
+    final definitions = reachableDefinitions(
+      program,
       roots,
       instantiatedTypes: [
         if (exports.values.any(

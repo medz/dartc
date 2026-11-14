@@ -1,11 +1,4 @@
-import 'dart:collection';
-
-import 'block.dart';
-import 'function.dart';
-import 'program.dart';
-import 'signature.dart';
-import 'type.dart';
-import 'value.dart';
+import 'package:dartc/ir.dart';
 
 /// A call closure narrowed by the union of values passed to each parameter.
 ///
@@ -15,7 +8,11 @@ import 'value.dart';
 /// Storage reads retain their static types; this analysis never rewrites IR or
 /// replaces its validation, argument checks, effects or exception edges.
 ///
-/// Code generation must [extend] this analysis when generated calls add source
+/// The immutable [program] is the identity of this analysis. Replacing any body,
+/// declaration or binding requires a new analysis from the actual roots, without
+/// carrying forward old retained definitions or supplemental facts.
+///
+/// Drivers must [extend] this analysis when generated calls add source
 /// dependencies, including calls to an already selected function. Such targets
 /// belong among unknown callers unless their actual arguments are analyzed here.
 final class CallTypeFlow(
@@ -39,10 +36,10 @@ final class CallTypeFlow(
   final _targets = <InstanceCall, Set<FunctionTarget>>{};
   final _directCalls = <DirectCall>{};
 
-  /// A live, read-only view of the required source bodies and imports.
-  late final Set<FunctionTarget> definitions = UnmodifiableSetView(
-    _definitions,
-  );
+  CallTypeFacts? _facts;
+
+  /// The converged read-only facts, valid until [extend] reports a change.
+  CallTypeFacts get facts => _facts ??= CallTypeFacts._(this);
 
   this {
     extend(
@@ -55,7 +52,9 @@ final class CallTypeFlow(
   ///
   /// Facts belong to the same immutable [program]. Repeated additions are inert;
   /// new calls widen existing entry parameters without discarding prior facts.
-  /// Returns whether entry, parameter or instance facts changed.
+  /// Returns whether entry, parameter or instance facts changed. A change
+  /// invalidates previously handed-out [facts], even if the definition count
+  /// stays the same. Repeated additions preserve the current result.
   bool extend({
     Iterable<FunctionTarget> unknownCalls = const [],
     Iterable<ClassType> instantiatedTypes = const [],
@@ -65,6 +64,7 @@ final class CallTypeFlow(
       _include(target, unknown: true);
     }
     final changed = _pending.isNotEmpty || instancesChanged;
+    if (changed) _facts = null;
     while (_pending.isNotEmpty) {
       // Discover direct dependencies before revisiting virtual calls for new classes.
       while (_unscanned.isNotEmpty) {
@@ -77,10 +77,7 @@ final class CallTypeFlow(
     return changed;
   }
 
-  /// Whether [receiver] can hold an instance of [actual] at any observed call.
-  ///
-  /// Values outside the analyzed source graphs retain their static bounds.
-  bool allows(Value receiver, ClassType actual) {
+  bool _allows(Value receiver, ClassType actual) {
     final declared = receiver.unviewedType;
     return _types(receiver)
             .any((type) => type == declared || type.mayHaveInstance(actual)) &&
@@ -146,7 +143,7 @@ final class CallTypeFlow(
         for (final (:caller, :receiver, :bound) in value) {
           if (bound
               ? receiver.unviewedType.mayHaveInstance(type)
-              : allows(receiver, type)) {
+              : _allows(receiver, type)) {
             _pending.add(caller);
           }
         }
@@ -363,6 +360,51 @@ final class CallTypeFlow(
           _pending.addAll(_callers[target] ?? const []);
         }
       }
+    }
+  }
+}
+
+/// Read-only call facts for one input program and one converged analysis state.
+///
+/// Extending the owning analysis with new facts invalidates this result.
+/// Definitions already obtained remain an immutable snapshot; querying an
+/// invalidated result throws [StateError]. No IR graph is copied.
+final class CallTypeFacts._(final CallTypeFlow _flow) {
+  final Set<FunctionTarget> _definitions = Set.unmodifiable(_flow._definitions);
+
+  /// The exact immutable input whose calls and values were analyzed.
+  final IrProgram program = _flow.program;
+
+  /// The required source bodies and imports at convergence.
+  Set<FunctionTarget> get definitions {
+    _checkCurrent();
+    return _definitions;
+  }
+
+  /// Checks that this result is current and belongs to [program].
+  ///
+  /// A different input, including a rewrite with the same function count,
+  /// throws [ArgumentError] and requires a new analysis from explicit roots.
+  void checkProgram(IrProgram program) {
+    _checkCurrent();
+    if (!identical(this.program, program)) {
+      throw ArgumentError('Call facts belong to a different program.');
+    }
+  }
+
+  /// Whether [receiver] can hold an instance of [actual] at an observed call.
+  ///
+  /// Values outside the analyzed source graphs retain their static bounds.
+  bool allows(Value receiver, ClassType actual) {
+    _checkCurrent();
+    return _flow._allows(receiver, actual);
+  }
+
+  void _checkCurrent() {
+    if (!identical(_flow._facts, this)) {
+      throw StateError(
+        'Call facts were invalidated by additional input facts.',
+      );
     }
   }
 }
