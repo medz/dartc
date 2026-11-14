@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import '../../lib/runtime/contracts.dart';
 
 /// Zero-filled managed byte storage, with no traced payload slots.
@@ -48,23 +50,22 @@ abstract final class Memory() {
   @Primitive(.context)
   external static int context();
 
-  @Primitive(.writeByte)
-  external static void writeByte(int address, int value);
-
-  @Primitive(.readByte)
-  external static int readByte(int address);
-
   /// Copies live byte storage, preserving overlapping ranges.
   @RuntimeEntry(.copyBytes)
   @NonAllocating()
-  static void copyBytes(int destination, int source, int count) {
-    if (destination <= source || destination - source >= count) {
+  static void copyBytes(
+    Pointer<Uint8> destination,
+    Pointer<Uint8> source,
+    int count,
+  ) {
+    if (destination.address <= source.address ||
+        destination.address - source.address >= count) {
       for (var i = 0; i < count; i++) {
-        writeByte(destination + i, readByte(source + i));
+        destination[i] = source[i];
       }
     } else {
       for (var i = count - 1; i >= 0; i--) {
-        writeByte(destination + i, readByte(source + i));
+        destination[i] = source[i];
       }
     }
   }
@@ -92,14 +93,6 @@ abstract final class Memory() {
   /// Releases a region returned by [map].
   @Primitive(.unmap)
   external static void unmap(int address, int bytes);
-
-  /// Reads one aligned machine word from live storage.
-  @Primitive(.read)
-  external static int read(int address);
-
-  /// Writes one aligned machine word to live storage.
-  @Primitive(.write)
-  external static void write(int address, int value);
 
   /// Observes an object's address while moving collection is suspended.
   @Primitive(.addressOf)

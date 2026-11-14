@@ -302,7 +302,7 @@ final class ScalarFunction<R extends Object>(
               adapter.convert(result, native.signature.result, intoDart: true);
             }
             if (native == null &&
-                layouts.representation(target!.returnType) !=
+                layouts.representation(layouts.returnType(target!)) !=
                     layouts.representation(resultType)) {
               final destination = allocation.allocate(
                 selection.bank(resultType),
@@ -652,11 +652,15 @@ final class ScalarFunction<R extends Object>(
       switch (selection.body.ends[block]!) {
         case Return(:final value):
           if (selection.entry.resultRegister case final result?) {
-            if (layouts.representation(value!.type) ==
-                layouts.representation(target.returnType)) {
+            if (layouts.representation(selection.body.typeOf(value!)) ==
+                layouts.representation(layouts.returnType(target))) {
               emitter.move(result, allocation.read(value));
             } else {
-              allocation.load(value, result, asType: target.returnType);
+              allocation.load(
+                value,
+                result,
+                asType: layouts.returnType(target),
+              );
             }
           }
           if (failures) {

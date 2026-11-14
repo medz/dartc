@@ -1,6 +1,5 @@
-import 'dart:ffi';
-
 import 'package:dartc/frontend.dart';
+import 'package:dartc/interop.dart';
 
 import 'package:dartc/runtime/contracts.dart';
 
@@ -125,10 +124,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       case .captureStackTrace:
         primitives[target] = .captureStackTrace;
         continue;
-      case .read:
-        value = block.emit(LoadNative(args.single, .of(Int64)));
-      case .readByte:
-        value = block.emit(LoadNative(args.single, .of(Uint8)));
       case .allocatePayload:
         value = block.emit(
           NewPayload(target.returnType as ClassType, args.single),
@@ -145,12 +140,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
         value = block.emit(FloatBitCast(args.single, width: 32));
       case .float64FromBits || .float64Bits:
         value = block.emit(FloatBitCast(args.single));
-      case .write:
-        block.emit(StoreNative(args.first, .of(Int64), args.last));
-        value = null;
-      case .writeByte:
-        block.emit(StoreNative(args.first, .of(Uint8), args.last));
-        value = null;
       case .addressOf:
         value = block.emit(ReferenceAddress(args.single));
       case .objectAt:
@@ -187,6 +176,22 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       captureStackTrace == null ||
       recordError == null) {
     throw ArgumentError('Missing runtime entry contract.');
+  }
+  final nativeContracts = {
+    for (final target in annotations.nonAllocating)
+      if (lowered.imports.containsKey(target)) target: lowered.imports[target]!,
+  };
+  for (final MapEntry(:key, :value) in nativeContracts.entries) {
+    if (program.implementationOf(key) is! IrExternal ||
+        value.type is! NativeFunctionType ||
+        !FfiTypes.canCall(
+          (value.type as NativeFunctionType).signature,
+          key.signature,
+        )) {
+      throw ArgumentError(
+        'Invalid non-allocating native contract: ${key.name}',
+      );
+    }
   }
   return HeapRuntime(
     program,
@@ -245,6 +250,9 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     stackContext: annotations.stackContext,
     recordError: recordError,
     primitives: primitives,
-    nonAllocating: annotations.nonAllocating,
+    nonAllocating: annotations.nonAllocating.where(
+      (target) => !lowered.imports.containsKey(target),
+    ),
+    nonAllocatingNatives: nativeContracts.values,
   );
 }

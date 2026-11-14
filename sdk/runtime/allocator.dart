@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import '../../lib/layout/memory.dart';
 import '../../lib/runtime/contracts.dart';
 import 'control.dart';
@@ -61,14 +63,18 @@ final class Allocator(
         if (page != null) {
           page.replaceStorage(address, size, capacity);
         } else {
-          Memory.write(context + RuntimeContext.initializing, 1);
+          Pointer<Int64>.fromAddress(context + RuntimeContext.initializing)
+                  .value =
+              1;
           try {
             page = Page(objects, address, size, capacity);
           } catch (_) {
             Memory.unmap(address, size * capacity);
             rethrow;
           } finally {
-            Memory.write(context + RuntimeContext.initializing, 0);
+            Pointer<Int64>.fromAddress(context + RuntimeContext.initializing)
+                    .value =
+                0;
           }
           heap.addPage(page);
         }
@@ -97,11 +103,14 @@ int slotSize(int bytes) {
 /// Returns nonzero storage or throws OutOfMemoryError after allocation fails.
 @RuntimeEntry(.allocate)
 int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
-  final prefix = Memory.read(descriptor);
+  final prefix = Pointer<Int64>.fromAddress(descriptor).value;
   var address = 0;
   if (payloadBytes >= 0 && payloadBytes <= 0x0ffffffffffffff8 - prefix) {
     final bytes = (prefix + payloadBytes + 7) & -8;
-    address = Memory.read(context + RuntimeContext.initializing) != 0
+    address =
+        Pointer<Int64>.fromAddress(context + RuntimeContext.initializing)
+                .value !=
+            0
         ? allocateControl(context, descriptor, bytes)
         : _allocator(context).allocate(context, descriptor, bytes, sp, pc);
   }
@@ -119,10 +128,10 @@ bool isOutOfMemory(Object error) => identical(error, const OutOfMemoryError());
 
 Allocator _allocator(int context) {
   var allocator = Memory.objectAt<Allocator?>(
-    Memory.read(context + RuntimeContext.heap),
+    Pointer<Int64>.fromAddress(context + RuntimeContext.heap).value,
   );
   if (allocator == null) {
-    Memory.write(context + RuntimeContext.initializing, 1);
+    Pointer<Int64>.fromAddress(context + RuntimeContext.initializing).value = 1;
     try {
       final objects = NativeObjects();
       final finalization = FinalizationQueue();
@@ -133,12 +142,16 @@ Allocator _allocator(int context) {
         finalization,
         events,
       );
-      Memory.write(context + RuntimeContext.heap, Memory.addressOf(allocator));
+      Pointer<Int64>.fromAddress(context + RuntimeContext.heap)
+          .value = Memory.addressOf(
+        allocator,
+      );
     } catch (_) {
       releaseControl(context);
       rethrow;
     } finally {
-      Memory.write(context + RuntimeContext.initializing, 0);
+      Pointer<Int64>.fromAddress(context + RuntimeContext.initializing).value =
+          0;
     }
   }
   return allocator;
@@ -152,7 +165,7 @@ EventLoop events() => _allocator(Memory.context()).events;
 @RuntimeEntry(.runEvents)
 void runEvents(int context, bool waitForCallbacks) {
   final allocator = Memory.objectAt<Allocator?>(
-    Memory.read(context + RuntimeContext.heap),
+    Pointer<Int64>.fromAddress(context + RuntimeContext.heap).value,
   );
   if (allocator != null) {
     allocator.events.run(waitForCallbacks: waitForCallbacks);
@@ -163,7 +176,7 @@ void runEvents(int context, bool waitForCallbacks) {
 @RuntimeEntry(.release)
 void release(int context) {
   final allocator = Memory.objectAt<Allocator?>(
-    Memory.read(context + RuntimeContext.heap),
+    Pointer<Int64>.fromAddress(context + RuntimeContext.heap).value,
   );
   try {
     callbacks.release();

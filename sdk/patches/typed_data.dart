@@ -1,4 +1,4 @@
-import 'dart:ffi' show Finalizable;
+import 'dart:ffi';
 
 import '../../lib/layout/memory.dart';
 import '../runtime/memory.dart';
@@ -169,10 +169,14 @@ class _TypedListBase {
     if (!_writable)
       throw UnsupportedError('Cannot modify an unmodifiable list');
     Memory.copyBytes(
-      (_typedData as _NativeData)._address + offsetInBytes + start * width,
-      (from._typedData as _NativeData)._address +
-          from.offsetInBytes +
-          skipCount * width,
+      Pointer.fromAddress(
+        (_typedData as _NativeData)._address + offsetInBytes + start * width,
+      ),
+      Pointer.fromAddress(
+        (from._typedData as _NativeData)._address +
+            from.offsetInBytes +
+            skipCount * width,
+      ),
       count * width,
     );
     Memory.keepAlive(from);
@@ -223,7 +227,9 @@ class _TypedList {
     final data = this as _NativeData;
     var bits = 0;
     for (var i = 0; i < width; i++) {
-      bits |= Memory.readByte(data._address + offset + i) << (i * 8);
+      bits |=
+          Pointer<Uint8>.fromAddress(data._address + offset + i).value <<
+          (i * 8);
     }
     Memory.keepAlive(data);
     return bits;
@@ -232,7 +238,8 @@ class _TypedList {
   void _writeBits(int offset, int width, int value) {
     final data = this as _NativeData;
     for (var i = 0; i < width; i++) {
-      Memory.writeByte(data._address + offset + i, value >>> (i * 8));
+      Pointer<Uint8>.fromAddress(data._address + offset + i).value =
+          value >>> (i * 8);
     }
     Memory.keepAlive(data);
   }

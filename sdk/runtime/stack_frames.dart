@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import '../../lib/layout/memory.dart';
 import 'memory.dart';
 
@@ -10,69 +12,91 @@ final class StackFrames(final int context) {
 
   /// The source frame description, or `null` for a generated machine frame.
   String? get description {
-    final address = Memory.read(_record + StackMapRecord.description);
+    final address = Pointer<Int64>.fromAddress(
+      _record + StackMapRecord.description,
+    ).value;
     return address == 0 ? null : Memory.objectAt<String>(address);
   }
 
   /// The managed continuation saved in this frame, if any.
   Object? get continuation {
-    final offset = Memory.read(_record + StackMapRecord.context);
+    final offset = Pointer<Int64>.fromAddress(_record + StackMapRecord.context)
+        .value;
     return offset == 0
         ? null
-        : Memory.objectAt<Object?>(Memory.read(_sp + offset - 1));
+        : Memory.objectAt<Object?>(
+            Pointer<Int64>.fromAddress(_sp + offset - 1).value,
+          );
   }
 
   void start(int sp, int pc) {
     if (sp == 0 || pc == 0) Memory.fail();
     _nextSp = sp;
     _nextPc = pc;
-    _segment = Memory.read(context + RuntimeContext.active);
+    _segment = Pointer<Int64>.fromAddress(context + RuntimeContext.active)
+        .value;
   }
 
-  bool get isBoundary => Memory.read(_record + StackMapRecord.callerStack) == 0;
-  int get rootCount => Memory.read(_record + StackMapRecord.rootCount);
+  bool get isBoundary =>
+      Pointer<Int64>.fromAddress(_record + StackMapRecord.callerStack).value ==
+      0;
+  int get rootCount =>
+      Pointer<Int64>.fromAddress(_record + StackMapRecord.rootCount).value;
   int rootSlot(int index) =>
-      _sp + Memory.read(_record + StackMapRecord.roots + index * 8);
+      _sp +
+      Pointer<Int64>.fromAddress(_record + StackMapRecord.roots + index * 8)
+          .value;
 
   bool moveNext() {
     if (_nextSp == 0) return false;
     _sp = _nextSp;
     _pc = _nextPc;
     _record = _find(pc);
-    final caller = Memory.read(_record + StackMapRecord.callerStack);
+    final caller = Pointer<Int64>.fromAddress(
+      _record + StackMapRecord.callerStack,
+    ).value;
     if (caller != 0) {
       _nextSp = _sp + caller;
-      _nextPc = Memory.read(
-        _sp + Memory.read(_record + StackMapRecord.returnAddress),
-      );
+      _nextPc = Pointer<Int64>.fromAddress(
+        _sp +
+            Pointer<Int64>.fromAddress(_record + StackMapRecord.returnAddress)
+                .value,
+      ).value;
     } else {
       _segment = _segment == 0
           ? 0
-          : Memory.read(_segment + RuntimeContext.previousEntry);
+          : Pointer<Int64>.fromAddress(_segment + RuntimeContext.previousEntry)
+                .value;
       _nextSp = _segment == 0
           ? 0
-          : Memory.read(_segment + RuntimeContext.suspendedSp);
+          : Pointer<Int64>.fromAddress(_segment + RuntimeContext.suspendedSp)
+                .value;
       _nextPc = _segment == 0
           ? 0
-          : Memory.read(_segment + RuntimeContext.suspendedPc);
+          : Pointer<Int64>.fromAddress(_segment + RuntimeContext.suspendedPc)
+                .value;
     }
     return true;
   }
 
   int _find(int pc) {
-    final table = Memory.read(context + RuntimeContext.maps);
-    var low = 0, high = Memory.read(table + StackMapTable.count);
+    final table = Pointer<Int64>.fromAddress(context + RuntimeContext.maps)
+        .value;
+    var low = 0,
+        high = Pointer<Int64>.fromAddress(table + StackMapTable.count).value;
     while (low < high) {
       final middle = low + ((high - low) >> 1);
       final entry =
           table + StackMapTable.entries + middle * StackMapTable.entrySize;
-      final address = Memory.read(entry + StackMapTable.pc);
+      final address = Pointer<Int64>.fromAddress(entry + StackMapTable.pc)
+          .value;
       if (pc < address) {
         high = middle;
       } else if (pc > address) {
         low = middle + 1;
       } else {
-        return table + Memory.read(entry + StackMapTable.record);
+        return table +
+            Pointer<Int64>.fromAddress(entry + StackMapTable.record).value;
       }
     }
     Memory.fail();

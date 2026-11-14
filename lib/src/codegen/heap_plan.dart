@@ -137,7 +137,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
     CallLayout<R> classify(FunctionTarget function) =>
         emitter.convention.classify(
           NativeSignature.types(
-            layouts.callType(function.returnType),
+            layouts.callType(layouts.returnType(function)),
             layouts.entryTypes(function).map(layouts.callType),
           ),
         );
@@ -249,7 +249,7 @@ final class HeapPlan({final HeapRuntime? runtime}) {
         register,
         i == 0 ? objectOffset : frame.localOffset + (i - 1) * 8,
       );
-      if (layouts.pointerParameters.contains(initializer, i)) {
+      if (layouts.pointerRepresentation.contains(initializer, i)) {
         emitter.loadMemory(
           register,
           register,

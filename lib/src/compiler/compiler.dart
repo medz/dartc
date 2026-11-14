@@ -230,6 +230,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
           resolve(reference!),
           signature,
           isLeaf: reference.isLeaf,
+          isNonAllocating: runtime.nonAllocatingNatives.contains(reference),
         );
         continue;
       }

@@ -35,17 +35,26 @@ bool copyExecutableMacos(int destination, int source, int bytes) {
 
 /// Copies into writable storage, then removes write access before publication.
 @RuntimeEntry(.copyExecutableLinux)
+@NonAllocating()
 bool copyExecutableLinux(int destination, int source, int bytes) {
-  Memory.copyBytes(destination, source, bytes);
+  Memory.copyBytes(
+    Pointer.fromAddress(destination),
+    Pointer.fromAddress(source),
+    bytes,
+  );
   if (_protect(Pointer.fromAddress(destination), bytes, 5) != 0) return false;
   Memory.flushInstructions(destination, bytes);
   return true;
 }
 
+// These OS operations cannot allocate managed objects or invoke Dart callbacks.
+@NonAllocating()
 @SystemNative()
 @Native<Uint32 Function()>(symbol: 'mach_task_self', isLeaf: true)
 external int _machTaskSelf();
 
+// These OS operations cannot allocate managed objects or invoke Dart callbacks.
+@NonAllocating()
 @SystemNative()
 @Native<
   Int32 Function(
@@ -76,6 +85,8 @@ external int _vmRemap(
   int inheritance,
 );
 
+// These OS operations cannot allocate managed objects or invoke Dart callbacks.
+@NonAllocating()
 @SystemNative()
 @Native<Int Function(Pointer<Void>, Size, Int)>(symbol: 'mprotect')
 external int _protect(Pointer<Void> address, int bytes, int protection);

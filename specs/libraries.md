@@ -183,6 +183,9 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 | 平台验证 | macOS ARM64、Linux ARM64/x86-64 已验证原生调用；macOS x86-64 当前检查文件生成、重定位表与签名，尚无运行验证。 |
 | 标准库与执行支持 | 同步入口内支持对象构造与不可达对象回收，具体范围见[类](classes.md#原生执行范围)。托管全局状态可跨入口保存；并发调用、跨线程调用、跨模块托管值 ABI 和 I/O 事件尚未实现；已接入的标准库成员及缺口见上文，源码可用不等于完整目标实现。 |
 
+只读取地址的 Pointer 值可通过分支、循环、普通函数参数与返回值保持原生表示；身份可观察、托管字段和未知调用仍保留对象表示及类型。runtime 的固定 64 位字段和字节存储分别共用 `Pointer<Int64>` 与 `Pointer<Uint8>`，不再通过独立的 Memory 读写原语。字节复制保留重叠语义与拥有者存活。见[表示契约](../test/codegen/pointer_representation_test.dart)、[Pointer 原生执行](../test/compiler/pointers_test.dart)和[共享结构体复制](../test/compiler/native_aggregates_test.dart)。
+
+
 [原生函数验证](../test/compiler/native_test.dart)通过固定 Dart FFI 调用代码执行预编译资产，并与 SDK 对照整数边界行为。[寄存器别名验证](../test/codegen/native_test.dart)覆盖目标寄存器重叠时的实际结果。[格式验证](../test/object/formats_test.dart)检查目标标识、静态归档成员与符号索引；[签名验证](../test/linker/signature_test.dart)检查 Mach-O 签名对全部映像页的覆盖；[头文件验证](../test/compiler/artifacts_test.dart)检查导出原型。上述范围是当前后端实现进度，不改变完整语言目标。
 
 [共享库绑定契约](../test/linker/shared_libraries_test.dart)检查依赖顺序、符号别名、可写指针槽、装载表及无效引用；[装载验证](../test/linker/native_test.dart)检查同名符号的目标平台查找规则、缺库和缺符号的具体错误。[地址验证](../test/linker/addresses_native_test.dart)检查静态对象、归档和共享库的函数地址身份、数据初始化与双向修改，以及本地地址槽；[重定位契约](../test/object/indirect_relocations_test.dart)检查指令形式、直接/间接引用和损坏记录。[调用验证](../test/codegen/native_calls_test.dart)使用同一组窄整数、Float、混合栈参数、副作用和跨调用存活用例执行独立共享库；[编译验证](../test/compiler/native_imports_test.dart)覆盖源码 `@Native` 到共享库依赖的完整路径。

@@ -25,6 +25,11 @@ final class NativeAggregates() {
       .lookupFunction<Choice Function(Choice), Choice Function(Choice)>(
         'negateChoice',
       );
+  late final copyNativeState = _library
+      .lookupFunction<
+        Void Function(Pointer<Mixed>, Pointer<Mixed>),
+        void Function(Pointer<Mixed>, Pointer<Mixed>)
+      >('copyNativeState');
   late final accumulate = _library
       .lookupFunction<
         Void Function(Pointer<Mixed>, Double),

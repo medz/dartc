@@ -331,6 +331,7 @@ base class ScalarCodeGenerator<R extends Object>(
         globals,
         instances,
         suspensions: suspensions,
+        imports: imports,
         callbacks: {
           for (final entry in callbacks.entries) entry.key: entry.value.address,
         },

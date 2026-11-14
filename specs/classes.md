@@ -47,7 +47,7 @@ typed noSuchMethod 转发的绑定参数、泛型与协变入口、返回检查�
 
 GC 根扫描与栈轨迹共用按返回地址排序的帧索引，以二分查找定位变长记录；仅在源码描述、异步续帧槽、调用者链接和全部根偏移一致时共享记录。查找本身不分配，原生重入及挂起外层帧仍沿原有链接遍历。见[栈映射格式契约](../test/codegen/stack_maps_test.dart)、[原生根扫描](../test/codegen/stack_roots_native_test.dart)和[异步父栈验证](../test/compiler/async_stack_traces_test.dart)。
 
-GC 关键入口的 `NonAllocating` 调用闭包在生成原生代码前检查，包含普通调用和机器桥接后的 Dart 目标；即使模块本身不需要托管堆，也不能进入外部代码或分配对象。栈捕获会构造 StackTrace，因此不能从关键闭包调用。见[关键调用拒绝验证](../test/codegen/runtime_test.dart)。
+GC 关键入口的 `NonAllocating` 调用闭包在生成原生代码前按选定操作与传递调用的效果检查，包含表示变化、数值范围证明和机器桥接后的 Dart 目标。禁止托管分配、Dart 异常及 Dart 重入；已验证的原语使用显式效果，普通原生调用须有声明身份对应的可信契约或 `NativeImport.isNonAllocating` 的显式承诺，`isLeaf` 不能替代该契约。该承诺也约束原生实现的间接调用，不由编译器证明外部代码。用户源码不能伪造受信 runtime 注解。栈捕获会构造 StackTrace，因此不能从关键闭包调用。见[关键调用效果验证](../test/codegen/runtime_test.dart)和[注解来源验证](../test/frontend/runtime_declarations_test.dart)。
 
 弱引用槽不会保活目标；条件 key/value 引用在所属对象与 key 存活时保留 value，并处理条件引用之间的依赖闭包。仅由 key/value 互相引用形成的循环不会自行存活，多个独立弱槽分别清理。见[弱槽与条件引用验证](../test/codegen/weak_heap_native_test.dart)。公开 `WeakReference<T>`、`Expando<T>` 与 `Finalizer<T>` 已接通源码和回收路径，见[标准库支持](libraries.md)；`NativeFinalizer`、`Finalizable` 和指针 TypedData 的所有权也已接通。
 

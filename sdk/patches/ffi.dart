@@ -144,8 +144,8 @@ Array<T> _arraySlice<T extends NativeType>(Array<Array<T>> array, int index) {
 
 void _copyArray(Array<NativeType> target, Array<NativeType> source) {
   Memory.copyBytes(
-    (target._typedDataBase as Pointer<Void>).address,
-    (source._typedDataBase as Pointer<Void>).address,
+    (target._typedDataBase as Pointer<Void>).cast<Uint8>(),
+    (source._typedDataBase as Pointer<Void>).cast<Uint8>(),
     target._shape.first * target._elementBytes,
   );
   Memory.keepAlive(target);

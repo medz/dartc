@@ -15,7 +15,7 @@ import 'native_calls.dart';
 
 import 'package:dartc/abi.dart' show NativeLayout;
 
-import 'pointer_parameters.dart';
+import 'pointer_representation.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
 import 'record_storage.dart';
@@ -49,7 +49,7 @@ final class ProgramLayout(
   final NativeStorage? native = nativeLayout == null
       ? null
       : NativeStorage(nativeLayout);
-  final pointerParameters = PointerParameters(functions);
+  final pointerRepresentation = PointerRepresentation(functions);
   final strings = stringStorage ?? StringStorage();
   final lists = listStorage ?? ListStorage(classes);
   final records = recordStorage ?? RecordStorage(classes, const []);
@@ -122,11 +122,17 @@ final class ProgramLayout(
   /// Selects parameter storage and appends lexical type arguments.
   List<ValueType> entryTypes(FunctionTarget target) => [
     for (final (i, type) in target.parameterTypes.indexed)
-      pointerParameters.contains(target, i) ? .integer : type,
+      pointerRepresentation.contains(target, i) ? .integer : type,
     if (target.kind == .factory && target.owner!.typeParameters.isNotEmpty)
       TypeMetadata.type,
     for (final _ in target.typeParameters) TypeMetadata.type,
   ];
+
+  /// The physical return value shared by callees and every selected caller.
+  ValueType returnType(FunctionTarget target) =>
+      pointerRepresentation.returnsAddress(target)
+      ? .integer
+      : target.returnType;
 
   /// Checks transfers before a machine word loses its semantic type.
   void checkTransfer(

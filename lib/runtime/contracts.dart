@@ -1,4 +1,5 @@
-/// Rejects allocation, throwing and foreign reentry throughout a call closure.
+/// Rejects managed allocation, throwing and Dart reentry throughout a call closure.
+/// On a trusted native declaration, asserts that contract for its implementation.
 final class const NonAllocating();
 
 /// Identifies a compiler entry without depending on its Dart name.
@@ -63,14 +64,10 @@ enum SystemLibrary() {
 enum MemoryOperation() {
   map,
   unmap,
-  read,
-  readByte,
-  write,
   addressOf,
   objectAt,
   fail,
   context,
-  writeByte,
   writeBytes,
   entropy,
   clock,

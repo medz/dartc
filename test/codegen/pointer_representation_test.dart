@@ -5,7 +5,7 @@ import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
-import 'package:dartc/src/codegen/pointer_parameters.dart';
+import 'package:dartc/src/codegen/pointer_representation.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:test/test.dart';
 
@@ -51,6 +51,78 @@ void main() {
     expect(layouts.entryTypes(forward), [ValueType.integer]);
   });
 
+  test('loop and returned pointers use one physical call contract', () {
+    for (final observe in [false, true]) {
+      final advance = FunctionTarget(uri, 'advance', pointerType, [
+        pointerType,
+        .integer,
+      ]);
+      final entry = Block(advance.parameterTypes);
+      final loop = Block(advance.parameterTypes), step = Block();
+      final done = Block([pointerType]);
+      entry.finish(Jump(loop, entry.parameters));
+      final [pointer, count] = loop.parameters;
+      loop.finish(
+        Branch(
+          loop.emit(IntBinary(.greaterThan, count, const Constant.integer(0))),
+          Jump(step),
+          Jump(done, [pointer]),
+        ),
+      );
+      step.finish(
+        Jump(loop, [
+          step.emit(PointerOffset(pointer, const Constant.integer(1))),
+          step.emit(IntBinary(.subtract, count, const Constant.integer(1))),
+        ]),
+      );
+      done.finish(Return(done.parameters.single));
+      final caller = FunctionTarget(uri, 'caller', .integer, [pointerType]);
+      final body = Block(caller.parameterTypes);
+      final result = body.emit(
+        DirectCall(advance, [
+          body.parameters.single,
+          const Constant.integer(5),
+        ]),
+      );
+      if (observe) body.emit(Identical(result, body.parameters.single));
+      body.finish(Return(body.emit(PointerAddress(result))));
+      final program = IrProgram([], [
+        IrFunction(advance, [entry, loop, step, done]),
+        IrFunction(caller, [body]),
+      ]);
+      final layouts = ProgramLayout(
+        [],
+        functions: program.functions,
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      );
+      expect(
+        layouts.returnType(advance),
+        observe ? pointerType : ValueType.integer,
+      );
+      final members = MemberCalls(program, {advance, caller});
+      for (final function in program.functions) {
+        final selected = FunctionRepresentation(
+          function,
+          layouts,
+          CheckedCasts(),
+          members,
+          HeapPlan(),
+        );
+        expect(selected.boxes, isEmpty);
+        for (final block in function.blocks) {
+          for (final parameter in block.parameters.where(
+            (v) => FfiTypes.isPointer(v.type),
+          )) {
+            expect(
+              selected.typeOf(parameter),
+              observe ? pointerType : ValueType.integer,
+            );
+          }
+        }
+      }
+    }
+  });
+
   test('identity observation propagates through recursive call cycles', () {
     for (final observe in [false, true]) {
       final a = FunctionTarget(uri, 'a', .integer, [pointerType]);
@@ -61,7 +133,7 @@ void main() {
         y.emit(Identical(y.parameters.single, y.parameters.single));
       }
       y.finish(Return(y.emit(DirectCall(a, y.parameters))));
-      final parameters = PointerParameters([
+      final parameters = PointerRepresentation([
         IrFunction(a, [x]),
         IrFunction(b, [y]),
       ]);

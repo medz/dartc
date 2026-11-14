@@ -1,21 +1,25 @@
+import 'dart:ffi' show Pointer, Uint8;
+
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
 import 'type_runtime.dart';
 
 /// Machine services available to checked runtime source.
-enum MemoryPrimitive() {
-  map,
-  unmap,
-  fail,
-  context,
-  writeBytes,
-  entropy,
-  clock,
-  sleep,
-  captureStackTrace,
-  currentThread,
-  callbackTemplate,
-  flushInstructions,
+enum MemoryPrimitive(final Set<Effect> effects) {
+  // Native mappings have an independent lifetime and never enter the Dart heap.
+  map({.writesStorage}),
+  unmap({.writesStorage}),
+  fail({}),
+  context({.readsStorage}),
+  writeBytes({.readsStorage, .writesStorage}),
+  entropy({.writesStorage}),
+  clock({.readsStorage}),
+  sleep({.readsStorage}),
+  captureStackTrace({.allocates, .mayThrow}),
+  currentThread({.readsStorage}),
+  callbackTemplate({.readsStorage}),
+  flushInstructions({.writesStorage}),
 }
 
 /// Source program and entry contracts used by managed code generation.
@@ -48,19 +52,32 @@ final class HeapRuntime(
   final TypeRuntime? types,
   required Map<FunctionTarget, MemoryPrimitive> primitives,
   required Iterable<FunctionTarget> nonAllocating,
+  Iterable<NativeReference> nonAllocatingNatives = const [],
 }) {
   /// Explicit machine entries; their signatures must match the selected service.
   final Map<FunctionTarget, MemoryPrimitive> primitives = .unmodifiable(
     primitives,
   );
 
-  /// Closures that cannot allocate, throw, or call foreign code after selection.
+  /// Native declarations with a trusted, explicit no-allocation/reentry contract.
+  final Set<NativeReference> nonAllocatingNatives = Set.unmodifiable(
+    nonAllocatingNatives,
+  );
+
+  /// Closures that cannot allocate, throw, or reenter Dart after selection.
   final List<FunctionTarget> nonAllocating = .unmodifiable({
     ...nonAllocating,
     isOutOfMemory,
   });
 
   this {
+    if (this.nonAllocatingNatives.any(
+      (reference) => reference.type is! NativeFunctionType,
+    )) {
+      throw ArgumentError(
+        'Native effect contracts require a function signature.',
+      );
+    }
     if (primitives.values
             .where((service) => service == .captureStackTrace)
             .length !=
@@ -75,7 +92,14 @@ final class HeapRuntime(
       (eventAccess, FunctionType(eventAccess.returnType, [])),
       if (processExitCode case final target?)
         (target, FunctionType(.integer, [])),
-      (copyBytes, FunctionType(.voidType, [.integer, .integer, .integer])),
+      (
+        copyBytes,
+        FunctionType(.voidType, [
+          FfiTypes.pointerTypes[Pointer<Uint8>]!,
+          FfiTypes.pointerTypes[Pointer<Uint8>]!,
+          .integer,
+        ]),
+      ),
       (captureStackTrace, FunctionType(.stackTrace, [.integer, .integer])),
       (recordError, FunctionType(.voidType, [.object, .stackTrace])),
       if (invocation case final target?)

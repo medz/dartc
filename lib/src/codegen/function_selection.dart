@@ -58,7 +58,7 @@ final class FunctionSelection<R>(
     // Internal booleans use integer locations; exported booleans remain rejected.
     entry = emitter.convention.classify(
       NativeSignature.types(
-        layouts.callType(body.target.returnType),
+        layouts.callType(layouts.returnType(body.target)),
         layouts.entryTypes(body.target).map(layouts.callType),
       ),
     );
@@ -343,8 +343,8 @@ final class FunctionSelection<R>(
     for (final block in body.blocks) {
       if (body.ends[block] case Return(value: final value?)) {
         layouts.checkTransfer(
-          value.type,
-          body.target.returnType,
+          body.typeOf(value),
+          layouts.returnType(body.target),
           constant: value is ScalarConstant,
         );
       }
@@ -370,7 +370,7 @@ final class FunctionSelection<R>(
       throw StateError('Selected call arity does not match ${target.name}.');
     }
     if (operation.type != .never && target.returnType != .never) {
-      layouts.checkTransfer(target.returnType, body.typeOf(operation));
+      layouts.checkTransfer(layouts.returnType(target), body.typeOf(operation));
     }
     for (final (i, input) in inputs.indexed) {
       layouts.checkTransfer(
@@ -382,7 +382,7 @@ final class FunctionSelection<R>(
     calls[operation] = (
       layout: emitter.convention.classify(
         NativeSignature.types(
-          layouts.callType(target.returnType),
+          layouts.callType(layouts.returnType(target)),
           parameters.map(layouts.callType),
         ),
       ),

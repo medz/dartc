@@ -1,3 +1,5 @@
+import 'dart:ffi';
+
 import 'memory.dart';
 
 /// Writes a UTF-8 line, replacing unpaired UTF-16 surrogates with U+FFFD.
@@ -7,7 +9,10 @@ void writeLine(String line) {
   if (buffer == 0) Memory.fail();
   try {
     var length = 0;
-    void byte(int value) => Memory.writeByte(buffer + length++, value);
+    void byte(int value) {
+      Pointer<Uint8>.fromAddress(buffer + length++).value = value;
+    }
+
     for (var i = 0; i < line.length; i++) {
       var rune = line.codeUnitAt(i);
       if (rune >= 0xd800 && rune <= 0xdbff && i + 1 < line.length) {
