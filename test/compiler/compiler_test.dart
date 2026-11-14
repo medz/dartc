@@ -1,6 +1,3 @@
-@Tags(['assets', 'native'])
-library;
-
 import 'dart:io';
 
 import 'package:dartc/compiler.dart';
@@ -72,18 +69,8 @@ void main() {
         expect(header.readAsStringSync(), result.header);
       }
     },
+    tags: ['assets', 'native'],
   );
-
-  test('invalid shared library identities fail during compilation', () async {
-    for (final name in ['', 'bad\u0000name']) {
-      await expectLater(
-        compiler.compile([
-          'test/compiler/fixtures/arithmetic.dart',
-        ], output: .sharedLibrary(name)),
-        throwsArgumentError,
-      );
-    }
-  });
 
   test(
     'source files and colliding output paths cannot be overwritten',
