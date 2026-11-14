@@ -1,6 +1,9 @@
 import 'package:dartc/frontend.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_value.dart';
+import 'package:dartc/src/optimizer/call_specialization.dart';
+import 'package:dartc/src/optimizer/storage_promotion.dart';
+import 'package:dartc/src/optimizer/inlining.dart';
 import 'package:dartc/src/optimizer/program_flow.dart';
 import 'package:dartc/src/optimizer/program_optimizer.dart';
 import 'package:dartc/src/optimizer/simplification.dart';
@@ -116,4 +119,94 @@ void main() {
     expect(facts.definitions, isNot(contains(saved.initializer)));
     expect(facts.returnedBy(invokeSaved.target).constant, isNull);
   });
+
+  for (final (name, samples, evaluate)
+      in <(String, List<List<Object>>, Object Function(List<Object>))>[
+        (
+          'forwardCaptured',
+          [
+            [-3],
+            [0],
+            [42],
+          ],
+          (args) => source.forwardCaptured(args.single as int),
+        ),
+        (
+          'selectStored',
+          [
+            [true, 3, 5],
+            [false, 3, 5],
+            [true, -8, -2],
+            [false, -8, -2],
+          ],
+          (args) => source.selectStored(
+            args[0] as bool,
+            args[1] as int,
+            args[2] as int,
+          ),
+        ),
+        (
+          'accumulate',
+          [
+            [0, 7],
+            [1, 7],
+            [5, -2],
+          ],
+          (args) => source.accumulate(args[0] as int, args[1] as int),
+        ),
+      ]) {
+    test('forwards runtime values through $name without source storage', () {
+      final function = program.functions.singleWhere(
+        (f) => f.target.name == name,
+      );
+      final optimized =
+          ProgramOptimizer(const [
+            ProgramSimplification(),
+            ProgramCallSpecialization(),
+            ProgramStoragePromotion(),
+            ProgramStorageElimination(),
+            DirectCallInlining(),
+          ]).run(program, [
+            (
+              target: function.target,
+              arguments: function.target.parameterTypes
+                  .map(FlowValue.unknown)
+                  .toList(),
+            ),
+          ]);
+      final rewritten =
+          optimized.program.implementationOf(function.target) as IrFunction;
+      for (final arguments in samples) {
+        final expected = evaluate(arguments);
+        expect(IrInterpreter(program, {}).run(function, arguments), expected);
+        expect(
+          IrInterpreter(optimized.program, {}).run(rewritten, arguments),
+          expected,
+        );
+      }
+      final residual = optimized.program.functions
+          .where((body) => optimized.definitions.contains(body.target))
+          .expand((body) => body.blocks)
+          .expand(
+            (block) => [
+              ...block.instructions,
+              if (block.end case Invoke(:final operation)) operation,
+            ],
+          );
+      expect(
+        residual.where(
+          (op) =>
+              op is Construct ||
+              op is NewCell ||
+              op is MakeClosure ||
+              op is LoadField ||
+              op is StoreField ||
+              op is ReadCell ||
+              op is WriteCell,
+        ),
+        isEmpty,
+        reason: 'unknown input values still have SSA sources and need no container identity',
+      );
+    });
+  }
 }

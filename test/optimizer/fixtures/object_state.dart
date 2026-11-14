@@ -26,4 +26,30 @@ String evaluate(bool first) {
   return '${left.value}:${right.value}:${read()}:${invokeSaved(3)}';
 }
 
+int forwardCaptured(int value) {
+  final box = Box(value);
+  var captured = box.value;
+  int read() => captured;
+  captured = value;
+  return read();
+}
+
+int selectStored(bool first, int left, int right) {
+  final box = Box(left);
+  if (first) {
+    box.value = left + 1;
+  } else {
+    box.value = right * 2;
+  }
+  return box.value;
+}
+
+int accumulate(int count, int seed) {
+  final box = Box(seed);
+  for (var i = 0; i < count; i++) {
+    box.value += i;
+  }
+  return box.value;
+}
+
 void main(List<String> arguments) => print(evaluate(arguments.isEmpty));
