@@ -2381,31 +2381,57 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
   /// Whether discarding an unused operation preserves effects and termination.
   bool canDiscard(Instruction operation, {Object? activation}) {
     final exits = exitsOf(operation, activation: activation);
-    if (!exits.normal ||
-        exits.exceptional ||
-        effectsOf(
-          operation,
-          activation: activation,
-        ).any((effect) => effect != .readsStorage && effect != .allocates)) {
-      return false;
-    }
+    if (!exits.normal || exits.exceptional) return false;
     for (final item in _at(operation, activation)) {
-      if (item.unknownCalls.contains(operation) ||
-          item.externalCalls.contains(operation)) {
-        return false;
-      }
-      for (final callee in item.calls[operation] ?? <_Activation>{}) {
-        if (!_terminates(callee, {})) return false;
-      }
+      if (!_discardableOperation(item, operation, {})) return false;
     }
     return true;
   }
 
-  bool _terminates(_Activation activation, Set<_Activation> visiting) {
+  bool _discardableOperation(
+    _Activation activation,
+    Instruction operation,
+    Set<_Activation> visiting,
+  ) {
+    if (activation.unknownCalls.contains(operation) ||
+        activation.externalCalls.contains(operation)) {
+      return false;
+    }
+    final callees = activation.calls[operation] ?? const <_Activation>{};
+    final binding =
+        operation is LoadGlobal &&
+        !operation.global.isWritable &&
+        operation.global.initializer != null &&
+        callees.isNotEmpty &&
+        callees.every(
+          (callee) =>
+              callee.body.target ==
+                  operation.global.initializer!.implementation &&
+              callee.effects.every((effect) => effect == .allocates),
+        );
+    for (final effect in {
+      ...?activation.operationEffects[operation],
+      ...?activation.externalEffects[operation],
+    }) {
+      if (effect != .readsStorage &&
+          effect != .allocates &&
+          effect != .mayThrow &&
+          !(effect == .writesStorage && binding)) {
+        return false;
+      }
+    }
+    for (final callee in callees) {
+      if (!_discardableBody(callee, visiting)) return false;
+    }
+    return true;
+  }
+
+  bool _discardableBody(_Activation activation, Set<_Activation> visiting) {
     if (!visiting.add(activation) ||
         activation.recursive ||
         activation.body is! IrFunction ||
-        activation.normal == null) {
+        activation.normal == null ||
+        activation.exceptional != null) {
       return false;
     }
     final body = activation.body as IrFunction;
@@ -2415,10 +2441,12 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
         activation.externalCalls.isNotEmpty) {
       return false;
     }
-    for (final callees in activation.calls.values) {
-      for (final callee in callees) {
-        if (!_terminates(callee, visiting)) return false;
-      }
+    for (final operation in {
+      ...activation.operationEffects.keys,
+      ...activation.externalEffects.keys,
+      ...activation.calls.keys,
+    }) {
+      if (!_discardableOperation(activation, operation, visiting)) return false;
     }
     visiting.remove(activation);
     return true;
