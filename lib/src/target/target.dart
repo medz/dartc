@@ -1,4 +1,5 @@
 import 'dart:ffi' as ffi;
+import 'dart:typed_data';
 
 /// A machine instruction encoding.
 enum Architecture() {
@@ -17,6 +18,16 @@ final class const Target(
   final OperatingSystem operatingSystem,
   final Architecture architecture,
 ) {
+  /// The width in bytes of addresses and machine words on the output.
+  int get wordSize => switch (architecture) {
+    .arm64 || .x64 => 8,
+  };
+
+  /// The byte order used by scalar loads and stores on the output.
+  Endian get byteOrder => switch (architecture) {
+    .arm64 || .x64 => .little,
+  };
+
   /// Identifies the platform running this process.
   factory host() => switch (ffi.Abi.current()) {
     ffi.Abi.macosArm64 => const .new(.macos, .arm64),

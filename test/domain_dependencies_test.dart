@@ -8,7 +8,7 @@ void main() {
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
       'ir': {'interop'},
-      'optimizer': {'ir'},
+      'optimizer': {'ir', 'abi', 'layout'},
       'target': {},
       'layout': {},
       'sdk': {},

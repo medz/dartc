@@ -563,13 +563,13 @@ final class FunctionRepresentation(
           :final copy,
         )) {
           invocations[instruction] = address == null || copy
-              ? layouts.native!.owned(
+              ? layouts.native.owned(
                   type,
-                  heap.allocatePayload(layouts.native!.buffer),
+                  heap.allocatePayload(layouts.native.buffer),
                   copy: copy,
                 )
               : heap.constructorFor(
-                  layouts.native!.view(type).initializer,
+                  layouts.native.view(type).initializer,
                   layouts,
                 );
           operands[instruction] = [
@@ -583,7 +583,7 @@ final class FunctionRepresentation(
         if (instruction case NativeAddress(:final view)) {
           operands[instruction] = [
             _load(
-              layouts.native!.view(view.type as ClassType).address,
+              layouts.native.view(view.type as ClassType).address,
               view,
               body,
             ),
@@ -594,8 +594,8 @@ final class FunctionRepresentation(
         }
         if (instruction is NativeSize || instruction is NativeFieldOffset) {
           final value = instruction is NativeSize
-              ? layouts.native!.layout.of(instruction.nativeType).size
-              : layouts.native!.layout
+              ? layouts.native.layout.of(instruction.nativeType).size
+              : layouts.native.layout
                     .of((instruction as NativeFieldOffset).owner)
                     .offsets[instruction.index];
           operands[instruction] = [Constant.integer(value)];
@@ -612,7 +612,7 @@ final class FunctionRepresentation(
           operands[instruction] = [
             destination,
             source,
-            Constant.integer(layouts.native!.layout.of(nativeType).size),
+            Constant.integer(layouts.native.layout.of(nativeType).size),
           ];
           body.add(instruction);
           continue;
@@ -647,7 +647,7 @@ final class FunctionRepresentation(
               .multiply,
               offset.index,
               Constant.integer(
-                layouts.native!.layout
+                layouts.native.layout
                     .of(FfiTypes.pointerElement(offset.pointer.type)!)
                     .size,
               ),
@@ -685,9 +685,9 @@ final class FunctionRepresentation(
             DirectCall? result;
             if (signature.result is NativeCompoundType) {
               final type = instruction.type as ClassType;
-              final create = layouts.native!.owned(
+              final create = layouts.native.owned(
                 type,
-                heap.allocatePayload(layouts.native!.buffer),
+                heap.allocatePayload(layouts.native.buffer),
                 copy: false,
               );
               result = DirectCall(create, [
@@ -704,7 +704,7 @@ final class FunctionRepresentation(
                   : pointerAddress(pointer, body),
               if (result != null)
                 _load(
-                  layouts.native!.view(result.type as ClassType).address,
+                  layouts.native.view(result.type as ClassType).address,
                   result,
                   body,
                 ),
@@ -714,7 +714,7 @@ final class FunctionRepresentation(
                 else if (value.type case ClassType(:final nativeType?)
                     when nativeType is NativeCompoundType)
                   _load(
-                    layouts.native!.view(value.type as ClassType).address,
+                    layouts.native.view(value.type as ClassType).address,
                     value,
                     body,
                   )

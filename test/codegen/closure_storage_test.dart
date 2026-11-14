@@ -1,3 +1,5 @@
+import 'package:dartc/target.dart';
+import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/closure_storage.dart';
@@ -141,7 +143,10 @@ void main() {
         ...TypeValues().classes,
       ], storage.functions);
       expect(program.functions, hasLength(2));
-      final layouts = ProgramLayout(program.classes);
+      final layouts = ProgramLayout(
+        program.classes,
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      );
       final fields = layouts.storageOf(shape.type);
       expect(fields.fields.first, same(storage.tag));
       expect(fields.layout.referenceOffsets, [

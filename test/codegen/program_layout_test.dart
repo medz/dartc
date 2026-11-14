@@ -1,3 +1,5 @@
+import 'package:dartc/target.dart';
+import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/constant_data.dart';
@@ -6,7 +8,13 @@ import 'package:test/test.dart';
 
 void main() {
   test('Type constants preserve canonical identity without merging distinct top types', () {
-    final data = ConstantData(ProgramLayout([]), 0);
+    final data = ConstantData(
+      ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
+      0,
+    );
     final types = <ValueType>[
       .integer,
       .dynamicType,
@@ -27,7 +35,13 @@ void main() {
   test('Type constants retain declaration identity for matching names', () {
     final uri = Uri.parse('memory:type-identities');
     final types = [for (var i = 0; i < 66; i++) ClassType(uri, 'SameName')];
-    final data = ConstantData(ProgramLayout([]), 0);
+    final data = ConstantData(
+      ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
+      0,
+    );
     expect(
       types.map((t) => data.addressOf(TypeConstant(t))).toSet(),
       hasLength(66),
@@ -37,7 +51,13 @@ void main() {
   test('Type constants normalize bound variables before nullable unions', () {
     final t = TypeParameterType('T')..initializeBound(ValueType.never);
     final u = TypeParameterType('U')..initializeBound(ValueType.never);
-    final data = ConstantData(ProgramLayout([]), 0);
+    final data = ConstantData(
+      ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
+      0,
+    );
     final a = FunctionType(t.nullable, [t], typeParameters: [t]);
     final b = FunctionType(.nullType, [.never], typeParameters: [u]);
     expect(data.addressOf(TypeConstant(a)), data.addressOf(TypeConstant(b)));
@@ -61,7 +81,7 @@ void main() {
       final data = ConstantData(
         ProgramLayout([
           IrClass(box, [field]),
-        ]),
+        ], nativeLayout: NativeLayout(const Target(.linux, .arm64))),
         0,
       );
       int address(ValueType type) => data.addressOf(
@@ -92,7 +112,7 @@ void main() {
       IrClass(base, [number]),
       IrClass(child, [reference]),
       IrClass(implementation, []),
-    ]);
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final storage = layouts.storageOf(child);
     expect(
       layouts.storageOf(ValueType.error).errorTraceOffset,

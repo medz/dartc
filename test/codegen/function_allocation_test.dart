@@ -19,7 +19,14 @@ import 'package:test/test.dart';
 void main() {
   final uri = Uri.parse('memory:allocation');
   SelectedFunction select(FunctionTarget target, List<Block> blocks) {
-    final body = SelectedFunction(target, ProgramLayout([]), blocks.first);
+    final body = SelectedFunction(
+      target,
+      ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
+      blocks.first,
+    );
     for (final block in blocks) {
       body.blocks.add(block);
       body.instructions[block] = [

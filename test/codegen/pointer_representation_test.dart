@@ -31,7 +31,11 @@ void main() {
       IrFunction(forward, [b]),
       IrFunction(caller, [c]),
     ]);
-    final layouts = ProgramLayout([], functions: program.functions);
+    final layouts = ProgramLayout(
+      [],
+      functions: program.functions,
+      nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+    );
     final members = MemberCalls(program, {read, forward, caller});
     for (final function in program.functions) {
       final body = FunctionRepresentation(

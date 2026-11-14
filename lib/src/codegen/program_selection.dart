@@ -200,7 +200,7 @@ final class ProgramSelection(
       for (final body in functions.values) ...body.invocations.values,
     };
     Iterable<IrFunction> supportFunctions() => [
-      ...?layouts.native?.functions,
+      ...layouts.native.functions,
       ...members.functions,
       ...layouts.closures.functions,
       ...layouts.records.functions,
@@ -315,7 +315,7 @@ final class ProgramSelection(
     if (missing.isNotEmpty) return missing;
     IrProgram(
       [
-        ...?layouts.native?.classes,
+        ...layouts.native.classes,
         if (casts.functions.isNotEmpty) ...casts.classes,
         if (!globals.isEmpty) globals.declaration,
         ...arithmetic.classes,

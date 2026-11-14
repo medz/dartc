@@ -1,3 +1,6 @@
+import 'package:dartc/target.dart';
+import 'package:dartc/abi.dart';
+
 import 'dart:ffi' as ffi;
 
 import 'package:dartc/interop.dart';
@@ -20,7 +23,11 @@ import '../support/runtime.dart';
 void main() {
   final uri = Uri.parse('memory:representation');
   setUpAll(prepareRuntime);
-  late final layouts = ProgramLayout([], typeRuntime: heapRuntime.types);
+  late final layouts = ProgramLayout(
+    [],
+    typeRuntime: heapRuntime.types,
+    nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+  );
   final members = MemberCalls(IrProgram([], []), {});
 
   test('suspension exception bridges receive ordinary live parameters', () {
@@ -118,7 +125,7 @@ void main() {
     );
     final layout = ProgramLayout([
       IrClass(owner, [], members: [getter]),
-    ]);
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final representation = FunctionRepresentation(
       IrFunction(target, [entry]),
       layout,
@@ -258,7 +265,11 @@ void main() {
       );
       final body = FunctionRepresentation(
         IrFunction(function, [entry]),
-        ProgramLayout(closures.classes, closureStorage: closures),
+        ProgramLayout(
+          closures.classes,
+          closureStorage: closures,
+          nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+        ),
         CheckedCasts(),
         members,
         HeapPlan(),
@@ -384,7 +395,10 @@ void main() {
       );
       final body = FunctionRepresentation(
         function,
-        ProgramLayout(program.classes),
+        ProgramLayout(
+          program.classes,
+          nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+        ),
         CheckedCasts(),
         MemberCalls(program, reachableDefinitions(program, [function.target])),
         HeapPlan(),
@@ -436,7 +450,7 @@ void main() {
         IrFunction(target, [entry, done, failed]),
         ProgramLayout([
           IrClass(owner, [field], members: [target]),
-        ]),
+        ], nativeLayout: NativeLayout(const Target(.linux, .arm64))),
         CheckedCasts(),
         members,
         HeapPlan(),

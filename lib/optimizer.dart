@@ -22,3 +22,5 @@ export 'src/optimizer/function_rewrite.dart' show FunctionRewrite;
 export 'src/optimizer/storage_elimination.dart' show ProgramStorageElimination;
 export 'src/optimizer/storage_promotion.dart' show ProgramStoragePromotion;
 export 'src/optimizer/call_specialization.dart' show ProgramCallSpecialization;
+
+export 'src/optimizer/memory_layout.dart' show FlowMemoryLayout;

@@ -1,3 +1,5 @@
+import 'package:dartc/target.dart';
+import 'package:dartc/abi.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
@@ -50,7 +52,10 @@ void main() {
       no.finish(const Return(Constant.integer(0)));
       final function = IrFunction(root, [entry, yes, no, done, caught]);
       final casts = CheckedCasts();
-      final layout = ProgramLayout([]);
+      final layout = ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      );
       final selection = ProgramSelection(
         layout,
         HeapPlan(),
@@ -94,7 +99,10 @@ void main() {
       block.finish(const Return());
       final function = IrFunction(root, [block]);
       final program = IrProgram([], [function, body]);
-      final layout = ProgramLayout([]);
+      final layout = ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      );
       final selection = ProgramSelection(
         layout,
         HeapPlan(),
@@ -164,6 +172,7 @@ void main() {
     final layout = ProgramLayout(
       program.classes,
       typeRuntime: heapRuntime.types,
+      nativeLayout: NativeLayout(const Target(.linux, .arm64)),
     );
     final selection = ProgramSelection(
       layout,
@@ -187,7 +196,10 @@ void main() {
     final casts = CheckedCasts();
     final traces = StackTraces(heapRuntime);
     final arithmetic = NumericOperations();
-    final layouts = ProgramLayout([...casts.classes, ...arithmetic.classes]);
+    final layouts = ProgramLayout([
+      ...casts.classes,
+      ...arithmetic.classes,
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
@@ -283,7 +295,10 @@ void main() {
     );
     final casts = CheckedCasts();
     final traces = StackTraces(heapRuntime);
-    final layouts = ProgramLayout([...casts.classes, ...program.classes]);
+    final layouts = ProgramLayout([
+      ...casts.classes,
+      ...program.classes,
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),

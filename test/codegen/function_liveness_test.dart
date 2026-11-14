@@ -1,3 +1,5 @@
+import 'package:dartc/target.dart';
+import 'package:dartc/abi.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
@@ -39,7 +41,12 @@ void main() {
     ], lateFailure: instances.failure?.target);
     final body = FunctionRepresentation(
       function,
-      ProgramLayout([], instanceStorage: instances, closureStorage: closures),
+      ProgramLayout(
+        [],
+        instanceStorage: instances,
+        closureStorage: closures,
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
       CheckedCasts(),
       MemberCalls(IrProgram([], []), {}),
       HeapPlan(),

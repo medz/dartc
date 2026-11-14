@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:dartc/abi.dart';
+import 'package:dartc/target.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/optimizer.dart';
@@ -28,7 +30,13 @@ void main() {
       caller: outer,
     );
     const symbolBase = 10;
-    final data = ConstantData(ProgramLayout([]), symbolBase);
+    final data = ConstantData(
+      ProgramLayout(
+        [],
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      ),
+      symbolBase,
+    );
     final first = data.frameAddress(root, origin(4))!;
     final second = data.frameAddress(root, origin(5))!;
     final caller = data.frameAddress(root, outer)!;

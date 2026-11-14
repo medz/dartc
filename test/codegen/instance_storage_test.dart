@@ -1,3 +1,4 @@
+import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/compiler.dart';
@@ -35,7 +36,11 @@ void main() {
       final closures = ClosureStorage([
         function,
       ], lateFailure: FunctionTarget(uri, 'fail', .never, [.string]));
-      final layouts = ProgramLayout(closures.classes, closureStorage: closures);
+      final layouts = ProgramLayout(
+        closures.classes,
+        closureStorage: closures,
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      );
       final body = FunctionRepresentation(
         function,
         layouts,
@@ -78,7 +83,7 @@ void main() {
     final layouts = ProgramLayout([
       IrClass(owner, [value]),
       IrClass(child, [number]),
-    ]);
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final (backing, bound) = layouts.instances.slots(value);
     final storage = layouts.storageOf(child);
     expect(storage.fields, [
@@ -148,9 +153,13 @@ void main() {
       final storage = InstanceStorage([
         function,
       ], lateError: IrFunction(constructor, [constructed]));
-      final layouts = ProgramLayout([
-        IrClass(owner, [field], members: [target]),
-      ], instanceStorage: storage);
+      final layouts = ProgramLayout(
+        [
+          IrClass(owner, [field], members: [target]),
+        ],
+        instanceStorage: storage,
+        nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+      );
       final body = FunctionRepresentation(
         function,
         layouts,

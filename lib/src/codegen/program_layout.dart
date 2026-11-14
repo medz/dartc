@@ -2,6 +2,7 @@ import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart' show FlowMemoryLayout;
 import 'package:dartc/layout.dart';
 
 import 'closure_storage.dart';
@@ -33,22 +34,20 @@ final class ProgramLayout(
   Iterable<IrClass> classes, {
   Iterable<IrFunction> functions = const [],
   Iterable<ClassType>? referencedClasses,
-  NativeLayout? nativeLayout,
+  @override required final NativeLayout nativeLayout,
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
   ListStorage? listStorage,
   RecordStorage? recordStorage,
   TypeRuntime? typeRuntime,
-}) {
+}) implements FlowMemoryLayout {
   final instances = instanceStorage ?? InstanceStorage([]);
   final closures = closureStorage ?? ClosureStorage([]);
   final types = TypeValues(typeRuntime);
   final pointers = PointerStorage();
   final nativeCalls = NativeCalls();
-  final NativeStorage? native = nativeLayout == null
-      ? null
-      : NativeStorage(nativeLayout);
+  final native = NativeStorage(nativeLayout);
   final pointerRepresentation = PointerRepresentation(functions);
   final strings = stringStorage ?? StringStorage();
   final lists = listStorage ?? ListStorage(classes);
@@ -159,14 +158,17 @@ final class ProgramLayout(
   /// Whether the physical value is traced; stack cells supply their content type.
   bool isReference(ValueType type) => representation(type) == .reference;
 
+  @override
+  ObjectLayout objectLayout(ClassType type) => storageOf(type).layout;
+
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;
     if (_storage[declaration] case final known?) return known;
     if (FfiTypes.isCompound(declaration)) {
-      final view = native!.view(declaration);
+      final view = native.view(declaration);
       return _storage[declaration] = ClassStorage(view.fields, this);
     }
-    if (declaration == native?.buffer) {
+    if (declaration == native.buffer) {
       return _storage[declaration] = ClassStorage([], this);
     }
     if (declaration == ValueType.object) {
