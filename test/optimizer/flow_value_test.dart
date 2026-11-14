@@ -100,6 +100,45 @@ void main() {
     },
   );
 
+  test(
+    'receiver candidates distinguish exact allocations from unknown bounds',
+    () {
+      final base = ClassType(Uri.parse('memory:types'), 'Base');
+      final child = ClassType(
+        Uri.parse('memory:types'),
+        'Child',
+        superclass: base,
+      );
+      final allocation = Construct(
+        FunctionTarget(
+          null,
+          'new',
+          .voidType,
+          [],
+          owner: base,
+          kind: .initializer,
+        ),
+        [],
+      );
+      final value = FlowValue.object(FlowObject(allocation, Object()));
+      expect(value.mayHaveInstance(base), isTrue);
+      expect(value.mayHaveInstance(child), isFalse);
+      expect(FlowValue.unknown(base).mayHaveInstance(child), isTrue);
+      expect(FlowValue.unknown(.integer).mayHaveInstance(base), isFalse);
+      expect(
+        FlowValue.constant(const Constant.nullValue())
+            .mayHaveInstance(ValueType.nullClass),
+        isTrue,
+      );
+      expect(
+        value
+            .withReferences([FlowValue.constant(ObjectConstant(child, {}))])
+            .mayHaveInstance(child),
+        isFalse,
+      );
+    },
+  );
+
   test('address reachability does not change a scalar value type', () {
     final cell = NewCell(CellType(.integer), const Constant.integer(7));
     final object = FlowObject(cell, Object());

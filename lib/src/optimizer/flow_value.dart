@@ -125,6 +125,23 @@ final class FlowValue {
     yield* objects.map((value) => value.type);
   }
 
+  /// Whether a nominal receiver candidate matches known values or unknown bounds.
+  ///
+  /// An exact allocation cannot gain a subclass merely through a broader view.
+  /// Physical carriers of functions and records belong to representation.
+  bool mayHaveInstance(ClassType type) {
+    if (unknownTypes.any((bound) => bound.mayHaveInstance(type))) return true;
+    return [
+      ...constants.map((value) => value.type),
+      ...objects.map((value) => value.type),
+    ].any((actual) {
+      if (actual == .nullType) return type == ValueType.nullClass;
+      return actual is ClassType &&
+          actual.declaration == type.declaration &&
+          type.mayHaveInstance(actual);
+    });
+  }
+
   /// Associates a definition with the exact value computed on this path.
   FlowValue withSource(Value value, Object activation) {
     if (isBottom) return this;

@@ -1825,12 +1825,12 @@ final class ProgramFlow(
         ValueType.string,
       ];
       for (final type in primitiveTypes) {
-        if (bound.mayHaveInstance(type) && seen.add(type)) yield type;
+        if (value.mayHaveInstance(type) && seen.add(type)) yield type;
       }
       if (primitiveTypes.contains(bound.nonNullable)) continue;
       for (final declaration in program.classes) {
         final type = declaration.type;
-        if (!type.isAbstract && bound.mayHaveInstance(type) && seen.add(type)) {
+        if (!type.isAbstract && value.mayHaveInstance(type) && seen.add(type)) {
           yield type;
         }
       }
@@ -1924,6 +1924,13 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     return [activation];
   }
 
+  /// Whether a value is queryable in this graph, including graph-independent constants.
+  bool owns(Value value) {
+    _check();
+    return value is Constant ||
+        _flow._owners.containsKey(value is TestedValue ? value.test : value);
+  }
+
   /// Independent point snapshots, including paths with no eventual return.
   ({FlowState before, FlowState? normal, FlowState? exceptional})? pointStateOf(
     Instruction operation, {
@@ -1953,6 +1960,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     _check();
     if (value is Constant) return FlowValue.constant(value);
     if (value is TestedValue) {
+      _at(value.test, activation);
       return valueOf(value.test.operand, activation: activation);
     }
     var result = const FlowValue.bottom();
@@ -1967,6 +1975,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     _check();
     if (value is Constant) return Set.unmodifiable({value});
     if (value is TestedValue) {
+      _at(value.test, activation);
       return equivalentsOf(value.test.operand, activation: activation);
     }
     Set<Value>? common;

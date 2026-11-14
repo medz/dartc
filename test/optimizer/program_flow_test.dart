@@ -643,6 +643,14 @@ void main() {
       FlowValue.unknown(ValueType.object.nullable),
     ]).facts;
     expect(() => facts.valueOf(foreign), throwsArgumentError);
+    expect(facts.owns(block.parameters.single), isTrue);
+    expect(facts.owns(const Constant.integer(7)), isTrue);
+    expect(facts.owns(foreign), isFalse);
+    final foreignTest = TypeTest(block.parameters.single, foreignType);
+    final refinement = foreignTest.refinement(true)!;
+    expect(facts.owns(refinement), isFalse);
+    expect(() => facts.valueOf(refinement), throwsArgumentError);
+    expect(() => facts.equivalentsOf(refinement), throwsArgumentError);
   });
 
   test(
