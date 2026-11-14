@@ -27,6 +27,10 @@ void observe(String name, Object? Function() run, [Object? input]) {
     error = failure;
   } on TypeError {
     error = 'type';
+  } on RangeError {
+    error = 'range';
+  } on UnsupportedError {
+    error = 'unsupported';
   } on StateError {
     error = 'state';
   } on NoSuchMethodError {

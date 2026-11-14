@@ -181,6 +181,8 @@ ASCII 的严格解码和 U+FFFD 替换模式、ASCII/Latin-1 编码直接复用 
 
 `HtmlEscape` 保留各公开模式和自定义模式的字符集合，转义后保留其余 UTF-16 输入，包括跨切片的代理项。`LineSplitter` 按 CR、LF 或 CRLF 分行，保留空行和未终止的非空尾行；空输入不生成一行，U+2028 不作为分隔符。样本还验证跨空块拆开的 CRLF、惰性切片、Stream 转换、输出和流错误的原始身份，以及多块分行缓存跨回收的存活。
 
+常量对象、集合和嵌套函数值的规范身份、跨库复用、泛型/别名构造器值、默认参数及模式比较已在 macOS/Linux ARM64 [原生验证](../test/compiler/constants_test.dart)。不可变集合仍先执行协变参数检查；拒绝写入时不提前迭代来源，动态 spread 保留逐项检查及已发生的副作用。
+
 ## 数值比较与 SDK 差异
 
 [`num.==`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_equals.html) 要求 int 与 double 具有相同数值；[`num.<`](https://api.dart.dev/stable/3.13.7/dart-core/num/operator_less.html) 按数值大小比较。正负零在这些运算符下相等；NaN 与任何值不等，四种大小关系均为假。整数先舍入成 double 再比较不满足这一契约。例如 `9007199254740993 > 9007199254740992.0` 应为真，两者相等应为假；最大 int 小于 `9223372036854775808.0`。
@@ -198,5 +200,3 @@ analyzer 14.7 的常量求值也存在相同的精度问题，还会将 `0.0 == 
 模式常量、Map 模式重复键与 switch 穷尽性使用同一求值结果，覆盖常量别名、record、枚举及 sealed 层次；带守卫的 case 不保证覆盖。见[模式常量验证](../test/frontend/analysis/pattern_constants_test.dart)。原始 analyzer 对象仍保留上游诊断，包含可能受错误常量折叠影响的不可达警告；会话验收与 IR 转换使用重新检查的结果。
 
 运行时 `identical` 支持普通调用和函数值调用，不执行用户的 `==`。整数按值、double 按位模式比较身份，区分正负零及不同 NaN 位模式；其余已支持原生存储的非 record 对象保持引用身份。record 不承诺持久身份，原生运行时的 identical 对 record 返回 false；相等比较仍访问各字段。见[声明绑定验证](../test/frontend/lowering/identity_test.dart)、[原生身份验证](../test/compiler/pointer_values_test.dart)和 [`identical` 契约](https://api.dart.dev/dart-core/identical.html)。
-
-跨 int/double 的 `identical` 常量结果仍未接通；analyzer 为这类依赖目标表示的判断保留未知值，当前转换会明确拒绝，不能把未知值当作 false。
