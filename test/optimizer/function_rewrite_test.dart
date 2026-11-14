@@ -137,6 +137,62 @@ void main() {
     },
   );
 
+  test(
+    'direct local throws retain operand effects and reject foreign proofs',
+    () {
+      final target = FunctionTarget(_uri, 'localThrow', .integer, [.integer]);
+      final entry = Block(target.parameterTypes), handler = Block([.object]);
+      final operand = entry.emit(DirectCall(_tick, entry.parameters));
+      final throwing = Throw(
+        operand,
+        onThrow: Jump(handler, [UnwindValue.exception]),
+      );
+      entry.finish(throwing);
+      handler.finish(
+        Return(
+          handler.emit(UncheckedCast(handler.parameters.single, .integer)),
+        ),
+      );
+      final original = IrFunction(target, [entry, handler]);
+      final rewritten = FunctionRewrite(
+        original,
+        directThrows: {throwing},
+      ).run();
+      for (final body in [original, rewritten]) {
+        final observed = <int>[];
+        final runner = IrInterpreter(IrProgram([], [body]), {
+          (_uri, 'tick'): (input) {
+            observed.add(input);
+            if (input < 0) throw StateError('operand failed');
+            return input + 1;
+          },
+        });
+        expect(runner.run(body, [7]), 8);
+        expect(() => runner.run(body, [-2]), throwsStateError);
+        expect(observed, [7, -2]);
+      }
+      expect(rewritten.blocks.map((b) => b.end).whereType<Throw>(), isEmpty);
+      final other = Throw(
+        operand,
+        onThrow: Jump(handler, [UnwindValue.exception]),
+      );
+      expect(
+        () => FunctionRewrite(original, directThrows: {other}).run(),
+        throwsArgumentError,
+      );
+      final escaping = Block(target.parameterTypes);
+      final uncaught = Throw(escaping.parameters.single);
+      escaping.finish(uncaught);
+      expect(
+        () => FunctionRewrite(
+          IrFunction(target, [escaping]),
+          directThrows: {uncaught},
+        ).run(),
+        throwsArgumentError,
+      );
+    },
+  );
+
   test('a disproved branch removes its call without requiring inlining', () {
     final target = FunctionTarget(_uri, 'branch', .integer, []);
     final entry = Block(), dead = Block(), live = Block();

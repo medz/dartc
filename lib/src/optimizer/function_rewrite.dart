@@ -21,6 +21,10 @@ final class FunctionRewrite(
   final Set<Instruction> nonReturning = const {},
   final Set<Instruction> discardable = const {},
 
+  /// Local throws proven not to record implicit state on their exception value.
+  /// A newly captured trace is still required while its handler observes it.
+  final Set<Throw> directThrows = const {},
+
   /// Checked entry values and type bindings for each expanded invocation.
   final Map<
         Instruction,
@@ -423,6 +427,31 @@ final class FunctionRewrite(
       );
     }
 
+    Terminator throwEnd(Throw original) {
+      final handler = original.onThrow == null ? null : jump(original.onThrow!);
+      if (directThrows.contains(original) &&
+          handler != null &&
+          (original.stackTrace != null ||
+              !handler.arguments.contains(UnwindValue.stackTrace))) {
+        changed = true;
+        return Jump(handler.target, [
+          for (final argument in handler.arguments)
+            switch (argument) {
+              UnwindValue.exception => value(original.exception),
+              UnwindValue.stackTrace => value(original.stackTrace!),
+              _ => argument,
+            },
+        ]);
+      }
+      return Throw(
+        value(original.exception),
+        stackTrace: original.stackTrace == null
+            ? null
+            : value(original.stackTrace!),
+        onThrow: handler,
+      );
+    }
+
     Terminator end(Terminator original) => switch (original) {
       Return(value: final returned) => Return(
         returned == null ? null : value(returned),
@@ -430,11 +459,7 @@ final class FunctionRewrite(
       final Jump edge => jump(edge),
       final Branch branch => branchEnd(branch),
       final Invoke invocation => invokeEnd(invocation),
-      Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
-        value(exception),
-        stackTrace: stackTrace == null ? null : value(stackTrace),
-        onThrow: onThrow == null ? null : jump(onThrow),
-      ),
+      final Throw throwing => throwEnd(throwing),
       ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(
         onThrow == null ? null : jump(onThrow),
       ),
@@ -772,6 +797,13 @@ final class FunctionRewrite(
       ...inlined.keys,
     ].any((value) => !owns(value))) {
       throw ArgumentError('A rewrite obligation belongs to another function.');
+    }
+    if (directThrows.any(
+      (throwing) =>
+          throwing.onThrow == null ||
+          !function.blocks.any((block) => identical(block.end, throwing)),
+    )) {
+      throw ArgumentError('A direct throw requires an owned local handler.');
     }
     Iterable<Jump> outgoing(Block block) {
       if (block.instructions.any(_never)) return const [];
