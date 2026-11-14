@@ -331,19 +331,36 @@ final class ProgramFlow(
           if (_equivalent(arguments[i], arguments[j])) (i, j),
     ];
     final plain = [for (final value in arguments) value.withSources(const [])];
-    final callee = path.isNotEmpty
-        ? path.last
-        : _calls.putIfAbsent(
-            _ContextKey(
-              target,
-              plain,
-              environment,
-              projected.structuralKey,
-              repeated,
-              aliases.fold<Object?>(null, (key, pair) => (key, pair)),
-            ),
-            () => _Activation(body),
-          );
+    late final _Activation callee;
+    if (path.isNotEmpty) {
+      callee = path.last;
+    } else {
+      final aliasKey = aliases.fold<Object?>(null, (key, pair) => (key, pair));
+      final local = _ContextKey(
+        target,
+        const [],
+        environment,
+        site,
+        repeated,
+        aliasKey,
+      );
+      var key = site.contexts[local];
+      if (key != local) {
+        final precise = _ContextKey(
+          target,
+          plain,
+          environment,
+          projected.structuralKey,
+          repeated,
+          aliasKey,
+        );
+        // Changing inputs join locally without changing other callers' facts.
+        site.contexts[local] = key = key == null || key == precise
+            ? precise
+            : local;
+      }
+      callee = _calls.putIfAbsent(key!, () => _Activation(body));
+    }
     if (repeated && !callee.repeated) {
       callee.repeated = true;
       _pending.add(callee);
@@ -386,7 +403,7 @@ final class ProgramFlow(
 
     FlowObject mapObject(FlowObject object) {
       if (site.recursive ||
-          projected.containsObject(object) ||
+          callee.input!.containsObject(object) ||
           arguments.any(
             (value) =>
                 value.objects.contains(object) ||
@@ -481,7 +498,14 @@ final class ProgramFlow(
         (_escapingActivations.contains(activation) ||
             (_escapingReturns.contains(body.target) &&
                 identical(_roots[body.target], activation)));
-    final incoming = <Block, FlowState>{body.entry: activation.input!.copy()};
+    bool availableAt(FlowSource source, Block block) =>
+        !identical(source.activation, activation) ||
+        !block.parameters.contains(source.value) &&
+            activation.dominance.atEntry(source.value, block);
+    final incoming = <Block, FlowState>{
+      body.entry: activation.input!.copy()
+        ..retainSources((source) => availableAt(source, body.entry)),
+    };
     final incomingRanges = <Block, Map<Value, FlowIntegerRange>>{
       body.entry: {},
     };
@@ -543,6 +567,9 @@ final class ProgramFlow(
       }
       activation.edges.add(jump);
       activation.mergePoint(activation.edgeStates, jump, state);
+      // Stored aliases refer to the previous binding when a loop re-enters.
+      final nextState = state.copy()
+        ..retainSources((source) => availableAt(source, jump.target));
       var changed = false;
       for (final (index, parameter) in jump.target.parameters.indexed) {
         var value = switch (jump.arguments[index]) {
@@ -554,6 +581,9 @@ final class ProgramFlow(
         if (nextRanges[jump.arguments[index]] case final range?) {
           value = value.restrictIntegers(range);
         }
+        value = value.withSources(
+          value.sources.where((source) => availableAt(source, jump.target)),
+        );
         nextRanges.remove(parameter);
         if (value.integers case final range?
             when range != FlowIntegerRange.full) {
@@ -584,9 +614,9 @@ final class ProgramFlow(
         changed = true;
       }
       if (incoming[jump.target] case final previous?) {
-        changed = previous.join(state, widen: widen) || changed;
+        changed = previous.join(nextState, widen: widen) || changed;
       } else {
-        incoming[jump.target] = state.copy();
+        incoming[jump.target] = nextState;
         changed = true;
       }
       if (changed) pending.add(jump.target);
@@ -2636,6 +2666,7 @@ final class _CallSite(
   final Instruction operation,
   final FunctionTarget target,
 ) {
+  final contexts = <_ContextKey, _ContextKey>{};
   final allocations = <FlowObject, FlowObject>{};
   bool recursive = false;
 }
@@ -2659,6 +2690,7 @@ bool _equivalent(FlowValue left, FlowValue right) =>
         left.constant!.structuralKey == right.constant!.structuralKey);
 
 final class _Activation(final IrCallable body) {
+  late final dominance = ValueDominance(body as IrFunction);
   late final Set<Jump> backEdges = switch (body) {
     IrFunction(:final entry) => _backEdges(entry),
     _ => {},
