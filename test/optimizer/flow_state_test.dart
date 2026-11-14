@@ -153,10 +153,17 @@ void main() {
             value: const .bottom(),
             normal: null,
             exceptional: changed,
+            exception: FlowValue.constant(
+              const Constant.string('initializer failure'),
+            ),
           );
         },
       );
       expect(failed.normal, isNull);
+      expect(
+        failed.exception.constant?.structuralKey,
+        const Constant.string('initializer failure').structuralKey,
+      );
       expect(
         _step(
           failed.exceptional!,
@@ -520,6 +527,214 @@ void main() {
       ).value.constants.map((c) => c.structuralKey),
       contains(_one.structuralKey),
       reason: 'a failing final bind does not roll back initializer writes',
+    );
+  });
+
+  test(
+    'structural keys normalize restored globals and survive later mutation',
+    () {
+      final global = GlobalVariable(_uri, 'key', ValueType.integer.nullable);
+      final initial = FlowState(IrProgram([], [], globals: [global]));
+      final written = _step(initial, StoreGlobal(global, _one)).normal!;
+      final restored = _step(
+        written,
+        StoreGlobal(global, const Constant.nullValue()),
+      ).normal!;
+      expect(restored, initial);
+      expect(restored.hashCode, initial.hashCode);
+      final snapshot = initial.structuralKey;
+      final pristine = initial.copy();
+      expect(initial.join(written), isTrue);
+      expect(snapshot, pristine.structuralKey);
+      expect(initial.structuralKey, isNot(snapshot));
+      expect(initial.join(written), isFalse);
+    },
+  );
+
+  test('projection keeps globals, escapes and transitive captures', () {
+    final type = CellType(.integer);
+    final enclosing = FunctionTarget(_uri, 'scope', .voidType, []);
+    final closureTarget = FunctionTarget(
+      _uri,
+      'capture',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: enclosing,
+      sourceOffset: 1,
+      captures: [type],
+    );
+    final global = GlobalVariable(
+      _uri,
+      'callback',
+      closureTarget.signature.nullable,
+    );
+    final capturedCell = NewCell(type, _one);
+    final escapedCell = NewCell(type, _two);
+    final hiddenCell = NewCell(type, const Constant.integer(99));
+    final a = _step(
+      FlowState(IrProgram([], [], globals: [global])),
+      capturedCell,
+    );
+    final b = _step(a.normal!, escapedCell);
+    final c = _step(b.normal!, hiddenCell);
+    final closure = MakeClosure(closureTarget, [capturedCell]);
+    final d = _step(c.normal!, closure, operands: [a.value]);
+    final stored = _step(
+      d.normal!,
+      StoreGlobal(global, closure),
+      operands: [d.value],
+    ).normal!..escape([b.value]);
+    final projected = stored.project([]);
+    expect(
+      _step(
+        projected,
+        ReadCell(capturedCell),
+        operands: [a.value],
+      ).value.constant?.structuralKey,
+      _one.structuralKey,
+    );
+    expect(
+      _step(
+        projected,
+        ReadCell(escapedCell),
+        operands: [b.value],
+      ).value.constant?.structuralKey,
+      _two.structuralKey,
+    );
+    expect(
+      _step(
+        projected,
+        ReadCell(hiddenCell),
+        operands: [c.value],
+      ).value.constant,
+      isNull,
+    );
+    expect(
+      _step(
+        stored,
+        ReadCell(hiddenCell),
+        operands: [c.value],
+      ).value.constant?.structuralKey,
+      const Constant.integer(99).structuralKey,
+    );
+  });
+
+  test(
+    'summary deltas preserve private caller storage and rename fresh objects',
+    () {
+      final global = GlobalVariable(
+        _uri,
+        'progress',
+        ValueType.integer.nullable,
+      );
+      final program = IrProgram([], [], globals: [global]);
+      final sharedCell = NewCell(CellType(.integer), _one);
+      final privateCell = NewCell(CellType(.integer), _two);
+      final a = _step(FlowState(program), sharedCell);
+      final b = _step(a.normal!, privateCell);
+      final caller = b.normal!;
+      final before = caller.project([a.value]);
+      final written = _step(
+        before,
+        WriteCell(sharedCell, const Constant.integer(7)),
+        operands: [a.value, .constant(const Constant.integer(7))],
+      );
+      final globalWrite = _step(written.normal!, StoreGlobal(global, _one));
+      final freshCell = NewCell(CellType(.integer), const Constant.integer(9));
+      final allocated = _step(globalWrite.normal!, freshCell);
+      final after = allocated.normal!..escape([allocated.value]);
+      final original = allocated.value.objects.single;
+      final renamed = FlowObject(original.site, Object(), type: original.type);
+      FlowObject mapObject(FlowObject value) =>
+          value == original ? renamed : value;
+      FlowValue mapValue(FlowValue value) => value.mapObjects(mapObject);
+      final applied = caller.applySummary(
+        before,
+        after,
+        mapObject: mapObject,
+        mapValue: mapValue,
+      );
+      expect(
+        _step(
+          applied,
+          ReadCell(sharedCell),
+          operands: [a.value],
+        ).value.constant?.structuralKey,
+        const Constant.integer(7).structuralKey,
+      );
+      expect(
+        _step(
+          applied,
+          ReadCell(privateCell),
+          operands: [b.value],
+        ).value.constant?.structuralKey,
+        _two.structuralKey,
+      );
+      expect(
+        _step(
+          applied,
+          ReadCell(freshCell),
+          operands: [.object(renamed)],
+        ).value.constant?.structuralKey,
+        const Constant.integer(9).structuralKey,
+      );
+      expect(applied.escapedValues.objects, contains(renamed));
+      expect(applied.escapedValues.objects, isNot(contains(original)));
+      expect(
+        _step(applied, LoadGlobal(global)).value.constant?.structuralKey,
+        _one.structuralKey,
+      );
+      expect(
+        _step(
+          caller,
+          ReadCell(sharedCell),
+          operands: [a.value],
+        ).value.constant?.structuralKey,
+        _one.structuralKey,
+      );
+      expect(
+        _step(caller, LoadGlobal(global)).value.constant?.structuralKey,
+        const Constant.nullValue().structuralKey,
+      );
+    },
+  );
+
+  test('address provenance keeps referenced storage without changing address types', () {
+    final cell = NewCell(CellType(.integer), _one);
+    final allocated = _step(FlowState(IrProgram([], [])), cell);
+    final address = FlowValue.unknown(.integer)
+        .withReferences([allocated.value]);
+    expect(address.types, [ValueType.integer]);
+    final projected = allocated.normal!.project([address]);
+    expect(
+      _step(
+        projected,
+        ReadCell(cell),
+        operands: [allocated.value],
+      ).value.constant?.structuralKey,
+      _one.structuralKey,
+    );
+    expect(
+      projected.escape([address]).objects,
+      contains(allocated.value.objects.single),
+    );
+    projected.invalidate([address]);
+    expect(
+      _step(
+        projected,
+        ReadCell(cell),
+        operands: [allocated.value],
+      ).value.constant,
+      isNull,
+    );
+    expect(
+      _step(
+        allocated.normal!,
+        ReadCell(cell),
+        operands: [allocated.value],
+      ).value.constant?.structuralKey,
+      _one.structuralKey,
     );
   });
 

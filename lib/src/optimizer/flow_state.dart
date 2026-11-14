@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 
 import 'flow_value.dart';
+import 'state_map.dart';
 
 /// Normal and exceptional state, including the actual thrown values.
 final class const FlowResult({
@@ -49,57 +50,171 @@ typedef FlowCall = FlowResult Function(
 final class FlowState {
   /// The immutable semantic graph whose declarations identify slots.
   final IrProgram program;
-  final Map<GlobalVariable, _Slot> _globals;
-  final Map<FlowObject, _ObjectState> _objects;
+  final Set<GlobalVariable> _declaredGlobals;
+  final Map<ClassType, IrClass> _classes;
+  StateMap<GlobalVariable, _Slot> _globals;
+  StateMap<FlowObject, _ObjectState> _objects;
   FlowValue _escaped;
 
   new(this.program)
-    : _globals = {
-        for (final global in program.globals)
-          global: !global.isLate && global.initializer == null
-              ? _Slot.bound(_null)
-              : const _Slot.unbound(),
-      },
-      _objects = {},
+    : _declaredGlobals = Set.unmodifiable(program.globals),
+      _classes = Map.unmodifiable({for (final c in program.classes) c.type: c}),
+      _globals = const .empty(),
+      _objects = const .empty(),
       _escaped = const .bottom();
 
-  new _(this.program, this._globals, this._objects, this._escaped);
+  new _(
+    this.program,
+    this._declaredGlobals,
+    this._classes,
+    this._globals,
+    this._objects,
+    this._escaped,
+  );
 
-  /// Makes a point snapshot without sharing mutable storage maps.
+  /// Shares immutable storage versions; taking a point snapshot is O(1).
   FlowState copy() => FlowState._(
     program,
-    {..._globals},
-    {for (final e in _objects.entries) e.key: e.value.copy()},
+    _declaredGlobals,
+    _classes,
+    _globals,
+    _objects,
     _escaped,
   );
 
-  /// Adds an executable alternative, returning whether any fact changed.
+  /// Adds an executable alternative, skipping unchanged storage subtrees.
   bool join(FlowState incoming) {
     if (!identical(program, incoming.program)) {
       throw ArgumentError('Cannot join storage from a different IR graph.');
     }
-    var changed = false;
-    for (final entry in incoming._globals.entries) {
-      final before = _globals[entry.key]!;
-      final after = before.join(entry.value);
-      if (before != after) {
-        _globals[entry.key] = after;
-        changed = true;
-      }
-    }
-    for (final entry in incoming._objects.entries) {
-      final before = _objects[entry.key];
-      if (before == null) {
-        _objects[entry.key] = entry.value.copy();
-        changed = true;
-      } else {
-        changed = before.join(entry.value) || changed;
-      }
-    }
+    final globals = _globals.merge(incoming._globals, (global, left, right) {
+      final value = (left ?? _initial(global)).join(right ?? _initial(global));
+      return value == _initial(global) ? null : value;
+    });
+    final objects = _objects.isEmpty
+        ? incoming._objects
+        : incoming._objects.isEmpty
+        ? _objects
+        : _objects.merge(
+            incoming._objects,
+            (_, left, right) => left == null
+                ? right!
+                : right == null
+                ? left
+                : left.join(right),
+          );
     final escaped = _escaped.join(incoming._escaped);
-    changed = escaped != _escaped || changed;
+    final changed =
+        !identical(globals, _globals) ||
+        !identical(objects, _objects) ||
+        escaped != _escaped;
+    _globals = globals;
+    _objects = objects;
     _escaped = escaped;
     return changed;
+  }
+
+  _Slot _initial(GlobalVariable global) =>
+      !global.isLate && global.initializer == null
+      ? _Slot.bound(_null)
+      : const _Slot.unbound();
+
+  /// An immutable key for the current version, safe after this wrapper changes.
+  Object get structuralKey => (program, _globals, _objects, _escaped);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FlowState && structuralKey == other.structuralKey;
+
+  @override
+  int get hashCode => structuralKey.hashCode;
+
+  /// Projects a call input while preserving globals and external reachability.
+  FlowState project(Iterable<FlowValue> roots) {
+    final reachable = reachableValues([
+      ...roots,
+      _escaped,
+      for (final slot in _globals.values) ...[slot.value, slot.initializer],
+    ]);
+    var objects = const StateMap<FlowObject, _ObjectState>.empty();
+    for (final object in reachable.objects) {
+      if (_objects[object] case final state?) {
+        objects = objects.withEntry(object, state);
+      }
+    }
+    return FlowState._(
+      program,
+      _declaredGlobals,
+      _classes,
+      _globals,
+      objects,
+      _escaped,
+    );
+  }
+
+  /// Applies a callee's changes after mapping its allocation and value identities.
+  ///
+  /// Unrelated caller storage is preserved. The returned wrapper is independent.
+  FlowState applySummary(
+    FlowState before,
+    FlowState after, {
+    required FlowObject Function(FlowObject) mapObject,
+    required FlowValue Function(FlowValue) mapValue,
+  }) {
+    if (!identical(program, before.program) ||
+        !identical(program, after.program)) {
+      throw ArgumentError('A call summary belongs to one immutable IR graph.');
+    }
+    final result = copy();
+    for (final change in after._globals.differences(before._globals)) {
+      result._setGlobal(
+        change.key,
+        (change.after ?? _initial(change.key)).map(mapValue),
+      );
+    }
+    for (final change in after._objects.differences(before._objects)) {
+      final next = change.after;
+      if (next == null) continue; // Projection is not an object destruction.
+      final object = mapObject(change.key);
+      final prior = change.before;
+      var current = result._objects[object];
+      if (prior == null || current == null) {
+        result._allocate(object, next.map(mapValue));
+        continue;
+      }
+      for (final slot in next.slots.differences(prior.slots)) {
+        if (slot.after == null) {
+          throw StateError('A summary cannot remove a declared storage slot.');
+        }
+        current = current!.withSlot(slot.key, slot.after!.map(mapValue));
+      }
+      current = current!.withFlags(
+        summary: next.summary && !prior.summary,
+        escaped: next.escaped && !prior.escaped,
+      );
+      if (!_sameCaptures(next.captures, prior.captures)) {
+        current = _ObjectState._(
+          current.slots,
+          next.captures == null
+              ? null
+              : List.unmodifiable(next.captures!.map(mapValue)),
+          current.summary,
+          current.escaped,
+        );
+      }
+      result._objects = result._objects.withEntry(object, current);
+    }
+    if (after._escaped != before._escaped) {
+      result._escaped = result._escaped.join(mapValue(after._escaped));
+    }
+    return result;
+  }
+
+  void _setGlobal(GlobalVariable global, _Slot slot) {
+    _globals = slot == _initial(global)
+        ? _globals.withoutKey(global)
+        : _globals.withEntry(global, slot);
   }
 
   /// Captures of this allocation, preserving shared cell identities.
@@ -122,7 +237,10 @@ final class FlowState {
     final reachable = reachableValues(roots);
     _escaped = _escaped.join(reachable);
     for (final object in reachable.objects) {
-      _objects[object]?.escaped = true;
+      final state = _objects[object];
+      if (state != null && !state.escaped) {
+        _objects = _objects.withEntry(object, state.withFlags(escaped: true));
+      }
     }
     return reachable;
   }
@@ -139,7 +257,8 @@ final class FlowState {
     for (final object in reachable.objects) {
       final state = _objects[object];
       if (state == null) continue;
-      for (final entry in state.slots.entries.toList()) {
+      var next = state;
+      for (final entry in state.slots.entries) {
         final key = entry.key;
         final type = key is InstanceField
             ? key.typeFor(object.type as ClassType)
@@ -147,14 +266,19 @@ final class FlowState {
         final isFinal = key is InstanceField
             ? key.isFinal
             : (object.type as CellType).isFinal;
-        state.slots[key] = entry.value.invalidate(type, isFinal: isFinal);
+        next = next.withSlot(
+          key,
+          entry.value.invalidate(type, isFinal: isFinal),
+        );
       }
+      _objects = _objects.withEntry(object, next);
     }
     if (globals) {
-      for (final entry in _globals.entries.toList()) {
-        _globals[entry.key] = entry.value.invalidate(
-          entry.key.type,
-          isFinal: entry.key.isFinal,
+      for (final global in _declaredGlobals) {
+        final slot = _globals[global] ?? _initial(global);
+        _setGlobal(
+          global,
+          slot.invalidate(global.type, isFinal: global.isFinal),
         );
       }
     }
@@ -514,7 +638,10 @@ final class FlowState {
         if (isFinal && !slot.unbound) continue;
         final checked = value.check(type);
         if (!checked.value.isBottom) {
-          state.slots[key] = slot.join(_Slot.bound(checked.value));
+          next._objects = next._objects.withEntry(
+            object,
+            state.withSlot(key, slot.join(_Slot.bound(checked.value))),
+          );
           if (state.escaped) next.escape([checked.value]);
         }
       }
@@ -626,28 +753,34 @@ final class FlowState {
 
   void _allocate(FlowObject object, _ObjectState state) {
     final prior = _objects[object];
-    if (prior == null) {
-      _objects[object] = state;
-    } else {
-      // The input already contains an earlier allocation, not a solver revisit.
-      prior.summary = true;
-      prior.join(state);
-    }
+    // Existing input storage denotes an earlier allocation, not a solver revisit.
+    _objects = _objects.withEntry(
+      object,
+      prior == null ? state : prior.join(state).withFlags(summary: true),
+    );
   }
 
   _Slot _slot((FlowObject?, Object) location) => location.$1 == null
-      ? _globals[location.$2 as GlobalVariable]!
-      : _objects[location.$1]!.slots[location.$2]!;
+      ? _globals[location.$2 as GlobalVariable] ??
+            _initial(location.$2 as GlobalVariable)
+      : _objects[location.$1!]!.slots[location.$2]!;
 
   void _set((FlowObject?, Object) location, _Slot slot) {
+    if (_slot(location) == slot) return;
     final object = location.$1;
     if (object == null) {
-      _globals[location.$2 as GlobalVariable] = slot;
+      _setGlobal(location.$2 as GlobalVariable, slot);
     } else {
       final state = _objects[object]!;
-      state.slots[location.$2] = state.summary || state.escaped
-          ? state.slots[location.$2]!.join(slot)
-          : slot;
+      _objects = _objects.withEntry(
+        object,
+        state.withSlot(
+          location.$2,
+          state.summary || state.escaped
+              ? state.slots[location.$2]!.join(slot)
+              : slot,
+        ),
+      );
     }
   }
 
@@ -660,14 +793,12 @@ final class FlowState {
   }
 
   void _requireGlobal(GlobalVariable global) {
-    if (!_globals.containsKey(global)) {
+    if (!_declaredGlobals.contains(global)) {
       throw ArgumentError('Global does not belong to this IR graph.');
     }
   }
 
-  IrClass? _class(ClassType type) => program.classes
-      .where((definition) => identical(definition.type, type.declaration))
-      .firstOrNull;
+  IrClass? _class(ClassType type) => _classes[type.declaration];
 
   bool _weak(InstanceField field) {
     final definition = _class(field.owner);
@@ -691,6 +822,7 @@ final class FlowState {
     while (pending.isNotEmpty) {
       final value = pending.removeLast();
       result = result.join(value);
+      if (!value.references.isBottom) pending.add(value.references);
       for (final object in value.objects) {
         if (!objects.add(object)) continue;
         final state = _objects[object];
@@ -789,6 +921,11 @@ final class _Slot {
     initializer.join(other.initializer),
   );
 
+  _Slot map(FlowValue Function(FlowValue) transform) {
+    final mapped = _Slot._(transform(value), unbound, transform(initializer));
+    return mapped == this ? this : mapped;
+  }
+
   _Slot invalidate(ValueType type, {required bool isFinal}) =>
       isFinal && !unbound
       ? this
@@ -804,52 +941,116 @@ final class _Slot {
   int get hashCode => Object.hash(value, unbound, initializer);
 }
 
-final class _ObjectState(
-  final Map<Object, _Slot> slots, {
-  List<FlowValue>? captures,
-  bool summary = false,
-  bool escaped = false,
-}) {
-  List<FlowValue>? captures = captures == null ? null : .unmodifiable(captures);
-  bool summary = summary;
-  bool escaped = escaped;
+final class _ObjectState {
+  final StateMap<Object, _Slot> slots;
+  final List<FlowValue>? captures;
+  final bool summary;
+  final bool escaped;
 
-  _ObjectState copy() => _ObjectState(
-    {...slots},
-    captures: captures,
-    summary: summary,
-    escaped: escaped,
+  new(
+    Map<Object, _Slot> slots, {
+    List<FlowValue>? captures,
+    this.summary = false,
+  }) : escaped = false,
+       slots = StateMap.fromEntries(slots.entries),
+       captures = captures == null ? null : List.unmodifiable(captures);
+
+  new _(this.slots, this.captures, this.summary, this.escaped);
+
+  _ObjectState withSlot(Object key, _Slot value) {
+    final next = slots.withEntry(key, value);
+    return identical(next, slots)
+        ? this
+        : _ObjectState._(next, captures, summary, escaped);
+  }
+
+  _ObjectState withFlags({bool summary = false, bool escaped = false}) =>
+      (!summary || this.summary) && (!escaped || this.escaped)
+      ? this
+      : _ObjectState._(
+          slots,
+          captures,
+          summary || this.summary,
+          escaped || this.escaped,
+        );
+
+  _ObjectState map(FlowValue Function(FlowValue) transform) {
+    final mappedSlots = slots.mapValues((_, value) => value.map(transform));
+    final mappedCaptures = captures == null
+        ? null
+        : List<FlowValue>.unmodifiable(captures!.map(transform));
+    return identical(mappedSlots, slots) &&
+            _sameCaptures(mappedCaptures, captures)
+        ? this
+        : _ObjectState._(mappedSlots, mappedCaptures, summary, escaped);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _ObjectState &&
+          slots == other.slots &&
+          summary == other.summary &&
+          escaped == other.escaped &&
+          _sameCaptures(captures, other.captures);
+
+  @override
+  late final int hashCode = Object.hash(
+    slots,
+    captures != null,
+    Object.hashAll(captures ?? const <FlowValue>[]),
+    summary,
+    escaped,
   );
 
-  bool join(_ObjectState incoming) {
-    var changed = incoming.summary && !summary || incoming.escaped && !escaped;
-    summary |= incoming.summary;
-    escaped |= incoming.escaped;
-    for (final entry in incoming.slots.entries) {
-      final before = slots[entry.key];
-      final after = before?.join(entry.value) ?? entry.value;
-      if (before != after) {
-        slots[entry.key] = after;
-        changed = true;
-      }
-    }
+  _ObjectState join(_ObjectState incoming) {
+    if (identical(this, incoming)) return this;
+    final joinedSlots = slots.merge(
+      incoming.slots,
+      (_, left, right) => left == null
+          ? right!
+          : right == null
+          ? left
+          : left.join(right),
+    );
+    var changed =
+        !identical(joinedSlots, slots) ||
+        incoming.summary && !summary ||
+        incoming.escaped && !escaped;
+    var joinedCaptures = captures;
     if (incoming.captures case final other?) {
       if (captures == null) {
-        captures = other;
+        joinedCaptures = other;
         changed = true;
-      } else {
+      } else if (!identical(captures, other)) {
         if (captures!.length != other.length) {
           throw StateError('One closure allocation has incompatible captures.');
         }
         final joined = <FlowValue>[];
+        var capturesChanged = false;
         for (var i = 0; i < other.length; i++) {
           final value = captures![i].join(other[i]);
-          changed = value != captures![i] || changed;
+          capturesChanged |= value != captures![i];
           joined.add(value);
         }
-        captures = List.unmodifiable(joined);
+        if (capturesChanged) joinedCaptures = List.unmodifiable(joined);
+        changed |= capturesChanged;
       }
     }
-    return changed;
+    return changed
+        ? _ObjectState._(
+            joinedSlots,
+            joinedCaptures,
+            summary || incoming.summary,
+            escaped || incoming.escaped,
+          )
+        : this;
   }
 }
+
+bool _sameCaptures(List<FlowValue>? a, List<FlowValue>? b) =>
+    identical(a, b) ||
+    a != null &&
+        b != null &&
+        a.length == b.length &&
+        a.indexed.every((entry) => entry.$2 == b[entry.$1]);
