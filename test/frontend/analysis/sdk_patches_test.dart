@@ -174,6 +174,16 @@ void main() {
           patches.origins[readEnvironment.resolvedUnit!.uri]!.path,
           endsWith('/sdk/patches/io.dart'),
         );
+        final directory = io.element.getClass('_Directory')!;
+        for (final member in [
+          directory.getGetter('current')!,
+          directory.getSetter('current')!,
+        ]) {
+          expect(
+            io.getFragmentDeclaration(member.fragments.last)!.resolvedUnit!.uri,
+            Uri.parse('dart:io/directory_impl.dart'),
+          );
+        }
         final analyzed = {for (final unit in units) unit.uri};
         expect(analyzed, containsAll(patches.origins.keys));
         final ffi = libraries.singleWhere(

@@ -125,7 +125,13 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 `Platform.environment` 在 macOS/Linux 可执行文件和原生库中读取所在进程的环境。环境项解析、重复键处理、首次读取缓存和只读 Map 保留[官方 platform_impl.dart](../sdk/std/lib/io/platform_impl.dart) 正文；目标片段通过现有 FFI 动态符号读取 `environ`，使用 SDK UTF-8 解码。名字开头的 U+FEFF 保留为数据，含非法 UTF-8 的整条环境项忽略；空值保留，没有等号或名称为空的条目丢弃，重复名称取最后一项。
 
-后续系统环境修改不改变已取得的快照；写入、删除和清空视图抛出 UnsupportedError。环境文本和视图跨回收保留，见[环境执行验证](../test/compiler/platform_environment_test.dart)。`Platform.operatingSystem`、平台布尔标记和 `pathSeparator` 使用输出目标 ABI 的平台事实。其他 Platform 元数据、文件/目录操作和子进程管理尚未接通。
+后续系统环境修改不改变已取得的快照；写入、删除和清空视图抛出 UnsupportedError。环境文本和视图跨回收保留，见[环境执行验证](../test/compiler/platform_environment_test.dart)。`Platform.operatingSystem`、平台布尔标记和 `pathSeparator` 使用输出目标 ABI 的平台事实。其他 Platform 元数据、当前目录读写以外的文件/目录操作和子进程管理尚未接通。
+
+## 当前工作目录
+
+`Directory.current` 读取和设置 macOS/Linux 目标进程的工作目录；设置影响同一进程的原生宿主与 Dart 调用。复用[SDK directory_impl.dart](../sdk/std/lib/io/directory_impl.dart) 的 String/Directory 输入、相对路径、路径快照、IOOverrides 和 FileSystemException 分类，目标实现只连接 getcwd/chdir 和 OS 错误。路径沿用 SDK 的 UTF-8 与零终止转换；原始路径的首个 NUL 结束传给系统的名称，Linux 非法 UTF-8 名称在读取文本时替换为 U+FFFD，文本不能无损表示原始字节。固定 SDK 3.14 在这个当前目录样本上会从 VM UTF-8 入口直接终止；dartc 沿用 SDK 其他原始路径的替换解码策略，并独立验证结果。
+
+失败的切换不改变当前目录；当前目录被删除时，读取抛出带 errno 的 PathNotFoundException，并可切回仍存在的目录。见[当前目录原生验证](../test/compiler/working_directory_test.dart)。文件和目录的其他操作、Uri.base 及默认文件 URI 平台选择仍待接通。
 
 ## 原生库
 
