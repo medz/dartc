@@ -12,6 +12,7 @@ library;
 export 'src/optimizer/call_type_flow.dart' show CallTypeFlow, CallTypeFacts;
 export 'src/optimizer/reachability.dart' show reachableDefinitions;
 export 'src/optimizer/flow_value.dart' show FlowValue, FlowObject, FlowAddress;
+export 'src/optimizer/integer_range.dart' show FlowIntegerRange;
 export 'src/optimizer/program_flow.dart'
     show ProgramFlow, ProgramFlowFacts, FlowEntry;
 export 'src/optimizer/program_pass.dart' show ProgramPass;

@@ -1,5 +1,7 @@
 import 'package:dartc/ir.dart';
 
+import 'integer_range.dart';
+
 /// An SSA definition whose value equals this fact in one activation.
 final class FlowSource(final Value value, final Object activation) {
   @override
@@ -93,8 +95,8 @@ final class FlowAddress(
 
 /// Values arriving on executable paths, including explicit unknown bounds.
 ///
-/// Empty facts mean no value has arrived. Distinct scalar constants widen to
-/// their type; function and allocation identities remain distinct.
+/// Empty facts mean no value has arrived. Integer alternatives retain bounds;
+/// other scalar alternatives widen to their type. Callable identities remain.
 final class FlowValue {
   final Map<Object, Constant> _constants;
 
@@ -113,6 +115,7 @@ final class FlowValue {
   /// activation. Joins retain only aliases valid on every incoming path.
   final Set<FlowSource> sources;
   final FlowValue? _references;
+  final FlowIntegerRange? _integers;
 
   /// Capabilities retained through raw memory: managed values and callback entries.
   ///
@@ -125,6 +128,7 @@ final class FlowValue {
       unknownTypes = const {},
       sources = const {},
       addresses = const {},
+      _integers = null,
       _references = null;
 
   new constant(Constant value)
@@ -133,6 +137,7 @@ final class FlowValue {
       unknownTypes = const {},
       sources = const {},
       addresses = const {},
+      _integers = null,
       _references = null;
 
   new object(FlowObject value)
@@ -141,6 +146,7 @@ final class FlowValue {
       unknownTypes = const {},
       sources = const {},
       addresses = const {},
+      _integers = null,
       _references = null;
 
   new unknown(ValueType type)
@@ -149,6 +155,7 @@ final class FlowValue {
       unknownTypes = Set.unmodifiable({type}),
       sources = const {},
       addresses = const {},
+      _integers = null,
       _references = null;
 
   new address(FlowAddress address)
@@ -157,7 +164,23 @@ final class FlowValue {
       unknownTypes = const {},
       sources = const {},
       addresses = Set.unmodifiable({address}),
+      _integers = null,
       _references = address.reference;
+
+  /// A scalar integer constrained by executable paths.
+  factory FlowValue.integerRange(FlowIntegerRange range) =>
+      switch (range.constant) {
+        final value? => FlowValue.constant(Constant.integer(value)),
+        null => ._(
+          const {},
+          const {},
+          {ValueType.integer},
+          const {},
+          null,
+          const {},
+          range == FlowIntegerRange.full ? null : range,
+        ),
+      };
 
   new _(
     Map<Object, Constant> constants,
@@ -166,11 +189,13 @@ final class FlowValue {
     Set<FlowSource> sources = const {},
     FlowValue? references,
     Set<FlowAddress> addresses = const {},
+    FlowIntegerRange? integers,
   ]) : _constants = Map.unmodifiable(constants),
        objects = Set.unmodifiable(objects),
        unknownTypes = Set.unmodifiable(unknownTypes),
        sources = Set.unmodifiable(sources),
        addresses = Set.unmodifiable(addresses),
+       _integers = integers,
        _references = references;
 
   /// Constants identified structurally, without invoking user equality.
@@ -198,6 +223,36 @@ final class FlowValue {
     yield* constants.map((value) => value.type);
     yield* objects.map((value) => value.type);
     yield* addresses.map((value) => value.type);
+  }
+
+  /// Bounds apply only to scalar integers, never to raw address capabilities.
+  FlowIntegerRange? get integers {
+    if (isBottom ||
+        objects.isNotEmpty ||
+        addresses.isNotEmpty ||
+        unknownTypes.any((type) => type != ValueType.integer) ||
+        constants.any(
+          (value) => value is! ScalarConstant || value.value is! int,
+        )) {
+      return null;
+    }
+    if (_integers != null) return _integers;
+    if (constant case ScalarConstant(value: final int value)) {
+      return FlowIntegerRange(value, value);
+    }
+    return FlowIntegerRange.full;
+  }
+
+  /// Intersects a numeric path condition without changing SSA equivalence.
+  FlowValue restrictIntegers(FlowIntegerRange range) {
+    final existing = integers;
+    if (existing == null) return this;
+    final narrowed = existing.intersect(range);
+    if (narrowed == null) return const FlowValue.bottom();
+    if (narrowed == existing) return this;
+    return FlowValue.integerRange(narrowed)
+        .withSources(sources)
+        .withReferences([references]);
   }
 
   /// Whether a nominal receiver candidate matches known values or unknown bounds.
@@ -230,6 +285,7 @@ final class FlowValue {
       {...sources, source},
       _references,
       addresses,
+      _integers,
     );
   }
 
@@ -264,6 +320,7 @@ final class FlowValue {
       sources,
       references,
       mappedAddresses,
+      _integers,
     );
   }
 
@@ -281,6 +338,7 @@ final class FlowValue {
       mapped,
       _references,
       addresses,
+      _integers,
     );
   }
 
@@ -300,6 +358,7 @@ final class FlowValue {
       sources,
       retained,
       addresses,
+      _integers,
     );
   }
 
@@ -373,23 +432,28 @@ final class FlowValue {
     return (
       value: checked.isBottom
           ? checked
-          : FlowValue._(
+          : ._(
               checked._constants,
               checked.objects,
               checked.unknownTypes,
               sources,
               _references,
               checked.addresses,
+              _integers,
             ),
       mayFail: mayFail,
     );
   }
 
   /// Joins values from executable alternatives without inventing call targets.
-  FlowValue join(FlowValue other) {
+  FlowValue join(FlowValue other, {bool widen = false}) {
     if (isBottom) return other;
     if (other.isBottom || this == other) return this;
     final constants = {..._constants, ...other._constants};
+    final leftIntegers = integers, rightIntegers = other.integers;
+    final joinedIntegers = leftIntegers != null && rightIntegers != null
+        ? leftIntegers.join(rightIntegers, widen: widen)
+        : null;
     final objects = {...this.objects, ...other.objects};
     final unknown = {...unknownTypes, ...other.unknownTypes};
     final scalars = <ValueType, Object>{};
@@ -422,6 +486,10 @@ final class FlowValue {
           ? null
           : references.join(other.references),
       addresses.values.toSet(),
+      joinedIntegers?.constant == null &&
+              joinedIntegers != FlowIntegerRange.full
+          ? joinedIntegers
+          : null,
     );
   }
 
@@ -438,6 +506,7 @@ final class FlowValue {
       unknownTypes.containsAll(other.unknownTypes) &&
       sources.length == other.sources.length &&
       sources.containsAll(other.sources) &&
+      _integers == other._integers &&
       _references == other._references;
 
   @override
@@ -447,6 +516,7 @@ final class FlowValue {
     Object.hashAllUnordered(addresses),
     Object.hashAllUnordered(unknownTypes),
     Object.hashAllUnordered(sources),
+    _integers,
     _references,
   );
 }

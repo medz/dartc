@@ -1,5 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_value.dart';
+import 'package:dartc/src/optimizer/integer_range.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -15,12 +16,42 @@ void main() {
 
   test('different scalar loop values widen without an unbounded set', () {
     final joined = FlowValue.constant(const Constant.integer(1))
-        .join(FlowValue.constant(const Constant.integer(2)));
+        .join(FlowValue.constant(const Constant.integer(2)), widen: true);
     expect(joined.constant, isNull);
     expect(joined.unknownTypes, {ValueType.integer});
     expect(joined.constants, isEmpty);
+    expect(joined.integers, FlowIntegerRange(1, FlowIntegerRange.maximum));
     expect(joined.join(FlowValue.constant(const Constant.integer(3))), joined);
   });
+
+  test(
+    'integer alternatives keep bounds and path filtering keeps equivalence',
+    () {
+      final block = Block([ValueType.integer]);
+      final activation = Object();
+      final joined = FlowValue.constant(const Constant.integer(1))
+          .join(FlowValue.constant(const Constant.integer(3)))
+          .withSource(block.parameters.single, activation);
+      expect(joined.integers, FlowIntegerRange(1, 3));
+      expect(joined.check(.integer).value, joined);
+      final narrowed = joined.restrictIntegers(FlowIntegerRange(3, 8));
+      expect(
+        narrowed.constant?.structuralKey,
+        const Constant.integer(3).structuralKey,
+      );
+      expect(narrowed.sources, joined.sources);
+      expect(joined.restrictIntegers(FlowIntegerRange(-2, 0)).isBottom, isTrue);
+      expect(
+        joined.join(FlowValue.unknown(.integer)).integers,
+        FlowIntegerRange.full,
+      );
+      expect(joined.join(FlowValue.unknown(.string)).integers, isNull);
+      expect(
+        FlowValue.integerRange(FlowIntegerRange.full),
+        FlowValue.unknown(.integer),
+      );
+    },
+  );
 
   test('same-signature functions retain their declaration identity', () {
     final first = FunctionTarget(
