@@ -210,6 +210,7 @@ final class ProgramSelection(
           managed ||
           persistent ||
           heap.allocates(calls) ||
+          calls.any((target) => heap.runtime?.primitives[target] == .context) ||
           exceptions;
       if (pending.isEmpty && capture == needsTrace && managed == needsHeap) {
         break;
@@ -270,9 +271,10 @@ final class ProgramSelection(
     if (capture) implicitCalls.add(heap.runtime!.captureStackTrace);
     calls.addAll(implicitCalls);
     heap.retain(calls);
-    primitives = managed
-        ? heap.primitives.intersection({...calls, heap.invalid})
-        : {if (calls.contains(heap.invalid)) heap.invalid};
+    primitives = heap.primitives.intersection({
+      ...calls,
+      if (managed) heap.invalid,
+    });
     final missing = calls.difference({
       ...callbacks.values,
       ...functions.keys,

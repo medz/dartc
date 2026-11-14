@@ -265,6 +265,31 @@ void main() {
   });
 
   final generator = Arm64CodeGenerator(const Target(.linux, .arm64));
+  test('standalone primitives preserve their required entry context', () {
+    for (final primitive in [MemoryPrimitive.clock, MemoryPrimitive.context]) {
+      final target = heapRuntime.primitives.entries
+          .singleWhere((entry) => entry.value == primitive)
+          .key;
+      final block = Block();
+      block.finish(Return(block.emit(DirectCall(target, []))));
+      final prepared = Compiler(generator.target).prepare(
+        IrProgram([], [
+          IrFunction(entry, [block]),
+        ]),
+        roots: [entry],
+        runtime: heapRuntime,
+      );
+      final module = generator.generate(prepared);
+      expect(
+        module.symbols.any((symbol) => symbol.name == target.name),
+        isTrue,
+      );
+      expect(
+        prepared.definitions.contains(heapRuntime.release),
+        primitive == MemoryPrimitive.context,
+      );
+    }
+  });
   test('an unmanaged process still calls its final status provider', () {
     final status = FunctionTarget(uri, 'processStatus', .integer, []);
     final block = Block()..finish(Return(const Constant.integer(43)));

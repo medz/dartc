@@ -267,7 +267,13 @@ base class ScalarCodeGenerator<R extends Object>(
               codeAddress: codeAddress,
             )
           : ScalarFunction(
-              FunctionAllocation(functions[declaration]!),
+              FunctionAllocation(
+                functions[declaration] ??
+                    (throw StateError(
+                      'Prepared definition has no emission: '
+                      '${declaration.library}::${declaration.name}',
+                    )),
+              ),
               emitter,
             ).generate(
               call,
