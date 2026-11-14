@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Select direct inlining from current program roots without a preliminary type-flow solve, and prefer small leaf operations over allocation and call expansion to limit compile time and code growth.
+
 - Retain explicit reference lifetime markers during inline cleanup, preserving resources across preceding calls and accesses without introducing allocation or exceptions.
 
 - Register event delivery through ordinary Dart state so inlining scheduling helpers preserves pending callbacks and process keep-alive. Programs without scheduling still omit the event loop and its clock/wait dependencies.
