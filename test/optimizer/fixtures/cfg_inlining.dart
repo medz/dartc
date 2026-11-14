@@ -52,3 +52,32 @@ int neverCall(int value) {
     return error + 1;
   }
 }
+
+T invoke<T>(T Function() action) => action();
+
+int closureThroughCall(int value) => invoke(() => value + 1);
+
+T captured<T>(T value) {
+  T action() => value;
+  return invoke(action);
+}
+
+int closureGeneric(int value) => captured(value);
+
+int closureCells(int value) {
+  var current = value;
+  int action(int delta, {int divisor = 2}) {
+    current += delta;
+    if (current < 0) throw current;
+    return current ~/ divisor;
+  }
+
+  int read() => current;
+  try {
+    return action(1) + read();
+  } on int catch (error) {
+    return error - read();
+  } finally {
+    current++;
+  }
+}

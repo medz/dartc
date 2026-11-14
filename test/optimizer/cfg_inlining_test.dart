@@ -56,4 +56,46 @@ void main() {
       expect(() => before.checkProgram(result), throwsArgumentError);
     });
   }
+  for (final (name, invoke) in [
+    ('closureThroughCall', source.closureThroughCall),
+    ('closureGeneric', source.closureGeneric),
+    ('closureCells', source.closureCells),
+  ]) {
+    test('$name expands captures without retaining closure environments', () {
+      final entry = program.functions.singleWhere((f) => f.target.name == name);
+      final facts = ProgramOptimizer([
+        const ProgramSimplification(),
+        const ProgramCallSpecialization(),
+        const ProgramStoragePromotion(),
+        const ProgramStorageElimination(),
+        name == 'closureCells'
+            ? const DirectCallInlining(
+                maxCalleeCost: 200,
+                maxCallerGrowth: 2000,
+              )
+            : const DirectCallInlining(),
+      ]).run(program, const [], openEntries: [entry.target]);
+      final body = facts.program.implementationOf(entry.target) as IrFunction;
+      expect(
+        body.blocks
+            .expand(
+              (block) => [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ],
+            )
+            .where(
+              (operation) =>
+                  operation is FunctionCall || operation is MakeClosure,
+            ),
+        isEmpty,
+      );
+      for (final input in [-3, -1, 0, 1, 9]) {
+        expect(
+          IrInterpreter(facts.program, {}).run(body, [input]),
+          invoke(input),
+        );
+      }
+    });
+  }
 }

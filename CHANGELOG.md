@@ -10,7 +10,7 @@
 
 - Skip callback reachability analysis when a program has no native callback entries, preserving native binding and rewritten-program checks.
 
-- Select direct inlining from current program roots without a preliminary type-flow solve, and prefer small leaf operations over allocation and call expansion to limit compile time and code growth.
+- Inline small direct calls and lexical closures, including calls exposed by inlining their callers. Preserve generic captures, shared mutable cells, evaluation order and exception paths while eliminating unused closure environments. `FunctionRewrite` now accepts explicit entry arguments and type bindings for expansion.
 
 - Retain explicit reference lifetime markers during inline cleanup, preserving resources across preceding calls and accesses without introducing allocation or exceptions.
 
@@ -20,7 +20,6 @@
 
 - Prepare IR with `Compiler.prepare` before calling `CodeGenerator.generate`. Preparation closes source, runtime, callback and native dependencies for an explicit target; emission rejects mismatched targets or invalidated analysis. Direct IR callers supply roots and bindings instead of a separately computed definition set. Generated support follows retained calls, so eliminated numeric operations do not require a runtime.
 - Preserve logical function names and call sites through nested inlining in stack traces, including rethrows and asynchronous gaps. `SourceLocation` now carries immutable source coordinates and an optional logical caller chain.
-- Inline small direct calls during compilation, preserving evaluation order, logical stack frames and exception handlers while removing unused pure operations and constant branches. `package:dartc/optimizer.dart` also exposes bounded inlining for IR clients; rewritten programs require fresh call and preparation facts.
 - Omit inferred system libraries after their calls are removed or resolved by objects and archives. Explicit shared-library dependencies remain loaded by default; `LinkInput.sharedLibrary(asNeeded: true)` retains them only for unresolved imports.
 - Carry unobserved Pointer values through branches, loops and ordinary function parameters and returns without managed wrappers; unused function values no longer force managed allocation in reachable calls. Runtime word/byte access and copying now use the same `dart:ffi` operations as user code. Check critical closures using selected operation effects and explicit native contracts; `isLeaf` alone does not grant GC safety.
 

@@ -8,6 +8,43 @@ final _uri = Uri.parse('memory:rewrite');
 final _tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
 
 void main() {
+  test(
+    'inlined entry arguments must dominate the call and match its types',
+    () {
+      final calleeEntry = Block(_tick.parameterTypes);
+      calleeEntry.finish(Return(calleeEntry.parameters.single));
+      final callee = IrFunction(_tick, [calleeEntry]);
+      final target = FunctionTarget(_uri, 'entry', .integer, [.integer]);
+      final entry = Block(target.parameterTypes);
+      final call = entry.emit(DirectCall(_tick, entry.parameters));
+      final later = entry.emit(
+        IntBinary(.add, call, const Constant.integer(1)),
+      );
+      entry.finish(Return(later));
+      final function = IrFunction(target, [entry]);
+      for (final arguments in [
+        [later],
+        [const Constant.string('wrong type')],
+        <Value>[],
+      ]) {
+        expect(
+          () => FunctionRewrite(
+            function,
+            inlined: {
+              call: (
+                body: callee,
+                arguments: arguments,
+                environment: const {},
+                handler: null,
+              ),
+            },
+          ).run(),
+          throwsArgumentError,
+        );
+      }
+    },
+  );
+
   test('fresh pure call inputs keep their evaluation and exception point', () {
     final target = FunctionTarget(_uri, 'templated', .integer, [.object]);
     final entry = Block(target.parameterTypes);

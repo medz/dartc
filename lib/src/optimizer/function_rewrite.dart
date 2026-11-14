@@ -20,7 +20,19 @@ final class FunctionRewrite(
       const {},
   final Set<Instruction> nonReturning = const {},
   final Set<Instruction> discardable = const {},
-  final Map<DirectCall, ({IrFunction body, Jump? handler})> inlined = const {},
+
+  /// Checked entry values and type bindings for each expanded invocation.
+  final Map<
+        Instruction,
+        ({
+          IrFunction body,
+          List<Value> arguments,
+          Map<TypeParameterType, ValueType> environment,
+          Jump? handler,
+        })
+      >
+      inlined =
+      const {},
 }) {
   /// Applies the replacements, removes dead paths and preserves source origins.
   IrFunction run() {
@@ -62,7 +74,7 @@ final class FunctionRewrite(
     late Block current;
     final ends = <Block, Terminator>{};
     final locations = <Object, SourceLocation>{};
-    final expansions = <DirectCall, ({Block entry, Block exit})>{};
+    final expansions = <Instruction, ({Block entry, Block exit})>{};
     late Value Function(Value) value;
     late Value Function(Value, Value) viewed;
     late Jump Function(Jump, {bool collapsed}) jump;
@@ -94,15 +106,10 @@ final class FunctionRewrite(
       return Unreachable(proof);
     }
 
-    Value expand(DirectCall call) {
+    Value expand(Instruction call) {
       final site = inlined[call]!;
       final body = site.body;
-      final environment = {
-        if (call.ownerType case final owner?)
-          ...body.target.environmentFor(owner),
-        for (final (i, type) in call.typeArguments.indexed)
-          body.target.typeParameters[i]: type,
-      };
+      final environment = site.environment;
       final handler = site.handler == null ? null : jump(site.handler!);
       final linear = body.blocks.length == 1 && body.entry.end is Return;
       final copiedBlocks = {
@@ -153,7 +160,7 @@ final class FunctionRewrite(
         throw StateError('Unexpected value in an inlined graph.');
       };
       for (final (i, parameter) in body.entry.parameters.indexed) {
-        final argument = value(call.inputs[i]);
+        final argument = value(site.arguments[i]);
         final type = parameter.type.substitute(environment);
         if (argument.type == type) {
           locals[parameter] = argument;
@@ -195,7 +202,7 @@ final class FunctionRewrite(
             var returned = value == null
                 ? const Constant.nullValue()
                 : read(value);
-            if (call.target.requiresResultCheck) {
+            if (body.target.requiresResultCheck) {
               final cast = TypeCast(returned, call.type);
               locate(source, cast, body, call);
               if (handler == null) {
@@ -331,7 +338,7 @@ final class FunctionRewrite(
       }
       if (values[original] case final known?) return known;
       final Value result;
-      if (original is DirectCall && inlined.containsKey(original)) {
+      if (original is Instruction && inlined.containsKey(original)) {
         result = expand(original);
       } else if (original is Instruction) {
         result = copy(original);
@@ -468,7 +475,7 @@ final class FunctionRewrite(
       current = blocks[original]!;
       instructions[current] = [];
       void emit(Instruction operation) {
-        if (operation is DirectCall && inlined.containsKey(operation)) {
+        if (inlined.containsKey(operation)) {
           if (!expansions.containsKey(operation)) {
             values[operation] = expand(operation);
           }
@@ -666,6 +673,37 @@ final class FunctionRewrite(
         );
       }
     }
+    if (inlined.isNotEmpty) {
+      final dominance = ValueDominance(function);
+      for (final MapEntry(key: call, value: site) in inlined.entries) {
+        if ((call is! DirectCall && call is! FunctionCall) ||
+            !owns(call) ||
+            site.arguments.any(
+              (value) => value is! Constant && !dominance.before(value, call),
+            )) {
+          throw ArgumentError(
+            'Inlined entries require dominating caller arguments.',
+          );
+        }
+        if (call
+            case DirectCall(:final target) ||
+                FunctionCall(target: final target?)
+            when target.implementation != site.body.target) {
+          throw ArgumentError(
+            'Inlined body differs from the proven call target.',
+          );
+        }
+        final parameters = site.body.target.parameterTypes;
+        if (parameters.length != site.arguments.length ||
+            parameters.indexed.any(
+              (entry) => !entry.$2
+                  .substitute(site.environment)
+                  .accepts(site.arguments[entry.$1].type),
+            )) {
+          throw ArgumentError('Inlined arguments violate the entry types.');
+        }
+      }
+    }
     final edges = {for (final block in function.blocks) ...block.successors};
     for (final MapEntry(key: parameter, value: phi) in phis.entries) {
       if (sourceValues.contains(parameter) ||
@@ -803,6 +841,7 @@ final class FunctionRewrite(
       if (!identical(original, operand)) uses.add(operand);
       if (original is Instruction) {
         uses.addAll((operations[original] ?? original).inputs);
+        uses.addAll(inlined[original]?.arguments ?? const []);
       }
       if (original is BlockParameter) {
         uses.addAll(incoming[original] ?? const []);
