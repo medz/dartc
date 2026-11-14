@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:dartc/ir.dart';
+import 'package:dartc/abi.dart';
+import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/suspension_normalization.dart';
 import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
@@ -120,6 +122,7 @@ void main() {
       final closures = ClosureStorage(functions);
       final layouts = ProgramLayout(
         [...program.classes, ...closures.classes],
+        nativeLayout: NativeLayout(Target.host()),
         functions: functions,
         closureStorage: closures,
         typeRuntime: heapRuntime.types,

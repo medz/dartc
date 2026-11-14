@@ -1,3 +1,5 @@
+// ignore_for_file: await_only_futures
+
 Future<int> accumulated(int count, int seed) async {
   var captured = seed;
   int read() => captured;
