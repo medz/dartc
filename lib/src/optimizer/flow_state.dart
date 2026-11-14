@@ -630,6 +630,7 @@ final class FlowState {
     return amount % ObjectHeader.alignment == 0 &&
         owner.objects.every(
           (object) =>
+              object.type is ClassType &&
               memoryLayout
                       ?.objectLayout(object.type as ClassType)
                       .tracesPayload ==

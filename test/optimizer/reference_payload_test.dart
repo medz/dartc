@@ -374,6 +374,62 @@ void main() {
     }
   });
 
+  test('opaque closure storage keeps its captured references without assuming a payload class', () {
+    final outer = FunctionTarget(null, 'scope', .voidType, []);
+    final target = FunctionTarget(
+      null,
+      'closure',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: outer,
+      sourceOffset: 1,
+      captures: [_type],
+    );
+    final captured = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final operation = MakeClosure(target, [_owner]);
+    final closure = FlowObject(operation, _activation);
+    final state = captured.state.copy()
+      ..retain(closure, [captured.value], repeated: false);
+    final value = _load(state, FlowValue.object(closure));
+    expect(value.constant, isNull);
+    expect(value.references.objects, contains(captured.value.objects.single));
+  });
+
+  test('an escaping return preserves its initialized reference payload', () {
+    final root = FunctionTarget(null, 'expose', _type, [.object.nullable]);
+    final block = Block(root.parameterTypes);
+    final owner = block.emit(NewPayload(_type, const Constant.integer(8)));
+    block.emit(StoreObjectReference(owner, _offset, block.parameters.single));
+    block.finish(Return(owner));
+    final program = IrProgram(
+      [_class],
+      [
+        IrFunction(root, [block]),
+      ],
+    );
+    final optimized =
+        ProgramOptimizer(const [
+          ProgramSimplification(),
+          ProgramStorageElimination(),
+        ]).run(
+          program,
+          [
+            (target: root, arguments: [FlowValue.unknown(.object.nullable)]),
+          ],
+          escapingReturns: [root],
+          memoryLayoutFor: (_) => _Layout(),
+        );
+    expect(
+      _operations(
+        optimized.program,
+        optimized,
+      ).whereType<StoreObjectReference>(),
+      hasLength(1),
+    );
+    expect(optimized.returnedBy(root).objects, hasLength(1));
+  });
+
   test('unknown inputs crossing branches become SSA values instead of reference slots', () {
     final root = FunctionTarget(null, 'choose', .object.nullable, [
       .boolean,
