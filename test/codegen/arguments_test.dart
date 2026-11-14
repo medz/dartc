@@ -1,5 +1,6 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -33,7 +34,10 @@ void main() {
         ]);
         expect(
           generator
-              .generate(program, runtime: heapRuntime, definitions: [target])
+              .generate(
+                Compiler(generator.target)
+                    .prepare(program, runtime: heapRuntime, roots: [target]),
+              )
               .sections,
           isNotEmpty,
         );
@@ -41,12 +45,14 @@ void main() {
         expect(target.parameterTypes, isEmpty);
         expect(
           () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [target],
-            exports: {
-              target: NativeExport('generic', NativeSignature(Int64, [])),
-            },
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: [target],
+              exports: {
+                target: NativeExport('generic', NativeSignature(Int64, [])),
+              },
+            ),
           ),
           throwsArgumentError,
         );
@@ -73,7 +79,10 @@ void main() {
         ]);
         sizes.add(
           generator
-              .generate(program, runtime: heapRuntime, definitions: [target])
+              .generate(
+                Compiler(generator.target)
+                    .prepare(program, runtime: heapRuntime, roots: [target]),
+              )
               .sections
               .single
               .bytes

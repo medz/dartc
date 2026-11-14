@@ -392,6 +392,24 @@ final class CallTypeFacts._(final CallTypeFlow _flow) {
     }
   }
 
+  /// Whether generated code may already instantiate this nominal class.
+  bool instantiates(ClassType type) {
+    _checkCurrent();
+    return _flow._instances.contains(type.declaration);
+  }
+
+  /// Whether a call admitting every declared argument value is already covered.
+  bool admitsUnknownCall(FunctionTarget target) {
+    _checkCurrent();
+    target = target.implementation;
+    if (!_definitions.contains(target)) return false;
+    final body = program.implementationOf(target);
+    return body is! IrFunction ||
+        body.entry.parameters.every(
+          (parameter) => _flow._parameters[parameter]!.contains(parameter.type),
+        );
+  }
+
   /// Whether [receiver] can hold an instance of [actual] at an observed call.
   ///
   /// Values outside the analyzed source graphs retain their static bounds.

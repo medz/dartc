@@ -1,6 +1,7 @@
 import 'dart:ffi';
 import 'dart:typed_data';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -444,22 +445,24 @@ ObjectModule boxedValues(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: functions.map((f) => f.target),
-    exports: {
-      for (final f in functions)
-        if (f.target.kind == .function &&
-            f.target.parameterTypes.every((type) => type == .integer) &&
-            (f.target.returnType == .integer ||
-                f.target.returnType == .floating))
-          f.target: NativeExport(
-            f.target.name,
-            NativeSignature(
-              f.target.returnType == .floating ? Double : Int64,
-              List.filled(f.target.parameterTypes.length, Int64),
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: functions.map((f) => f.target),
+      exports: {
+        for (final f in functions)
+          if (f.target.kind == .function &&
+              f.target.parameterTypes.every((type) => type == .integer) &&
+              (f.target.returnType == .integer ||
+                  f.target.returnType == .floating))
+            f.target: NativeExport(
+              f.target.name,
+              NativeSignature(
+                f.target.returnType == .floating ? Double : Int64,
+                List.filled(f.target.parameterTypes.length, Int64),
+              ),
             ),
-          ),
-    },
+      },
+    ),
   );
 }

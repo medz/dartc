@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/abi.dart';
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -160,10 +161,12 @@ ObjectModule exceptions(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   final module = generator.generate(
-    IrProgram(classes, bodies),
-    runtime: heapRuntime,
-    definitions: bodies.map((f) => f.target),
-    exports: exports,
+    Compiler(generator.target).prepare(
+      IrProgram(classes, bodies),
+      runtime: heapRuntime,
+      roots: bodies.map((f) => f.target),
+      exports: exports,
+    ),
   );
   return ObjectModule(
     target,

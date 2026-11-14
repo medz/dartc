@@ -1,5 +1,6 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
@@ -153,9 +154,11 @@ void main() {
     ]);
     expect(
       () => Arm64CodeGenerator(const Target(.linux, .arm64)).generate(
-        IrProgram([changed], [mainBody(true)]),
-        definitions: [entry],
-        runtime: heapRuntime,
+        Compiler(const Target(.linux, .arm64)).prepare(
+          IrProgram([changed], [mainBody(true)]),
+          roots: [entry],
+          runtime: heapRuntime,
+        ),
       ),
       throwsArgumentError,
     );
@@ -242,11 +245,15 @@ void main() {
     final status = FunctionTarget(uri, 'processStatus', .integer, []);
     final block = Block()..finish(Return(const Constant.integer(43)));
     final module = generator.generate(
-      IrProgram([], [mainBody(false)]),
-      definitions: [entry, status],
-      roots: const [],
-      runtime: withCritical(status, processStatus: IrFunction(status, [block])),
-      entryPoint: (function: entry, symbol: 'start'),
+      Compiler(generator.target).prepare(
+        IrProgram([], [mainBody(false)]),
+        roots: const [],
+        runtime: withCritical(
+          status,
+          processStatus: IrFunction(status, [block]),
+        ),
+        entryPoint: (function: entry, symbol: 'start'),
+      ),
     );
     final index = module.symbols.indexWhere(
       (symbol) => symbol.name == status.name,
@@ -268,9 +275,8 @@ void main() {
     for (final managed in [false, true]) {
       final program = IrProgram([], [mainBody(managed)]);
       final module = generator.generate(
-        program,
-        definitions: [entry],
-        runtime: heapRuntime,
+        Compiler(generator.target)
+            .prepare(program, roots: [entry], runtime: heapRuntime),
       );
       for (final target in [heapRuntime.allocate, heapRuntime.release]) {
         expect(module.symbols.any((s) => s.name == target.name), managed);
@@ -282,7 +288,9 @@ void main() {
       expect(module.imports, isNot(contains('.dartc.clock')));
       if (managed) {
         expect(
-          () => generator.generate(program, definitions: [entry]),
+          () => generator.generate(
+            Compiler(generator.target).prepare(program, roots: [entry]),
+          ),
           throwsArgumentError,
         );
       }
@@ -334,9 +342,8 @@ void main() {
       ]);
       for (final runtime in [heapRuntime, withCritical(critical)]) {
         final module = generator.generate(
-          program,
-          definitions: [critical, helper],
-          runtime: runtime,
+          Compiler(generator.target)
+              .prepare(program, roots: [critical, helper], runtime: runtime),
         );
         expect(
           module.symbols.any((s) => s.name == heapRuntime.allocate.name),
@@ -361,13 +368,15 @@ void main() {
       }
       expect(
         () => generator.generate(
-          IrProgram([], [
-            mainBody(true),
-            IrFunction(caller, [call]),
-            IrFunction(leaf, [body]),
-          ]),
-          definitions: [entry, caller, leaf],
-          runtime: withCritical(caller),
+          Compiler(generator.target).prepare(
+            IrProgram([], [
+              mainBody(true),
+              IrFunction(caller, [call]),
+              IrFunction(leaf, [body]),
+            ]),
+            roots: [entry, caller, leaf],
+            runtime: withCritical(caller),
+          ),
         ),
         throwsA(
           isA<UnsupportedError>().having(
@@ -391,24 +400,26 @@ void main() {
             final block = Block();
             block.finish(Return(block.emit(DirectCall(foreign, []))));
             Object generate() => generator.generate(
-              IrProgram(
-                [],
-                [
-                  mainBody(managed),
-                  IrFunction(critical, [block]),
-                ],
-                externals: [IrExternal(foreign)],
-              ),
-              definitions: [entry, critical, foreign],
-              imports: {
-                foreign: NativeImport(
-                  'foreign',
-                  NativeSignature(Int64, []),
-                  isLeaf: leaf,
-                  isNonAllocating: permitted,
+              Compiler(generator.target).prepare(
+                IrProgram(
+                  [],
+                  [
+                    mainBody(managed),
+                    IrFunction(critical, [block]),
+                  ],
+                  externals: [IrExternal(foreign)],
                 ),
-              },
-              runtime: withCritical(critical),
+                roots: [entry, critical, foreign],
+                imports: {
+                  foreign: NativeImport(
+                    'foreign',
+                    NativeSignature(Int64, []),
+                    isLeaf: leaf,
+                    isNonAllocating: permitted,
+                  ),
+                },
+                runtime: withCritical(critical),
+              ),
             );
             if (permitted) {
               expect(generate, returnsNormally);
@@ -450,14 +461,16 @@ void main() {
           ),
         );
         Object generate() => generator.generate(
-          IrProgram([], [
-            IrFunction(critical, [block]),
-          ]),
-          definitions: [critical],
-          nativeSymbols: {reference: 'native_effects'},
-          runtime: withCritical(
-            critical,
-            nativeContracts: permitted ? [reference] : [],
+          Compiler(generator.target).prepare(
+            IrProgram([], [
+              IrFunction(critical, [block]),
+            ]),
+            roots: [critical],
+            nativeSymbols: {reference: 'native_effects'},
+            runtime: withCritical(
+              critical,
+              nativeContracts: permitted ? [reference] : [],
+            ),
           ),
         );
         if (permitted) {
@@ -499,11 +512,13 @@ void main() {
           ),
         );
         Object generate() => generator.generate(
-          IrProgram([], [
-            IrFunction(critical, [block]),
-          ]),
-          definitions: [critical],
-          runtime: withCritical(critical),
+          Compiler(generator.target).prepare(
+            IrProgram([], [
+              IrFunction(critical, [block]),
+            ]),
+            roots: [critical],
+            runtime: withCritical(critical),
+          ),
         );
         if (bounded) {
           expect(generate, returnsNormally);
@@ -534,15 +549,17 @@ void main() {
     for (final marked in [critical, capture]) {
       expect(
         () => generator.generate(
-          IrProgram(
-            [],
-            [
-              IrFunction(critical, [block]),
-            ],
-            externals: [IrExternal(capture)],
+          Compiler(generator.target).prepare(
+            IrProgram(
+              [],
+              [
+                IrFunction(critical, [block]),
+              ],
+              externals: [IrExternal(capture)],
+            ),
+            roots: [critical, capture],
+            runtime: withCritical(marked),
           ),
-          definitions: [critical, capture],
-          runtime: withCritical(marked),
         ),
         throwsA(
           isA<UnsupportedError>().having(

@@ -1,5 +1,6 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
@@ -185,33 +186,36 @@ ObjectModule objectValues(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: [
-      ...program.functions.map((f) => f.target),
-      program.externals.single.target,
-    ],
-    imports: {
-      program.externals.single.target: NativeImport(
-        'object_touch',
-        NativeSignature(Int64, []),
-      ),
-    },
-    exports: {
-      for (final f in program.functions)
-        if (f.target.returnType == .integer || f.target.returnType == .floating)
-          if (f.target.parameterTypes.every((type) => type == .integer))
-            f.target: NativeExport(
-              f.target.name,
-              NativeSignature(
-                f.target.name == 'integer_field'
-                    ? Int16
-                    : f.target.returnType == .floating
-                    ? Double
-                    : Int64,
-                List.filled(f.target.parameterTypes.length, Int64),
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: [
+        ...program.functions.map((f) => f.target),
+        program.externals.single.target,
+      ],
+      imports: {
+        program.externals.single.target: NativeImport(
+          'object_touch',
+          NativeSignature(Int64, []),
+        ),
+      },
+      exports: {
+        for (final f in program.functions)
+          if (f.target.returnType == .integer ||
+              f.target.returnType == .floating)
+            if (f.target.parameterTypes.every((type) => type == .integer))
+              f.target: NativeExport(
+                f.target.name,
+                NativeSignature(
+                  f.target.name == 'integer_field'
+                      ? Int16
+                      : f.target.returnType == .floating
+                      ? Double
+                      : Int64,
+                  List.filled(f.target.parameterTypes.length, Int64),
+                ),
               ),
-            ),
-    },
+      },
+    ),
   );
 }

@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/object.dart';
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -109,19 +110,21 @@ ObjectModule controlFlow(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: program.functions.map((f) => f.target),
-    exports: {
-      for (final function in program.functions)
-        if (function.target.name != 'forever')
-          function.target: NativeExport(
-            function.target.name,
-            NativeSignature(
-              Int64,
-              List.filled(function.target.parameterTypes.length, Int64),
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: program.functions.map((f) => f.target),
+      exports: {
+        for (final function in program.functions)
+          if (function.target.name != 'forever')
+            function.target: NativeExport(
+              function.target.name,
+              NativeSignature(
+                Int64,
+                List.filled(function.target.parameterTypes.length, Int64),
+              ),
             ),
-          ),
-    },
+      },
+    ),
   );
 }

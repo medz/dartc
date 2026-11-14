@@ -1,8 +1,8 @@
 import 'package:dartc/layout.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/instance_storage.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
@@ -228,9 +228,8 @@ void main() {
         expect(
           generator
               .generate(
-                program,
-                runtime: heapRuntime,
-                definitions: reachableDefinitions(program, [read]),
+                Compiler(generator.target)
+                    .prepare(program, runtime: heapRuntime, roots: [read]),
               )
               .sections,
           isNotEmpty,

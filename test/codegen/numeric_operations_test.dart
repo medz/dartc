@@ -1,3 +1,4 @@
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
@@ -40,9 +41,9 @@ void main() {
             expect(
               generator
                   .generate(
-                    program,
-                    runtime: heapRuntime,
-                    definitions: [target],
+                    Compiler(
+                      generator.target,
+                    ).prepare(program, runtime: heapRuntime, roots: [target]),
                   )
                   .sections,
               isNotEmpty,
@@ -79,7 +80,10 @@ void main() {
       );
       expect(
         generator
-            .generate(program, runtime: heapRuntime, definitions: [target])
+            .generate(
+              Compiler(generator.target)
+                  .prepare(program, runtime: heapRuntime, roots: [target]),
+            )
             .sections,
         isNotEmpty,
       );

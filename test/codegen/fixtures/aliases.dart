@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/object.dart';
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
@@ -34,18 +35,20 @@ ObjectModule aliases(Target target) {
   };
   final program = arithmetic();
   return generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: program.functions.map((f) => f.target),
-    exports: {
-      for (final f in program.functions)
-        f.target: NativeExport(
-          f.target.name,
-          NativeSignature(
-            Int64,
-            List.filled(f.target.parameterTypes.length, Int64),
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: program.functions.map((f) => f.target),
+      exports: {
+        for (final f in program.functions)
+          f.target: NativeExport(
+            f.target.name,
+            NativeSignature(
+              Int64,
+              List.filled(f.target.parameterTypes.length, Int64),
+            ),
           ),
-        ),
-    },
+      },
+    ),
   );
 }

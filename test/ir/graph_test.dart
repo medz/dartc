@@ -45,14 +45,16 @@ void main() {
         line: 3,
         column: 5,
       );
-      final positions = <Object, SourceLocation>{entry: location};
+      final positions = <Object, SourceLocation>{
+        entry: SourceLocation(location),
+      };
       final function = IrFunction(f, [entry], sourceLocations: positions);
       positions.clear();
-      expect(function.sourceLocations[entry], location);
+      expect(function.sourceLocations[entry], SourceLocation(location));
       for (final invalid in <Object, SourceLocation>{
-        entry.end: location,
-        Block(): location,
-        IntBinary(.add, one, one): location,
+        entry.end: SourceLocation(location),
+        Block(): SourceLocation(location),
+        IntBinary(.add, one, one): SourceLocation(location),
       }.entries) {
         expect(
           () => IrFunction(
@@ -69,7 +71,11 @@ void main() {
         (uri: location.uri, line: 3, column: 0),
       ]) {
         expect(
-          () => IrFunction(f, [entry], sourceLocations: {entry: invalid}),
+          () => IrFunction(
+            f,
+            [entry],
+            sourceLocations: {entry: SourceLocation(invalid)},
+          ),
           throwsArgumentError,
         );
       }
@@ -78,20 +84,37 @@ void main() {
 
   test('declarations require original absolute source coordinates', () {
     final location = (uri: Uri.parse('file:///part.dart'), line: 2, column: 3);
-    FunctionTarget declared(SourceLocation position) => FunctionTarget(
-      Uri.parse('file:///library.dart'),
-      'declared',
-      .voidType,
-      [],
-      declarationLocation: position,
-    );
-    expect(declared(location).declarationLocation, location);
+    FunctionTarget declared(({Uri uri, int line, int column}) position) =>
+        FunctionTarget(
+          Uri.parse('file:///library.dart'),
+          'declared',
+          .voidType,
+          [],
+          declarationLocation: SourceLocation(position),
+        );
+    expect(declared(location).declarationLocation, SourceLocation(location));
     for (final invalid in [
       (uri: Uri.parse('part.dart'), line: 2, column: 3),
       (uri: location.uri, line: 0, column: 3),
       (uri: location.uri, line: 2, column: 0),
     ]) {
       expect(() => declared(invalid), throwsArgumentError);
+    }
+    for (final invalid in [
+      SourceLocation(null),
+      SourceLocation(location, function: f),
+      SourceLocation(location, caller: SourceLocation(null)),
+    ]) {
+      expect(
+        () => FunctionTarget(
+          f.library,
+          'invalid',
+          .voidType,
+          [],
+          declarationLocation: invalid,
+        ),
+        throwsArgumentError,
+      );
     }
   });
 

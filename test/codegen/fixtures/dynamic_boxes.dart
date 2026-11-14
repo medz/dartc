@@ -1,5 +1,6 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -349,9 +350,11 @@ ObjectModule dynamicBoxes(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: functions.map((f) => f.target),
-    exports: exports,
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: functions.map((f) => f.target),
+      exports: exports,
+    ),
   );
 }

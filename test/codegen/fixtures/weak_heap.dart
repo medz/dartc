@@ -1,9 +1,9 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/optimizer.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 
@@ -152,9 +152,7 @@ ObjectModule weakHeap(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
-    program,
-    definitions: reachableDefinitions(program, exports.keys),
-    exports: exports,
-    runtime: heapRuntime,
+    Compiler(generator.target)
+        .prepare(program, exports: exports, runtime: heapRuntime),
   );
 }

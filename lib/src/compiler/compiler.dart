@@ -26,6 +26,101 @@ import 'permissions.dart';
 /// [resources] supplies fixed resources for embedded library use. When omitted,
 /// sources are loaded from the dartc package; AOT callers must supply resources.
 final class Compiler(final Target target, {final SdkSources? resources}) {
+  /// Prepares checked IR for instruction selection on [target].
+  ///
+  /// [roots], native exports and the process entry are independently callable.
+  /// Runtime sources are composed before analysis. Target dependencies extend
+  /// that analysis until every generated call and instance type is covered.
+  /// Rewritten IR must start here again with its actual roots.
+  PreparedProgram prepare(
+    IrProgram program, {
+    Iterable<FunctionTarget> roots = const [],
+    Map<FunctionTarget, NativeExport> exports = const {},
+    Map<FunctionTarget, NativeImport> imports = const {},
+    Map<NativeReference, String> nativeSymbols = const {},
+    ({FunctionTarget function, String symbol})? entryPoint,
+    HeapRuntime? runtime,
+  }) {
+    if (runtime != null && !identical(program, runtime.program)) {
+      final classes = {for (final c in program.classes) c.type: c};
+      for (final declaration in runtime.program.classes) {
+        final existing = classes[declaration.type];
+        if (existing != null &&
+            (existing.fields.isNotEmpty &&
+                    (existing.fields.length != declaration.fields.length ||
+                        existing.fields.indexed.any(
+                          (entry) => entry.$2 != declaration.fields[entry.$1],
+                        )) ||
+                existing.members.entries.any(
+                  (entry) => declaration.members[entry.key] != entry.value,
+                ) ||
+                existing.constructors.entries.any(
+                  (entry) => declaration.constructors[entry.key] != entry.value,
+                ))) {
+          throw ArgumentError(
+            'Conflicting runtime class: ${declaration.type.name}',
+          );
+        }
+        classes[declaration.type] = declaration;
+      }
+      final functions = {
+        for (final function in program.functions) function.target: function,
+      };
+      for (final function in runtime.program.functions) {
+        final existing = functions[function.target];
+        if (existing != null && !identical(existing, function)) {
+          throw ArgumentError(
+            'Conflicting runtime definition: ${function.target.name}',
+          );
+        }
+        functions[function.target] = function;
+      }
+      program = IrProgram(
+        classes.values,
+        functions.values,
+        globals: {...program.globals, ...runtime.program.globals},
+        externals: {
+          for (final external in [
+            ...runtime.program.externals,
+            ...program.externals,
+          ])
+            if (!functions.containsKey(external.target))
+              external.target: external,
+        }.values,
+      );
+    }
+    final preparation = ProgramPreparation(
+      target,
+      program,
+      roots: roots,
+      exports: exports,
+      imports: imports,
+      nativeSymbols: nativeSymbols,
+      entryPoint: entryPoint,
+      runtime: runtime,
+    );
+    final flow = CallTypeFlow(
+      preparation.program,
+      preparation.roots,
+      instantiatedTypes: preparation.instantiatedTypes,
+    );
+    while (true) {
+      switch (preparation.prepare(flow.facts)) {
+        case final PreparedProgram prepared:
+          return prepared;
+        case PreparationDependencies(:final calls, :final instantiatedTypes):
+          if (!flow.extend(
+            unknownCalls: calls,
+            instantiatedTypes: instantiatedTypes,
+          )) {
+            throw StateError(
+              'Target preparation did not close its dependencies.',
+            );
+          }
+      }
+    }
+  }
+
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
   /// All non-SDK dependencies are checked before selecting native definitions.
@@ -241,16 +336,17 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     }
     const entrySymbol = '.dartc.start';
     final object = generator.generate(
-      program,
-      definitions: definitions,
-      roots: roots,
-      exports: exports,
-      imports: nativeImports,
-      nativeSymbols: addresses,
-      entryPoint: output is ExecutableOutput
-          ? (function: entry!, symbol: entrySymbol)
-          : null,
-      runtime: runtime,
+      prepare(
+        program,
+        roots: roots,
+        exports: exports,
+        imports: nativeImports,
+        nativeSymbols: addresses,
+        entryPoint: output is ExecutableOutput
+            ? (function: entry!, symbol: entrySymbol)
+            : null,
+        runtime: runtime,
+      ),
     );
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),

@@ -1,7 +1,45 @@
 import 'type.dart';
 
-/// A source URI and one-based line and column for a declaration or operation.
-typedef SourceLocation = ({Uri uri, int line, int column});
+/// A source position and its logical frame chain, innermost first.
+///
+/// Supplied coordinates must be absolute and one-based, or construction throws
+/// [ArgumentError]. An omitted position does not erase the logical frame.
+final class SourceLocation(
+  /// The original source coordinates, absent when only frame identity is known.
+  final ({Uri uri, int line, int column})? position, {
+
+  /// The logical callable, or the containing physical callable when omitted.
+  final FunctionTarget? function,
+
+  /// The call site in the next outer logical frame.
+  final SourceLocation? caller,
+}) {
+  this {
+    if (position case (:final uri, :final line, :final column)
+        when !uri.isAbsolute || line < 1 || column < 1) {
+      throw ArgumentError('Expected absolute, one-based source coordinates.');
+    }
+  }
+
+  /// Binds unnamed frames to [owner] and appends the outer [callSite].
+  /// Existing logical identities and positions are preserved.
+  SourceLocation inlinedAt(FunctionTarget owner, SourceLocation callSite) =>
+      SourceLocation(
+        position,
+        function: function ?? owner,
+        caller: caller?.inlinedAt(owner, callSite) ?? callSite,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is SourceLocation &&
+      position == other.position &&
+      function == other.function &&
+      caller == other.caller;
+
+  @override
+  int get hashCode => Object.hash(position, function, caller);
+}
 
 /// A deferred import's source prefix and the library it loads.
 ///
@@ -298,9 +336,9 @@ final class FunctionTarget(
 
   this {
     if (declarationLocation case final location?
-        when !location.uri.isAbsolute ||
-            location.line < 1 ||
-            location.column < 1) {
+        when location.position == null ||
+            location.function != null ||
+            location.caller != null) {
       throw ArgumentError('Invalid declaration location for $name.');
     }
     final ownerParameters =

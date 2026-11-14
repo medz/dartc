@@ -4,6 +4,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
 import 'package:dartc/assembler/x64.dart' as x64;
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -32,14 +33,16 @@ List<ObjectModule> stackCalls(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   final callee = generator.generate(
-    program,
-    definitions: [declaration],
-    exports: {
-      declaration: NativeExport(
-        'stack_value',
-        .new(Int64, List.filled(10, Int64)),
-      ),
-    },
+    Compiler(generator.target).prepare(
+      program,
+      roots: [declaration],
+      exports: {
+        declaration: NativeExport(
+          'stack_value',
+          .new(Int64, List.filled(10, Int64)),
+        ),
+      },
+    ),
   );
 
   final List<int> code;
