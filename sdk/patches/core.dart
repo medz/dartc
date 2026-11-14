@@ -1,5 +1,7 @@
 import 'dart:_internal' show checkValidWeakTarget;
 import 'dart:async' as async;
+import 'dart:ffi' as ffi;
+import 'dart:io' as io;
 
 import '../../lib/runtime/contracts.dart' as runtime;
 import '../runtime/allocator.dart' as allocator;
@@ -8,6 +10,21 @@ import '../runtime/memory.dart';
 import '../runtime/type_info.dart' as metadata;
 import '../runtime/stack_trace.dart' as traces;
 import 'date_time.dart' as dates;
+
+@patch
+class Uri {
+  @patch
+  static Uri get base => io.Directory.current.uri;
+}
+
+@patch
+class _Uri {
+  @patch
+  static bool get _isWindows => switch (ffi.Abi.current()) {
+    ffi.Abi.windowsArm64 || ffi.Abi.windowsIA32 || ffi.Abi.windowsX64 => true,
+    _ => false,
+  };
+}
 
 @patch
 class Finalizer<T> {
