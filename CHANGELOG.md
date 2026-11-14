@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Omit inferred system libraries after their calls are removed or resolved by objects and archives. Explicit shared-library dependencies remain loaded by default; `LinkInput.sharedLibrary(asNeeded: true)` retains them only for unresolved imports.
+
 - Move program reachability and call-type analysis to `package:dartc/optimizer.dart`. Call facts are read-only, tied to their input IR, and invalidated when supplemental facts change; rewritten programs are analyzed again from their roots.
 
 - Avoid temporary owner-type metadata during ordinary generic member reads. Keep virtual calls and type metadata limited to the values that can reach each call, while preserving generic checks, exceptions and native callback entry points.
