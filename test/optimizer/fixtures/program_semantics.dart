@@ -157,3 +157,34 @@ class ReturnsSeven {
 }
 
 int nullableDynamic(ReturnsSeven? value) => (value as dynamic).answer();
+
+int hiddenIncrement(int value) => value + 1;
+
+void exposePrivateArgument(void Function(int Function()) boundary) {
+  final hidden = hiddenIncrement;
+  boundary(() => hidden(7));
+}
+
+void exposeInstantiatedClosure(void Function(int Function(int)) boundary) {
+  T local<T>(T value) => value;
+  boundary(local<int>);
+}
+
+class GenericMethod() {
+  T echo<T>(T value) => value;
+  int kind<T>() => T == int ? 17 : 29;
+}
+
+void exposeInstantiatedMethod(void Function(int Function(int)) boundary) {
+  boundary(GenericMethod().echo<int>);
+}
+
+int genericBoundMethodValue() {
+  final kind = GenericMethod().kind<int>;
+  return kind();
+}
+
+int genericBoundMethodOtherType() {
+  final kind = GenericMethod().kind<String>;
+  return kind();
+}

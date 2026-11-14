@@ -1579,6 +1579,12 @@ final class ProgramFlow(
                 target,
                 [...captures, ...arguments],
                 state,
+                environment: _environment(
+                  target,
+                  null,
+                  appliedArguments,
+                  activation,
+                ),
                 checkAllArguments: checkAllArguments,
               ),
             );
@@ -1617,8 +1623,10 @@ final class ProgramFlow(
     effects ??= operation.effects;
     activation.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
     final next = state.copy();
-    final reachable = next.escape([...inputs, state.escapedValues]);
-    if (effects.contains(Effect.writesStorage)) next.invalidate([reachable]);
+    next.escape(inputs);
+    if (effects.contains(Effect.writesStorage)) {
+      next.invalidate([next.exposedValues]);
+    }
     if (effects.contains(Effect.callsUserCode)) {
       // Re-entry follows values that crossed this boundary or declared exports.
       _admitEscaped(next);
@@ -1640,7 +1648,10 @@ final class ProgramFlow(
     return FlowResult(
       value: resultType == .never
           ? const FlowValue.bottom()
-          : FlowValue.unknown(resultType).withReferences([reachable]),
+          : FlowValue.unknown(resultType)
+                .join(next.exposedValues.check(resultType).value)
+                .withSources(const [])
+                .withReferences(inputs.map((value) => value.references)),
       normal: resultType == .never ? null : next,
       exceptional: effects.contains(Effect.mayThrow) ? next.copy() : null,
     );
@@ -1659,7 +1670,7 @@ final class ProgramFlow(
   }
 
   void _admitEscaped(FlowState state) {
-    final reachable = state.escapedValues;
+    final reachable = state.exposedValues;
     void admit(
       Object key,
       FunctionTarget target,
@@ -1678,50 +1689,87 @@ final class ProgramFlow(
       _supply(activation, arguments, state);
     }
 
-    for (final constant in reachable.constants.whereType<FunctionConstant>()) {
-      final target = constant.target.implementation;
-      admit(
-        constant.structuralKey,
-        target,
-        target.parameterTypes.map(FlowValue.unknown).toList(),
-        environment: {
+    final visited = <(FlowObject, Object?)>{};
+    void visit(
+      FlowValue value, {
+      List<ValueType> typeArguments = const [],
+      Object? identity,
+    }) {
+      List<FlowValue> parameters(
+        FunctionTarget target,
+        Map<TypeParameterType, ValueType> environment,
+      ) => [
+        for (final type in target.signature.parameters)
+          FlowValue.unknown(type.substitute(environment)),
+      ];
+
+      for (final constant in value.constants.whereType<FunctionConstant>()) {
+        final target = constant.target.implementation;
+        final environment = {
           if (constant.ownerType != null)
             ...target.environmentFor(constant.ownerType!),
           for (final (i, type)
-              in (constant.typeArguments ?? const <ValueType>[]).indexed)
+              in (constant.typeArguments ?? typeArguments).indexed)
             if (i < target.typeParameters.length)
               target.typeParameters[i]: type,
-        },
-      );
-    }
-    for (final object in reachable.objects) {
-      if (object.site case MakeClosure(:final target)) {
+        };
+        admit(identity ?? constant.structuralKey, target, [
+          if (target.kind.hasReceiver)
+            FlowValue.unknown(constant.ownerType ?? target.owner!),
+          ...parameters(target, environment),
+        ], environment: environment);
+      }
+      for (final object in value.objects) {
+        if (!visited.add((object, _typeKey(typeArguments)))) continue;
         final captures = state.capturesOf(object);
-        if (captures != null) {
-          admit(object, target, [
+        if (captures == null) continue;
+        final creator = _creator(object);
+        if (creator.instantiations[_original(object)] case final arguments?) {
+          visit(
+            captures.single,
+            typeArguments: arguments,
+            identity: identity ?? object,
+          );
+          continue;
+        }
+        if (object.site case MakeClosure(:final target)) {
+          final environment = {
+            ...creator.environment,
+            for (final (i, type) in typeArguments.indexed)
+              target.typeParameters[i]: type,
+          };
+          admit(identity ?? object, target, [
             FlowValue.object(object),
             ...captures,
-            ...target.signature.parameters.map(FlowValue.unknown),
-          ], environment: _creator(object).environment);
-        }
-      } else if (_creator(object).boundMethods.containsKey(_original(object))) {
-        final creator = _creator(object);
-        for (final target
-            in creator.boundMethods[_original(object)] ?? <FunctionTarget>{}) {
-          final captures = state.capturesOf(object);
-          if (captures != null) {
-            admit(
-              (object, target),
-              target,
-              [
-                ...captures,
-                ...target.signature.parameters.map(FlowValue.unknown),
-              ],
-            );
+            ...parameters(target, environment),
+          ], environment: environment);
+        } else {
+          for (final target
+              in creator.boundMethods[_original(object)] ??
+                  <FunctionTarget>{}) {
+            for (final type in _receiverTypes(captures.single)) {
+              if (type.asInstanceOf(target.owner!) == null) continue;
+              final environment = {
+                ...target.environmentFor(type),
+                for (final (i, argument) in typeArguments.indexed)
+                  target.typeParameters[i]: argument,
+              };
+              admit(
+                (identity ?? object, target, type),
+                target,
+                [
+                  _receiverValue(captures.single, type),
+                  ...parameters(target, environment),
+                ],
+                environment: environment,
+              );
+            }
           }
         }
       }
     }
+
+    visit(reachable);
   }
 
   FlowValue _receiverValue(FlowValue value, ClassType type) {
@@ -2346,6 +2394,11 @@ Constant? _fold(Instruction operation, List<FlowValue> inputs) {
       case Equals(:final negated)
           when constants.every((value) => value is ScalarConstant):
         result = (scalars[0] == scalars[1]) != negated;
+      case Equals(:final negated)
+          when constants.every((value) => value is TypeConstant):
+        result =
+            (constants[0]!.structuralKey == constants[1]!.structuralKey) !=
+            negated;
       case Identical()
           when constants.every(
             (value) =>

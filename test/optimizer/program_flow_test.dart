@@ -691,6 +691,107 @@ void main() {
     },
   );
 
+  for (final raw in [false, true]) {
+    test('external capture access follows raw address capability ($raw)', () {
+      final add = _addOne();
+      final mainTarget = FunctionTarget(_uri, 'main', .voidType, []);
+      final callbackTarget = FunctionTarget(
+        _uri,
+        'callback',
+        .integer,
+        [],
+        kind: .closure,
+        enclosing: mainTarget,
+        sourceOffset: 2,
+        captures: [add.target.signature],
+      );
+      final callbackBody = Block(callbackTarget.parameterTypes);
+      callbackBody.finish(
+        Return(
+          callbackBody.emit(
+            FunctionCall(callbackBody.parameters[1], [
+              const Constant.integer(7),
+            ]),
+          ),
+        ),
+      );
+      final boundaryType = raw ? ValueType.integer : callbackTarget.signature;
+      final external = FunctionTarget(_uri, 'accept', boundaryType, [
+        boundaryType,
+      ]);
+      final entry = Block();
+      final callback = entry.emit(
+        MakeClosure(callbackTarget, [FunctionConstant(add.target)]),
+      );
+      final argument = raw ? entry.emit(ReferenceAddress(callback)) : callback;
+      final returned = entry.emit(DirectCall(external, [argument]));
+      entry.emit(DirectCall(external, [returned]));
+      entry.finish(const Return());
+      final main = IrFunction(mainTarget, [entry]);
+      final program = IrProgram(
+        [],
+        [
+          main,
+          add,
+          IrFunction(callbackTarget, [callbackBody]),
+        ],
+        externals: [IrExternal(external)],
+      );
+      final facts = _flow(program, main).facts;
+      expect(
+        facts.valueOf(add.entry.parameters.single).constant?.structuralKey,
+        raw ? null : const Constant.integer(7).structuralKey,
+      );
+      expect(
+        facts.returnedBy(add.target).constant?.structuralKey,
+        raw ? null : const Constant.integer(8).structuralKey,
+      );
+    });
+  }
+
+  test('a definite write after a callback boundary replaces the earlier captured value', () {
+    final mainTarget = FunctionTarget(_uri, 'main', .integer, []);
+    final cellType = CellType(.integer);
+    final callbackTarget = FunctionTarget(
+      _uri,
+      'callback',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: mainTarget,
+      sourceOffset: 3,
+      captures: [cellType],
+    );
+    final callbackBody = Block(callbackTarget.parameterTypes);
+    callbackBody.finish(
+      Return(callbackBody.emit(ReadCell(callbackBody.parameters[1]))),
+    );
+    final external = FunctionTarget(_uri, 'accept', .voidType, [
+      callbackTarget.signature,
+    ]);
+    final entry = Block();
+    final cell = entry.emit(NewCell(cellType, const Constant.integer(1)));
+    final callback = entry.emit(MakeClosure(callbackTarget, [cell]));
+    entry.emit(DirectCall(external, [callback]));
+    entry.emit(WriteCell(cell, const Constant.integer(7)));
+    final read = entry.emit(ReadCell(cell));
+    entry.finish(Return(read));
+    final main = IrFunction(mainTarget, [entry]);
+    final program = IrProgram(
+      [],
+      [
+        main,
+        IrFunction(callbackTarget, [callbackBody]),
+      ],
+      externals: [IrExternal(external)],
+    );
+    final facts = _flow(program, main).facts;
+    expect(
+      facts.valueOf(read).constant?.structuralKey,
+      const Constant.integer(7).structuralKey,
+    );
+  });
+
   test('an explicit leaf contract does not invent callback execution or termination', () {
     final global = GlobalVariable(_uri, 'private', .integer, isLate: true);
     final callback = FunctionTarget(_uri, 'callback', .voidType, []);

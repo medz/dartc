@@ -66,10 +66,69 @@ void main() {
     expect(facts.thrownBy(entry.target).exception.isBottom, isFalse);
   });
 
+  test(
+    'an opaque API only invokes the private function with its actual argument',
+    () {
+      final observed = <int>[];
+      source.exposePrivateArgument((callback) {
+        observed.add(callback());
+        observed.add(callback());
+      });
+      expect(observed, [8, 8]);
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'exposePrivateArgument',
+      );
+      final hidden = program.functions.singleWhere(
+        (f) => f.target.name == 'hiddenIncrement',
+      );
+      final facts = ProgramFlow(program, [
+        (
+          target: entry.target,
+          arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(
+        facts.valueOf(hidden.entry.parameters.single).constant?.structuralKey,
+        const Constant.integer(7).structuralKey,
+      );
+      expect(
+        facts.returnedBy(hidden.target).constant?.structuralKey,
+        const Constant.integer(8).structuralKey,
+      );
+    },
+  );
+
+  for (final (name, targetName, run) in [
+    ('exposeInstantiatedClosure', 'local', source.exposeInstantiatedClosure),
+    ('exposeInstantiatedMethod', 'echo', source.exposeInstantiatedMethod),
+  ]) {
+    test('an exposed generic callable preserves its instantiation: $name', () {
+      final observed = <int>[];
+      run((callback) => observed.add(callback(17)));
+      expect(observed, [17]);
+      final entry = program.functions.singleWhere((f) => f.target.name == name);
+      final callable = program.functions.singleWhere(
+        (f) => f.target.name == targetName,
+      );
+      final facts = ProgramFlow(program, [
+        (
+          target: entry.target,
+          arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(facts.definitions, contains(callable.target));
+      expect(facts.returnedBy(callable.target).unknownTypes, {
+        ValueType.integer,
+      });
+    });
+  }
+
   for (final example in <String, int Function()>{
     'rejectedCovariantCall': source.rejectedCovariantCall,
     'constructorValue': source.constructorValue,
     'genericFunctionValue': source.genericFunctionValue,
+    'genericBoundMethodValue': source.genericBoundMethodValue,
+    'genericBoundMethodOtherType': source.genericBoundMethodOtherType,
     'genericClosureValue': source.genericClosureValue,
     'genericConstructorValue': source.genericConstructorValue,
     'boundMethodValue': source.boundMethodValue,
