@@ -69,20 +69,28 @@ abstract final class RuntimeContext() {
   static const entrySize = 24;
 }
 
-/// Byte offsets in stack-map records, following the table's entry count.
-abstract final class StackMapRecord() {
-  static const tableHeader = 8;
+/// A sorted return-PC index followed by shared, variable-length root records.
+abstract final class StackMapTable() {
+  static const count = 0;
+  static const entries = 8;
+  static const entrySize = 16;
   static const pc = 0;
 
+  /// The record's byte offset from the start of the table.
+  static const record = 8;
+}
+
+/// Byte offsets in a root record addressed by the stack-map index.
+abstract final class StackMapRecord() {
   /// The constant frame-description address, or zero for an unnamed frame.
-  static const description = 8;
+  static const description = 0;
 
   /// One plus the stack offset of the traced continuation, or zero.
-  static const context = 16;
-  static const callerStack = 24;
-  static const returnAddress = 32;
-  static const rootCount = 40;
-  static const roots = 48;
+  static const context = 8;
+  static const callerStack = 16;
+  static const returnAddress = 24;
+  static const rootCount = 32;
+  static const roots = 40;
 }
 
 /// Byte offsets in optional immutable function-value metadata.

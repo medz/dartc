@@ -61,13 +61,19 @@ final class StackFrames(final int context) {
 
   int _find(int pc) {
     final table = Memory.read(context + RuntimeContext.maps);
-    final count = Memory.read(table);
-    var record = table + StackMapRecord.tableHeader;
-    for (var i = 0; i < count; i++) {
-      if (Memory.read(record + StackMapRecord.pc) == pc) return record;
-      record +=
-          StackMapRecord.roots +
-          Memory.read(record + StackMapRecord.rootCount) * 8;
+    var low = 0, high = Memory.read(table + StackMapTable.count);
+    while (low < high) {
+      final middle = low + ((high - low) >> 1);
+      final entry =
+          table + StackMapTable.entries + middle * StackMapTable.entrySize;
+      final address = Memory.read(entry + StackMapTable.pc);
+      if (pc < address) {
+        high = middle;
+      } else if (pc > address) {
+        low = middle + 1;
+      } else {
+        return table + Memory.read(entry + StackMapTable.record);
+      }
     }
     Memory.fail();
   }

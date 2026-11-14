@@ -15,10 +15,13 @@ void main() {
       final native = StackRootCalls();
       addTearDown(native.close);
       final maps = <int, StackRoots>{};
-      var offset = StackMapRecord.tableHeader ~/ 8;
       for (var i = 0; i < native.table.value; i++) {
+        final index =
+            (StackMapTable.entries + i * StackMapTable.entrySize) ~/ 8;
+        final pc = native.table[index + StackMapTable.pc ~/ 8];
+        final offset = native.table[index + StackMapTable.record ~/ 8] ~/ 8;
         final count = native.table[offset + StackMapRecord.rootCount ~/ 8];
-        maps[native.table[offset + StackMapRecord.pc ~/ 8]] = StackRoots(
+        maps[pc] = StackRoots(
           native.table[offset + StackMapRecord.callerStack ~/ 8],
           native.table[offset + StackMapRecord.returnAddress ~/ 8],
           [
@@ -28,9 +31,8 @@ void main() {
         );
         final context = native.table[offset + StackMapRecord.context ~/ 8];
         if (context != 0) {
-          expect(maps[native.table[offset]]!.offsets, contains(context - 1));
+          expect(maps[pc]!.offsets, contains(context - 1));
         }
-        offset += StackMapRecord.roots ~/ 8 + count;
       }
       for (final route in [0, 1]) {
         for (final relocate in [false, true, true]) {

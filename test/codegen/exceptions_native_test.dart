@@ -15,10 +15,12 @@ void main() {
     final native = ExceptionCalls();
     addTearDown(native.close);
     final maps = <int, StackRoots>{};
-    var offset = StackMapRecord.tableHeader ~/ 8;
     for (var i = 0; i < native.table.value; i++) {
+      final index = (StackMapTable.entries + i * StackMapTable.entrySize) ~/ 8;
+      final pc = native.table[index + StackMapTable.pc ~/ 8];
+      final offset = native.table[index + StackMapTable.record ~/ 8] ~/ 8;
       final count = native.table[offset + StackMapRecord.rootCount ~/ 8];
-      maps[native.table[offset + StackMapRecord.pc ~/ 8]] = StackRoots(
+      maps[pc] = StackRoots(
         native.table[offset + StackMapRecord.callerStack ~/ 8],
         native.table[offset + StackMapRecord.returnAddress ~/ 8],
         [
@@ -26,7 +28,6 @@ void main() {
             native.table[offset + StackMapRecord.roots ~/ 8 + j],
         ],
       );
-      offset += StackMapRecord.roots ~/ 8 + count;
     }
     int errorTraceSlot(Pointer<Uint64> object) {
       final descriptor = Pointer<Uint64>.fromAddress(object.value);

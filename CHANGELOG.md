@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Look up GC and stack-trace frame records through a sorted return-address index, reducing each lookup to logarithmic time. Share identical frame records while retaining roots, source descriptions and asynchronous continuation links.
+
 - Preserve checked SDK ancestor interfaces when binding ordinary classes, including ancestors hidden by canonical core types. `List.followedBy` now works across growable, fixed, constant, typed and user-defined lists while retaining generic argument checks.
 
 - Reject overflowing native array sizes, field offsets and alignment padding before allocation or code generation. Oversized FFI layouts can no longer wrap to a small or zero size.

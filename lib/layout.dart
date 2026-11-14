@@ -6,6 +6,7 @@ export 'src/layout/memory_layout.dart'
         ObjectHeader,
         ObjectDescriptor,
         RuntimeContext,
+        StackMapTable,
         StackMapRecord,
         ClosureTraceMetadata;
 export 'src/layout/object_layout.dart' show ObjectLayout, ValueRepresentation;
