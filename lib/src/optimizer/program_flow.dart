@@ -3044,6 +3044,26 @@ Constant? _fold(
   List<FlowValue> inputs,
   IrProgram program,
 ) {
+  if (operation is Identical) {
+    if (inputs.first.constant case final ObjectConstant left) {
+      if (inputs.last.constant case final ObjectConstant right) {
+        return Constant.boolean(left.structuralKey == right.structuralKey);
+      }
+    }
+    for (final (constant, allocated) in [
+      (inputs.first, inputs.last),
+      (inputs.last, inputs.first),
+    ]) {
+      if (constant.constant is ObjectConstant &&
+          allocated.objects.isNotEmpty &&
+          allocated.constants.isEmpty &&
+          allocated.unknownTypes.isEmpty &&
+          allocated.addresses.isEmpty &&
+          allocated.objects.every((object) => object.type is ClassType)) {
+        return const Constant.boolean(false);
+      }
+    }
+  }
   if (operation case Equals(:final negated)) {
     if (inputs.every(
       (value) =>
