@@ -1036,6 +1036,7 @@ final class FunctionRepresentation(
                                           instruction.implicitMember!.selector,
                                       },
                                   hasBuiltin: builtin,
+                                  receiverValue: receiver,
                                 )
                               : {member!.owner!: member})
                           .entries)
@@ -1748,6 +1749,7 @@ final class FunctionRepresentation(
               _ => throw StateError('Expected a member call.'),
             };
             invocations[call] = target;
+            callOrigins[call] = instruction;
             final entryTypes = layouts.entryTypes(target);
             final converted = <Value>[];
             operands[call] = [

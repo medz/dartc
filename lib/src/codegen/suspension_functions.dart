@@ -106,6 +106,7 @@ final class SuspensionFrame(final IrFunction source, int index) {
     result.boxes.addAll(body.boxes);
     result.tests.addAll(body.tests);
     result.invocations.addAll(body.invocations);
+    result.callOrigins.addAll(body.callOrigins);
     result.resultTypes.addAll(body.resultTypes);
     final frame = entry.parameters.first;
     if (!synchronous) {

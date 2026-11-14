@@ -47,6 +47,7 @@ base class ScalarCodeGenerator<R extends Object>(
   ObjectModule generate(
     IrProgram program, {
     required Iterable<FunctionTarget> definitions,
+    Iterable<FunctionTarget>? roots,
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
     Map<NativeReference, String> nativeSymbols = const {},
@@ -54,6 +55,20 @@ base class ScalarCodeGenerator<R extends Object>(
     HeapRuntime? runtime,
   }) {
     final selected = definitions.toSet();
+    final sourceRoots = {
+      ...roots ?? selected,
+      ...exports.keys,
+      if (entryPoint != null) ...[
+        entryPoint.function,
+        if (selected.contains(runtime?.processExitCode))
+          runtime!.processExitCode!,
+      ],
+    };
+    if (!selected.containsAll(sourceRoots)) {
+      throw ArgumentError(
+        'Entry roots must belong to the supplied definitions.',
+      );
+    }
     if (selected.isEmpty ||
         !selected.containsAll([...exports.keys, ...imports.keys]) ||
         exports.keys.any(imports.containsKey)) {
@@ -123,13 +138,18 @@ base class ScalarCodeGenerator<R extends Object>(
     final callbackGetters = {
       for (final entry in callbacks.entries) entry.value.address: entry.key,
     };
-    selected.addAll(bindings.definitions);
-    selected.addAll(program.reachableFrom(selected));
     final sourceProgram = program;
-    final sourceDefinitions = {...selected};
+    sourceRoots.addAll([...exports.keys, ...bindings.definitions]);
+    final unknownCalls = <FunctionTarget>{};
+    final sourceFlow = CallTypeFlow(
+      sourceProgram,
+      sourceRoots,
+      instantiatedTypes: TypeMetadata.fields.keys,
+    );
     late final ProgramSelection resolved;
     while (true) {
       program = sourceProgram;
+      final sourceDefinitions = sourceFlow.definitions;
       selected
         ..clear()
         ..addAll(sourceDefinitions);
@@ -227,31 +247,26 @@ base class ScalarCodeGenerator<R extends Object>(
             if (!globals.isEmpty) IrExternal(globals.address),
           ],
         );
-        final required = expanded.reachableFrom([
-          ...sourceDefinitions,
-          for (final function in helpers) function.target,
-        ], instantiatedTypes: instantiatedTypes);
-        final discovered = required
-            .where(
-              (target) =>
-                  sourceProgram.implementationOf(target) != null &&
-                  !sourceDefinitions.contains(target),
-            )
-            .toList();
-        if (discovered.isNotEmpty) {
-          sourceDefinitions.addAll(discovered);
-          continue;
-        }
         program = expanded;
-        selected
-          ..clear()
-          ..addAll(required);
+        selected.addAll([
+          for (final function in helpers) function.target,
+          if (!globals.isEmpty) globals.address,
+        ]);
       }
+      final sourceCount = sourceDefinitions.length;
+      sourceFlow.extend(
+        instantiatedTypes: [
+          ...instantiatedTypes,
+          for (final function in helpers) ...function.instantiatedClasses,
+        ],
+      );
+      if (sourceDefinitions.length != sourceCount) continue;
       final members = MemberCalls(
         program,
         selected,
         records: records,
         instantiatedTypes: instantiatedTypes,
+        callTypes: sourceFlow,
       );
       final suspensions = SuspensionFunctions(
         selected.map(program.implementationOf).whereType<IrFunction>(),
@@ -341,14 +356,24 @@ base class ScalarCodeGenerator<R extends Object>(
           throw ArgumentError('Missing support dependency: ${target.name}');
         }
       }
-      if (missing.isNotEmpty) {
-        sourceDefinitions.addAll(
-          sourceProgram.reachableFrom([
-            ...sourceDefinitions,
-            ...missing,
-          ], instantiatedTypes: instantiatedTypes),
+      final additional = {
+        ...missing,
+        for (final target in selection.implicitCalls)
+          if (sourceProgram.implementationOf(target) is IrFunction) target,
+      }.difference(unknownCalls);
+      if (additional.isNotEmpty) {
+        unknownCalls.addAll(additional);
+        final changed = sourceFlow.extend(
+          unknownCalls: additional,
+          instantiatedTypes: instantiatedTypes,
         );
-        continue;
+        if (changed || missing.isNotEmpty) continue;
+      }
+      if (missing.isNotEmpty) {
+        throw StateError(
+          'Required source calls were not selected: '
+          '${missing.map((target) => target.name).join(', ')}',
+        );
       }
       resolved = selection;
       break;

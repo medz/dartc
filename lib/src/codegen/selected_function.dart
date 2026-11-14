@@ -28,6 +28,8 @@ base class SelectedFunction(
   final introduced = <Instruction>{};
   final tests = <TypeTest, TypeTestKind>{};
   final invocations = <Instruction, FunctionTarget>{};
+  // Representation changes preserve the already analyzed argument flow.
+  final callOrigins = <Instruction, Instruction>{};
   final aliases = <Instruction>{};
   final resultTypes = <Value, ValueType>{};
   final stackCells = <NewCell>{};

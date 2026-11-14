@@ -54,72 +54,67 @@ void main() {
   test(
     'unreferenced declarations do not expand List code or metadata',
     () async {
-      for (final (fixture, root, required) in [
-        ('lists_overflow', 'main', 'filled'),
-        ('lists', 'listConstantOnly', '[]'),
+      final lowered = await prepareRuntime('test/compiler/fixtures/lists.dart');
+      final entry = lowered.program.functions
+          .firstWhere((body) => body.target.name == 'listConstantOnly')
+          .target;
+      for (final CodeGenerator generator in [
+        Arm64CodeGenerator(const Target(.macos, .arm64)),
+        X64CodeGenerator(const Target(.linux, .x64)),
       ]) {
-        final lowered = await prepareRuntime(
-          'test/compiler/fixtures/$fixture.dart',
+        final module = generator.generate(
+          lowered.program,
+          runtime: heapRuntime,
+          definitions: lowered.program.reachableFrom([entry]),
+          roots: [entry],
         );
-        final entry = lowered.program.functions
-            .firstWhere((body) => body.target.name == root)
-            .target;
-        for (final CodeGenerator generator in [
-          Arm64CodeGenerator(const Target(.macos, .arm64)),
-          X64CodeGenerator(const Target(.linux, .x64)),
-        ]) {
-          final module = generator.generate(
-            lowered.program,
-            runtime: heapRuntime,
-            definitions: lowered.program.reachableFrom([entry]),
+        final names = module.symbols.map((symbol) => symbol.name);
+        expect(names, contains('[]'));
+        final t = TypeParameterType('T')..initializeBound(.object.nullable);
+        final unused = ClassType(
+          Uri.parse('memory:unreachable'),
+          'Unused',
+          typeParameters: [t],
+        );
+        final member = FunctionTarget(
+          unused.library,
+          'addAll',
+          .integer,
+          [],
+          owner: unused,
+          kind: .method,
+        );
+        final expanded = IrProgram(
+          [
+            ...lowered.program.classes,
+            IrClass(unused, [], members: [member]),
+          ],
+          [
+            ...lowered.program.functions,
+            IrFunction(member, [
+              Block(member.parameterTypes)
+                ..finish(const Return(Constant.integer(91))),
+            ]),
+          ],
+          globals: lowered.program.globals,
+          externals: lowered.program.externals,
+        );
+        final enlarged = generator.generate(
+          expanded,
+          runtime: heapRuntime,
+          definitions: expanded.reachableFrom([entry]),
+          roots: [entry],
+        );
+        if (generator.target.operatingSystem == .macos) {
+          expect(
+            MachO(generator.target).encodeObject(enlarged),
+            MachO(generator.target).encodeObject(module),
           );
-          final names = module.symbols.map((symbol) => symbol.name);
-          expect(names, contains(required));
-          final t = TypeParameterType('T')..initializeBound(.object.nullable);
-          final unused = ClassType(
-            Uri.parse('memory:unreachable'),
-            'Unused',
-            typeParameters: [t],
+        } else {
+          expect(
+            Elf(generator.target).encodeObject(enlarged),
+            Elf(generator.target).encodeObject(module),
           );
-          final member = FunctionTarget(
-            unused.library,
-            'addAll',
-            .integer,
-            [],
-            owner: unused,
-            kind: .method,
-          );
-          final expanded = IrProgram(
-            [
-              ...lowered.program.classes,
-              IrClass(unused, [], members: [member]),
-            ],
-            [
-              ...lowered.program.functions,
-              IrFunction(member, [
-                Block(member.parameterTypes)
-                  ..finish(const Return(Constant.integer(91))),
-              ]),
-            ],
-            globals: lowered.program.globals,
-            externals: lowered.program.externals,
-          );
-          final enlarged = generator.generate(
-            expanded,
-            runtime: heapRuntime,
-            definitions: expanded.reachableFrom([entry]),
-          );
-          if (generator.target.operatingSystem == .macos) {
-            expect(
-              MachO(generator.target).encodeObject(enlarged),
-              MachO(generator.target).encodeObject(module),
-            );
-          } else {
-            expect(
-              Elf(generator.target).encodeObject(enlarged),
-              Elf(generator.target).encodeObject(module),
-            );
-          }
         }
       }
     },

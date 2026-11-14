@@ -31,6 +31,9 @@ final class ProgramSelection(
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
 
+  /// Source entries reached through generated code rather than checked call sites.
+  final implicitCalls = <FunctionTarget>{};
+
   /// Checks a runtime closure entered with raw native pointer arguments.
   ///
   /// Caller-side boxing, allocation, exceptions and foreign calls are rejected.
@@ -211,11 +214,54 @@ final class ProgramSelection(
       capture = needsTrace;
       managed = needsHeap;
     }
-    if (managed) {
-      calls.addAll([heap.allocate, heap.release, heap.isOutOfMemory]);
-      if (calls.contains(heap.eventAccess)) calls.add(heap.runEvents);
+    for (final body in functions.values) {
+      final source = (members.callTypes?.program ?? members.program)
+          .implementationOf(body.sourceTarget);
+      final observed = {
+        if (source is IrFunction)
+          for (final block in source.blocks) ...[
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ],
+      };
+      Value unview(Value value) {
+        while (value is TypeView) {
+          value = value.operand;
+        }
+        return value;
+      }
+
+      for (final MapEntry(key: operation, value: callee)
+          in body.invocations.entries) {
+        final origin = body.callOrigins[operation] ?? operation;
+        final initializer = heap.initializersFor([callee]).firstOrNull;
+        if (observed.contains(origin) &&
+            (origin is InstanceCall && operation is InstanceCall ||
+                origin is Construct && initializer == origin.initializer)) {
+          continue;
+        }
+        if (origin is DirectCall &&
+            operation is DirectCall &&
+            observed.contains(origin) &&
+            origin.target.implementation == callee.implementation) {
+          final inputs = body.operands[operation] ?? operation.inputs;
+          if (inputs.length >= origin.inputs.length &&
+              origin.inputs.indexed.every(
+                (entry) =>
+                    identical(unview(entry.$2), unview(inputs[entry.$1])),
+              )) {
+            continue;
+          }
+        }
+        implicitCalls.add(initializer ?? callee);
+      }
     }
-    if (capture) calls.add(heap.runtime!.captureStackTrace);
+    if (managed) {
+      implicitCalls.addAll([heap.allocate, heap.release, heap.isOutOfMemory]);
+      if (calls.contains(heap.eventAccess)) implicitCalls.add(heap.runEvents);
+    }
+    if (capture) implicitCalls.add(heap.runtime!.captureStackTrace);
+    calls.addAll(implicitCalls);
     heap.retain(calls);
     primitives = managed
         ? heap.primitives.intersection({...calls, heap.invalid})

@@ -239,6 +239,7 @@ void main() {
     final module = generator.generate(
       IrProgram([], [mainBody(false)]),
       definitions: [entry, status],
+      roots: const [],
       runtime: withCritical(status, processStatus: IrFunction(status, [block])),
       entryPoint: (function: entry, symbol: 'start'),
     );

@@ -155,11 +155,12 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
     };
+    final roots = [
+      ...exports.keys,
+      if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
+    ];
     final definitions = program.reachableFrom(
-      [
-        ...exports.keys,
-        if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
-      ],
+      roots,
       instantiatedTypes: [
         if (exports.values.any(
               (export) => export.signature.parameters.any(
@@ -239,6 +240,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     final object = generator.generate(
       program,
       definitions: definitions,
+      roots: roots,
       exports: exports,
       imports: nativeImports,
       nativeSymbols: addresses,

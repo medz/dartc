@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Avoid temporary owner-type metadata during ordinary generic member reads. Keep virtual calls and type metadata limited to the values that can reach each call, while preserving generic checks, exceptions and native callback entry points.
+- Bundle generated Unicode case tables and their license without the original regeneration inputs; packaged compilers continue to work offline.
+
 - Look up GC and stack-trace frame records through a sorted return-address index, reducing each lookup to logarithmic time. Share identical frame records while retaining roots, source descriptions and asynchronous continuation links.
 
 - Preserve checked SDK ancestor interfaces when binding ordinary classes, including ancestors hidden by canonical core types. `List.followedBy` now works across growable, fixed, constant, typed and user-defined lists while retaining generic argument checks.

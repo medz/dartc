@@ -80,6 +80,107 @@ void main() {
     }
   });
 
+  test('generated calls widen an already observed source target', () {
+    for (final origin in ['source', 'rewritten', 'generated']) {
+      final uri = Uri.parse('memory:implicit-calls');
+      final callee = FunctionTarget(uri, 'consume', .voidType, [.integer]);
+      final body = IrFunction(callee, [
+        Block(callee.parameterTypes)..finish(const Return()),
+      ]);
+      final root = FunctionTarget(uri, 'root', .voidType, []);
+      final block = Block();
+      block.emit(DirectCall(callee, [const Constant.integer(1)]));
+      block.finish(const Return());
+      final function = IrFunction(root, [block]);
+      final program = IrProgram([], [function, body]);
+      final layout = ProgramLayout([]);
+      final selection = ProgramSelection(
+        layout,
+        HeapPlan(),
+        StackTraces(null),
+        CheckedCasts(),
+        MemberCalls(
+          program,
+          {root, callee},
+          callTypes: CallTypeFlow(
+            origin == 'generated' ? IrProgram([], [body]) : program,
+            origin == 'generated' ? [callee] : [root],
+          ),
+        ),
+        NumericOperations(),
+        GlobalStorage([]),
+        layout.instances,
+      );
+      selection.include(function);
+      selection.include(body);
+      if (origin == 'rewritten') {
+        final call = DirectCall(callee, [const Constant.integer(2)]);
+        final selected = selection.functions[root]!;
+        selected.instructions[block]!.add(call);
+        selected.invocations[call] = callee;
+      }
+      expect(selection.close(persistent: false), isEmpty);
+      expect(selection.implicitCalls, origin == 'source' ? isEmpty : {callee});
+    }
+  });
+
+  test('selected virtual and constructor calls retain observed arguments', () {
+    final uri = Uri.parse('memory:observed-calls');
+    final type = ClassType(uri, 'Item');
+    final constructor = FunctionTarget(
+      uri,
+      'new',
+      .voidType,
+      [.integer],
+      owner: type,
+      kind: .initializer,
+    );
+    final member = FunctionTarget(
+      uri,
+      'consume',
+      .voidType,
+      [.integer],
+      owner: type,
+      kind: .method,
+    );
+    final root = FunctionTarget(uri, 'root', .voidType, []);
+    final block = Block();
+    final item = block.emit(
+      Construct(constructor, [const Constant.integer(1)]),
+    );
+    block.emit(InstanceCall(member, item, [const Constant.integer(2)]));
+    block.finish(const Return());
+    final functions = [
+      IrFunction(root, [block]),
+      for (final target in [constructor, member])
+        IrFunction(target, [
+          Block(target.parameterTypes)..finish(const Return()),
+        ]),
+    ];
+    final program = IrProgram([
+      IrClass(type, [], constructors: [constructor], members: [member]),
+    ], functions);
+    final layout = ProgramLayout(
+      program.classes,
+      typeRuntime: heapRuntime.types,
+    );
+    final selection = ProgramSelection(
+      layout,
+      HeapPlan(runtime: heapRuntime),
+      StackTraces(heapRuntime),
+      CheckedCasts(),
+      MemberCalls(program, functions.map((body) => body.target).toSet()),
+      NumericOperations(),
+      GlobalStorage([]),
+      layout.instances,
+    );
+    functions.forEach(selection.include);
+    selection.close(persistent: false);
+    expect(selection.implicitCalls, isNot(contains(constructor)));
+    expect(selection.implicitCalls, isNot(contains(member)));
+    expect(selection.functions[root]!.invocations.values, contains(member));
+  });
+
   test('heap support closes transitively generated call dependencies', () {
     final program = IrProgram([], []);
     final casts = CheckedCasts();

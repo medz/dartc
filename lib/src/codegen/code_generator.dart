@@ -14,7 +14,10 @@ abstract interface class CodeGenerator() {
   ///
   /// [definitions] must belong to [program] and include every directly called
   /// body or external declaration and every selected virtual implementation.
-  /// [IrProgram.reachableFrom] selects these for a closed program. Required class
+  /// [IrProgram.reachableFrom] selects these for a closed program. [roots]
+  /// identifies independently callable entries for target-code selection; when
+  /// omitted, every supplied definition remains a possible entry. Exports and the
+  /// process entry always remain roots. Required class
   /// definitions include inherited fields and SDK error constructors used by
   /// generated checks. Unsupported operations fail before returning an artifact.
   /// Generated support functions and their source dependencies are resolved
@@ -53,6 +56,7 @@ abstract interface class CodeGenerator() {
   ObjectModule generate(
     IrProgram program, {
     required Iterable<FunctionTarget> definitions,
+    Iterable<FunctionTarget>? roots,
     Map<FunctionTarget, NativeExport> exports = const {},
     Map<FunctionTarget, NativeImport> imports = const {},
     Map<NativeReference, String> nativeSymbols = const {},
