@@ -11,6 +11,14 @@ int _readExitCode() => _exitStatus;
 @patch
 class _ProcessUtils {
   @patch
+  static int _pid(Process? process) {
+    if (process != null) {
+      throw UnsupportedError('Child process handles are not implemented.');
+    }
+    return _ioGetpid();
+  }
+
+  @patch
   static Never _exit(int status) {
     _exitProcess(status);
     throw StateError('Process termination returned');
@@ -41,6 +49,121 @@ external void _exitProcess(int status);
 
 @patch
 class _Platform {
+  @patch
+  static int _numberOfProcessors() {
+    if (_operatingSystem() == 'linux')
+      return _ioSysconf(84); // _SC_NPROCESSORS_ONLN
+    final value = _ioMalloc(4);
+    if (value == ffi.nullptr) throw const OutOfMemoryError();
+    try {
+      final length = _ioMalloc(ffi.sizeOf<ffi.Size>());
+      if (length == ffi.nullptr) throw const OutOfMemoryError();
+      try {
+        final name = _ioMalloc(14);
+        if (name == ffi.nullptr) throw const OutOfMemoryError();
+        try {
+          name.asTypedList(14).setAll(0, utf8.encode('hw.logicalcpu\u0000'));
+          final size = length.cast<ffi.Size>()..value = 4;
+          final query = ffi.DynamicLibrary.process()
+              .lookupFunction<
+                ffi.Int Function(
+                  ffi.Pointer<ffi.Uint8>,
+                  ffi.Pointer<ffi.Void>,
+                  ffi.Pointer<ffi.Size>,
+                  ffi.Pointer<ffi.Void>,
+                  ffi.Size,
+                ),
+                int Function(
+                  ffi.Pointer<ffi.Uint8>,
+                  ffi.Pointer<ffi.Void>,
+                  ffi.Pointer<ffi.Size>,
+                  ffi.Pointer<ffi.Void>,
+                  int,
+                )
+              >('sysctlbyname', isLeaf: true);
+          if (query(name, value.cast(), size, ffi.nullptr, 0) == 0) {
+            return value.cast<ffi.Int32>().value;
+          }
+        } finally {
+          _ioFree(name);
+        }
+      } finally {
+        _ioFree(length);
+      }
+    } finally {
+      _ioFree(value);
+    }
+    return _ioSysconf(58); // Darwin's _SC_NPROCESSORS_ONLN.
+  }
+
+  @patch
+  static _localHostname() {
+    final buffer = _ioMalloc(256);
+    if (buffer == ffi.nullptr) throw const OutOfMemoryError();
+    try {
+      final error = _errnoLocation();
+      if (_ioGethostname(buffer, 256) != 0) return _ioError(error.value);
+      buffer[255] = 0;
+      return _ioString(buffer);
+    } finally {
+      _ioFree(buffer);
+    }
+  }
+
+  @patch
+  static _resolvedExecutable() {
+    if (_operatingSystem() == 'linux') {
+      final path = Uint8List.fromList(utf8.encode('/proc/self/exe\u0000'));
+      for (var size = 256; ; size *= 2) {
+        final buffer = _ioMalloc(size + 1);
+        if (buffer == ffi.nullptr) throw const OutOfMemoryError();
+        try {
+          final error = _errnoLocation();
+          final length = _ioReadlink(path.address, buffer, size);
+          if (length < 0) throw _ioError(error.value);
+          if (length < size) {
+            buffer[length] = 0;
+            return _ioString(buffer);
+          }
+        } finally {
+          _ioFree(buffer);
+        }
+      }
+    }
+    final query = ffi.DynamicLibrary.process()
+        .lookupFunction<
+          ffi.Int Function(ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint32>),
+          int Function(ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint32>)
+        >('_NSGetExecutablePath', isLeaf: true);
+    final length = _ioMalloc(4);
+    if (length == ffi.nullptr) throw const OutOfMemoryError();
+    try {
+      final size = length.cast<ffi.Uint32>()..value = 0;
+      query(ffi.nullptr, size);
+      if (size.value == 0)
+        throw const OSError('Executable path is unavailable');
+      final buffer = _ioMalloc(size.value);
+      if (buffer == ffi.nullptr) throw const OutOfMemoryError();
+      try {
+        if (query(buffer, size) != 0) {
+          throw const OSError('Executable path changed during resolution');
+        }
+        final error = _errnoLocation();
+        final path = _ioRealpath(buffer, ffi.nullptr);
+        if (path == ffi.nullptr) throw _ioError(error.value);
+        try {
+          return _ioString(path);
+        } finally {
+          _ioFree(path);
+        }
+      } finally {
+        _ioFree(buffer);
+      }
+    } finally {
+      _ioFree(length);
+    }
+  }
+
   @patch
   static String _operatingSystem() => switch (ffi.Abi.current()) {
     ffi.Abi.macosArm64 || ffi.Abi.macosX64 => 'macos',
@@ -164,3 +287,40 @@ external ffi.Pointer<ffi.Uint8> _ioMalloc(int size);
 @SystemNative()
 @ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Uint8>)>(symbol: 'free')
 external void _ioFree(ffi.Pointer<ffi.Uint8> pointer);
+
+@SystemNative()
+@ffi.Native<ffi.Int Function()>(symbol: 'getpid', isLeaf: true)
+external int _ioGetpid();
+
+@SystemNative()
+@ffi.Native<ffi.Long Function(ffi.Int)>(symbol: 'sysconf', isLeaf: true)
+external int _ioSysconf(int name);
+
+@SystemNative()
+@ffi.Native<ffi.Int Function(ffi.Pointer<ffi.Uint8>, ffi.Size)>(
+  symbol: 'gethostname',
+  isLeaf: true,
+)
+external int _ioGethostname(ffi.Pointer<ffi.Uint8> buffer, int length);
+
+@SystemNative()
+@ffi.Native<
+  ffi.IntPtr Function(ffi.Pointer<ffi.Uint8>, ffi.Pointer<ffi.Uint8>, ffi.Size)
+>(symbol: 'readlink', isLeaf: true)
+external int _ioReadlink(
+  ffi.Pointer<ffi.Uint8> path,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int size,
+);
+
+@SystemNative()
+@ffi.Native<
+  ffi.Pointer<ffi.Uint8> Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'realpath')
+external ffi.Pointer<ffi.Uint8> _ioRealpath(
+  ffi.Pointer<ffi.Uint8> path,
+  ffi.Pointer<ffi.Uint8> buffer,
+);

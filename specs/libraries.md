@@ -125,7 +125,9 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 `Platform.environment` 在 macOS/Linux 可执行文件和原生库中读取所在进程的环境。环境项解析、重复键处理、首次读取缓存和只读 Map 保留[官方 platform_impl.dart](../sdk/std/lib/io/platform_impl.dart) 正文；目标片段通过现有 FFI 动态符号读取 `environ`，使用 SDK UTF-8 解码。名字开头的 U+FEFF 保留为数据，含非法 UTF-8 的整条环境项忽略；空值保留，没有等号或名称为空的条目丢弃，重复名称取最后一项。
 
-后续系统环境修改不改变已取得的快照；写入、删除和清空视图抛出 UnsupportedError。环境文本和视图跨回收保留，见[环境执行验证](../test/compiler/platform_environment_test.dart)。`Platform.operatingSystem`、平台布尔标记和 `pathSeparator` 使用输出目标 ABI 的平台事实。其他 Platform 元数据、当前目录读写以外的文件/目录操作和子进程管理尚未接通。
+后续系统环境修改不改变已取得的快照；写入、删除和清空视图抛出 UnsupportedError。环境文本和视图跨回收保留，见[环境执行验证](../test/compiler/platform_environment_test.dart)。`Platform.operatingSystem`、平台布尔标记和 `pathSeparator` 使用输出目标 ABI 的平台事实。
+
+`pid` 返回正在执行的进程 ID；`Platform.numberOfProcessors`、`localHostname` 和 `resolvedExecutable` 读取目标进程所在系统，保留官方 Dart 包装。可执行路径为解析符号链接后的绝对路径，支持空 PATH、相对启动路径、Unicode 和超过初始缓冲区长度的路径，见[进程身份验证](../test/compiler/process_identity_test.dart)。其余 Platform 元数据、当前目录读写以外的文件/目录操作和子进程管理仍有实现缺口。
 
 ## 当前工作目录
 

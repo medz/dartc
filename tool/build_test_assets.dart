@@ -112,6 +112,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'environment',
     'assertions',
     'process_lifecycle',
+    'process_identity',
     'working_directory',
     'descriptor_write',
     'futures',
@@ -309,6 +310,7 @@ Future<void> main(List<String> args) async {
       ),
       ('process_lifecycle', 'process_lifecycle', 'entry_process_lifecycle'),
       ('process_lifecycle', 'process_status_only', 'entry_process_status_only'),
+      ('process_identity', 'process_identity', 'entry_process_identity'),
       ('regexp_escape', 'regexp_escape', 'entry_regexp_escape'),
       ('native_callables', 'native_callables', 'entry_native_callables'),
       (
