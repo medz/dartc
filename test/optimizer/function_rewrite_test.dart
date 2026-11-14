@@ -8,6 +8,44 @@ final _uri = Uri.parse('memory:rewrite');
 final _tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
 
 void main() {
+  test(
+    'discarding a proven pure invocation also removes its unused input phi',
+    () {
+      final helper = FunctionTarget(_uri, 'seven', .integer, [.integer]);
+      final callee = IrFunction(helper, [
+        Block(helper.parameterTypes)..finish(const Return(Constant.integer(7))),
+      ]);
+      final target = FunctionTarget(_uri, 'invoke', .integer, [.integer]);
+      final entry = Block(target.parameterTypes),
+          forwarded = Block([ValueType.integer]),
+          normal = Block([ValueType.integer]),
+          caught = Block();
+      entry.finish(Jump(forwarded, entry.parameters));
+      final call = DirectCall(helper, forwarded.parameters);
+      forwarded.finish(
+        Invoke(call, onReturn: Jump(normal, [call]), onThrow: Jump(caught)),
+      );
+      normal.finish(Return(normal.parameters.single));
+      caught.finish(const Return(Constant.integer(-1)));
+      final before = IrFunction(target, [entry, forwarded, normal, caught]);
+      final after = FunctionRewrite(
+        before,
+        replacements: {call: const Constant.integer(7)},
+        discardable: {call},
+      ).run();
+      expect(after.callees, isEmpty);
+      for (final function in [before, after]) {
+        final interpreter = IrInterpreter(
+          IrProgram([], [function, callee]),
+          {},
+        );
+        for (final input in [-2, 42]) {
+          expect(interpreter.run(function, [input]), 7);
+        }
+      }
+    },
+  );
+
   test('a disproved branch removes its call without requiring inlining', () {
     final target = FunctionTarget(_uri, 'branch', .integer, []);
     final entry = Block(), dead = Block(), live = Block();

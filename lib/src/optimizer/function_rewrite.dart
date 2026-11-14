@@ -355,6 +355,14 @@ final class FunctionRewrite(
     }
 
     Terminator invokeEnd(Invoke invocation) {
+      if (!needed.contains(invocation.operation)) {
+        final normal = invocation.onReturn;
+        if (normal == null || _never(invocation.operation)) {
+          throw StateError('A non-returning operation cannot be discarded.');
+        }
+        changed = true;
+        return jump(normal);
+      }
       final template = operations[invocation.operation] ?? invocation.operation;
       if (!template.mayThrow) {
         changed = true;
