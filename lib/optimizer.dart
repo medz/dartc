@@ -1,19 +1,24 @@
-/// Program analysis and bounded transformations for verified, immutable IR.
+/// Analysis and transformations of verified Dart programs.
 ///
-/// [reachableDefinitions] computes a conservative closure from explicit roots.
-/// [CallTypeFlow] narrows virtual calls using argument and return facts. Extend
-/// it only while its input program is unchanged, then hand [CallTypeFlow.facts]
-/// to consumers. Rewritten IR requires a new analysis from the actual roots;
-/// previous retained definitions are not additional entry points.
-/// [inlineDirectCalls] expands small direct calls with bounded growth, preserving
-/// effects and exceptional continuations while cleaning up the copied bodies.
+/// [ProgramFlow] solves execution, values, calls and state for one immutable IR.
+/// [ProgramOptimizer] applies semantic passes and recomputes facts after changes.
+/// Supply actual invocations through [FlowEntry]; `openEntries`
+/// describes callable boundaries whose arguments are externally unknown.
 ///
-/// @docImport 'src/optimizer/call_type_flow.dart';
-/// @docImport 'src/optimizer/reachability.dart';
-/// @docImport 'src/optimizer/inlining.dart';
+/// @docImport 'src/optimizer/program_flow.dart';
+/// @docImport 'src/optimizer/program_optimizer.dart';
 library;
 
 export 'src/optimizer/call_type_flow.dart' show CallTypeFlow, CallTypeFacts;
 export 'src/optimizer/reachability.dart' show reachableDefinitions;
+export 'src/optimizer/flow_value.dart' show FlowValue, FlowObject;
+export 'src/optimizer/program_flow.dart'
+    show ProgramFlow, ProgramFlowFacts, FlowEntry;
+export 'src/optimizer/program_pass.dart' show ProgramPass;
+export 'src/optimizer/program_optimizer.dart' show ProgramOptimizer;
+export 'src/optimizer/simplification.dart' show ProgramSimplification;
 export 'src/optimizer/inlining.dart' show inlineDirectCalls;
 export 'src/optimizer/function_rewrite.dart' show FunctionRewrite;
+export 'src/optimizer/storage_elimination.dart' show ProgramStorageElimination;
+export 'src/optimizer/storage_promotion.dart' show ProgramStoragePromotion;
+export 'src/optimizer/call_specialization.dart' show ProgramCallSpecialization;
