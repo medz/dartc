@@ -170,8 +170,9 @@ final class ProgramFlow(
                 'Entry function value belongs to another program.',
               );
             }
-          case ObjectConstant(:final fields):
+          case ObjectConstant(:final fields, :final payload):
             pending.addAll(fields.values);
+            pending.addAll(payload);
           case RecordConstant(:final fields):
             pending.addAll(fields);
           case SequenceConstant(:final elements):

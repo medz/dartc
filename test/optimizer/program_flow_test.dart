@@ -9,6 +9,49 @@ final _uri = Uri.parse('memory:program-flow');
 
 void main() {
   test(
+    'entry constants validate nested payload callbacks without invoking them',
+    () {
+      final storage = ClassType(_uri, 'References');
+      final entry = FunctionTarget(_uri, 'entry', .voidType, [storage]);
+      final callback = _constant('callback', 7);
+      final program = IrProgram(
+        [IrClass(storage, [], referencePayload: true)],
+        [
+          IrFunction(entry, [
+            Block(entry.parameterTypes)..finish(const Return()),
+          ]),
+          callback,
+        ],
+      );
+      FlowValue argument(FunctionTarget function) => FlowValue.constant(
+        ObjectConstant(
+          storage,
+          {},
+          payload: [
+            ObjectConstant(storage, {}, payload: [FunctionConstant(function)]),
+          ],
+        ),
+      );
+      final facts = ProgramFlow(program, [
+        (target: entry, arguments: [argument(callback.target)]),
+      ]).facts;
+      expect(facts.definitions, {entry});
+      final foreign = FunctionTarget(
+        Uri.parse('memory:foreign'),
+        'value',
+        .integer,
+        [],
+      );
+      expect(
+        () => ProgramFlow(program, [
+          (target: entry, arguments: [argument(foreign)]),
+        ]),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test(
     'constant control flow excludes calls and unobserved function bodies',
     () {
       final tick = FunctionTarget(_uri, 'tick', .integer, []);
