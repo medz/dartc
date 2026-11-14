@@ -145,6 +145,78 @@ void main() {
     }
   });
 
+  test('incremental entries and instances match fresh analysis', () {
+    final model = _dispatch();
+    final identity = FunctionTarget(_uri, 'identity', model.face, [model.face]);
+    final identityBody = _identity(identity);
+    final late = FunctionTarget(_uri, 'late', model.face, [model.face]);
+    final forwarding = Block(late.parameterTypes);
+    forwarding.finish(
+      Return(forwarding.emit(DirectCall(identity, forwarding.parameters))),
+    );
+    final entry = Block();
+    final value = entry.emit(
+      DirectCall(identity, [ObjectConstant(model.types.first, {})]),
+    );
+    entry.finish(Return(entry.emit(InstanceCall(model.member, value, []))));
+    final root = IrFunction(FunctionTarget(_uri, 'main', .integer, []), [
+      entry,
+    ]);
+    final program = IrProgram(model.classes, [
+      ...model.bodies,
+      identityBody,
+      IrFunction(late, [forwarding]),
+      root,
+    ]);
+    final flow = CallTypeFlow(program, [root.target]);
+    final view = flow.definitions;
+    expect(view.intersection(model.members.toSet()), {model.members.first});
+    expect(flow.allows(value, model.types.last), isFalse);
+    expect(() => view.add(late), throwsUnsupportedError);
+    expect(flow.extend(unknownCalls: [model.members.first]), isFalse);
+    final entries = <FunctionTarget>[], instances = <ClassType>[];
+    for (final (calls, types) in [
+      ([identity], <ClassType>[]),
+      (<FunctionTarget>[], [model.types[1]]),
+      ([late], <ClassType>[]),
+      (<FunctionTarget>[], [model.types[2]]),
+    ]) {
+      entries.addAll(calls);
+      instances.addAll(types);
+      expect(
+        flow.extend(unknownCalls: calls, instantiatedTypes: types),
+        isTrue,
+      );
+      final fresh = CallTypeFlow(
+        program,
+        [root.target],
+        unknownCalls: entries,
+        instantiatedTypes: instances,
+      );
+      expect(view, fresh.definitions);
+      expect(flow.definitions, same(view));
+      for (final receiver in [
+        value,
+        identityBody.entry.parameters.single,
+        forwarding.parameters.single,
+      ]) {
+        for (final type in model.types) {
+          expect(flow.allows(receiver, type), fresh.allows(receiver, type));
+        }
+      }
+      expect(
+        flow.extend(unknownCalls: entries, instantiatedTypes: instances),
+        isFalse,
+      );
+    }
+    expect(view, containsAll([late, ...model.members]));
+    expect(flow.extend(), isFalse);
+    final dormant = CallTypeFlow(program, []);
+    expect(dormant.extend(instantiatedTypes: [model.types.first]), isTrue);
+    expect(dormant.definitions, isEmpty);
+    expect(dormant.extend(instantiatedTypes: [model.types.first]), isFalse);
+  });
+
   test(
     'generic parameters combine actual values without fixing their binder',
     () {

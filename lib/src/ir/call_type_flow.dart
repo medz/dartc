@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'block.dart';
 import 'function.dart';
 import 'program.dart';
@@ -13,7 +15,7 @@ import 'value.dart';
 /// Storage reads retain their static types; this analysis never rewrites IR or
 /// replaces its validation, argument checks, effects or exception edges.
 ///
-/// Code generation must repeat the analysis when generated calls add source
+/// Code generation must [extend] this analysis when generated calls add source
 /// dependencies, including calls to an already selected function. Such targets
 /// belong among unknown callers unless their actual arguments are analyzed here.
 final class CallTypeFlow(
@@ -33,14 +35,34 @@ final class CallTypeFlow(
   final _targets = <InstanceCall, Set<FunctionTarget>>{};
   final _directCalls = <DirectCall>{};
 
-  /// The source bodies and imports required by the analyzed entry points.
-  late final Set<FunctionTarget> definitions = .unmodifiable(_definitions);
+  /// A live, read-only view of the required source bodies and imports.
+  late final Set<FunctionTarget> definitions = UnmodifiableSetView(
+    _definitions,
+  );
 
   this {
+    extend(
+      unknownCalls: [...roots, ...unknownCalls],
+      instantiatedTypes: instantiatedTypes,
+    );
+  }
+
+  /// Adds unknown entry points and instance classes, then resumes convergence.
+  ///
+  /// Facts belong to the same immutable [program]. Repeated additions are inert;
+  /// new calls widen existing entry parameters without discarding prior facts.
+  /// Returns whether entry, parameter or instance facts changed.
+  bool extend({
+    Iterable<FunctionTarget> unknownCalls = const [],
+    Iterable<ClassType> instantiatedTypes = const [],
+  }) {
+    final before = _instances.length;
     _instances.addAll(instantiatedTypes.map((type) => type.declaration));
-    for (final target in [...roots, ...unknownCalls]) {
+    if (_instances.length != before) _pending.addAll(_virtuals);
+    for (final target in unknownCalls) {
       _include(target, unknown: true);
     }
+    final changed = _pending.isNotEmpty || _instances.length != before;
     while (_pending.isNotEmpty) {
       // Discover direct dependencies before revisiting virtual calls for new classes.
       while (_unscanned.isNotEmpty) {
@@ -50,6 +72,7 @@ final class CallTypeFlow(
       _pending.remove(target);
       _visit(target);
     }
+    return changed;
   }
 
   /// Whether [receiver] can hold an instance of [actual] at any observed call.
