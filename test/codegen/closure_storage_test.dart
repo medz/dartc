@@ -62,10 +62,12 @@ void main() {
     'static values share a carrier without allocation or wrapper bodies',
     () {
       final target = FunctionTarget(uri, 'plain', .integer, []);
+      final unreferenced = FunctionTarget(uri, 'unreferenced', .integer, []);
       final first = FunctionConstant(target), second = FunctionConstant(target);
       final use = FunctionTarget(uri, 'use', first.type, []);
       final storage = ClosureStorage([
         body(target),
+        body(unreferenced),
         IrFunction(use, [Block()..finish(Return(first))]),
         IrFunction(FunctionTarget(uri, 'again', second.type, []), [
           Block()..finish(Return(second)),
@@ -75,6 +77,10 @@ void main() {
       expect(storage.constants[first.structuralKey]!.target, same(target));
       expect(storage.constants[first.structuralKey]!.initializer, isNull);
       expect(storage.functions, isEmpty);
+      expect(
+        storage.targetsFor(target.signature).map((shape) => shape.target),
+        [target],
+      );
       expect(
         () => ClosureStorage([
           IrFunction(use, [Block()..finish(Return(first))]),

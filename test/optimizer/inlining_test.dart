@@ -243,37 +243,72 @@ void main() {
     expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
   });
 
-  test('constant branch cleanup removes dead external dependencies', () {
-    final helper = FunctionTarget(_uri, 'enabled', .boolean, []);
-    final predicate = IrFunction(helper, [
-      Block()..finish(const Return(Constant.boolean(true))),
-    ]);
-    final root = FunctionTarget(_uri, 'root', .integer, []);
-    final entry = Block(), yes = Block(), no = Block();
-    entry.finish(
-      Branch(entry.emit(DirectCall(helper, [])), Jump(yes), Jump(no)),
-    );
-    yes.finish(const Return(Constant.integer(11)));
-    no.finish(Return(no.emit(DirectCall(_tick, [const Constant.integer(99)]))));
-    final program = IrProgram(
-      [],
-      [
-        predicate,
-        IrFunction(root, [entry, yes, no]),
-      ],
-      externals: [IrExternal(_tick)],
-    );
-    final facts = CallTypeFlow(program, [root]).facts;
-    expect(facts.definitions, {root, helper, _tick});
-    final result = inlineDirectCalls(program, facts);
-    final events = <int>[];
-    expect(_run(result, root, [], events), 11);
-    expect(events, isEmpty);
-    expect(CallTypeFlow(result, [root]).facts.definitions, {root});
-    expect(reachableDefinitions(result, [root]), {root});
-    expect(result.functions.length, program.functions.length);
-    expect(result.implementationOf(helper), same(predicate));
-  });
+  test(
+    'constant branch cleanup removes dead calls and callback registrations',
+    () {
+      final state = ClassType(_uri, 'State');
+      final drain = FunctionTarget(_uri, 'drain', .voidType, [state, .boolean]);
+      final callback = InstanceField(
+        state,
+        'callback',
+        drain.signature.nullable,
+      );
+      final initialize = FunctionTarget(
+        _uri,
+        'new',
+        .voidType,
+        [],
+        owner: state,
+        kind: .initializer,
+      );
+      final helper = FunctionTarget(_uri, 'enabled', .boolean, []);
+      final predicate = IrFunction(helper, [
+        Block()..finish(const Return(Constant.boolean(true))),
+      ]);
+      final root = FunctionTarget(_uri, 'root', .integer, []);
+      final entry = Block(), yes = Block(), no = Block();
+      entry.finish(
+        Branch(entry.emit(DirectCall(helper, [])), Jump(yes), Jump(no)),
+      );
+      yes.finish(const Return(Constant.integer(11)));
+      no.emit(
+        StoreField(
+          callback,
+          no.emit(Construct(initialize, [])),
+          FunctionConstant(drain),
+        ),
+      );
+      no.finish(
+        Return(no.emit(DirectCall(_tick, [const Constant.integer(99)]))),
+      );
+      final program = IrProgram(
+        [
+          IrClass(state, [callback], constructors: [initialize]),
+        ],
+        [
+          predicate,
+          IrFunction(initialize, [
+            Block(initialize.parameterTypes)..finish(const Return()),
+          ]),
+          IrFunction(drain, [
+            Block(drain.parameterTypes)..finish(const Return()),
+          ]),
+          IrFunction(root, [entry, yes, no]),
+        ],
+        externals: [IrExternal(_tick)],
+      );
+      final facts = CallTypeFlow(program, [root]).facts;
+      expect(facts.definitions, {root, helper, _tick, initialize, drain});
+      final result = inlineDirectCalls(program, facts);
+      final events = <int>[];
+      expect(_run(result, root, [], events), 11);
+      expect(events, isEmpty);
+      expect(CallTypeFlow(result, [root]).facts.definitions, {root});
+      expect(reachableDefinitions(result, [root]), {root});
+      expect(result.functions.length, program.functions.length);
+      expect(result.implementationOf(helper), same(predicate));
+    },
+  );
 
   test('cost bounds and selected callers limit expansion without changing semantics', () {
     final helper = FunctionTarget(_uri, 'identity', .integer, [.integer]);
