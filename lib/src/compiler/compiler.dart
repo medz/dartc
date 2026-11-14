@@ -264,27 +264,33 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     program = ProgramNormalization(program, runtime: runtime).run();
     program =
         ProgramOptimizer(const [
-          ProgramSimplification(),
-          ProgramCallSpecialization(),
-          ProgramStoragePromotion(),
-          ProgramStorageElimination(),
-          DirectCallInlining(),
-        ]).run(program, [
-          if (output is ExecutableOutput) ...[
-            (
-              target: entry!,
-              arguments: entry.parameterTypes.map(FlowValue.unknown).toList(),
-            ),
-          ],
-        ],
-        openEntries: [...exports.keys, ?runtime.processExitCode],
-        memoryLayoutFor: (program) => ProgramLayout(
-          program.classes,
-          functions: program.functions,
-          nativeLayout: NativeLayout(target),
-          typeRuntime: runtime.types,
-        ),
-      ).program;
+              ProgramSimplification(),
+              ProgramCallSpecialization(),
+              ProgramStoragePromotion(),
+              ProgramStorageElimination(),
+              DirectCallInlining(),
+            ])
+            .run(
+              program,
+              [
+                if (output is ExecutableOutput) ...[
+                  (
+                    target: entry!,
+                    arguments: entry.parameterTypes
+                        .map(FlowValue.unknown)
+                        .toList(),
+                  ),
+                ],
+              ],
+              openEntries: [...exports.keys, ?runtime.processExitCode],
+              memoryLayoutFor: (program) => ProgramLayout(
+                program.classes,
+                functions: program.functions,
+                nativeLayout: NativeLayout(target),
+                typeRuntime: runtime.types,
+              ),
+            )
+            .program;
     final definitions = reachableDefinitions(
       program,
       roots,
@@ -370,7 +376,6 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         ProgramPreparation(
           target,
           program,
-          roots: roots,
           exports: exports,
           imports: nativeImports,
           nativeSymbols: addresses,
