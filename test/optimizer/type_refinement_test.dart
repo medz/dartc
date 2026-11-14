@@ -171,6 +171,41 @@ void main() {
     ]).use((input) async => (await Lowering().lower(input)).program);
   });
 
+  test('open generic dispatch excludes unrelated exact constant receivers', () {
+    final function = sourceProgram.functions.singleWhere(
+      (body) => body.target.name == 'readCount',
+    );
+    final facts = ProgramFlow(sourceProgram, [
+      (
+        target: function.target,
+        arguments: function.target.parameterTypes
+            .map(FlowValue.unknown)
+            .toList(),
+      ),
+    ]).facts;
+    expect(facts.thrownBy(function.target).exception.isBottom, isTrue);
+    expect(facts.returnedBy(function.target).integers, FlowIntegerRange(3, 7));
+    final storage = sourceProgram.functions.singleWhere(
+      (body) =>
+          body.target.name == 'count' &&
+          body.target.owner?.name == 'StorageReader',
+    );
+    expect(facts.activationsOf(storage.target), isNotEmpty);
+    for (final activation in facts.activationsOf(storage.target)) {
+      expect(
+        facts
+            .valueOf(storage.entry.parameters.first, activation: activation)
+            .types
+            .every(
+              (type) =>
+                  type is ClassType &&
+                  type.declaration == storage.target.owner!.declaration,
+            ),
+        isTrue,
+      );
+    }
+  });
+
   for (final example in <String, int Function(bool)>{
     'nullableGuard': source.nullableGuard,
     'nullAssertion': source.nullAssertion,

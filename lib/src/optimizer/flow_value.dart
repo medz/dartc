@@ -168,19 +168,18 @@ final class FlowValue {
       _references = address.reference;
 
   /// A scalar integer constrained by executable paths.
-  factory FlowValue.integerRange(FlowIntegerRange range) =>
-      switch (range.constant) {
-        final value? => FlowValue.constant(Constant.integer(value)),
-        null => ._(
-          const {},
-          const {},
-          {ValueType.integer},
-          const {},
-          null,
-          const {},
-          range == FlowIntegerRange.full ? null : range,
-        ),
-      };
+  factory integerRange(FlowIntegerRange range) => switch (range.constant) {
+    final value? => FlowValue.constant(Constant.integer(value)),
+    null => ._(
+      const {},
+      const {},
+      {ValueType.integer},
+      const {},
+      null,
+      const {},
+      range == FlowIntegerRange.full ? null : range,
+    ),
+  };
 
   new _(
     Map<Object, Constant> constants,
@@ -374,7 +373,8 @@ final class FlowValue {
       final bool? matches = type.accepts(actual)
           ? true
           : type == ValueType.never ||
-                actual == ValueType.nullType && !type.mayBeNull
+                actual == ValueType.nullType && !type.mayBeNull ||
+                actual is ClassType && !type.mayHaveInstance(actual)
           ? false
           : type.freeTypeParameters.isNotEmpty ||
                 actual.freeTypeParameters.isNotEmpty
@@ -484,7 +484,7 @@ final class FlowValue {
       sources.intersection(other.sources),
       references.isBottom && other.references.isBottom
           ? null
-          : references.join(other.references),
+          : references.join(other.references, widen: widen),
       addresses.values.toSet(),
       joinedIntegers?.constant == null &&
               joinedIntegers != FlowIntegerRange.full

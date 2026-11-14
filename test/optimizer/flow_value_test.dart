@@ -53,6 +53,21 @@ void main() {
     },
   );
 
+  test('open generic type checks still reject unrelated nominal receivers', () {
+    final uri = Uri.parse('memory:generic-receiver');
+    final parameter = TypeParameterType('T')..initializeBound(.object.nullable);
+    final left = ClassType(uri, 'Left', typeParameters: [parameter]);
+    final right = ClassType(uri, 'Right', typeParameters: [parameter]);
+    final value = FlowValue.constant(
+      ObjectConstant(left.instantiate([.integer]), {}),
+    );
+    expect(value.check(right).value.isBottom, isTrue);
+    expect(value.check(right).mayFail, isTrue);
+    expect(value.check(right, negated: true).value, value);
+    expect(value.check(right, negated: true).mayFail, isFalse);
+    expect(value.check(left).value.isBottom, isFalse);
+  });
+
   test('same-signature functions retain their declaration identity', () {
     final first = FunctionTarget(
       Uri.parse('memory:first'),

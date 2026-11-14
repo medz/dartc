@@ -26,3 +26,21 @@ int genericChecks(bool selected) {
   final Object value = selected ? 7 : 'other';
   return matches<int>(value) * 100 + matches<String>(value);
 }
+
+abstract class Reader() {
+  int get count;
+}
+
+class const ConstantReader<T>() implements Reader {
+  @override
+  int get count => 3;
+}
+
+class StorageReader<T>() implements Reader {
+  int get _storage => 7;
+  @override
+  int get count => _storage;
+}
+
+int readCount(Reader reader, bool selected) =>
+    (selected ? const ConstantReader<int>() : reader).count;

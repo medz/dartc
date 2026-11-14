@@ -2,6 +2,7 @@ import 'package:dartc/ir.dart';
 
 import 'flow_state.dart';
 import 'flow_value.dart';
+import 'integer_range.dart';
 import 'memory_layout.dart';
 
 /// One actual invocation, with all semantic entry arguments.
@@ -215,7 +216,10 @@ final class ProgramFlow(
     }
     var changed = false;
     for (final (index, value) in arguments.indexed) {
-      final joined = activation.arguments[index].join(value);
+      final joined = activation.arguments[index].join(
+        value,
+        widen: activation.recursive,
+      );
       changed |= joined != activation.arguments[index];
       activation.arguments[index] = joined;
     }
@@ -223,7 +227,8 @@ final class ProgramFlow(
       activation.input = input.copy();
       changed = true;
     } else {
-      changed = activation.input!.join(input) || changed;
+      changed =
+          activation.input!.join(input, widen: activation.recursive) || changed;
     }
     if (changed) _pending.add(activation);
   }
@@ -464,11 +469,15 @@ final class ProgramFlow(
             (_escapingReturns.contains(body.target) &&
                 identical(_roots[body.target], activation)));
     final incoming = <Block, FlowState>{body.entry: activation.input!.copy()};
+    final incomingRanges = <Block, Map<Value, FlowIntegerRange>>{
+      body.entry: {},
+    };
     final pending = <Block>{body.entry};
     final readers = <Value, Set<Block>>{};
     late Block readingBlock;
-    bool mergeValue(Value value, FlowValue incoming) {
-      if (!activation.mergeValue(value, incoming)) return false;
+    late Map<Value, FlowIntegerRange> ranges;
+    bool mergeValue(Value value, FlowValue incoming, {bool widen = false}) {
+      if (!activation.mergeValue(value, incoming, widen: widen)) return false;
       pending.addAll(readers[value] ?? const []);
       return true;
     }
@@ -496,7 +505,11 @@ final class ProgramFlow(
           return FlowValue.unknown(value.type);
         default:
           (readers[value] ??= {}).add(readingBlock);
-          return activation.values[value] ?? const FlowValue.bottom();
+          final known = activation.values[value] ?? const FlowValue.bottom();
+          return switch (ranges[value]) {
+            final range? => known.restrictIntegers(range),
+            null => known,
+          };
       }
     }
 
@@ -505,26 +518,60 @@ final class ProgramFlow(
       FlowState state, {
       FlowValue? exception,
       FlowValue? stackTrace,
+      Map<Value, FlowIntegerRange>? refinements,
     }) {
+      final nextRanges = {...ranges, ...?refinements};
+      final widen = activation.backEdges.contains(jump);
+      for (final operation in [
+        ...jump.target.instructions,
+        if (jump.target.end case Invoke(:final operation)) operation,
+      ]) {
+        nextRanges.remove(operation);
+      }
       activation.edges.add(jump);
       activation.mergePoint(activation.edgeStates, jump, state);
       var changed = false;
       for (final (index, parameter) in jump.target.parameters.indexed) {
+        var value = switch (jump.arguments[index]) {
+          UnwindValue.exception => exception ?? FlowValue.unknown(.object),
+          UnwindValue.stackTrace =>
+            stackTrace ?? FlowValue.unknown(.stackTrace),
+          final argument => read(argument),
+        };
+        if (nextRanges[jump.arguments[index]] case final range?) {
+          value = value.restrictIntegers(range);
+        }
+        nextRanges.remove(parameter);
+        if (value.integers case final range?
+            when range != FlowIntegerRange.full) {
+          nextRanges[parameter] = range;
+        }
         changed =
             mergeValue(
               parameter,
-              (switch (jump.arguments[index]) {
-                UnwindValue.exception =>
-                  exception ?? FlowValue.unknown(.object),
-                UnwindValue.stackTrace =>
-                  stackTrace ?? FlowValue.unknown(.stackTrace),
-                final argument => read(argument),
-              }).withSource(parameter, activation),
+              value.withSource(parameter, activation),
+              widen: widen,
             ) ||
             changed;
       }
+      if (incomingRanges[jump.target] case final previous?) {
+        for (final value in previous.keys.toList()) {
+          final next = nextRanges[value];
+          if (next == null) {
+            previous.remove(value);
+            changed = true;
+          } else {
+            final joined = previous[value]!.join(next, widen: widen);
+            changed |= joined != previous[value];
+            previous[value] = joined;
+          }
+        }
+      } else {
+        incomingRanges[jump.target] = nextRanges;
+        changed = true;
+      }
       if (incoming[jump.target] case final previous?) {
-        changed = previous.join(state) || changed;
+        changed = previous.join(state, widen: widen) || changed;
       } else {
         incoming[jump.target] = state.copy();
         changed = true;
@@ -552,7 +599,9 @@ final class ProgramFlow(
         activation.exceptional = state.copy();
         summaryChanged = true;
       } else {
-        summaryChanged = activation.exceptional!.join(state) || summaryChanged;
+        summaryChanged =
+            activation.exceptional!.join(state, widen: activation.recursive) ||
+            summaryChanged;
       }
     }
 
@@ -560,6 +609,7 @@ final class ProgramFlow(
       final block = pending.first;
       pending.remove(block);
       readingBlock = block;
+      ranges = {...incomingRanges[block]!};
       activation.blocks.add(block);
       FlowState? state = incoming[block]!.copy();
       FlowResult evaluate(Instruction operation) {
@@ -573,6 +623,11 @@ final class ProgramFlow(
           read,
         );
         mergeValue(operation, result.value.withSource(operation, activation));
+        ranges.remove(operation);
+        if (result.value.integers case final range?
+            when range != FlowIntegerRange.full) {
+          ranges[operation] = range;
+        }
         if (result.normal != null) {
           activation.mergePoint(activation.after, operation, result.normal!);
         }
@@ -615,14 +670,19 @@ final class ProgramFlow(
             state.escape([returned, ?_constructedReturns[activation]]);
             _admitEscaped(state);
           }
-          final joined = activation.returned.join(returned);
+          final joined = activation.returned.join(
+            returned,
+            widen: activation.recursive,
+          );
           summaryChanged |= joined != activation.returned;
           activation.returned = joined;
           if (activation.normal == null) {
             activation.normal = state.copy();
             summaryChanged = true;
           } else {
-            summaryChanged = activation.normal!.join(state) || summaryChanged;
+            summaryChanged =
+                activation.normal!.join(state, widen: activation.recursive) ||
+                summaryChanged;
           }
         case final Jump jump:
           edge(jump, state);
@@ -632,8 +692,10 @@ final class ProgramFlow(
           if (value.constant case ScalarConstant(value: final bool known)) {
             edge(known ? ifTrue : ifFalse, state);
           } else {
-            edge(ifTrue, state);
-            edge(ifFalse, state);
+            final yes = _integerRefinements(condition, true, read);
+            final no = _integerRefinements(condition, false, read);
+            if (yes != null) edge(ifTrue, state, refinements: yes);
+            if (no != null) edge(ifFalse, state, refinements: no);
           }
         case Invoke(:final operation, :final onReturn, :final onThrow):
           final result = evaluate(operation);
@@ -1078,13 +1140,25 @@ final class ProgramFlow(
           normal: value.isBottom ? null : state.copy(),
         );
       default:
-        final folded = _fold(operation, inputs);
+        final folded = _fold(operation, inputs, program);
         if (folded != null) {
           activation.operationEffects[operation] = const {};
           return FlowResult(
             value: FlowValue.constant(folded),
             normal: state.copy(),
             exceptional: null,
+          );
+        }
+        if (_integerOperation(operation, inputs) case final result?) {
+          activation.operationEffects[operation] = {
+            if (result.mayThrow) Effect.mayThrow,
+          };
+          return FlowResult(
+            value: result.value.withReferences(
+              inputs.map((value) => value.references),
+            ),
+            normal: result.value.isBottom ? null : state.copy(),
+            exceptional: result.mayThrow ? state.copy() : null,
           );
         }
         activation.operationEffects[operation] = operation.effects;
@@ -2551,6 +2625,10 @@ bool _equivalent(FlowValue left, FlowValue right) =>
         left.constant!.structuralKey == right.constant!.structuralKey);
 
 final class _Activation(final IrCallable body) {
+  late final Set<Jump> backEdges = switch (body) {
+    IrFunction(:final entry) => _backEdges(entry),
+    _ => {},
+  };
   final List<FlowValue> arguments = [
     for (final _ in body.target.parameterTypes) const FlowValue.bottom(),
   ];
@@ -2597,9 +2675,9 @@ final class _Activation(final IrCallable body) {
     }
   }
 
-  bool mergeValue(Value value, FlowValue incoming) {
+  bool mergeValue(Value value, FlowValue incoming, {bool widen = false}) {
     final previous = values[value] ?? const FlowValue.bottom();
-    final joined = previous.join(incoming);
+    final joined = previous.join(incoming, widen: widen || recursive);
     if (joined == previous) return false;
     values[value] = joined;
     return true;
@@ -2709,6 +2787,204 @@ Set<Block> _cyclicBlocks(Iterable<Block> blocks, {Set<Jump>? edges}) {
   return cyclic;
 }
 
+Set<Jump> _backEdges(Block entry) {
+  final visited = <Block>{}, active = <Block>{};
+  final result = <Jump>{};
+  void visit(Block block) {
+    if (!visited.add(block)) return;
+    active.add(block);
+    for (final jump in block.successors) {
+      if (active.contains(jump.target)) {
+        result.add(jump);
+      } else {
+        visit(jump.target);
+      }
+    }
+    active.remove(block);
+  }
+
+  visit(entry);
+  return result;
+}
+
+Map<Value, FlowIntegerRange>? _integerRefinements(
+  Value condition,
+  bool outcome,
+  FlowValue Function(Value) read,
+) {
+  final (Value, Value, bool)? relation = switch (condition) {
+    IntBinary(operator: .lessThan, :final left, :final right) =>
+      outcome ? (left, right, true) : (right, left, false),
+    IntBinary(operator: .lessOrEqual, :final left, :final right) =>
+      outcome ? (left, right, false) : (right, left, true),
+    IntBinary(operator: .greaterThan, :final left, :final right) =>
+      outcome ? (right, left, true) : (left, right, false),
+    IntBinary(operator: .greaterOrEqual, :final left, :final right) =>
+      outcome ? (right, left, false) : (left, right, true),
+    _ => null,
+  };
+  if (relation != null) {
+    final (leftValue, rightValue, strict) = relation;
+    final left = read(leftValue).integers, right = read(rightValue).integers;
+    if (left == null || right == null) return {};
+    if (strict &&
+        (right.upper == FlowIntegerRange.minimum ||
+            left.lower == FlowIntegerRange.maximum)) {
+      return null;
+    }
+    final a = left.intersect(
+      FlowIntegerRange(
+        FlowIntegerRange.minimum,
+        right.upper - (strict ? 1 : 0),
+      ),
+    );
+    final b = right.intersect(
+      FlowIntegerRange(left.lower + (strict ? 1 : 0), FlowIntegerRange.maximum),
+    );
+    return a == null || b == null ? null : {leftValue: a, rightValue: b};
+  }
+  if (condition case Equals(:final left, :final right, :final negated)) {
+    final a = read(left).integers, b = read(right).integers;
+    if (a == null || b == null) return {};
+    if (outcome != negated) {
+      final common = a.intersect(b);
+      return common == null ? null : {left: common, right: common};
+    }
+    final result = <Value, FlowIntegerRange>{};
+    for (final (value, range, excluded) in [
+      (left, a, b.constant),
+      (right, b, a.constant),
+    ]) {
+      if (excluded == null || !range.contains(excluded)) continue;
+      if (range.constant == excluded) return null;
+      if (range.lower == excluded) {
+        result[value] = FlowIntegerRange(excluded + 1, range.upper);
+      } else if (range.upper == excluded) {
+        result[value] = FlowIntegerRange(range.lower, excluded - 1);
+      }
+    }
+    return result;
+  }
+  return {};
+}
+
+({FlowValue value, bool mayThrow})? _integerOperation(
+  Instruction operation,
+  List<FlowValue> inputs,
+) {
+  if (inputs.length != 2) return null;
+  final left = inputs.first.integers, right = inputs.last.integers;
+  if (left == null || right == null) return null;
+  ({FlowValue value, bool mayThrow}) result(FlowIntegerRange range) =>
+      (value: FlowValue.integerRange(range), mayThrow: false);
+  ({FlowValue value, bool mayThrow}) boolean(bool? value) => (
+    value: value == null
+        ? FlowValue.unknown(.boolean)
+        : FlowValue.constant(Constant.boolean(value)),
+    mayThrow: false,
+  );
+  if (operation case Equals(:final negated)) {
+    if (left.intersect(right) == null) return boolean(negated);
+    if (_equivalent(inputs.first, inputs.last)) return boolean(!negated);
+    return boolean(null);
+  }
+  if (operation is! IntBinary) return null;
+  switch (operation.operator) {
+    case .add:
+      return result(left.add(right));
+    case .subtract:
+      return result(left.subtract(right));
+    case .multiply:
+      return result(left.multiply(right));
+    case .lessThan:
+      return boolean(
+        left.upper < right.lower
+            ? true
+            : left.lower >= right.upper
+            ? false
+            : null,
+      );
+    case .lessOrEqual:
+      return boolean(
+        left.upper <= right.lower
+            ? true
+            : left.lower > right.upper
+            ? false
+            : null,
+      );
+    case .greaterThan:
+      return boolean(
+        left.lower > right.upper
+            ? true
+            : left.upper <= right.lower
+            ? false
+            : null,
+      );
+    case .greaterOrEqual:
+      return boolean(
+        left.lower >= right.upper
+            ? true
+            : left.upper < right.lower
+            ? false
+            : null,
+      );
+    case .bitAnd:
+      final mask = left.constant ?? right.constant;
+      if (mask != null && mask >= 0) return result(FlowIntegerRange(0, mask));
+      if (mask == -1) return result(left.constant == -1 ? right : left);
+    case .bitOr || .bitXor:
+      if (left.constant == 0) return result(right);
+      if (right.constant == 0) return result(left);
+    case .shiftLeft || .shiftRight || .unsignedShiftRight:
+      final mayThrow = right.lower < 0;
+      if (right.upper < 0) {
+        return (value: const FlowValue.bottom(), mayThrow: true);
+      }
+      FlowIntegerRange value = FlowIntegerRange.full;
+      if (left.constant == 0 ||
+          operation.operator == .unsignedShiftRight && right.lower >= 64) {
+        value = FlowIntegerRange(0, 0);
+      } else if (right.constant == 0) {
+        value = left;
+      } else if (operation.operator != .shiftLeft) {
+        final counts = [
+          right.lower < 0 ? 0 : right.lower,
+          right.upper,
+          if (operation.operator == .unsignedShiftRight &&
+              left.lower < 0 &&
+              right.contains(1))
+            1,
+        ];
+        final values = [
+          for (final number in [left.lower, left.upper])
+            for (final count in counts)
+              operation.operator == .shiftRight
+                  ? number >> count
+                  : number >>> count,
+          if (operation.operator == .unsignedShiftRight &&
+              left.lower < 0 &&
+              left.upper >= 0) ...[
+            for (final count in counts) ...[0, -1 >>> count],
+          ],
+        ]..sort();
+        value = FlowIntegerRange(values.first, values.last);
+      }
+      return (value: FlowValue.integerRange(value), mayThrow: mayThrow);
+    case .truncateDivide || .modulo || .remainder:
+      return (
+        value: right.constant == 0
+            ? const FlowValue.bottom()
+            : left.constant == 0
+            ? FlowValue.constant(const Constant.integer(0))
+            : FlowValue.unknown(.integer),
+        mayThrow: right.contains(0),
+      );
+    case .divide:
+      break;
+  }
+  return null;
+}
+
 FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
   final left = inputs[0], right = inputs[1];
   final subtract = operation.operator == .subtract;
@@ -2763,7 +3039,11 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
   return result.withReferences([left.references, right.references]);
 }
 
-Constant? _fold(Instruction operation, List<FlowValue> inputs) {
+Constant? _fold(
+  Instruction operation,
+  List<FlowValue> inputs,
+  IrProgram program,
+) {
   if (operation case Equals(:final negated)) {
     if (inputs.every(
       (value) =>
@@ -2875,8 +3155,32 @@ Constant? _fold(Instruction operation, List<FlowValue> inputs) {
         result = String.fromCharCode(scalars.single as int);
       case StringCodeUnitAt():
         result = (scalars[0] as String).codeUnitAt(scalars[1] as int);
-      case StringFromCharCodes() when constants.first is SequenceConstant:
-        final codes = (constants.first as SequenceConstant).elements;
+      case StringFromCharCodes():
+        List<Constant>? codes;
+        if (constants.first case SequenceConstant(:final elements)) {
+          codes = elements;
+        } else if (constants.first case ObjectConstant(
+          :final type,
+          :final fields,
+        )) {
+          final storage = program.classes
+              .where(
+                (declaration) =>
+                    declaration.type == (type as ClassType).declaration,
+              )
+              .firstOrNull
+              ?.listStorage;
+          if (storage == null) return null;
+          if ((fields[storage.length], fields[storage.data])
+              case (
+                ScalarConstant(value: final int length),
+                ObjectConstant(:final payload),
+              )
+              when length == payload.length) {
+            codes = payload;
+          }
+        }
+        if (codes == null) return null;
         if (codes.any(
           (code) => code is! ScalarConstant || code.value is! int,
         )) {
