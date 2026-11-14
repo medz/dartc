@@ -36,8 +36,9 @@ final class CapturedStackTrace(
     }
     var index = 0;
     return [
-      for (final name in names.reversed)
-        name == '<asynchronous suspension>' ? name : '#${index++} $name',
+      for (final frame in names.reversed)
+        for (final name in frame.split('\n'))
+          name == '<asynchronous suspension>' ? name : '#${index++} $name',
     ].join('\n');
   }
 }

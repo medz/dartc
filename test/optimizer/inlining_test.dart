@@ -129,7 +129,7 @@ void main() {
       final cast = body.emit(TypeCast(body.parameters.single, .string));
       body.emit(DirectCall(_tick, [const Constant.integer(2)]));
       body.finish(const Return(Constant.integer(7)));
-      final location = (uri: _uri, line: 12, column: 4);
+      final location = SourceLocation((uri: _uri, line: 12, column: 4));
       final root = FunctionTarget(_uri, 'root', .integer, [.object]);
       final entry = Block(root.parameterTypes),
           normal = Block([ValueType.integer]);
@@ -188,7 +188,11 @@ void main() {
           .map((end) => end.operation)
           .whereType<TypeCast>()
           .single;
-      expect(rewritten.sourceLocations[copiedCast], location);
+      final origin = rewritten.sourceLocations[copiedCast]!;
+      expect(origin.position, location.position);
+      expect(origin.function, same(helper));
+      expect(origin.caller!.position, isNull);
+      expect(origin.caller!.caller, isNull);
     },
   );
 
