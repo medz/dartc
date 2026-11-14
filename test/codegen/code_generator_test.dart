@@ -4,6 +4,8 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/object/mach_o.dart';
+import 'package:dartc/object/elf.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -50,7 +52,7 @@ void main() {
   });
 
   test(
-    'List constants and construction select only required native bodies',
+    'unreferenced declarations do not expand List code or metadata',
     () async {
       for (final (fixture, root, required) in [
         ('lists_overflow', 'main', 'filled'),
@@ -73,8 +75,50 @@ void main() {
           );
           final names = module.symbols.map((symbol) => symbol.name);
           expect(names, contains(required));
-          for (final name in ['addAll', 'sublist', 'iterator']) {
-            expect(names, isNot(contains(name)), reason: name);
+          final t = TypeParameterType('T')..initializeBound(.object.nullable);
+          final unused = ClassType(
+            Uri.parse('memory:unreachable'),
+            'Unused',
+            typeParameters: [t],
+          );
+          final member = FunctionTarget(
+            unused.library,
+            'addAll',
+            .integer,
+            [],
+            owner: unused,
+            kind: .method,
+          );
+          final expanded = IrProgram(
+            [
+              ...lowered.program.classes,
+              IrClass(unused, [], members: [member]),
+            ],
+            [
+              ...lowered.program.functions,
+              IrFunction(member, [
+                Block(member.parameterTypes)
+                  ..finish(const Return(Constant.integer(91))),
+              ]),
+            ],
+            globals: lowered.program.globals,
+            externals: lowered.program.externals,
+          );
+          final enlarged = generator.generate(
+            expanded,
+            runtime: heapRuntime,
+            definitions: expanded.reachableFrom([entry]),
+          );
+          if (generator.target.operatingSystem == .macos) {
+            expect(
+              MachO(generator.target).encodeObject(enlarged),
+              MachO(generator.target).encodeObject(module),
+            );
+          } else {
+            expect(
+              Elf(generator.target).encodeObject(enlarged),
+              Elf(generator.target).encodeObject(module),
+            );
           }
         }
       }

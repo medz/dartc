@@ -57,6 +57,31 @@ void main() {
     expect((type as DirectCall).target, same(values.entry(.typeFutureOr)));
   });
 
+  test('inherited argument reads reuse metadata without allocation', () {
+    final uri = Uri.parse('memory:argument-projection');
+    final a = TypeParameterType('A')..initializeBound(.object.nullable);
+    final b = TypeParameterType('B')..initializeBound(.object.nullable);
+    final base = ClassType(uri, 'Base', typeParameters: [a, b]);
+    final x = TypeParameterType('X')..initializeBound(.object.nullable);
+    final y = TypeParameterType('Y')..initializeBound(.object.nullable);
+    final child = ClassType(
+      uri,
+      'Child',
+      typeParameters: [x, y],
+      superclass: base.instantiate([y, x]),
+    );
+    final relations = TypeRelations(TypeValues(), [child]);
+    final target = relations.argumentOf(base, 0);
+    final body = relations.functions.singleWhere(
+      (body) => body.target == target,
+    );
+    expect(
+      body.blocks.expand((block) => block.instructions).whereType<Construct>(),
+      isEmpty,
+    );
+    expect(body.callees, isEmpty);
+  });
+
   test('nominal projections use source normalization and lexical shifting', () {
     final uri = Uri.parse('memory:projection');
     TypeParameterType parameter(String name) =>
@@ -87,11 +112,7 @@ void main() {
         .toSet();
     expect(
       calls,
-      containsAll([
-        values.entry(.typeAt),
-        values.entry(.typeNullable),
-        values.entry(.typeShift),
-      ]),
+      containsAll([values.entry(.typeNullable), values.entry(.typeShift)]),
     );
     expect(projection.target, same(heapRuntime.types!.projection));
     expect(

@@ -33,33 +33,30 @@ final class FunctionRepresentation(
       function.target.kind == .factory &&
       function.target.owner!.typeParameters.isNotEmpty;
 
-  late final _classArguments = _ownerArguments(
-    _factoryEnvironment
-        ? entryParameters[function.entry.parameters.length]
-        : layouts.types.runtimeTypeOf(
-            function.entry.parameters.first,
-            _prologue,
-          ),
-    function.target.owner!,
-    _prologue,
-  );
+  final _classArguments = <int, Value>{};
 
-  List<Value> _ownerArguments(Value actual, ClassType owner, List<Value> into) {
-    final view = DirectCall(layouts.relations.viewOf(owner), [actual]);
-    final checked = NullCheck(view);
-    var parts = LoadField(TypeMetadata.parts, checked);
-    into.addAll([view, checked, parts]);
-    final arguments = <Value>[];
-    for (final _ in owner.typeParameters) {
-      final node = NullCheck(parts);
-      final head = LoadField(TypeMetadata.head, node);
-      final tail = LoadField(TypeMetadata.tail, node);
-      into.addAll([node, head, tail]);
-      arguments.add(head);
-      parts = tail;
-    }
-    return arguments;
+  Value _ownerArgument(
+    Value actual,
+    ClassType owner,
+    int index,
+    List<Value> into,
+  ) {
+    final argument = DirectCall(layouts.relations.argumentOf(owner, index), [
+      actual,
+    ]);
+    final checked = NullCheck(argument);
+    into.addAll([argument, checked]);
+    return checked;
   }
+
+  List<Value> _ownerArguments(
+    Value actual,
+    ClassType owner,
+    List<Value> into,
+  ) => [
+    for (var i = 0; i < owner.typeParameters.length; i++)
+      _ownerArgument(actual, owner, i, into),
+  ];
 
   Value _reify(ValueType type, List<Value> into) {
     if (type is TypeParameterType) {
@@ -73,7 +70,22 @@ final class FunctionRepresentation(
       if (owner != null &&
           (function.target.kind.hasReceiver || _factoryEnvironment)) {
         final index = owner.typeParameters.indexOf(type);
-        if (index >= 0) return _classArguments[index];
+        if (index >= 0) {
+          return _classArguments.putIfAbsent(
+            index,
+            () => _ownerArgument(
+              _factoryEnvironment
+                  ? entryParameters[function.entry.parameters.length]
+                  : layouts.types.runtimeTypeOf(
+                      function.entry.parameters.first,
+                      _prologue,
+                    ),
+              owner,
+              index,
+              _prologue,
+            ),
+          );
+        }
       }
       if (function.target.kind == .closure) {
         final shape = layouts.closures.closures[function.target]!;
@@ -1410,18 +1422,8 @@ final class FunctionRepresentation(
                 storage?.parameters ??
                 target.owner?.typeParameters ??
                 const <TypeParameterType>[];
-            final classTypes = closure != null
-                ? [
-                    for (final field in storage!.environment)
-                      _load(field, carrier, setup),
-                  ]
-                : parameters.isEmpty
-                ? <Value>[]
-                : _ownerArguments(actual, target.owner!, setup);
             setup.forEach(append);
             final environment = {
-              for (final (i, parameter) in parameters.indexed)
-                parameter: classTypes[i],
               if (!binding && functionTypes.isNotEmpty)
                 for (final (i, parameter)
                     in (storage?.signature.typeParameters ??
@@ -1429,15 +1431,25 @@ final class FunctionRepresentation(
                         .indexed)
                   parameter: functionTypes[i],
             };
+            Value argument(TypeParameterType parameter) =>
+                environment.putIfAbsent(parameter, () {
+                  final index = parameters.indexOf(parameter);
+                  final pending = <Value>[];
+                  final value = closure != null
+                      ? _load(storage!.environment[index], carrier, pending)
+                      : _ownerArgument(actual, target.owner!, index, pending);
+                  pending.forEach(append);
+                  return value;
+                });
             Value reify(ValueType type) {
               if (type.freeTypeParameters.isEmpty) {
                 return layouts.types.constant(type);
               }
-              if (type is TypeParameterType) return environment[type]!;
+              if (type is TypeParameterType) return argument(type);
               final template = layouts.types.instantiate(type);
               final call = DirectCall(template.target, [
                 for (final parameter in template.parameters)
-                  environment[parameter]!,
+                  argument(parameter),
               ]);
               append(call);
               return call;
@@ -1471,7 +1483,7 @@ final class FunctionRepresentation(
                 operands[cast] = [
                   receiver,
                   for (final parameter in checked.parameters)
-                    environment[parameter]!,
+                    argument(parameter),
                 ];
                 append(cast);
                 capturedReceiver = cast;
@@ -1500,7 +1512,7 @@ final class FunctionRepresentation(
               operands[bound] = [
                 Constant.integer(shape.tag),
                 captured,
-                ...classTypes,
+                for (final parameter in parameters) argument(parameter),
                 reify(shape.signature),
               ];
               append(bound);
@@ -1640,7 +1652,7 @@ final class FunctionRepresentation(
               operands[check] = [
                 widened,
                 for (final parameter in signature.parameters)
-                  environment[parameter]!,
+                  argument(parameter),
               ];
               if (destination == .never) {
                 instructions[current]!.add(check);

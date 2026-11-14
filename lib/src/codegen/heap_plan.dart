@@ -41,8 +41,8 @@ final class HeapPlan({final HeapRuntime? runtime}) {
       calls.any(_factories.containsKey);
 
   /// Source initializers called by the retained allocation wrappers.
-  Iterable<FunctionTarget> get initializers =>
-      _factories.values.map((entry) => entry.initializer).nonNulls;
+  Iterable<FunctionTarget> initializersFor(Iterable<FunctionTarget> calls) =>
+      calls.map((target) => _factories[target]?.initializer).nonNulls;
 
   FunctionTarget box(ValueType type) => _boxes.putIfAbsent(type, () {
     final target = FunctionTarget(null, 'box${_boxes.length}', .object, [type]);

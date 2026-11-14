@@ -32,7 +32,7 @@ enum TypeTestKind() {
 final class ProgramLayout(
   Iterable<IrClass> classes, {
   Iterable<IrFunction> functions = const [],
-  Iterable<ClassType> referencedClasses = const [],
+  Iterable<ClassType>? referencedClasses,
   NativeLayout? nativeLayout,
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
@@ -73,10 +73,11 @@ final class ProgramLayout(
     for (final declaration in types.classes) {
       _classes.putIfAbsent(declaration.type, () => declaration);
     }
-    relations = TypeRelations(types, [
-      ..._classes.keys,
-      ...referencedClasses,
-    ], recordStorage: records.declaration?.type);
+    relations = TypeRelations(
+      types,
+      referencedClasses ?? _classes.keys,
+      recordStorage: records.declaration?.type,
+    );
   }
 
   FunctionTarget collectionFactory(ClassType type) =>

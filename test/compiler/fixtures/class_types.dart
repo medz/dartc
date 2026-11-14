@@ -24,6 +24,8 @@ class Parent<A, B>(final A first, final B second, int count) {
 
   // ignore: avoid_shadowing_type_parameters
   Type pair<A>() => Pair<B, A>;
+
+  bool hasTypes(Type first, Type second) => A == first && B == second;
 }
 
 class Child<T>(T value, int count) extends Parent<Box<T>, T?> {
@@ -95,6 +97,7 @@ int construct<T>(T value, double number, int count) {
   final factory = Factory<T>(value, count);
   final stack = InspectStack<T>(value, number, count);
   churn(count);
+  if (!(child as dynamic).hasTypes(Box<T>, typeOf<T?>())) throw 4;
   return (child.runtimeType == (Child<T>) ? 1 : 0) |
       (child is Parent<Box<T>, T?> ? 2 : 0) |
       (factory.runtimeType == (Product<T>) ? 4 : 0) |

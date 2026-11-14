@@ -21,6 +21,46 @@ void main() {
   late final layouts = ProgramLayout([], typeRuntime: heapRuntime.types);
   final members = MemberCalls(IrProgram([], []), {});
 
+  test('non-generic member access does not prepare owner type arguments', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final owner = ClassType(uri, 'Container', typeParameters: [t]);
+    final getter = FunctionTarget(
+      uri,
+      'length',
+      .integer,
+      [],
+      owner: owner,
+      kind: .getter,
+    );
+    final target = FunctionTarget(uri, 'read', .integer, [
+      owner.instantiate([.integer]),
+    ]);
+    final entry = Block(target.parameterTypes);
+    entry.finish(
+      Return(
+        entry.emit(
+          DirectCall(
+            getter,
+            entry.parameters,
+            ownerType: owner.instantiate([.integer]),
+          ),
+        ),
+      ),
+    );
+    final layout = ProgramLayout([
+      IrClass(owner, [], members: [getter]),
+    ]);
+    final representation = FunctionRepresentation(
+      IrFunction(target, [entry]),
+      layout,
+      CheckedCasts(),
+      members,
+      HeapPlan(),
+    );
+    expect(representation.invocations.values, [getter]);
+    expect(layout.relations.functions, isEmpty);
+  });
+
   test(
     'borrowed owners remain live through the selected native invocation',
     () {

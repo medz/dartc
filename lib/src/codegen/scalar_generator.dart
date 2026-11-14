@@ -283,10 +283,19 @@ base class ScalarCodeGenerator<R extends Object>(
         listStorage: lists,
         recordStorage: records,
         typeRuntime: runtime?.types,
-        referencedClasses: selected.expand(
-          (target) =>
-              program.implementationOf(target)?.referencedClasses ?? const [],
-        ),
+        referencedClasses: [
+          ...instantiatedTypes,
+          for (final declaration in [
+            ...casts.classes,
+            ...arithmetic.classes,
+            ...closures.classes,
+            ...suspensions.classes,
+            ?records.declaration,
+          ])
+            declaration.type,
+          for (final target in selected)
+            ...?program.implementationOf(target)?.referencedClasses,
+        ],
       );
       final persistent =
           callbacks.isNotEmpty ||

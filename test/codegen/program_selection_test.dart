@@ -13,6 +13,73 @@ import '../support/runtime.dart';
 
 void main() {
   setUpAll(prepareRuntime);
+  test('proved branches preserve effects and exception edges', () {
+    for (final negated in [false, true]) {
+      final uri = Uri.parse('memory:selection');
+      final live = FunctionTarget(uri, 'live', .voidType, []);
+      final dead = FunctionTarget(uri, 'dead', .voidType, []);
+      final handler = FunctionTarget(uri, 'handler', .voidType, []);
+      final root = FunctionTarget(uri, 'root', .integer, []);
+      final entry = Block(),
+          yes = Block(),
+          no = Block(),
+          done = Block(),
+          caught = Block();
+      entry.emit(DirectCall(live, []));
+      entry.finish(
+        Branch(
+          entry.emit(
+            TypeTest(const Constant.integer(1), .integer, negated: negated),
+          ),
+          Jump(negated ? no : yes),
+          Jump(negated ? yes : no),
+        ),
+      );
+      yes.finish(
+        Invoke(
+          DirectCall(live, []),
+          onReturn: Jump(done),
+          onThrow: Jump(caught),
+        ),
+      );
+      done.finish(const Return(Constant.integer(42)));
+      caught.emit(DirectCall(handler, []));
+      caught.finish(const Return(Constant.integer(99)));
+      no.emit(DirectCall(dead, []));
+      no.finish(const Return(Constant.integer(0)));
+      final function = IrFunction(root, [entry, yes, no, done, caught]);
+      final casts = CheckedCasts();
+      final layout = ProgramLayout([]);
+      final selection = ProgramSelection(
+        layout,
+        HeapPlan(),
+        StackTraces(null),
+        casts,
+        MemberCalls(
+          IrProgram(
+            [],
+            [function],
+            externals: [
+              IrExternal(live),
+              IrExternal(dead),
+              IrExternal(handler),
+            ],
+          ),
+          {},
+        ),
+        NumericOperations(),
+        GlobalStorage([]),
+        layout.instances,
+      );
+      selection.include(function);
+      final selected = selection.functions[root]!;
+      expect(selected.invocations.values, [live, live, handler]);
+      expect(selected.blocks, [entry, yes, done, caught]);
+      expect((selected.ends[yes] as Invoke).onThrow.target, same(caught));
+      expect(entry.end, isA<Branch>());
+    }
+  });
+
   test('heap support closes transitively generated call dependencies', () {
     final program = IrProgram([], []);
     final casts = CheckedCasts();

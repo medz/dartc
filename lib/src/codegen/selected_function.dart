@@ -59,6 +59,44 @@ base class SelectedFunction(
 
   List<Value> argumentsOf(Jump edge) => edgeArguments[edge] ?? edge.arguments;
 
+  /// Removes paths disproved by representation facts before selecting callees.
+  void prune() {
+    bool? known(Value value) {
+      if (value case ScalarConstant(value: final bool result)) return result;
+      if (value is TypeTest) {
+        final result = switch (tests[value]) {
+          TypeTestKind.constantTrue => true,
+          TypeTestKind.constantFalse => false,
+          _ => null,
+        };
+        return result == null ? null : result != value.negated;
+      }
+      return aliases.contains(value) ? known(inputsOf(value).single) : null;
+    }
+
+    final reached = <Block>{}, pending = [entry];
+    while (pending.isNotEmpty) {
+      final block = pending.removeLast();
+      if (!reached.add(block)) continue;
+      if (ends[block] case Branch(
+        :final condition,
+        :final ifTrue,
+        :final ifFalse,
+      )) {
+        if (known(condition) case final result?) {
+          ends[block] = result ? ifTrue : ifFalse;
+        }
+      }
+      pending.addAll(successors(block).map((edge) => edge.target));
+    }
+    blocks.removeWhere((block) => !reached.contains(block));
+    instructions.removeWhere((block, _) => !reached.contains(block));
+    ends.removeWhere((block, _) => !reached.contains(block));
+    final retained = instructions.values.expand((values) => values).toSet();
+    invocations.removeWhere((value, _) => !retained.contains(value));
+    boxes.removeWhere((value, _) => !retained.contains(value));
+  }
+
   Iterable<Jump> successors(Block block) => switch (ends[block]!) {
     final Jump jump => [jump],
     Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],

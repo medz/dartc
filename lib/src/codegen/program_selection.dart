@@ -114,6 +114,7 @@ final class ProgramSelection(
   }
 
   void _bind(SelectedFunction body) {
+    body.prune();
     final owner = body.target.owner;
     final context = heap.runtime?.stackContext;
     if (body.target.awaiterCapture != null ||
@@ -159,6 +160,9 @@ final class ProgramSelection(
 
   /// Returns source dependencies that require preparing storage and bindings again.
   Set<FunctionTarget> close({required bool persistent}) {
+    final calls = {
+      for (final body in functions.values) ...body.invocations.values,
+    };
     Iterable<IrFunction> supportFunctions() => [
       ...?layouts.native?.functions,
       ...members.functions,
@@ -170,21 +174,21 @@ final class ProgramSelection(
       ...casts.functions,
       ...layouts.relations.functions,
       ...layouts.types.functions,
-      if (heap.initializers.contains(layouts.pointers.initializer))
+      if (heap.initializersFor(calls).contains(layouts.pointers.initializer))
         layouts.pointers.function,
     ];
-    final calls = {
-      for (final body in functions.values) ...body.invocations.values,
-    };
     var exceptions = functions.values.any(
       (body) => body.ends.values.any((end) => end is Throw || end is Invoke),
     );
     var support = <IrFunction>[];
     while (true) {
+      calls.addAll(heap.initializersFor(calls.toList()));
       support = supportFunctions().toList();
       final pending = [
         for (final function in support)
-          if (!functions.containsKey(function.target)) function,
+          if (calls.contains(function.target) &&
+              !functions.containsKey(function.target))
+            function,
       ];
       for (final function in pending) {
         include(function);
@@ -213,7 +217,6 @@ final class ProgramSelection(
     }
     if (capture) calls.add(heap.runtime!.captureStackTrace);
     heap.retain(calls);
-    calls.addAll(heap.initializers);
     primitives = managed
         ? heap.primitives.intersection({...calls, heap.invalid})
         : {if (calls.contains(heap.invalid)) heap.invalid};

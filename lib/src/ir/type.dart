@@ -242,6 +242,10 @@ sealed class const ValueType() {
     return visit(this, parameters, !forResult);
   }
 
+  /// Nominal declaration identities mentioned by this type expression.
+  Iterable<ClassType> get referencedClasses =>
+      typeDeclarationsIn(this).whereType<ClassType>();
+
   /// Free lexical type-variable identities mentioned by this type expression.
   Iterable<TypeParameterType> get freeTypeParameters =>
       typeDeclarationsIn(this).whereType<TypeParameterType>();
