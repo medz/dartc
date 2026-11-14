@@ -7,7 +7,6 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
-import 'package:dartc/src/codegen/native_bindings.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -41,16 +40,12 @@ void main() {
       effects: const {Effect.readsStorage},
     );
     final source = IrProgram([], [], externals: [declaration]);
-    final bindings = NativeBindings(
+    final bindings = NativeBoundaries(
       source,
-      {
-        target: NativeImport(
-          'read_byte',
-          NativeSignature(Int64, [Pointer<Uint8>]),
-        ),
+      imports: {
+        target: NativeSignature(Int64, [Pointer<Uint8>]),
       },
-      {},
-      [target],
+      roots: [target],
     );
     final raw = bindings.program.externals.single;
     expect(raw.target.parameterTypes, [ValueType.integer]);

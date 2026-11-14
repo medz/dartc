@@ -19,8 +19,14 @@ final class ProgramFlow(
   Iterable<FlowEntry> entries, {
   Iterable<FunctionTarget> openEntries = const [],
   Iterable<FunctionTarget> escapingReturns = const [],
+
+  /// Raw ABI entries used only when their declared callback addresses escape.
+  Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
   final FlowMemoryLayout? memoryLayout,
 }) {
+  final _nativeEntries = Map<NativeCallbackTarget, FunctionTarget>.unmodifiable(
+    nativeEntries,
+  );
   final _entries = <FlowEntry>[];
   final _openEntries = <FunctionTarget>{};
   final _escapingReturns = <FunctionTarget>{};
@@ -40,6 +46,13 @@ final class ProgramFlow(
   ProgramFlowFacts? _facts;
 
   this {
+    for (final target in _nativeEntries.values) {
+      if (program.implementationOf(target) is! IrFunction ||
+          target.kind != .function ||
+          target.typeParameters.isNotEmpty) {
+        throw ArgumentError('A native entry requires a supplied raw ABI body.');
+      }
+    }
     for (final function in program.functions) {
       for (final block in function.blocks) {
         _owners[block] = function.target;
@@ -1992,9 +2005,17 @@ final class ProgramFlow(
             );
 
       for (final address in value.addresses) {
-        if (address.base case final NativeCallbackTarget definition
-            when !callbacks.add(definition)) {
-          continue;
+        if (address.base case final NativeCallbackTarget definition) {
+          if (!callbacks.add(definition)) continue;
+          if (_nativeEntries[definition] case final entry?) {
+            admit(
+              definition,
+              entry,
+              entry.parameterTypes.map(FlowValue.unknown).toList(),
+              native: true,
+            );
+            continue;
+          }
         }
         switch (address.base) {
           case final StaticCallbackTarget definition:

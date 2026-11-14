@@ -90,12 +90,19 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       );
     }
     program = ProgramNormalization(program, runtime: runtime).run();
+    final boundaries = NativeBoundaries(
+      program,
+      roots: {...roots, if (entryPoint != null) entryPoint.function},
+      imports: {
+        for (final entry in imports.entries) entry.key: entry.value.signature,
+      },
+      exports: exports,
+    );
     return _close(
       ProgramPreparation(
         target,
-        program,
-        roots: roots,
-        exports: exports,
+        boundaries.program,
+        boundaries: boundaries,
         imports: imports,
         nativeSymbols: nativeSymbols,
         entryPoint: entryPoint,
@@ -257,11 +264,22 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .arm64 => Arm64CodeGenerator(target),
       .x64 => X64CodeGenerator(target),
     };
-    final roots = [
-      ...exports.keys,
-      if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
-    ];
     program = ProgramNormalization(program, runtime: runtime).run();
+    final boundaries = NativeBoundaries(
+      program,
+      roots: [
+        if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
+      ],
+      exports: exports,
+      imports: {
+        for (final declaration in imports.entries)
+          if (declaration.value.type case NativeFunctionType(:final signature)
+              when program.implementationOf(declaration.key) is IrExternal)
+            declaration.key: signature,
+      },
+    );
+    program = boundaries.program;
+    final roots = boundaries.roots;
     program =
         ProgramOptimizer(const [
               ProgramSimplification(),
@@ -282,7 +300,14 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
                   ),
                 ],
               ],
-              openEntries: [...exports.keys, ?runtime.processExitCode],
+              openEntries: [
+                ...boundaries.exports.keys,
+                if (output is ExecutableOutput) ?runtime.processExitCode,
+              ],
+              nativeEntries: {
+                for (final entry in boundaries.callbacks.entries)
+                  entry.key: entry.value.target,
+              },
               memoryLayoutFor: (program) => ProgramLayout(
                 program.classes,
                 functions: program.functions,
@@ -354,10 +379,10 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
           target == runtime.types?.projection) {
         continue;
       }
-      final reference = imports[target];
+      final reference = imports[boundaries.imports[target]?.source];
       if (reference?.type case NativeFunctionType(:final signature)
           when function is IrExternal) {
-        nativeImports[target] = NativeImport(
+        nativeImports[boundaries.imports[target]!.source] = NativeImport(
           resolve(reference!),
           signature,
           isLeaf: reference.isLeaf,
@@ -376,7 +401,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         ProgramPreparation(
           target,
           program,
-          exports: exports,
+          boundaries: boundaries,
           imports: nativeImports,
           nativeSymbols: addresses,
           entryPoint: output is ExecutableOutput

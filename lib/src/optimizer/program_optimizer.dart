@@ -25,6 +25,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     Iterable<FlowEntry> entries, {
     Iterable<FunctionTarget> openEntries = const [],
     Iterable<FunctionTarget> escapingReturns = const [],
+    Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
     FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
   }) {
     final initial = [
@@ -36,11 +37,15 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     ];
     final open = Set<FunctionTarget>.unmodifiable(openEntries);
     final escaping = Set<FunctionTarget>.unmodifiable(escapingReturns);
+    final callbacks = Map<NativeCallbackTarget, FunctionTarget>.unmodifiable(
+      nativeEntries,
+    );
     ProgramFlowFacts analyze(IrProgram input) => ProgramFlow(
       input,
       initial,
       openEntries: open,
       escapingReturns: escaping,
+      nativeEntries: callbacks,
       memoryLayout: memoryLayoutFor?.call(input),
     ).facts;
     var facts = analyze(program);

@@ -8,6 +8,8 @@ import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
+import '../support/ir_interpreter.dart';
+
 void main() {
   const target = Target(.linux, .arm64);
   final uri = Uri.parse('memory:preparation');
@@ -25,7 +27,7 @@ void main() {
   );
 
   test('preparation rejects foreign graphs and facts missing entry roots', () {
-    final preparation = ProgramPreparation(target, program, roots: [entry]);
+    final preparation = _preparation(target, program, roots: [entry]);
     final foreign = IrProgram(program.classes, program.functions);
     expect(
       () => preparation.prepare(CallTypeFlow(foreign, [entry]).facts),
@@ -38,7 +40,7 @@ void main() {
   });
 
   test('same-size fact changes invalidate preparation and emission', () {
-    final preparation = ProgramPreparation(target, program, roots: [entry]);
+    final preparation = _preparation(target, program, roots: [entry]);
     final flow = CallTypeFlow(
       preparation.program,
       preparation.roots,
@@ -100,7 +102,7 @@ void main() {
           NativeSignature(Pointer<Int64>, [Pointer<Int64>]),
         ),
       };
-      final preparation = ProgramPreparation(target, program, exports: exports);
+      final preparation = _preparation(target, program, exports: exports);
       final entry = preparation.roots.single;
       expect(entry.parameterTypes, [ValueType.integer]);
       expect(entry.returnType, ValueType.integer);
@@ -111,7 +113,7 @@ void main() {
       ).facts;
       expect(facts.openEntries, isNot(contains(identity)));
       expect(facts.definitions, contains(identity));
-      final explicit = ProgramPreparation(
+      final explicit = _preparation(
         target,
         program,
         roots: [identity],
@@ -126,6 +128,110 @@ void main() {
       );
     },
   );
+
+  test('ABI conversions simplify with the actual native entry arguments', () {
+    final pointer = FfiTypes.int64Pointer;
+    final identity = FunctionTarget(uri, 'pointerIdentity', pointer, [pointer]);
+    final body = Block(identity.parameterTypes);
+    body.finish(Return(body.parameters.single));
+    final boundaries = NativeBoundaries(
+      IrProgram([], [
+        IrFunction(identity, [body]),
+      ]),
+      exports: {
+        identity: NativeExport(
+          'pointer_identity',
+          NativeSignature(Pointer<Int64>, [Pointer<Int64>]),
+        ),
+      },
+    );
+    final facts = ProgramOptimizer(const [
+      ProgramSimplification(),
+      ProgramCallSpecialization(),
+      ProgramStoragePromotion(),
+      ProgramStorageElimination(),
+      DirectCallInlining(),
+    ]).run(boundaries.program, const [], openEntries: boundaries.roots);
+    final entry = boundaries.roots.single;
+    final rewritten = facts.program.implementationOf(entry) as IrFunction;
+    expect(facts.definitions, {entry});
+    expect(rewritten.blocks.single.instructions, isEmpty);
+    for (final address in [0, 8, 0x12345678]) {
+      expect(
+        IrInterpreter(facts.program, {}).run(rewritten, [address]),
+        address,
+      );
+    }
+    final preparation = ProgramPreparation(
+      target,
+      facts.program,
+      boundaries: boundaries,
+    );
+    final prepared = preparation.prepare(
+      CallTypeFlow(
+        preparation.program,
+        preparation.roots,
+        instantiatedTypes: preparation.instantiatedTypes,
+      ).facts,
+    ) as PreparedProgram;
+    expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
+  });
+
+  test('escaped callbacks analyze ABI entry values before Dart calls', () {
+    final pointer = FfiTypes.int64Pointer;
+    final identity = FunctionTarget(uri, 'callback', pointer, [pointer]);
+    final callbackBody = Block(identity.parameterTypes);
+    callbackBody.finish(Return(callbackBody.parameters.single));
+    final declaration = StaticCallbackTarget(
+      identity,
+      FunctionType(pointer, [pointer]),
+    );
+    final factory = FunctionTarget(uri, 'callbackAddress', .integer, []);
+    final factoryBody = Block();
+    factoryBody.finish(
+      Return(factoryBody.emit(NativeCallbackAddress(declaration))),
+    );
+    final boundaries = NativeBoundaries(
+      IrProgram([], [
+        IrFunction(identity, [callbackBody]),
+        IrFunction(factory, [factoryBody]),
+      ]),
+      roots: [factory],
+    );
+    final native = boundaries.callbacks[declaration]!.target;
+    final entries = {declaration: native};
+    final closed = ProgramFlow(boundaries.program, [
+      (target: factory, arguments: <FlowValue>[]),
+    ], nativeEntries: entries).facts;
+    expect(closed.definitions, {factory});
+    final escaped =
+        ProgramOptimizer(const [ProgramSimplification(), DirectCallInlining()])
+            .run(
+              boundaries.program,
+              const [],
+              openEntries: [factory],
+              nativeEntries: entries,
+            );
+    expect(escaped.definitions, {factory, native});
+    final rewritten = escaped.program.implementationOf(native) as IrFunction;
+    expect(rewritten.entry.instructions, isEmpty);
+    for (final address in [0, 8, 0x12345678]) {
+      expect(
+        IrInterpreter(escaped.program, {}).run(rewritten, [address]),
+        address,
+      );
+    }
+    expect(
+      () => ProgramFlow(
+        boundaries.program,
+        const [],
+        nativeEntries: {
+          declaration: FunctionTarget(null, 'missing', .integer, [.integer]),
+        },
+      ),
+      throwsArgumentError,
+    );
+  });
 
   test('native addresses must be bound before emission', () {
     final reference = NativeReference(
@@ -213,18 +319,18 @@ void main() {
         ]),
         input.implementationOf(other)! as IrFunction,
       ]);
-      final current = ProgramPreparation(target, removed, roots: [entry]);
+      final current = _preparation(target, removed, roots: [entry]);
       expect(current.program, same(removed));
       for (final selected in [
-        ProgramPreparation(target, input, roots: [entry]),
-        ProgramPreparation(
+        _preparation(target, input, roots: [entry]),
+        _preparation(
           target,
           const DirectCallInlining().run(
             ProgramFlow(input, const [], openEntries: [entry]).facts,
           ),
           roots: [entry],
         ),
-        ProgramPreparation(
+        _preparation(
           target,
           input,
           exports: {entry: NativeExport('address', NativeSignature(Int64, []))},
@@ -292,4 +398,14 @@ void main() {
     expect(module.symbols.map((symbol) => symbol.name), contains('entry'));
     expect(module.imports, isEmpty);
   });
+}
+
+ProgramPreparation _preparation(
+  Target target,
+  IrProgram program, {
+  Iterable<FunctionTarget> roots = const [],
+  Map<FunctionTarget, NativeExport> exports = const {},
+}) {
+  final boundaries = NativeBoundaries(program, roots: roots, exports: exports);
+  return ProgramPreparation(target, boundaries.program, boundaries: boundaries);
 }

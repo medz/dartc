@@ -2,66 +2,106 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 
-/// Checks native bindings and preserves typed values across native boundaries.
-final class NativeBindings(
-  IrProgram source,
-  Map<FunctionTarget, NativeImport> sourceImports,
-  Map<FunctionTarget, NativeExport> sourceExports,
-  Iterable<FunctionTarget> roots,
-) {
+/// Introduces ordinary IR bridges before semantic analysis of native boundaries.
+///
+/// [imports] supplies signatures without resolving external symbols. [roots]
+/// are independent Dart entries; exports instead enter through their ABI bridge.
+final class NativeBoundaries(
+  IrProgram source, {
+  Map<FunctionTarget, NativeSignature> imports = const {},
+  Map<FunctionTarget, NativeExport> exports = const {},
+  Iterable<FunctionTarget> roots = const [],
+}) {
+  /// The source graph including native conversion and callback bodies.
   late final IrProgram program;
-  final imports = <FunctionTarget, NativeImport>{};
-  final exports = <FunctionTarget, NativeExport>{};
-  final callbacks =
-      <
-        NativeCallbackTarget,
-        ({FunctionTarget address, FunctionTarget target})
-      >{};
+
+  /// Independent entries after native argument conversion has been introduced.
+  late final Set<FunctionTarget> roots;
+
+  /// Native callees and their original declaration and platform signature.
+  late final Map<
+    FunctionTarget,
+    ({FunctionTarget source, NativeSignature signature})
+  >
+  imports;
+
+  /// Public native symbols attached to their actual entry bodies.
+  late final Map<FunctionTarget, NativeExport> exports;
+
+  /// Address providers and ABI entries for checked callback declarations.
+  late final Map<
+    NativeCallbackTarget,
+    ({FunctionTarget address, FunctionTarget target})
+  >
+  callbacks;
   final _functions = <IrFunction>[];
 
   this {
+    final entries = roots.toSet();
+    final sourceEntries = {...entries, ...exports.keys};
+    if (sourceEntries.isEmpty || exports.keys.any(imports.containsKey)) {
+      throw ArgumentError(
+        'Expected roots and distinct native imports and exports.',
+      );
+    }
+    for (final entry in sourceEntries) {
+      if (source.implementationOf(entry) == null) {
+        throw ArgumentError('Missing entry definition: ${entry.name}');
+      }
+    }
+    final nativeImports =
+        <
+          FunctionTarget,
+          ({FunctionTarget source, NativeSignature signature})
+        >{};
+    final nativeExports = <FunctionTarget, NativeExport>{};
+    final nativeCallbacks =
+        <
+          NativeCallbackTarget,
+          ({FunctionTarget address, FunctionTarget target})
+        >{};
     final externals = source.externals.toList();
-    for (final MapEntry(key: target, value: binding) in sourceImports.entries) {
+    for (final MapEntry(key: target, value: binding) in imports.entries) {
       final declaration = source.implementationOf(target);
       if (declaration is! IrExternal ||
           target.kind.hasReceiver ||
-          !FfiTypes.canCall(binding.signature, target.signature)) {
+          !FfiTypes.canCall(binding, target.signature)) {
         throw ArgumentError(
           'Native import requires a matching external declaration: ${target.name}',
         );
       }
-      if (_needsBridge(binding.signature)) {
+      if (_needsBridge(binding)) {
         final raw = _bridge(target, intoDart: false);
         externals.removeWhere((declaration) => declaration.target == target);
         externals.add(IrExternal(raw, effects: declaration.effects));
-        imports[raw] = binding;
+        nativeImports[raw] = (source: target, signature: binding);
       } else {
-        imports[target] = binding;
+        nativeImports[target] = (source: target, signature: binding);
       }
     }
-    for (final MapEntry(key: target, value: binding) in sourceExports.entries) {
+    for (final MapEntry(key: target, value: binding) in exports.entries) {
       final signature = binding.signature;
       if (!FfiTypes.canExport(signature, target.signature)) {
         throw ArgumentError('Native signature mismatch: ${target.name}');
       }
-      exports[_needsBridge(signature)
+      nativeExports[_needsBridge(signature)
               ? _bridge(target, intoDart: true)
               : target] =
           binding;
     }
     // Programs without callback entries need no callback reachability analysis.
-    late final selected = reachableDefinitions(source, roots);
+    late final selected = reachableDefinitions(source, sourceEntries);
     for (final body in source.functions) {
       for (final block in body.blocks) {
         for (final instruction
             in block.instructions.whereType<NativeCallbackAddress>()) {
           if (!selected.contains(body.target)) break;
           final definition = instruction.target;
-          if (callbacks.containsKey(definition)) continue;
+          if (nativeCallbacks.containsKey(definition)) continue;
           final signature = definition.dartSignature;
           final target = FunctionTarget(
             null,
-            'callback${callbacks.length}',
+            'callback${nativeCallbacks.length}',
             signature.result,
             [
               if (definition is ClosureCallbackTarget) ValueType.integer,
@@ -96,12 +136,12 @@ final class NativeBindings(
           _functions.add(IrFunction(target, [entry]));
           final address = FunctionTarget(
             null,
-            'callbackAddress${callbacks.length}',
+            'callbackAddress${nativeCallbacks.length}',
             .integer,
             [],
           );
           externals.add(IrExternal(address));
-          callbacks[definition] = (
+          nativeCallbacks[definition] = (
             address: address,
             target: _needsBridge(definition.signature)
                 ? _bridge(target, intoDart: true)
@@ -110,6 +150,10 @@ final class NativeBindings(
         }
       }
     }
+    this.roots = .unmodifiable({...entries, ...nativeExports.keys});
+    this.imports = .unmodifiable(nativeImports);
+    this.exports = .unmodifiable(nativeExports);
+    callbacks = .unmodifiable(nativeCallbacks);
     program = _functions.isEmpty
         ? source
         : IrProgram(

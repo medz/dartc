@@ -4,7 +4,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 
-import 'native_bindings.dart';
+import 'native_boundaries.dart';
 import 'program_selection.dart';
 import 'program_layout.dart';
 import 'heap_plan.dart';
@@ -37,26 +37,23 @@ final class PreparationDependencies._(
   final Set<ClassType> instantiatedTypes = .unmodifiable(instantiatedTypes);
 }
 
-/// Binds native entries and prepares storage from immutable source facts.
+/// Prepares storage after native bridges have entered semantic analysis.
 ///
-/// Construction uses nominal reachability when registering native callbacks.
 /// Preparation consumes driver-supplied call and type facts, reporting
 /// [PreparationDependencies] until the driver obtains a [PreparedProgram].
 /// Runtime source definitions must be supplied with the input program.
 final class ProgramPreparation(
   /// The output platform used for layouts and native bindings.
   final Target target,
-  IrProgram source, {
-  Iterable<FunctionTarget> roots = const [],
-  Map<FunctionTarget, NativeExport> exports = const {},
+
+  /// The graph after boundary normalization and any semantic rewrites.
+  final IrProgram program, {
+  required NativeBoundaries boundaries,
   Map<FunctionTarget, NativeImport> imports = const {},
   Map<NativeReference, String> nativeSymbols = const {},
   ({FunctionTarget function, String symbol})? entryPoint,
   HeapRuntime? runtime,
 }) {
-  /// The source graph after native boundary bridges have been registered.
-  late final IrProgram program;
-
   /// Independently callable source, export and process entries.
   late final Set<FunctionTarget> roots;
 
@@ -68,29 +65,42 @@ final class ProgramPreparation(
   );
   final _entryPoint = entryPoint;
   final _runtime = runtime;
-  late final NativeBindings _bindings;
+  final NativeBoundaries _boundaries = boundaries;
+  late final Map<FunctionTarget, NativeImport> _imports;
 
   this {
-    final entries = {
-      ...roots,
-      if (entryPoint != null) ...[
-        entryPoint.function,
-        ?runtime?.processExitCode,
-      ],
-    };
-    final sourceEntries = {...entries, ...exports.keys};
-    if (sourceEntries.isEmpty || exports.keys.any(imports.containsKey)) {
-      throw ArgumentError(
-        'Expected roots and distinct native imports and exports.',
-      );
-    }
-    for (final entry in sourceEntries) {
-      if (source.implementationOf(entry) == null) {
-        throw ArgumentError('Missing entry definition: ${entry.name}');
+    roots = .unmodifiable({
+      ...boundaries.roots,
+      if (entryPoint != null) ?runtime?.processExitCode,
+    });
+    for (final entry in roots) {
+      if (program.implementationOf(entry) == null) {
+        throw ArgumentError('Missing native entry body: ${entry.name}');
       }
     }
+    _imports = .unmodifiable({
+      for (final MapEntry(key: raw, value: binding)
+          in boundaries.imports.entries)
+        raw: ?imports[binding.source],
+    });
+    for (final entry in _imports.entries) {
+      if (entry.value.signature != boundaries.imports[entry.key]!.signature) {
+        throw ArgumentError(
+          'Native import signature changed after boundary lowering.',
+        );
+      }
+    }
+    if (imports.keys.any(
+      (source) =>
+          !boundaries.imports.values.any((binding) => binding.source == source),
+    )) {
+      throw ArgumentError('Native import has no lowered boundary.');
+    }
+    if (entryPoint != null && !roots.contains(entryPoint.function)) {
+      throw ArgumentError('Process entry must be a declared boundary root.');
+    }
     if (entryPoint case (:final function, :final symbol)) {
-      final body = source.implementationOf(function);
+      final body = program.implementationOf(function);
       if (symbol.isEmpty || symbol.contains('\u0000')) {
         throw ArgumentError.value(symbol, 'entryPoint.symbol');
       }
@@ -106,9 +116,6 @@ final class ProgramPreparation(
         );
       }
     }
-    _bindings = NativeBindings(source, imports, exports, sourceEntries);
-    program = _bindings.program;
-    this.roots = .unmodifiable({...entries, ..._bindings.exports.keys});
   }
 
   /// Prepares one dependency-closed step using facts for [program].
@@ -122,8 +129,8 @@ final class ProgramPreparation(
     }
     final program = this.program;
     final runtime = _runtime;
-    final imports = _bindings.imports;
-    final callbacks = _bindings.callbacks;
+    final imports = _imports;
+    final callbacks = _boundaries.callbacks;
     final callbackGetters = {
       for (final entry in callbacks.entries) entry.value.address: entry.key,
     };
@@ -369,7 +376,7 @@ final class PreparedProgram._(
       ?_cleanup,
     });
     final names = <String>{};
-    for (final entry in _input._bindings.imports.entries) {
+    for (final entry in _input._imports.entries) {
       if (definitions.contains(entry.key)) {
         names.add(target.nativeSymbol(entry.value.symbol));
       }
@@ -402,8 +409,8 @@ final class PreparedProgram._(
 /// Internal consumption of a closed program; absent from the public entry.
 extension PreparedProgramEmission on PreparedProgram {
   ProgramSelection get selection => _selection;
-  Map<FunctionTarget, NativeImport> get imports => _input._bindings.imports;
-  Map<FunctionTarget, NativeExport> get exports => _input._bindings.exports;
+  Map<FunctionTarget, NativeImport> get imports => _input._imports;
+  Map<FunctionTarget, NativeExport> get exports => _input._boundaries.exports;
   Map<NativeCallbackTarget, ({FunctionTarget address, FunctionTarget target})>
   get callbacks => _callbacks;
   Map<NativeReference, String> get nativeSymbols => _input._nativeSymbols;

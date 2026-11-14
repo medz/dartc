@@ -7,6 +7,7 @@ export 'src/codegen/program_layout.dart'
 export 'src/codegen/code_generator.dart' show CodeGenerator;
 export 'src/codegen/program_normalization.dart' show ProgramNormalization;
 export 'src/codegen/suspension_normalization.dart' show SuspensionNormalization;
+export 'src/codegen/native_boundaries.dart' show NativeBoundaries;
 export 'src/codegen/program_preparation.dart'
     show
         ProgramPreparation,
