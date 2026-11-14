@@ -12,6 +12,8 @@
 
 - Share stack-frame names, source URIs and inline caller metadata across call sites, formatting captured traces on demand while preserving source locations and asynchronous frame order.
 
+- Evaluate FFI sizes and field offsets during program analysis using the selected target ABI, including array stride, alignment and ABI-specific integer mappings.
+
 - Analyze native argument conversions, exported entry bodies and escaped callbacks before target preparation. Pointer round trips can disappear through ordinary optimization; native symbol resolution follows retained calls. Direct codegen callers use NativeBoundaries to supply the graph and entry contracts.
 
 - Inline small direct calls and lexical closures, including calls exposed by inlining their callers. Collapse linear control flow and budget actual copied operations, so eliminated branches and unused entry parameters do not obstruct expansion. Resume expansion after semantic cleanup exposes new candidates without resetting spent budgets. Preserve generic captures, shared mutable cells, evaluation order and exception paths while eliminating unused closure environments. `FunctionRewrite` now accepts explicit entry arguments and type bindings for expansion.

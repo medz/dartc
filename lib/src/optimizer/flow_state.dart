@@ -378,6 +378,16 @@ final class FlowState {
       throw ArgumentError('Storage transfer requires every operand.');
     }
     switch (operation) {
+      case NativeSize() || NativeFieldOffset():
+        final layout = memoryLayout?.nativeLayout;
+        if (layout == null) return null;
+        final value = switch (operation) {
+          NativeSize(:final nativeType) => layout.of(nativeType).size,
+          NativeFieldOffset(:final owner, :final index) =>
+            layout.of(owner).offsets[index],
+          _ => throw StateError('Expected a native layout query.'),
+        };
+        return _normal(FlowValue.constant(Constant.integer(value)), copy());
       case NewPayload():
         if (operands.single.isBottom) return _unreachable;
         final object = allocate(operation);

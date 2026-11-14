@@ -1,4 +1,4 @@
-import 'dart:ffi' show Uint8;
+import 'dart:ffi' show Abi, Int32, Int64, Uint8;
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/interop.dart';
@@ -13,6 +13,55 @@ import '../support/ir_interpreter.dart';
 final _uri = Uri.parse('memory:program-optimizer');
 
 void main() {
+  test(
+    'native layout facts follow the output ABI before program rewriting',
+    () {
+      final word = NativeAbiIntegerType(_uri, 'Word', {
+        Abi.macosArm64: NativeScalarType(Int64),
+        Abi.linuxX64: NativeScalarType(Int32),
+      });
+      final pair = NativeCompoundType('Pair', [
+        NativeField('tag', NativeScalarType(Uint8)),
+        NativeField('value', word),
+      ]);
+      final root = FunctionTarget(_uri, 'layout', .integer, []);
+      final entry = Block();
+      entry.finish(
+        Return(
+          entry.emit(
+            IntBinary(
+              .add,
+              entry.emit(NativeSize(NativeArrayType(pair, 3))),
+              entry.emit(NativeFieldOffset(pair, 1)),
+            ),
+          ),
+        ),
+      );
+      final program = IrProgram([], [
+        IrFunction(root, [entry]),
+      ]);
+      final optimizer = ProgramOptimizer(const [ProgramSimplification()]);
+      final entries = [(target: root, arguments: <FlowValue>[])];
+      expect(optimizer.run(program, entries).returnedBy(root).constant, isNull);
+      for (final (target, expected) in [
+        (const Target(.macos, .arm64), 56),
+        (const Target(.linux, .x64), 28),
+      ]) {
+        final facts = optimizer.run(
+          program,
+          entries,
+          memoryLayoutFor: (graph) => _Layout(graph, target: target),
+        );
+        final body = facts.program.implementationOf(root) as IrFunction;
+        expect(IrInterpreter(facts.program, {}).run(body, []), expected);
+      }
+      expect(
+        () => optimizer.run(program, entries, memoryLayoutFor: _Layout.new),
+        throwsUnsupportedError,
+      );
+    },
+  );
+
   test('rewritten storage is analyzed using the new graph layout', () {
     final storage = ClassType(null, 'Payload');
     final root = FunctionTarget(null, 'read', .integer, []);
@@ -296,9 +345,12 @@ void main() {
   });
 }
 
-final class _Layout(final IrProgram program) implements FlowMemoryLayout {
+final class _Layout(
+  final IrProgram program, {
+  Target target = const Target(.linux, .arm64),
+}) implements FlowMemoryLayout {
   @override
-  final nativeLayout = NativeLayout(const Target(.linux, .arm64));
+  final nativeLayout = NativeLayout(target);
 
   @override
   ObjectLayout objectLayout(ClassType type) => ObjectLayout([
