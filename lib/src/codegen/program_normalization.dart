@@ -2,6 +2,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 
 import 'heap_runtime.dart';
+import 'list_storage.dart';
 import 'suspension_normalization.dart';
 
 /// Resolves semantic operations to their checked implementation before analysis.
@@ -13,6 +14,7 @@ final class ProgramNormalization(
   final HeapRuntime? runtime,
 }) {
   final _helpers = <Object, IrFunction>{};
+  late final _lists = ListStorage(program.classes);
   final _classes = {
     for (final declaration in program.classes) declaration.type: declaration,
   };
@@ -30,12 +32,29 @@ final class ProgramNormalization(
       functions.add(_function(_helpers.values.elementAt(index)));
       changed = true;
     }
+    final externals = [
+      for (final external in program.externals)
+        if (external.sequenceConstants.isEmpty)
+          external
+        else
+          IrExternal(
+            external.target,
+            defaults: {
+              for (final entry in external.defaults.entries)
+                entry.key: _constant(entry.value),
+            },
+            effects: external.effects,
+          ),
+    ];
+    changed |= externals.indexed.any(
+      (entry) => !identical(entry.$2, program.externals[entry.$1]),
+    );
     final normalized = changed
         ? IrProgram(
             program.classes,
             functions,
             globals: program.globals,
-            externals: program.externals,
+            externals: externals,
           )
         : program;
     if (normalized.functions.every((body) => body.bodyKind == .synchronous)) {
@@ -125,9 +144,52 @@ final class ProgramNormalization(
         if (replacement != null) operations[operation] = replacement;
       }
     }
-    return operations.isEmpty
+    return operations.isEmpty && source.sequenceConstants.isEmpty
         ? source
-        : FunctionRewrite(source, operations: operations).run();
+        : FunctionRewrite(
+            source,
+            operations: operations,
+            constants: _constant,
+          ).run();
+  }
+
+  Constant _constant(Constant value) {
+    var changed = false;
+    Constant child(Constant value) {
+      final result = _constant(value);
+      changed |= !identical(result, value);
+      return result;
+    }
+
+    switch (value) {
+      case SequenceConstant(:final type, :final elements):
+        final values = elements.map(child).toList();
+        if ((type as ClassType).declaration == CoreTypes.list) {
+          return ObjectConstant(_lists.type.instantiate(type.typeArguments), {
+            _lists.length: Constant.integer(values.length),
+            _lists.data: ObjectConstant(_lists.buffer, {}, payload: values),
+          });
+        }
+        return changed ? SequenceConstant(type, values) : value;
+      case ObjectConstant(:final type, :final fields, :final payload):
+        final values = {
+          for (final entry in fields.entries) entry.key: child(entry.value),
+        };
+        final references = payload.map(child).toList();
+        return changed
+            ? ObjectConstant(type as ClassType, values, payload: references)
+            : value;
+      case RecordConstant(:final type, :final fields):
+        final values = fields.map(child).toList();
+        return changed ? RecordConstant(type as RecordType, values) : value;
+      case MapConstant(:final type, :final entries):
+        final values = [
+          for (final (key, value) in entries) (child(key), child(value)),
+        ];
+        return changed ? MapConstant(type as ClassType, values) : value;
+      default:
+        return value;
+    }
   }
 
   DynamicDispatch _dispatch(DynamicDispatch operation) {

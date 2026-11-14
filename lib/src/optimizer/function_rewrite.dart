@@ -8,6 +8,9 @@ final class FunctionRewrite(
   final IrFunction function, {
   final Map<Value, Value> replacements = const {},
 
+  /// Rebinds immutable constants, including nested defaults, before their uses.
+  final Constant Function(Constant)? constants,
+
   /// New operations using source values and pure, nonthrowing input templates.
   /// Fresh inputs are evaluated at each replacement's original program point.
   final Map<Instruction, Instruction> operations = const {},
@@ -307,7 +310,15 @@ final class FunctionRewrite(
     };
 
     value = (original) {
-      if (original is Constant || original is UnwindValue) return original;
+      if (original is Constant) {
+        final result = constants?.call(original) ?? original;
+        if (!original.type.accepts(result.type)) {
+          throw ArgumentError('A rewritten constant must preserve its type.');
+        }
+        changed |= !identical(result, original);
+        return result;
+      }
+      if (original is UnwindValue) return original;
       final replacement = _replacement(original);
       if (!identical(original, replacement)) {
         if (!replacing.add(original)) {
@@ -567,11 +578,15 @@ final class FunctionRewrite(
       block.finish(ends[block]!);
       if (block.end case Invoke(:final operation)) owned.add(operation);
     }
+    final defaults = {
+      for (final entry in function.defaults.entries)
+        entry.key: value(entry.value) as Constant,
+    };
     if (!changed) return function;
     return IrFunction(
       function.target,
       reachable,
-      defaults: function.defaults,
+      defaults: defaults,
       bodyKind: function.bodyKind,
       yieldType: function.yieldType,
       completionType: function.completionType,

@@ -17,7 +17,6 @@ import 'global_storage.dart';
 import 'instance_storage.dart';
 import 'closure_storage.dart';
 import 'string_storage.dart';
-import 'list_storage.dart';
 import 'record_storage.dart';
 
 /// A target preparation step, either closed or requiring more source facts.
@@ -165,17 +164,7 @@ final class ProgramPreparation(
       argumentError: constructor(.argumentError),
       unsupportedError: constructor(.unsupportedError),
     );
-    final constantLists = bodies.any(
-      (body) => body.sequenceConstants.any(
-        (value) => (value.type as ClassType).declaration == CoreTypes.list,
-      ),
-    );
-    final lists = ListStorage(program.classes);
-    // Codegen materializes these instances without source constructor calls.
-    final instantiatedTypes = [
-      ...TypeMetadata.fields.keys,
-      if (constantLists) ...[lists.type, lists.buffer],
-    ];
+    final instantiatedTypes = TypeMetadata.fields.keys;
     final records = RecordStorage(
       program.classes,
       bodies.expand((body) => body.recordTypes),
@@ -240,7 +229,6 @@ final class ProgramPreparation(
       instanceStorage: instances,
       closureStorage: closures,
       stringStorage: strings,
-      listStorage: lists,
       recordStorage: records,
       typeRuntime: runtime?.types,
       referencedClasses: [

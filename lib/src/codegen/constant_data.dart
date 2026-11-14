@@ -80,19 +80,11 @@ final class ConstantData(
     if (_constants[key] case final symbol?) return symbol;
     final ClassStorage? storage;
     final ObjectLayout layout;
-    final list =
-        value is SequenceConstant &&
-            (value.type as ClassType).declaration == CoreTypes.list
-        ? value
-        : null;
     final carrier = value is FunctionConstant
         ? layouts.closures.constants[value.structuralKey]!
         : null;
     if (carrier != null) {
       storage = layouts.storageOf(carrier.type);
-      layout = storage.layout;
-    } else if (list != null) {
-      storage = layouts.storageOf(layouts.lists.type);
       layout = storage.layout;
     } else if (value is RecordConstant) {
       storage = layouts.storageOf(layouts.records.type);
@@ -124,6 +116,7 @@ final class ConstantData(
     final payloadWords = switch (value) {
       ScalarConstant(value: final String text) => (text.length + 3) ~/ 4,
       RecordConstant(:final fields) => fields.length,
+      ObjectConstant(:final payload) => payload.length,
       _ => 0,
     };
     final size = layout.size + payloadWords * 8;
@@ -133,11 +126,7 @@ final class ConstantData(
         carrier?.type ??
         (value is RecordConstant
             ? layouts.records.type
-            : list == null
-            ? value.type as ClassType
-            : layouts.lists.type.instantiate(
-                (list.type as ClassType).typeArguments,
-              ));
+            : value.type as ClassType);
     _header(
       symbol,
       offset,
@@ -150,16 +139,6 @@ final class ConstantData(
       for (final (i, field) in value.fields.indexed) {
         _write(field, .object.nullable, offset + layout.size + i * 8);
       }
-    } else if (list != null) {
-      _words[(offset + layouts.fieldOffset(layouts.lists.length)) ~/ 8] =
-          list.elements.length;
-      relocations.add(
-        .address(
-          1,
-          offset + layouts.fieldOffset(layouts.lists.data),
-          _listData(list.elements),
-        ),
-      );
     } else if (carrier != null) {
       _write(
         Constant.integer(carrier.tag),
@@ -184,6 +163,14 @@ final class ConstantData(
         );
       }
     }
+    if (value is ObjectConstant) {
+      if (value.payload.isNotEmpty && !layout.tracesPayload) {
+        throw ArgumentError('Constant payload requires traced storage.');
+      }
+      for (final (i, element) in value.payload.indexed) {
+        _write(element, .object.nullable, offset + layout.size + i * 8);
+      }
+    }
     return symbol;
   }
 
@@ -192,9 +179,6 @@ final class ConstantData(
       RecordConstant() => _recordType(field),
       FunctionConstant() =>
         layouts.closures.constants[field.structuralKey]!.signature,
-      SequenceConstant()
-          when (field.type as ClassType).declaration == CoreTypes.list =>
-        layouts.lists.type.instantiate((field.type as ClassType).typeArguments),
       TypeConstant() => TypeMetadata.type,
       _ => field.type,
     };
@@ -226,17 +210,6 @@ final class ConstantData(
         addressOf(layouts.types.constant(runtimeType)),
       ),
     );
-  }
-
-  int _listData(List<Constant> elements) {
-    final type = layouts.lists.buffer, layout = layouts.storageOf(type).layout;
-    final offset = _words.length * 8, size = layout.size + elements.length * 8;
-    final symbol = _reserve('list-data', size ~/ 8);
-    _header(symbol, offset, type, layout, size, type);
-    for (final (i, element) in elements.indexed) {
-      _write(element, .object.nullable, offset + layout.size + i * 8);
-    }
-    return symbol;
   }
 
   void _write(Constant value, ValueType type, int offset) {

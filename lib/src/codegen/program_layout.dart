@@ -18,7 +18,6 @@ import 'package:dartc/abi.dart' show NativeLayout;
 
 import 'pointer_representation.dart';
 import 'string_storage.dart';
-import 'list_storage.dart';
 import 'record_storage.dart';
 
 enum TypeTestKind() {
@@ -38,7 +37,6 @@ final class ProgramLayout(
   InstanceStorage? instanceStorage,
   ClosureStorage? closureStorage,
   StringStorage? stringStorage,
-  ListStorage? listStorage,
   RecordStorage? recordStorage,
   TypeRuntime? typeRuntime,
 }) implements FlowMemoryLayout {
@@ -50,7 +48,6 @@ final class ProgramLayout(
   final native = NativeStorage(nativeLayout);
   final pointerRepresentation = PointerRepresentation(functions);
   final strings = stringStorage ?? StringStorage();
-  final lists = listStorage ?? ListStorage(classes);
   final records = recordStorage ?? RecordStorage(classes, const []);
   late final TypeRelations relations;
   final _classes = {
