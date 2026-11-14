@@ -171,6 +171,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
               facts.valueOf(receiver),
               value,
               _overlaps(
+                facts,
                 facts.valueOf(receiver),
                 reads[field] ?? const .bottom(),
               ),
@@ -178,7 +179,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
             WriteCell(:final cell, :final value) => (
               facts.valueOf(cell),
               value,
-              _overlaps(facts.valueOf(cell), cells),
+              _overlaps(facts, facts.valueOf(cell), cells),
             ),
             StoreObjectReference(
               :final object,
@@ -188,7 +189,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
               (
                 facts.valueOf(object),
                 value,
-                _overlaps(facts.valueOf(object), payloads) ||
+                _overlaps(facts, facts.valueOf(object), payloads) ||
                     facts.pointStateOf(operation)!.normal!.boundValueOf(
                           LoadObjectReference(object, byteOffset),
                           [facts.valueOf(object), facts.valueOf(byteOffset)],
@@ -200,14 +201,14 @@ final class const ProgramStorageElimination() implements ProgramPass {
           if (stored == null ||
               demanded ||
               receiver.unknownTypes.isNotEmpty ||
-              _overlaps(receiver, visible)) {
+              _overlaps(facts, receiver, visible)) {
             continue;
           }
           var references = facts.valueOf(stored);
           for (final state in states) {
             references = references.join(state.reachableValues([references]));
           }
-          if (_retains(references, lifetimes)) continue;
+          if (_retains(facts, references, lifetimes)) continue;
           discardable.add(operation);
         }
       }
@@ -230,9 +231,14 @@ final class const ProgramStorageElimination() implements ProgramPass {
   }
 }
 
-bool _overlaps(FlowValue a, FlowValue b) {
+bool _overlaps(ProgramFlowFacts facts, FlowValue a, FlowValue b) {
   if (a.isBottom || b.isBottom) return false;
-  if (a.objects.any(b.objects.contains)) return true;
+  if (a.objects.any(
+    (left) =>
+        b.objects.any((right) => facts.mayAliasAcrossSummaries(left, right)),
+  )) {
+    return true;
+  }
   final constants = a.constants.map((c) => c.structuralKey).toSet();
   if (b.constants.any((c) => constants.contains(c.structuralKey))) return true;
   bool admits(ValueType bound, ValueType actual) => actual is ClassType
@@ -248,7 +254,11 @@ bool _overlaps(FlowValue a, FlowValue b) {
 }
 
 // Constants are immortal; scalar values cannot acquire a weak/finalizer identity.
-bool _retains(FlowValue references, FlowValue lifetimes) {
+bool _retains(
+  ProgramFlowFacts facts,
+  FlowValue references,
+  FlowValue lifetimes,
+) {
   var mortal = const FlowValue.bottom();
   for (final object in references.objects) {
     mortal = mortal.join(.object(object));
@@ -263,5 +273,5 @@ bool _retains(FlowValue references, FlowValue lifetimes) {
     }
     mortal = mortal.join(.unknown(type));
   }
-  return _overlaps(mortal, lifetimes);
+  return _overlaps(facts, mortal, lifetimes);
 }

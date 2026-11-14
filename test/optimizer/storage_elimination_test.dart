@@ -11,6 +11,100 @@ const _one = Constant.integer(1);
 const _null = Constant.nullValue();
 
 void main() {
+  test(
+    'caller reads retain factory writes across distinct summary instances',
+    () {
+      final box = _box();
+      final factory = FunctionTarget(_uri, 'factory', box.type, [.integer]);
+      final creating = Block(factory.parameterTypes);
+      creating.finish(
+        Return(
+          creating.emit(
+            Construct(box.constructor.target, [creating.parameters.single]),
+          ),
+        ),
+      );
+      final root = FunctionTarget(_uri, 'read', .integer, [.integer, .integer]);
+      final reading = Block(root.parameterTypes);
+      final first = reading.emit(DirectCall(factory, [reading.parameters[0]]));
+      final second = reading.emit(DirectCall(factory, [reading.parameters[1]]));
+      reading.finish(
+        Return(
+          reading.emit(
+            IntBinary(
+              .subtract,
+              reading.emit(LoadField(box.field, first)),
+              reading.emit(LoadField(box.field, second)),
+            ),
+          ),
+        ),
+      );
+      final program = IrProgram(
+        [box.declaration],
+        [
+          box.constructor,
+          IrFunction(factory, [creating]),
+          IrFunction(root, [reading]),
+        ],
+      );
+      final facts = ProgramFlow(program, [
+        (target: root, arguments: [.unknown(.integer), .unknown(.integer)]),
+      ]).facts;
+      expect(
+        facts.valueOf(first).objects.single,
+        isNot(facts.valueOf(second).objects.single),
+      );
+      final optimized = const ProgramStorageElimination().run(facts);
+      for (final graph in [program, optimized]) {
+        final entry = graph.implementationOf(root) as IrFunction;
+        for (final (left, right) in [(3, 11), (42, -7), (0, 0)]) {
+          expect(
+            IrInterpreter(graph, {}).run(entry, [left, right]),
+            left - right,
+          );
+        }
+      }
+    },
+  );
+
+  test('a private sibling instance does not demand its unrelated writes', () {
+    final box = _box();
+    final factory = FunctionTarget(_uri, 'factory', box.type, [.integer]);
+    final creating = Block(factory.parameterTypes);
+    creating.finish(
+      Return(
+        creating.emit(
+          Construct(box.constructor.target, [creating.parameters.single]),
+        ),
+      ),
+    );
+    final root = FunctionTarget(_uri, 'read', .integer, [.integer, .integer]);
+    final reading = Block(root.parameterTypes);
+    final first = reading.emit(DirectCall(factory, [reading.parameters[0]]));
+    final second = reading.emit(DirectCall(factory, [reading.parameters[1]]));
+    reading.emit(StoreField(box.field, first, const Constant.integer(77)));
+    reading.finish(Return(reading.emit(LoadField(box.field, second))));
+    final program = IrProgram(
+      [box.declaration],
+      [
+        box.constructor,
+        IrFunction(factory, [creating]),
+        IrFunction(root, [reading]),
+      ],
+    );
+    final facts = ProgramFlow(program, [
+      (target: root, arguments: [.unknown(.integer), .unknown(.integer)]),
+    ]).facts;
+    final optimized = const ProgramStorageElimination().run(facts);
+    expect(_operations(optimized, root).whereType<StoreField>(), isEmpty);
+    for (final graph in [program, optimized]) {
+      final entry = graph.implementationOf(root) as IrFunction;
+      for (final (left, right) in [(3, 11), (42, -7), (0, 0)]) {
+        expect(IrInterpreter(graph, {}).run(entry, [left, right]), right);
+      }
+    }
+  });
+
   test('unused globals disappear without removing their value effects', () {
     final tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
     final global = GlobalVariable(_uri, 'unused', ValueType.integer.nullable);
