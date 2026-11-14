@@ -8,7 +8,8 @@ final class FunctionRewrite(
   final IrFunction function, {
   final Map<Value, Value> replacements = const {},
 
-  /// New operation templates expressed using values from the source graph.
+  /// New operations using source values and pure, nonthrowing input templates.
+  /// Fresh inputs are evaluated at each replacement's original program point.
   final Map<Instruction, Instruction> operations = const {},
 
   /// New block parameters, with a value supplied by each retained incoming edge.
@@ -20,7 +21,8 @@ final class FunctionRewrite(
 }) {
   /// Applies the replacements, removes dead paths and preserves source origins.
   IrFunction run() {
-    final (blocks: liveBlocks, :needed, :parameterSlots) = _demand();
+    final (blocks: liveBlocks, :needed, :parameterSlots, :templates) =
+        _demand();
     final added = <Block, List<BlockParameter>>{
       for (final block in liveBlocks)
         block: [
@@ -260,9 +262,20 @@ final class FunctionRewrite(
         throw ArgumentError('Cyclic operation templates.');
       }
       final template = operations[original] ?? original;
-      final result = template.mapInputs(
-        (operand) => viewed(operand, value(operand)),
-      );
+      final inputs = <Instruction, Instruction>{};
+      Value input(Value operand) {
+        if (operand is Instruction && templates.contains(operand)) {
+          return inputs.putIfAbsent(operand, () {
+            final result = operand.mapInputs(input);
+            instructions[current]!.add(result);
+            locate(original, result, function);
+            return result;
+          });
+        }
+        return viewed(operand, value(operand));
+      }
+
+      final result = template.mapInputs(input);
       copying.remove(original);
       changed |= !identical(template, original);
       values[original] = result;
@@ -592,7 +605,12 @@ final class FunctionRewrite(
     return value;
   }
 
-  ({Set<Block> blocks, Set<Value> needed, Map<Block, List<int>> parameterSlots})
+  ({
+    Set<Block> blocks,
+    Set<Value> needed,
+    Map<Block, List<int>> parameterSlots,
+    Set<Instruction> templates,
+  })
   _demand() {
     final sourceValues = <Value>{
       for (final block in function.blocks) ...[
@@ -605,17 +623,31 @@ final class FunctionRewrite(
     bool owns(Value value) =>
         sourceValues.contains(value) ||
         value is TestedValue && sourceValues.contains(value.test);
+    final templates = <Instruction>{};
     for (final entry in operations.entries) {
+      final visiting = <Instruction>{};
+      bool available(Value value) {
+        if (value == entry.key) return false;
+        if (value is Constant || owns(value) || phis.containsKey(value)) {
+          return true;
+        }
+        if (value is! Instruction ||
+            value.effects.isNotEmpty ||
+            !visiting.add(value)) {
+          return false;
+        }
+        final valid = value.inputs.every(available);
+        visiting.remove(value);
+        if (valid) templates.add(value);
+        return valid;
+      }
+
       if (!owns(entry.key) ||
           !entry.key.type.accepts(entry.value.type) ||
           inlined.containsKey(entry.key) ||
-          entry.value.inputs.any(
-            (value) =>
-                value == entry.key ||
-                value is! Constant && !owns(value) && !phis.containsKey(value),
-          )) {
+          !entry.value.inputs.every(available)) {
         throw ArgumentError(
-          'Operation templates must preserve their result type and use available SSA inputs.',
+          'Operation templates require available SSA inputs or pure input expressions.',
         );
       }
     }
@@ -774,6 +806,11 @@ final class FunctionRewrite(
     for (final value in replacements.keys) {
       _replacement(value);
     }
-    return (blocks: liveBlocks, needed: needed, parameterSlots: parameterSlots);
+    return (
+      blocks: liveBlocks,
+      needed: needed,
+      parameterSlots: parameterSlots,
+      templates: templates,
+    );
   }
 }

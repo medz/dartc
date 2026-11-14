@@ -8,6 +8,60 @@ final _uri = Uri.parse('memory:rewrite');
 final _tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
 
 void main() {
+  test('fresh pure call inputs keep their evaluation and exception point', () {
+    final target = FunctionTarget(_uri, 'templated', .integer, [.object]);
+    final entry = Block(target.parameterTypes);
+    final normal = Block([ValueType.integer]), caught = Block();
+    final original = entry.emit(
+      UncheckedCast(entry.parameters.single, .integer),
+    );
+    final call = DirectCall(_tick, [original]);
+    entry.finish(
+      Invoke(call, onReturn: Jump(normal, [call]), onThrow: Jump(caught)),
+    );
+    normal.finish(Return(normal.parameters.single));
+    caught.finish(const Return(Constant.integer(-1)));
+    final before = IrFunction(target, [entry, normal, caught]);
+    final after = FunctionRewrite(
+      before,
+      operations: {
+        call: DirectCall(_tick, [
+          UncheckedCast(
+            TypeView(entry.parameters.single, .object.nullable),
+            .integer,
+          ),
+        ]),
+      },
+    ).run();
+    for (final function in [before, after]) {
+      final events = <int>[];
+      final interpreter = IrInterpreter(
+        IrProgram([], [function], externals: [IrExternal(_tick)]),
+        {
+          (_uri, 'tick'): (int value) {
+            events.add(value);
+            if (value < 0) throw StateError('negative');
+            return value;
+          },
+        },
+      );
+      expect(interpreter.run(function, [7]), 7);
+      expect(interpreter.run(function, [-2]), -1);
+      expect(events, [7, -2]);
+    }
+    expect(
+      () => FunctionRewrite(
+        before,
+        operations: {
+          call: DirectCall(_tick, [
+            TypeCast(entry.parameters.single, .integer),
+          ]),
+        },
+      ).run(),
+      throwsArgumentError,
+    );
+  });
+
   test(
     'discarding a proven pure invocation also removes its unused input phi',
     () {
