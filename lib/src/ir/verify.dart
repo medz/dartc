@@ -1,6 +1,6 @@
 import 'type_metadata.dart';
 import 'block.dart';
-import 'dominance.dart';
+import 'control_flow.dart';
 import 'core_types.dart';
 import 'ffi_types.dart';
 import 'signature.dart';
