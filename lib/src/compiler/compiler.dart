@@ -89,21 +89,29 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         }.values,
       );
     }
-    final preparation = ProgramPreparation(
-      target,
-      program,
-      roots: roots,
-      exports: exports,
-      imports: imports,
-      nativeSymbols: nativeSymbols,
-      entryPoint: entryPoint,
-      runtime: runtime,
+    return _close(
+      ProgramPreparation(
+        target,
+        program,
+        roots: roots,
+        exports: exports,
+        imports: imports,
+        nativeSymbols: nativeSymbols,
+        entryPoint: entryPoint,
+        runtime: runtime,
+      ),
     );
-    final flow = CallTypeFlow(
-      preparation.program,
-      preparation.roots,
-      instantiatedTypes: preparation.instantiatedTypes,
-    );
+  }
+
+  PreparedProgram _close(ProgramPreparation preparation, [CallTypeFlow? flow]) {
+    // Rewrites and native bridges require fresh facts from the actual roots.
+    if (flow == null || !identical(flow.program, preparation.program)) {
+      flow = CallTypeFlow(
+        preparation.program,
+        preparation.roots,
+        instantiatedTypes: preparation.instantiatedTypes,
+      );
+    }
     while (true) {
       switch (preparation.prepare(flow.facts)) {
         case final PreparedProgram prepared:
@@ -255,6 +263,12 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       ...exports.keys,
       if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
     ];
+    final flow = CallTypeFlow(
+      program,
+      roots,
+      instantiatedTypes: TypeMetadata.fields.keys,
+    );
+    program = inlineDirectCalls(program, flow.facts);
     final definitions = reachableDefinitions(
       program,
       roots,
@@ -336,16 +350,20 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     }
     const entrySymbol = '.dartc.start';
     final object = generator.generate(
-      prepare(
-        program,
-        roots: roots,
-        exports: exports,
-        imports: nativeImports,
-        nativeSymbols: addresses,
-        entryPoint: output is ExecutableOutput
-            ? (function: entry!, symbol: entrySymbol)
-            : null,
-        runtime: runtime,
+      _close(
+        ProgramPreparation(
+          target,
+          program,
+          roots: roots,
+          exports: exports,
+          imports: nativeImports,
+          nativeSymbols: addresses,
+          entryPoint: output is ExecutableOutput
+              ? (function: entry!, symbol: entrySymbol)
+              : null,
+          runtime: runtime,
+        ),
+        flow,
       ),
     );
     final ObjectFormat format = switch (target.operatingSystem) {

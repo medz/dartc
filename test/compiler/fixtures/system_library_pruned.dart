@@ -19,8 +19,10 @@ final class ForeignReader() implements Reader {
 
 int read(Reader reader) => reader.read();
 bool isForeign(Reader reader) => reader is ForeignReader;
+bool usesForeignLibrary() => false;
 
 void main() {
+  if (usesForeignLibrary()) system.loaderError();
   if (read(PlainReader()) != 7 ||
       !isForeign(ForeignReader()) ||
       system.processId() <= 0) {

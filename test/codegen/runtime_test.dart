@@ -290,8 +290,11 @@ void main() {
           module.symbols.any((s) => s.name == heapRuntime.runEvents.name),
           managed,
         );
-        expect(module.imports, isNot(contains('.dartc.clock')));
-        expect(module.imports, isNot(contains('.dartc.sleep')));
+        for (final binding in heapRuntime.primitives.entries) {
+          if (binding.value == .clock || binding.value == .sleep) {
+            expect(prepared.definitions, isNot(contains(binding.key)));
+          }
+        }
         if (managed) {
           expect(
             () => generator.generate(
