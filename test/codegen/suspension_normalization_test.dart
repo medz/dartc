@@ -3,6 +3,13 @@ import 'dart:collection';
 
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/suspension_normalization.dart';
+import 'package:dartc/src/codegen/closure_storage.dart';
+import 'package:dartc/src/codegen/function_representation.dart';
+import 'package:dartc/src/codegen/function_liveness.dart';
+import 'package:dartc/src/codegen/heap_plan.dart';
+import 'package:dartc/src/codegen/program_layout.dart';
+import 'package:dartc/src/codegen/member_calls.dart';
+import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -96,6 +103,45 @@ void main() {
             ),
         isEmpty,
       );
+    },
+  );
+
+  test(
+    'ordinary closure storage carries suspended cells and lexical types',
+    () {
+      bool belongs(FunctionTarget target) =>
+          target.library.toString().endsWith(
+            '/codegen/fixtures/suspensions.dart',
+          ) ||
+          target.enclosing != null && belongs(target.enclosing!);
+      final functions = program.functions
+          .where((body) => belongs(body.target))
+          .toList();
+      final closures = ClosureStorage(functions);
+      final layouts = ProgramLayout(
+        [...program.classes, ...closures.classes],
+        functions: functions,
+        closureStorage: closures,
+        typeRuntime: heapRuntime.types,
+      );
+      final members = MemberCalls(
+        program,
+        functions.map((f) => f.target).toSet(),
+      );
+      for (final function in functions) {
+        final selected = FunctionRepresentation(
+          function,
+          layouts,
+          CheckedCasts(),
+          members,
+          HeapPlan(runtime: heapRuntime),
+        );
+        FunctionLiveness(
+          selected,
+          selected.inputsOf,
+          selected.invocations.keys.toSet(),
+        );
+      }
     },
   );
 
