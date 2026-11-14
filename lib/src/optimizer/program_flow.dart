@@ -2868,6 +2868,24 @@ Constant? _fold(Instruction operation, List<FlowValue> inputs) {
         return index >= 0 && index < values.length ? values[index] : null;
       case StringLength() when scalars.single is String:
         return Constant.integer((scalars.single as String).length);
+      case StringConcat():
+        result = (scalars[0] as String) + (scalars[1] as String);
+      case StringFromCharCode():
+        result = String.fromCharCode(scalars.single as int);
+      case StringCodeUnitAt():
+        result = (scalars[0] as String).codeUnitAt(scalars[1] as int);
+      case StringFromCharCodes() when constants.first is SequenceConstant:
+        final codes = (constants.first as SequenceConstant).elements;
+        if (codes.any(
+          (code) => code is! ScalarConstant || code.value is! int,
+        )) {
+          return null;
+        }
+        result = String.fromCharCodes(
+          codes.map((code) => (code as ScalarConstant).value as int),
+          scalars[1] as int,
+          scalars[2] as int?,
+        );
       default:
         return null;
     }
@@ -2879,6 +2897,7 @@ Constant? _fold(Instruction operation, List<FlowValue> inputs) {
     bool value => Constant.boolean(value),
     int value => Constant.integer(value),
     double value => Constant.floating(value),
+    String value => Constant.string(value),
     _ => null,
   };
 }
