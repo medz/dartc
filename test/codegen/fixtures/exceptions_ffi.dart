@@ -19,5 +19,9 @@ final class ExceptionCalls() {
         int Function(int, int, int)
       >('error');
 
+  late final local = _library.lookupFunction<Int64 Function(), int Function()>(
+    'local',
+  );
+
   void close() => _library.close();
 }

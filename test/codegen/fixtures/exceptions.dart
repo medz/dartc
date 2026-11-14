@@ -13,18 +13,20 @@ import '../../support/runtime.dart';
 ObjectModule exceptions(Target target) {
   final uri = Uri.parse('memory:exceptions');
   final node = ClassType(uri, 'Payload');
+  final box = ClassType(uri, 'Box');
   final error = ClassType(uri, 'Failure', superclass: ValueType.error);
   final classes = <IrClass>[IrClass(ValueType.error, [])];
   final bodies = <IrFunction>[];
   final constructors = <ClassType, FunctionTarget>{};
   final fields = <ClassType, InstanceField>{};
-  for (final type in [node, error]) {
-    final field = fields[type] = InstanceField(type, 'value', .integer);
+  for (final type in [node, error, box]) {
+    final content = type == box ? node : ValueType.integer;
+    final field = fields[type] = InstanceField(type, 'value', content);
     final ctor = constructors[type] = FunctionTarget(
       uri,
       type.name,
       .voidType,
-      [.integer],
+      [content],
       owner: type,
       kind: .initializer,
     );
@@ -156,6 +158,47 @@ ObjectModule exceptions(Target target) {
       NativeSignature(Int64, [Int64, Int64, Int64]),
     );
   }
+
+  final local = FunctionTarget(uri, 'localCaught', node, [box, .stackTrace]);
+  final localEntry = Block(local.parameterTypes),
+      localHandler = Block([ValueType.object]);
+  final loaded = localEntry.emit(
+    LoadField(fields[box]!, localEntry.parameters.first),
+  );
+  localEntry.finish(
+    Throw(
+      loaded,
+      stackTrace: localEntry.parameters.last,
+      onThrow: Jump(localHandler, [UnwindValue.exception]),
+    ),
+  );
+  localHandler.emit(KeepAlive(localEntry.parameters.first));
+  localHandler.finish(
+    Return(
+      localHandler.emit(UncheckedCast(localHandler.parameters.single, node)),
+    ),
+  );
+  bodies.add(IrFunction(local, [localEntry, localHandler]));
+
+  final runLocal = FunctionTarget(uri, 'local', .integer, []);
+  final localStart = Block(), captured = Block([.stackTrace]);
+  final original = localStart.emit(
+    Construct(constructors[node]!, [const Constant.integer(321)]),
+  );
+  final container = localStart.emit(Construct(constructors[box]!, [original]));
+  localStart.finish(
+    Invoke(
+      DirectCall(thrower, [original]),
+      onReturn: null,
+      onThrow: Jump(captured, [UnwindValue.stackTrace]),
+    ),
+  );
+  final caught = captured.emit(
+    DirectCall(local, [container, captured.parameters.single]),
+  );
+  captured.finish(Return(captured.emit(LoadField(fields[node]!, caught))));
+  bodies.add(IrFunction(runLocal, [localStart, captured]));
+  exports[runLocal] = NativeExport('local', NativeSignature(Int64, []));
 
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)

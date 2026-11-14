@@ -2,7 +2,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
-import 'binary_encoding.dart';
+import 'scalar_binary.dart';
 import 'double_bits.dart';
 import 'function_emitter.dart';
 import 'function_liveness.dart';
@@ -12,17 +12,30 @@ import 'reference_equality.dart';
 import 'storage_access.dart';
 import 'type_values.dart';
 
-/// Selects encodings and fixed call locations before allocating a function.
+/// Selects operand constraints and fixed call locations before allocation.
 final class FunctionSelection<R>(
   final SelectedFunction body,
-  final FunctionEmitter<R> emitter,
+  FunctionEmitter<R> emitter,
 ) {
   final layouts = body.layouts;
+  final convention = emitter.convention;
+  final registers = List<R>.unmodifiable(emitter.allocatableRegisters);
+  final registerBanks = Map<R, RegisterBank>.unmodifiable({
+    for (final register in emitter.allocatableRegisters)
+      register: emitter.bank(register),
+  });
+  final exceptionRegister = emitter.exceptionRegister;
+  final traceRegister = emitter.traceRegister;
+  final failureRegister = emitter.failureRegister;
+  final negationNeedsTemporary = emitter.negationNeedsTemporary;
   final binaries =
       <
         Value,
         ({
-          BinaryEncoding<R> encoding,
+          bool reuseLeft,
+          ({R left, R right, R result, Set<R> clobbered})? fixed,
+          Comparison? comparison,
+          bool? constant,
           Value left,
           Value right,
           bool floatingInputs,
@@ -51,11 +64,6 @@ final class FunctionSelection<R>(
 
   /// Live managed values at each selected call, before assigning their homes.
   late final Map<Value, Set<Value>> liveReferences;
-  int _generalTemporaries = 0, _floatingTemporaries = 0;
-
-  /// The maximum additional scratch demand of a selected operation.
-  int temporaries(RegisterBank bank) =>
-      bank == .general ? _generalTemporaries : _floatingTemporaries;
 
   /// The operands read by the selected encoding, including generated constants.
   Iterable<Value> inputsOf(Value instruction) {
@@ -68,7 +76,7 @@ final class FunctionSelection<R>(
 
   this {
     // Internal booleans use integer locations; exported booleans remain rejected.
-    entry = emitter.convention.classify(
+    entry = convention.classify(
       NativeSignature.types(
         layouts.callType(layouts.returnType(body.target)),
         layouts.entryTypes(body.target).map(layouts.callType),
@@ -87,6 +95,17 @@ final class FunctionSelection<R>(
           throw UnsupportedError('Native terminator: ${end.runtimeType}');
       }
       for (final instruction in body.instructions[block]!) {
+        if (instruction is ReferenceAddress ||
+            instruction is ReferenceFromAddress) {
+          final type = instruction is ReferenceAddress
+              ? instruction.object.type
+              : instruction.type;
+          if (layouts.representation(type) != .reference) {
+            throw UnsupportedError(
+              'Memory access requires a reference representation.',
+            );
+          }
+        }
         if (body.aliases.contains(instruction)) continue;
         if (instruction is Instruction) {
           final target = body.invocations[instruction];
@@ -134,7 +153,7 @@ final class FunctionSelection<R>(
           case NativeInvocation(:final signature):
             _selectCall(
               instruction,
-              emitter.convention.classify(signature),
+              convention.classify(signature),
               body.inputsOf(instruction).skip(1).toList(),
               block,
             );
@@ -144,14 +163,13 @@ final class FunctionSelection<R>(
           case DoubleBits():
             break;
           case ObjectRuntimeType():
-            if (_generalTemporaries < 1) _generalTemporaries = 1;
+            break;
           case ObjectHashCode(:final operand, direct: true):
             if (layouts.representation(operand.type) != .reference) {
               throw UnsupportedError(
                 'Native identity hash requires a managed reference.',
               );
             }
-            if (_generalTemporaries < 1) _generalTemporaries = 1;
           case LoadField(:final field) || StorageRead(:final field):
             _storage(field, body.inputsOf(instruction).first);
             layouts.checkTransfer(field.type, body.typeOf(instruction));
@@ -180,9 +198,10 @@ final class FunctionSelection<R>(
               final equal = (kind == .isNull) != negated;
               _binary(
                 instruction,
-                emitter.comparison(equal ? .equal : .notEqual),
+                emitter,
                 operand,
                 const Constant.nullValue(),
+                comparison: equal ? .equal : .notEqual,
               );
             } else {
               throw StateError('Unresolved type test.');
@@ -190,29 +209,17 @@ final class FunctionSelection<R>(
           case LoadObjectData() ||
               StoreObjectData() ||
               LoadObjectReference() ||
-              StoreObjectReference():
-            if (_generalTemporaries < 1) _generalTemporaries = 1;
-            if (instruction case StoreObjectData(nativeType: final native)
-                when native.isSinglePrecision && _floatingTemporaries == 0) {
-              _floatingTemporaries = 1;
-            }
-          case TypeReference() ||
-              ReferenceAddress() ||
-              ReferenceFromAddress() ||
-              LoadNative():
+              StoreObjectReference() ||
+              TypeReference() ||
+              LoadNative() ||
+              StoreNative() ||
+              FloatBitCast():
             break;
-          case StoreNative(:final nativeType):
-            if (nativeType.isSinglePrecision && _floatingTemporaries == 0) {
-              _floatingTemporaries = 1;
-            }
+          case ReferenceAddress() || ReferenceFromAddress():
+            break;
           case NumericNegate(:final type):
-            if (emitter.negationNeedsTemporary) _generalTemporaries = 1;
             if (type != .floating) {
               throw UnsupportedError('Native numeric negation: $type');
-            }
-          case FloatBitCast(:final type, :final width):
-            if (type == .integer && width == 32 && _floatingTemporaries == 0) {
-              _floatingTemporaries = 1;
             }
           case NumericToDouble(:final operand) ||
               NumericToInt(:final operand) ||
@@ -244,50 +251,18 @@ final class FunctionSelection<R>(
             }
             final floating =
                 instruction.type == .floating || left.type == .floating;
-            final encoding = switch (operator) {
-              .add => floating ? emitter.addDouble : emitter.add,
-              .subtract => floating ? emitter.subtractDouble : emitter.subtract,
-              .multiply => floating ? emitter.multiplyDouble : emitter.multiply,
-              .divide => emitter.divideDouble,
-              _ when comparison != null => emitter.comparison(
-                comparison,
-                floating: floating,
-              ),
-              _ => throw UnsupportedError(
-                'Native numeric operation: $operator',
-              ),
-            };
             _binary(
               instruction,
-              encoding,
+              emitter,
               left,
               right,
               floatingInputs: floating,
+              comparison: comparison,
             );
           case IntBinary(:final operator, :final left, :final right):
-            final encoding = switch (operator) {
-              .add => emitter.add,
-              .subtract => emitter.subtract,
-              .multiply => emitter.multiply,
-              .truncateDivide => emitter.divideSigned,
-              .shiftLeft => emitter.shiftLeft,
-              .shiftRight => emitter.shiftRight,
-              .unsignedShiftRight => emitter.unsignedShiftRight,
-              .divide => emitter.divideDouble,
-              .bitAnd => emitter.bitAnd,
-              .bitOr => emitter.bitOr,
-              .bitXor => emitter.bitXor,
-              .lessThan => emitter.comparison(.lessThan),
-              .lessOrEqual => emitter.comparison(.lessOrEqual),
-              .greaterThan => emitter.comparison(.greaterThan),
-              .greaterOrEqual => emitter.comparison(.greaterOrEqual),
-              _ => throw UnsupportedError(
-                'Native integer operation: $operator',
-              ),
-            };
             _binary(
               instruction,
-              encoding,
+              emitter,
               left,
               right,
               floatingInputs: operator == .divide,
@@ -299,9 +274,10 @@ final class FunctionSelection<R>(
             }
             _binary(
               instruction,
-              emitter.comparison(negated ? .notEqual : .equal),
+              emitter,
               left,
               right,
+              comparison: negated ? .notEqual : .equal,
             );
           case Equals(:final left, :final right, :final negated):
             final nullComparison =
@@ -327,20 +303,20 @@ final class FunctionSelection<R>(
               _mixed(instruction, negated ? .notEqual : .equal, left, right);
               break;
             }
-            final BinaryEncoding<R> encoding =
+            final comparable =
                 left.type == right.type ||
-                    (nullComparison || typeLiteral) &&
-                        layouts.representation(left.type) == .reference &&
-                        layouts.representation(right.type) == .reference
-                ? emitter.comparison(
-                    negated ? .notEqual : .equal,
-                    floating: left.type == .floating,
-                  )
-                : BinaryEncoding(
-                    (destination, _, _) =>
-                        emitter.loadImmediate(destination, negated ? 1 : 0),
-                  );
-            _binary(instruction, encoding, left, right);
+                (nullComparison || typeLiteral) &&
+                    layouts.representation(left.type) == .reference &&
+                    layouts.representation(right.type) == .reference;
+            _binary(
+              instruction,
+              emitter,
+              left,
+              right,
+              floatingInputs: comparable && left.type == .floating,
+              comparison: comparable ? (negated ? .notEqual : .equal) : null,
+              constant: comparable ? null : negated,
+            );
           default:
             throw UnsupportedError(
               'Native operation: ${instruction.runtimeType} in '
@@ -413,7 +389,7 @@ final class FunctionSelection<R>(
     }
     _selectCall(
       operation,
-      emitter.convention.classify(
+      convention.classify(
         NativeSignature.types(
           layouts.callType(layouts.returnType(target)),
           parameters.map(layouts.callType),
@@ -441,9 +417,9 @@ final class FunctionSelection<R>(
       final kind = bank(parameterTypes?[i] ?? body.typeOf(arguments[i]));
       stackScratch.putIfAbsent(
         kind,
-        () => emitter.allocatableRegisters.firstWhere(
+        () => registers.firstWhere(
           (register) =>
-              emitter.bank(register) == kind && clobbered.contains(register),
+              registerBanks[register] == kind && clobbered.contains(register),
         ),
       );
     }
@@ -457,9 +433,9 @@ final class FunctionSelection<R>(
       stackScratch: Map.unmodifiable(stackScratch),
       addressRegister: target != null
           ? null
-          : emitter.allocatableRegisters.lastWhere(
+          : registers.lastWhere(
               (register) =>
-                  emitter.bank(register) == .general &&
+                  registerBanks[register] == .general &&
                   clobbered.contains(register) &&
                   !layout.registerInputs.containsKey(register) &&
                   !layout.parameters.any(
@@ -468,10 +444,10 @@ final class FunctionSelection<R>(
             ),
       parkRegister: target != null
           ? null
-          : emitter.allocatableRegisters.firstWhere(
+          : registers.firstWhere(
               (register) =>
-                  emitter.bank(register) == .general &&
-                  register != emitter.failureRegister &&
+                  registerBanks[register] == .general &&
+                  register != failureRegister &&
                   clobbered.contains(register),
             ),
       onThrow: switch (body.ends[block]) {
@@ -493,20 +469,36 @@ final class FunctionSelection<R>(
 
   void _binary(
     Value instruction,
-    BinaryEncoding<R> encoding,
+    FunctionEmitter<R> emitter,
     Value left,
     Value right, {
     bool floatingInputs = false,
+    Comparison? comparison,
+    bool? constant,
   }) {
     final inputs = body.inputsOf(instruction).toList();
     left = inputs.first;
     if (inputs.length > 1) right = inputs[1];
-    final count = floatingInputs
-        ? [left, right].where((v) => v.type == .integer).length
-        : 0;
-    if (count > _floatingTemporaries) _floatingTemporaries = count;
+    final encoding = scalarBinaryEncoding(
+      emitter,
+      instruction,
+      floating: floatingInputs,
+      comparison: comparison,
+      constant: constant,
+    );
+    final fixed = encoding.fixed;
     binaries[instruction] = (
-      encoding: encoding,
+      reuseLeft: encoding.reuseLeft,
+      fixed: fixed == null
+          ? null
+          : (
+              left: fixed.left,
+              right: fixed.right,
+              result: fixed.result,
+              clobbered: Set<R>.unmodifiable(fixed.clobbered),
+            ),
+      comparison: comparison,
+      constant: constant,
       left: left,
       right: right,
       floatingInputs: floatingInputs,
@@ -537,8 +529,6 @@ final class FunctionSelection<R>(
       integer: left,
       floating: right,
     );
-    _generalTemporaries = 1;
-    if (_floatingTemporaries == 0) _floatingTemporaries = 1;
   }
 
   bool _number(ValueType type) => type == .integer || type == .floating;

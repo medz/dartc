@@ -10,6 +10,12 @@ import 'fixtures/exceptions_ffi.dart';
 import 'fixtures/stack_roots_ffi.dart' show RootVisitor;
 
 void main() {
+  test('local catch preserves a loaded exception and other live values', () {
+    final native = ExceptionCalls();
+    addTearDown(native.close);
+    expect(native.local(), 321);
+  });
+
   test('exception identity, traces and Error storage survive rethrow and collection', () {
     const payload = ObjectHeader.fieldsOffset ~/ ObjectHeader.alignment;
     final native = ExceptionCalls();

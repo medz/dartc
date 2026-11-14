@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
@@ -9,28 +8,21 @@ import 'package:dartc/layout.dart';
 import 'double_bits.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
-import 'selected_function.dart';
-import 'function_selection.dart';
 import 'heap_entry.dart';
 import 'native_adapter.dart';
 import 'native_invocation.dart';
+import 'scalar_binary.dart';
 import 'storage_access.dart';
 import 'type_values.dart';
 
-/// Generates a control-flow graph with explicit edge transfers.
+/// Emits a completely allocated function, binding its calls and roots to PCs.
 final class ScalarFunction<R extends Object>(
-  SelectedFunction body,
+  final FunctionAllocation<R> allocation,
   final FunctionEmitter<R> emitter,
 ) {
-  final target = body.target;
-  final sourceTarget = body.sourceTarget;
-  final layouts = body.layouts;
-  final selection = FunctionSelection(body, emitter);
+  final selection = allocation.selection;
+  final layouts = allocation.selection.layouts;
 
-  bool get hasRoots =>
-      selection.liveReferences.values.any((values) => values.isNotEmpty);
-
-  /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
     void Function(Fixup, FunctionTarget) call,
     void Function(Fixup, Constant) constant,
@@ -40,19 +32,18 @@ final class ScalarFunction<R extends Object>(
     void Function(Fixup, NativeReference)? nativeAddress,
     void Function(Fixup, int)? codeAddress,
   }) {
-    final allocation = FunctionAllocation(
-      emitter,
-      selection,
-      (value, register) =>
-          emitter.address(register, (fixup) => constant(fixup, value)),
-    );
     final adapter = NativeAdapter(emitter);
     final labels = {
       for (final block in selection.body.blocks) block: emitter.label(),
     };
-    if (allocation.frame case final frame?) emitter.prologue(frame);
-    void edge(Jump jump) {
-      allocation.copyArguments(jump);
+    void transfers(Iterable<AllocationMove<R>> moves) {
+      for (final move in moves) {
+        _transfer(move, constant);
+      }
+    }
+
+    void edge(Block block, Jump jump) {
+      transfers(allocation.edges[(block, jump)]!);
       emitter.jump(labels[jump.target]!);
     }
 
@@ -64,179 +55,40 @@ final class ScalarFunction<R extends Object>(
       }
     }
 
-    R objectDataAddress(Value object, Value offset) {
-      final base = allocation.read(object);
-      final index = allocation.read(offset, except: [base]);
-      final address = allocation.allocate(.general, except: [base, index]);
-      emitter.addScaled(address, base, index, scale: 1);
-      allocation.release(object);
-      allocation.release(offset);
-      return address;
-    }
-
+    if (allocation.frame case final frame?) emitter.prologue(frame);
     for (final block in selection.body.blocks) {
       emitter.bind(labels[block]!);
-      allocation.begin(block);
-      void emptyResult(Value operation) {
-        if (!selection.liveness.uses[block]!.containsKey(operation) &&
-            !selection.liveness.liveOut[block]!.contains(operation)) {
-          return;
-        }
-        final result = allocation.allocate(.general);
-        emitter.loadImmediate(result, 0);
-        allocation.define(operation, result);
-      }
-
       for (final instruction in selection.body.instructions[block]!) {
-        if (selection.liveness.omitted.contains(instruction)) continue;
-        if (selection.body.aliases.contains(instruction) &&
-            selection.body.inputsOf(instruction).isEmpty) {
-          emptyResult(instruction);
-          continue;
-        }
-        if (selection.constantTests[instruction] case final value?) {
-          final destination = allocation.allocate(.general);
-          emitter.loadImmediate(destination, value ? 1 : 0);
-          allocation.define(instruction, destination);
-        } else if (instruction case NativeSymbolAddress(:final reference)) {
-          final destination = allocation.allocate(.general);
-          emitter.address(
-            destination,
-            (fixup) => nativeAddress!(fixup, reference),
-            indirect: true,
-          );
-          allocation.define(instruction, destination);
-        } else if (instruction is DoubleBits) {
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).single,
-          );
-          final destination = allocation.allocate(.general);
-          emitter.move(destination, source);
-          allocation.release(selection.body.inputsOf(instruction).single);
-          allocation.define(instruction, destination);
-        } else if (instruction
-            case ObjectRuntimeType(:final operand) ||
-                ObjectHashCode(:final operand, direct: true)
-            when !selection.calls.containsKey(instruction) &&
-                !selection.body.aliases.contains(instruction) &&
-                (instruction is ObjectHashCode || operand.type != .nullType) &&
-                layouts.representation(operand.type) == .reference) {
-          final value = allocation.read(
-            selection.body.inputsOf(instruction).single,
-          );
-          final result = allocation.allocate(.general, except: [value]);
-          final done = emitter.label();
-          if (instruction is ObjectRuntimeType) {
-            emitter.address(
-              result,
-              (fixup) => constant(fixup, layouts.types.constant(.nullType)),
-            );
-          } else {
-            emitter.loadImmediate(result, 0);
-          }
-          emitter.jumpIfZero(value, done);
-          emitter.loadMemory(
-            result,
-            value,
-            offset: instruction is ObjectRuntimeType
-                ? ObjectHeader.typeOffset
-                : ObjectHeader.identityHashOffset,
-            bytes: 8,
-            signed: false,
-          );
-          emitter.bind(done);
-          allocation.release(selection.body.inputsOf(instruction).single);
-          allocation.define(instruction, result);
-        } else if (instruction case NewCell(:final initial)
-            when selection.cells.contains(instruction)) {
-          if (initial != null) {
-            allocation.writeCell(
-              instruction,
-              selection.body.inputsOf(instruction).single,
-            );
-          } else if (layouts.isReference(selection.body.typeOf(instruction))) {
-            allocation.clearCell(instruction);
-          }
-        } else if (instruction is KeepAlive) {
-          allocation.release(selection.body.inputsOf(instruction).single);
-          emptyResult(instruction);
-        } else if (instruction is ReadCell &&
-            !selection.body.aliases.contains(instruction)) {
-          allocation.readCell(instruction);
-        } else if (instruction case WriteCell(:final cell)
-            when selection.cells.contains(cell)) {
-          allocation.writeCell(cell, selection.body.inputsOf(instruction).last);
-          emptyResult(instruction);
-        } else if (selection.calls[instruction] case (
-          :final layout,
-          :final target,
-          :final arguments,
-          :final parameterTypes,
-          :final stackScratch,
-          :final addressRegister,
-          :final parkRegister,
-          :final onThrow,
-        )) {
+        final plan = allocation.operations[instruction];
+        if (plan == null) continue;
+        transfers(plan.before);
+        final inputs = plan.inputs;
+        final result = plan.result;
+        if (selection.calls[instruction] case final selected?) {
           final native = instruction is NativeInvocation ? instruction : null;
-          allocation.prepareCall(instruction);
           final parked = persistent && native != null
-              ? HeapEntry.park(emitter, parkRegister!)
+              ? HeapEntry.park(emitter, selected.parkRegister!)
               : const <Fixup>[];
-          // Stage stack words before populating registers that the scratch may alias.
-          if (layout.stackBytes != 0) {
-            for (final (i, location) in layout.parameters.indexed) {
-              if (location case StackArgument(:final offset)) {
-                final value = arguments[i];
-                final scratch =
-                    stackScratch[selection.bank(
-                      parameterTypes?[i] ?? selection.body.typeOf(value),
-                    )]!;
-                allocation.load(value, scratch, asType: parameterTypes?[i]);
-                final type = native?.signature.parameters[i].resolveAbi(
-                  emitter.convention.target.abi,
-                );
-                if (type != null && type.isSinglePrecision) {
-                  adapter.convert(scratch, type, intoDart: false);
-                }
-                emitter.storeStack(
-                  scratch,
-                  offset,
-                  bytes: type?.nativeSize ?? 8,
-                );
-                allocation.release(value);
-              }
+          for (final argument in plan.arguments) {
+            transfers(argument.loads);
+            if (argument.nativeType case final type?) {
+              adapter.convert(argument.register, type, intoDart: false);
             }
-          }
-          // Double constants may need a general temporary before fixed general arguments.
-          for (final bank in [RegisterBank.floating, RegisterBank.general]) {
-            for (final (i, location) in layout.parameters.indexed) {
-              if (location case RegisterArgument(:final register)
-                  when emitter.bank(register) == bank) {
-                final value = arguments[i];
-                allocation.load(value, register, asType: parameterTypes?[i]);
-                if (native != null) {
-                  adapter.convert(
-                    register,
-                    native.signature.parameters[i],
-                    intoDart: false,
-                  );
-                }
-                allocation.release(value);
-              }
+            if (argument.stackOffset case final offset?) {
+              emitter.storeStack(
+                argument.register,
+                offset,
+                bytes: argument.nativeType?.nativeSize ?? 8,
+              );
             }
           }
           if (native == null) {
-            call(emitter.call(), target!);
+            call(emitter.call(), selected.target!);
           } else {
-            // Load last so argument staging cannot overwrite the callee address.
-            final address = addressRegister!;
-            allocation.load(selection.body.inputsOf(native).first, address);
-            allocation.release(selection.body.inputsOf(native).first);
-            for (final MapEntry(:key, :value)
-                in layout.registerInputs.entries) {
-              emitter.loadImmediate(key, value);
+            for (final entry in selected.layout.registerInputs.entries) {
+              emitter.loadImmediate(entry.key, entry.value);
             }
-            emitter.callRegister(address);
+            emitter.callRegister(selected.addressRegister!);
           }
           for (final fixup in parked) {
             codeAddress!(fixup, emitter.position);
@@ -249,356 +101,237 @@ final class ScalarFunction<R extends Object>(
           );
           if (failures && native == null) {
             final returned = emitter.label();
-            if (onThrow != null) {
-              allocation.prepareEdges(block);
-            }
             emitter.jumpIfZero(emitter.failureRegister, returned);
-            if (onThrow != null) {
-              allocation.saveUnwind();
-              edge(onThrow);
+            if (selected.onThrow case final failed?) {
+              edge(block, failed);
             } else {
               leave();
             }
             emitter.bind(returned);
           }
-          if (native != null && native.signature.result.isVoid) {
-            final result = allocation.allocate(.general);
-            emitter.loadImmediate(result, 0);
-            allocation.define(instruction, result);
-          } else if (layout.resultRegister case final result?) {
-            final resultType = selection.body.typeOf(instruction);
+          transfers(plan.after);
+          if (selected.layout.resultRegister case final rawResult?
+              when !plan.emptyResult) {
             if (instruction
                 case Equals(negated: true) || TypeTest(negated: true)) {
-              final scratch = allocation.allocate(.general, except: [result]);
+              final scratch = plan.temporaries.single;
               emitter.loadImmediate(scratch, 1);
-              emitter.bitXor.emit(result, result, scratch);
-              allocation.releaseTemporary(scratch);
+              emitter.bitXor.emit(rawResult, rawResult, scratch);
             }
             if (native != null) {
-              adapter.convert(result, native.signature.result, intoDart: true);
-            }
-            if (native == null &&
-                layouts.representation(layouts.returnType(target!)) !=
-                    layouts.representation(resultType)) {
-              final destination = allocation.allocate(
-                selection.bank(resultType),
-                preferred: result,
+              adapter.convert(
+                rawResult,
+                native.signature.result,
+                intoDart: true,
               );
-              emitter.loadMemory(
-                destination,
-                result,
-                offset: ObjectHeader.fieldsOffset,
-                bytes: 8,
-                signed: false,
-              );
-              allocation.define(instruction, destination);
-            } else {
-              allocation.define(instruction, result);
             }
           }
+        } else if (selection.body.aliases.contains(instruction) &&
+            selection.body.inputsOf(instruction).isEmpty) {
+          // The zero result below is the only selected work.
+        } else if (selection.constantTests[instruction] case final value?) {
+          emitter.loadImmediate(result!, value ? 1 : 0);
+        } else if (instruction case NativeSymbolAddress(:final reference)) {
+          emitter.address(
+            result!,
+            (fixup) => nativeAddress!(fixup, reference),
+            indirect: true,
+          );
+        } else if (instruction is DoubleBits) {
+          emitter.move(result!, inputs.single);
+        } else if (instruction
+            case ObjectRuntimeType(:final operand) ||
+                ObjectHashCode(:final operand, direct: true)
+            when !selection.body.aliases.contains(instruction) &&
+                (instruction is ObjectHashCode || operand.type != .nullType) &&
+                layouts.representation(operand.type) == .reference) {
+          final done = emitter.label();
+          if (instruction is ObjectRuntimeType) {
+            emitter.address(
+              result!,
+              (fixup) => constant(fixup, layouts.types.constant(.nullType)),
+            );
+          } else {
+            emitter.loadImmediate(result!, 0);
+          }
+          emitter.jumpIfZero(inputs.single, done);
+          emitter.loadMemory(
+            result,
+            inputs.single,
+            offset: instruction is ObjectRuntimeType
+                ? ObjectHeader.typeOffset
+                : ObjectHeader.identityHashOffset,
+            bytes: 8,
+            signed: false,
+          );
+          emitter.bind(done);
+        } else if (instruction case NewCell(:final initial)
+            when selection.cells.contains(instruction)) {
+          final slot = allocation.homes[instruction]!.offset;
+          if (initial != null) {
+            emitter.storeStack(inputs.single, slot);
+          } else if (plan.temporaries.isNotEmpty) {
+            final scratch = plan.temporaries.single;
+            emitter.loadImmediate(scratch, 0);
+            emitter.storeStack(scratch, slot);
+          }
+        } else if (instruction is KeepAlive) {
+          // Lifetime is represented by the allocation; there is no instruction.
+        } else if (instruction is ReadCell &&
+            !selection.body.aliases.contains(instruction)) {
+          emitter.loadStack(
+            result!,
+            allocation.homes[instruction.cell]!.offset,
+          );
+        } else if (instruction case WriteCell(:final cell)
+            when selection.cells.contains(cell)) {
+          emitter.storeStack(inputs.single, allocation.homes[cell]!.offset);
         } else if (instruction
             case StoreField(:final field) || StorageWrite(:final field)) {
-          final receiver = selection.body.inputsOf(instruction).first;
-          final value = selection.body.inputsOf(instruction).last;
-          final base = allocation.read(receiver);
-          final source = allocation.allocate(
-            selection.bank(field.type),
-            except: [base],
-          );
-          allocation.load(value, source, asType: field.type, except: [base]);
           emitter.storeMemory(
-            source,
-            base,
+            inputs.last,
+            inputs.first,
             offset: layouts.fieldOffset(field),
             bytes: 8,
           );
-          allocation.releaseTemporary(source);
-          allocation.release(value);
-          allocation.release(receiver);
-          emptyResult(instruction);
         } else if (instruction
             case LoadField(:final field) || StorageRead(:final field)
             when !selection.body.aliases.contains(instruction)) {
-          final type = selection.body.typeOf(instruction);
-          final receiver = selection.body.inputsOf(instruction).first;
-          final source = allocation.read(receiver);
-          allocation.release(receiver);
-          final stored = allocation.allocate(
-            selection.bank(field.type),
-            preferred: source,
-          );
+          final stored = plan.temporaries.single;
           emitter.loadMemory(
             stored,
-            source,
+            inputs.single,
             offset: layouts.fieldOffset(field),
             bytes: 8,
             signed: false,
           );
-          var destination = stored;
-          if (layouts.representation(field.type) !=
-              layouts.representation(type)) {
-            if (selection.bank(type) != emitter.bank(stored)) {
-              destination = allocation.allocate(selection.bank(type));
-              allocation.releaseTemporary(stored);
-            }
-            emitter.loadMemory(
-              destination,
-              stored,
-              offset: ObjectHeader.fieldsOffset,
-              bytes: 8,
-              signed: false,
-            );
-          }
-          allocation.define(instruction, destination);
         } else if (instruction is ReferenceAddress ||
-            instruction is ReferenceFromAddress) {
-          final operand = instruction is ReferenceAddress
-              ? instruction.object
-              : (instruction as ReferenceFromAddress).address;
-          final referenceType = instruction is ReferenceAddress
-              ? operand.type
-              : instruction.type;
-          if (layouts.representation(referenceType) != .reference) {
-            throw UnsupportedError(
-              'Memory access requires a reference representation.',
-            );
-          }
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).single,
-          );
-          allocation.release(selection.body.inputsOf(instruction).single);
-          final destination = allocation.allocate(.general, preferred: source);
-          emitter.move(destination, source);
-          allocation.define(instruction, destination);
-        } else if (selection.body.aliases.contains(instruction) ||
+            instruction is ReferenceFromAddress ||
+            selection.body.aliases.contains(instruction) ||
             instruction is TypeView ||
             instruction is UncheckedCast ||
             instruction is TypeReference ||
             instruction is ReifyType ||
             instruction is ObjectRuntimeType) {
-          final operand = selection.body.inputsOf(instruction).single;
-          final type = selection.body.typeOf(instruction);
-          final R destination;
-          if (layouts.representation(selection.body.typeOf(operand)) ==
-              layouts.representation(type)) {
-            final source = allocation.read(operand);
-            allocation.release(operand);
-            destination = allocation.allocate(
-              selection.bank(type),
-              preferred: source,
+          emitter.move(result!, inputs.single);
+        } else if (instruction is StoreObjectReference ||
+            instruction is LoadObjectReference ||
+            instruction is StoreObjectData ||
+            instruction is LoadObjectData ||
+            instruction is StoreNative ||
+            instruction is LoadNative) {
+          final object =
+              instruction is StoreObjectReference ||
+              instruction is LoadObjectReference ||
+              instruction is StoreObjectData ||
+              instruction is LoadObjectData;
+          final store =
+              instruction is StoreObjectReference ||
+              instruction is StoreObjectData ||
+              instruction is StoreNative;
+          final base = object ? plan.temporaries.first : inputs.first;
+          if (object) {
+            emitter.addScaled(base, inputs[0], inputs[1], scale: 1);
+          }
+          final NativeTypeRef? native = switch (instruction) {
+            StoreObjectData(nativeType: final NativeTypeRef type) ||
+            LoadObjectData(nativeType: final NativeTypeRef type) ||
+            StoreNative(nativeType: final NativeTypeRef type) ||
+            LoadNative(
+              nativeType: final NativeTypeRef type,
+            ) => type.resolveAbi(emitter.convention.target.abi),
+            _ => null,
+          };
+          if (store) {
+            var value = inputs.last;
+            if (native?.isSinglePrecision ?? false) {
+              value = plan.temporaries.last;
+              emitter.convertDoubleToFloat(value, inputs.last);
+            }
+            emitter.storeMemory(value, base, bytes: native?.nativeSize ?? 8);
+          } else {
+            emitter.loadMemory(
+              result!,
+              base,
+              bytes: native?.nativeSize ?? 8,
+              signed: native?.integerLayout?.signed ?? false,
             );
-            emitter.move(destination, source);
-          } else {
-            destination = allocation.allocate(selection.bank(type));
-            allocation.load(operand, destination, asType: type);
-            allocation.release(operand);
-          }
-          allocation.define(instruction, destination);
-        } else if (instruction is StoreObjectReference) {
-          final base = objectDataAddress(
-            selection.body.inputsOf(instruction).first,
-            selection.body.inputsOf(instruction).elementAt(1),
-          );
-          final value = selection.body.inputsOf(instruction).last;
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).last,
-            except: [base],
-          );
-          allocation.release(value);
-          emitter.storeMemory(source, base, bytes: 8);
-          allocation.releaseTemporary(base);
-          emptyResult(instruction);
-        } else if (instruction is LoadObjectReference) {
-          final source = objectDataAddress(
-            selection.body.inputsOf(instruction).first,
-            selection.body.inputsOf(instruction).elementAt(1),
-          );
-          allocation.releaseTemporary(source);
-          final destination = allocation.allocate(.general, preferred: source);
-          emitter.loadMemory(destination, source, bytes: 8, signed: false);
-          allocation.define(instruction, destination);
-        } else if (instruction
-            case StoreNative(nativeType: final NativeTypeRef storageType) ||
-                StoreObjectData(nativeType: final NativeTypeRef storageType)) {
-          final nativeType = storageType.resolveAbi(
-            emitter.convention.target.abi,
-          );
-          final offset = instruction is StoreObjectData
-              ? instruction.byteOffset
-              : null;
-          final base = offset == null
-                  ? allocation.read(selection.body.inputsOf(instruction).first)
-                  : objectDataAddress(
-                      selection.body.inputsOf(instruction).first,
-                      selection.body.inputsOf(instruction).elementAt(1),
-                    ),
-              source = allocation.read(
-                selection.body.inputsOf(instruction).last,
-                except: [base],
-              );
-          allocation.release(selection.body.inputsOf(instruction).last);
-          if (nativeType.isSinglePrecision) {
-            final temporary = allocation.allocate(.floating, preferred: source);
-            emitter.convertDoubleToFloat(temporary, source);
-            emitter.storeMemory(temporary, base, bytes: 4);
-            allocation.releaseTemporary(temporary);
-          } else {
-            emitter.storeMemory(source, base, bytes: nativeType.nativeSize);
-          }
-          if (offset == null) {
-            allocation.release(selection.body.inputsOf(instruction).first);
-          } else {
-            allocation.releaseTemporary(base);
-          }
-          emptyResult(instruction);
-        } else if (instruction
-            case LoadNative(nativeType: final NativeTypeRef storageType) ||
-                LoadObjectData(nativeType: final NativeTypeRef storageType)) {
-          final nativeType = storageType.resolveAbi(
-            emitter.convention.target.abi,
-          );
-          final offset = instruction is LoadObjectData
-              ? instruction.byteOffset
-              : null;
-          final source = offset == null
-              ? allocation.read(selection.body.inputsOf(instruction).first)
-              : objectDataAddress(
-                  selection.body.inputsOf(instruction).first,
-                  selection.body.inputsOf(instruction).elementAt(1),
-                );
-          if (offset == null) {
-            allocation.release(selection.body.inputsOf(instruction).first);
-          } else {
-            allocation.releaseTemporary(source);
-          }
-          final destination = allocation.allocate(
-            selection.bank(instruction.type),
-            preferred: source,
-          );
-          emitter.loadMemory(
-            destination,
-            source,
-            bytes: nativeType.nativeSize,
-            signed: nativeType.integerLayout?.signed ?? false,
-          );
-          if (nativeType.isSinglePrecision) {
-            emitter.convertFloatToDouble(destination, destination);
-          }
-          allocation.define(instruction, destination);
-        } else if (instruction case FloatBitCast(:final width)) {
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).single,
-          );
-          allocation.release(selection.body.inputsOf(instruction).single);
-          final toFloat = instruction.type == .floating;
-          final destination = allocation.allocate(
-            toFloat ? .floating : .general,
-          );
-          if (!toFloat && width == 32) {
-            final temporary = allocation.allocate(.floating, except: [source]);
-            emitter.convertDoubleToFloat(temporary, source);
-            emitter.move(destination, temporary);
-            emitter.extendInteger(destination, bytes: 4, signed: false);
-            allocation.releaseTemporary(temporary);
-          } else {
-            emitter.move(destination, source);
-            if (toFloat && width == 32) {
-              emitter.convertFloatToDouble(destination, destination);
+            if (native?.isSinglePrecision ?? false) {
+              emitter.convertFloatToDouble(result, result);
             }
           }
-          allocation.define(instruction, destination);
-        } else if (instruction case NumericToInt(:final operand)) {
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).single,
-          );
-          allocation.release(selection.body.inputsOf(instruction).single);
-          final destination = allocation.allocate(.general, preferred: source);
-          if (operand.type == .integer) {
-            emitter.move(destination, source);
+        } else if (instruction case FloatBitCast(:final width)) {
+          final toFloat = instruction.type == .floating;
+          if (!toFloat && width == 32) {
+            emitter.convertDoubleToFloat(
+              plan.temporaries.single,
+              inputs.single,
+            );
+            emitter.move(result!, plan.temporaries.single);
+            emitter.extendInteger(result, bytes: 4, signed: false);
           } else {
-            emitter.truncateDoubleToInt(destination, source);
+            emitter.move(result!, inputs.single);
+            if (toFloat && width == 32) {
+              emitter.convertFloatToDouble(result, result);
+            }
           }
-          allocation.define(instruction, destination);
+        } else if (instruction case NumericToInt(:final operand)) {
+          if (operand.type == .integer) {
+            emitter.move(result!, inputs.single);
+          } else {
+            emitter.truncateDoubleToInt(result!, inputs.single);
+          }
         } else if (instruction
             case NumericToDouble(:final operand) ||
                 NumericRoundToDouble(:final operand) ||
                 NumericSquareRoot(:final operand)) {
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).single,
-          );
-          allocation.release(selection.body.inputsOf(instruction).single);
-          final destination = allocation.allocate(.floating, preferred: source);
           if (operand.type == .integer) {
-            emitter.convertIntToDouble(destination, source);
-          } else if (instruction is NumericToDouble) {
-            emitter.move(destination, source);
+            emitter.convertIntToDouble(result!, inputs.single);
+          } else if (instruction is! NumericSquareRoot) {
+            emitter.move(result!, inputs.single);
           }
           if (instruction is NumericSquareRoot) {
             emitter.squareRootDouble(
-              destination,
-              operand.type == .integer ? destination : source,
+              result!,
+              operand.type == .integer ? result : inputs.single,
             );
           }
-          allocation.define(instruction, destination);
         } else if (instruction is NumericNegate) {
-          final source = allocation.read(
-            selection.body.inputsOf(instruction).single,
+          emitter.negateDouble(
+            result!,
+            inputs.single,
+            plan.temporaries.singleOrNull,
           );
-          allocation.release(selection.body.inputsOf(instruction).single);
-          final destination = allocation.allocate(.floating, preferred: source);
-          final temporary = emitter.negationNeedsTemporary
-              ? allocation.allocate(.general)
-              : null;
-          emitter.negateDouble(destination, source, temporary);
-          if (temporary != null) allocation.releaseTemporary(temporary);
-          allocation.define(instruction, destination);
         } else if (selection.mixedComparisons[instruction]
             case final selected?) {
-          final integer = allocation.read(selected.integer);
-          final floating = allocation.read(
-            selected.floating,
-            except: [integer],
-          );
-          final destination = allocation.allocate(.general, except: [integer]);
-          final temporary = allocation.allocate(.general, except: [integer]);
-          final converted = allocation.allocate(.floating, except: [floating]);
           _mixedComparison(
             selected.comparison,
-            destination,
-            integer,
-            floating,
-            temporary,
-            converted,
+            result!,
+            inputs[0],
+            inputs[1],
+            plan.temporaries[0],
+            plan.temporaries[1],
           );
-          allocation.release(selected.integer);
-          allocation.release(selected.floating);
-          allocation.releaseTemporary(temporary);
-          allocation.releaseTemporary(converted);
-          allocation.define(instruction, destination);
         } else {
-          final operands = allocation.binaryOperands(instruction);
-          selection.binaries[instruction]!.encoding.emit(
-            operands.result,
-            operands.left,
-            operands.right,
-          );
-          allocation.finishBinary(instruction, operands);
+          final binary = selection.binaries[instruction]!;
+          scalarBinaryEncoding(
+            emitter,
+            instruction,
+            floating: binary.floatingInputs,
+            comparison: binary.comparison,
+            constant: binary.constant,
+          ).emit(result!, inputs[0], inputs[1]);
+        }
+        transfers(plan.resultMoves);
+        if (plan.emptyResult && result != null) {
+          emitter.loadImmediate(result, 0);
         }
       }
-      switch (selection.body.ends[block]!) {
-        case Return(:final value):
-          if (selection.entry.resultRegister case final result?) {
-            if (layouts.representation(selection.body.typeOf(value!)) ==
-                layouts.representation(layouts.returnType(target))) {
-              emitter.move(result, allocation.read(value));
-            } else {
-              allocation.load(
-                value,
-                result,
-                asType: layouts.returnType(target),
-              );
-            }
-          }
+      final end = selection.body.ends[block]!;
+      final plan = allocation.terminators[block]!;
+      transfers(plan.before);
+      switch (end) {
+        case Return():
           if (failures) {
             emitter.loadImmediate(
               emitter.failureRegister,
@@ -610,39 +343,116 @@ final class ScalarFunction<R extends Object>(
           if (onReturn == null) {
             emitter.abort(71);
           } else {
-            allocation.prepareEdges(block);
-            edge(onReturn);
+            edge(block, onReturn);
           }
-        case Throw(:final exception, stackTrace: final trace!, :final onThrow):
-          allocation.placeException(exception, trace);
-          emitter.loadImmediate(
-            emitter.failureRegister,
-            CallStatus.threw.index,
-          );
+        case Throw(:final onThrow):
           if (onThrow == null) {
+            emitter.loadImmediate(
+              emitter.failureRegister,
+              CallStatus.threw.index,
+            );
             leave();
           } else {
-            allocation.saveUnwind();
-            edge(onThrow);
+            edge(block, onThrow);
           }
         case Unreachable():
           emitter.abort(71);
         case final Jump jump:
-          allocation.prepareEdges(block);
-          edge(jump);
-        case Branch(:final condition, :final ifTrue, :final ifFalse):
-          final value = allocation.read(condition);
-          allocation.prepareEdges(block);
+          edge(block, jump);
+        case Branch(:final ifTrue, :final ifFalse):
           final otherwise = emitter.label();
-          emitter.jumpIfZero(value, otherwise);
-          edge(ifTrue);
+          emitter.jumpIfZero(plan.inputs.single, otherwise);
+          edge(block, ifTrue);
           emitter.bind(otherwise);
-          edge(ifFalse);
+          edge(block, ifFalse);
         default:
-          throw UnsupportedError('Native terminator: ${block.end.runtimeType}');
+          throw StateError('Unallocated terminator.');
       }
     }
     return emitter.finish();
+  }
+
+  void _transfer(
+    AllocationMove<R> move,
+    void Function(Fixup, Constant) constant,
+  ) {
+    void object(Constant value, R destination) =>
+        emitter.address(destination, (fixup) => constant(fixup, value));
+    void load(AllocationLocation<R> source, R destination) {
+      switch (source) {
+        case AllocationRegister(:final register):
+          if (destination != register) emitter.move(destination, register);
+        case AllocationStack(:final offset):
+          emitter.loadStack(destination, offset);
+        case AllocationConstant(value: final value):
+          switch (value) {
+            case ScalarConstant(value: final int number):
+              emitter.loadImmediate(destination, number);
+            case ScalarConstant(value: final bool flag):
+              emitter.loadImmediate(destination, flag ? 1 : 0);
+            case ScalarConstant(value: final double number):
+              final bits = ByteData(8)..setFloat64(0, number, .little);
+              emitter.loadImmediate(move.auxiliary!, bits.getInt64(0, .little));
+              emitter.move(destination, move.auxiliary!);
+            case ScalarConstant(value: null):
+              emitter.loadImmediate(destination, 0);
+            default:
+              object(value, destination);
+          }
+      }
+    }
+
+    final source = move.source, destination = move.destination;
+    if (destination is AllocationStack<R> &&
+        source is AllocationRegister<R> &&
+        move.from == move.to) {
+      emitter.storeStack(source.register, destination.offset);
+      return;
+    }
+    final register = destination is AllocationRegister<R>
+        ? destination.register
+        : move.temporary!;
+    if (source is AllocationConstant<R> &&
+        move.to == .reference &&
+        move.from != .reference) {
+      object(source.value, register);
+    } else if (move.from == move.to) {
+      load(source, register);
+    } else if (move.to == .reference) {
+      load(source, register);
+      final no = emitter.label(), done = emitter.label();
+      emitter.jumpIfZero(register, no);
+      object(const Constant.boolean(true), register);
+      emitter.jump(done);
+      emitter.bind(no);
+      object(const Constant.boolean(false), register);
+      emitter.bind(done);
+    } else if (move.from == .reference) {
+      final base = source is AllocationRegister<R>
+          ? source.register
+          : move.to == .floating
+          ? move.auxiliary!
+          : register;
+      load(source, base);
+      emitter.loadMemory(
+        register,
+        base,
+        offset: ObjectHeader.fieldsOffset,
+        bytes: 8,
+        signed: false,
+      );
+    } else if (move.from == .word && move.to == .floating) {
+      final base = source is AllocationRegister<R>
+          ? source.register
+          : move.auxiliary!;
+      load(source, base);
+      emitter.convertIntToDouble(register, base);
+    } else {
+      throw StateError('Unsupported allocated representation transfer.');
+    }
+    if (destination is AllocationStack<R>) {
+      emitter.storeStack(register, destination.offset);
+    }
   }
 
   void _mixedComparison(
