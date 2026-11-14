@@ -285,6 +285,31 @@ class _Directory {
   }
 }
 
+@patch
+abstract class FileSystemEntity {
+  @patch
+  static _resolveSymbolicLinks(_Namespace namespace, Uint8List path) {
+    final input = _ioMalloc(path.length);
+    if (input == ffi.nullptr) throw const OutOfMemoryError();
+    try {
+      input.asTypedList(path.length).setAll(0, path);
+      final error = _errnoLocation();
+      ffi.Pointer<ffi.Uint8> resolved;
+      do {
+        resolved = _ioRealpath(input, ffi.nullptr);
+      } while (resolved == ffi.nullptr && error.value == 4);
+      if (resolved == ffi.nullptr) return _ioError(error.value);
+      try {
+        return _ioString(resolved);
+      } finally {
+        _ioFree(resolved);
+      }
+    } finally {
+      _ioFree(input);
+    }
+  }
+}
+
 final _errnoLocation = ffi.DynamicLibrary.process()
     .lookupFunction<
       ffi.Pointer<ffi.Int> Function(),
@@ -303,7 +328,12 @@ String _ioString(ffi.Pointer<ffi.Uint8> pointer) {
   while (pointer[length] != 0) {
     length++;
   }
-  return utf8.decode(pointer.asTypedList(length), allowMalformed: true);
+  final bytes = pointer.asTypedList(length);
+  final text = utf8.decode(bytes, allowMalformed: true);
+  // OS strings treat a leading BOM as data, unlike the UTF-8 decoder.
+  return length >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2] == 0xbf
+      ? '\ufeff$text'
+      : text;
 }
 
 @SystemNative()
@@ -356,17 +386,18 @@ external int _ioReadlink(
   int size,
 );
 
-@SystemNative()
-@ffi.Native<
-  ffi.Pointer<ffi.Uint8> Function(
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Pointer<ffi.Uint8>,
-  )
->(symbol: 'realpath')
-external ffi.Pointer<ffi.Uint8> _ioRealpath(
-  ffi.Pointer<ffi.Uint8> path,
-  ffi.Pointer<ffi.Uint8> buffer,
-);
+// glibc's compatibility realpath rejects null; dlsym selects the default version.
+final _ioRealpath = ffi.DynamicLibrary.process()
+    .lookupFunction<
+      ffi.Pointer<ffi.Uint8> Function(
+        ffi.Pointer<ffi.Uint8>,
+        ffi.Pointer<ffi.Uint8>,
+      ),
+      ffi.Pointer<ffi.Uint8> Function(
+        ffi.Pointer<ffi.Uint8>,
+        ffi.Pointer<ffi.Uint8>,
+      )
+    >('realpath');
 
 @SystemNative()
 @ffi.Native<ffi.Pointer<ffi.Uint8> Function(ffi.Pointer<ffi.Uint8>)>(

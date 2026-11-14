@@ -186,6 +186,16 @@ void main() {
             Uri.parse('dart:io/directory_impl.dart'),
           );
         }
+        final resolveLinks = io.element
+            .getClass('FileSystemEntity')!
+            .getMethod('resolveSymbolicLinksSync')!;
+        expect(
+          io
+              .getFragmentDeclaration(resolveLinks.fragments.last)!
+              .resolvedUnit!
+              .uri,
+          Uri.parse('dart:io/file_system_entity.dart'),
+        );
         final analyzed = {for (final unit in units) unit.uri};
         expect(analyzed, containsAll(patches.origins.keys));
         final ffi = libraries.singleWhere(

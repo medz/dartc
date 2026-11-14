@@ -116,6 +116,7 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     'process_identity',
     'working_directory',
     'temporary_directories',
+    'resolve_symbolic_links',
     'descriptor_write',
     'futures',
     'async_functions',
@@ -306,6 +307,11 @@ Future<void> main(List<String> args) async {
       ('mixins', 'mixins', 'entry_mixins'),
       ('json_utf8', 'json_utf8', 'entry_json_utf8'),
       ('working_directory', 'working_directory', 'entry_working_directory'),
+      (
+        'resolve_symbolic_links',
+        'resolve_symbolic_links',
+        'entry_resolve_symbolic_links',
+      ),
       (
         'temporary_directories',
         'temporary_directories',

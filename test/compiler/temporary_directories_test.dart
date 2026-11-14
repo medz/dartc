@@ -30,6 +30,7 @@ void main() {
       ({'TMPDIR': '中文///', 'TMP': 'ignored'}, '中文//'),
       ({'TMPDIR': '', 'TMP': 'ignored'}, ''),
       ({'TMPDIR': '/'}, '/'),
+      ({'TMPDIR': '\ufeffrelative/'}, '\ufeffrelative'),
     ]) {
       for (final command in commands()) {
         final result = await Process.run(

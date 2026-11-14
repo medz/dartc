@@ -127,7 +127,7 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 后续系统环境修改不改变已取得的快照；写入、删除和清空视图抛出 UnsupportedError。环境文本和视图跨回收保留，见[环境执行验证](../test/compiler/platform_environment_test.dart)。`Platform.operatingSystem`、平台布尔标记和 `pathSeparator` 使用输出目标 ABI 的平台事实。
 
-`pid` 返回正在执行的进程 ID；`Platform.numberOfProcessors`、`localHostname` 和 `resolvedExecutable` 读取目标进程所在系统，保留官方 Dart 包装。可执行路径为解析符号链接后的绝对路径，支持空 PATH、相对启动路径、Unicode 和超过初始缓冲区长度的路径，见[进程身份验证](../test/compiler/process_identity_test.dart)。其余 Platform 元数据、当前目录读写和同步临时目录以外的文件/目录操作和子进程管理仍有实现缺口。
+`pid` 返回正在执行的进程 ID；`Platform.numberOfProcessors`、`localHostname` 和 `resolvedExecutable` 读取目标进程所在系统，保留官方 Dart 包装。可执行路径为解析符号链接后的绝对路径，支持空 PATH、相对启动路径、Unicode 和超过初始缓冲区长度的路径，见[进程身份验证](../test/compiler/process_identity_test.dart)。部分 Platform 元数据、文件/目录操作和子进程管理仍有实现缺口。
 
 ## 工作目录与临时目录
 
@@ -135,9 +135,11 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 失败的切换不改变当前目录；当前目录被删除时，读取抛出带 errno 的 PathNotFoundException，并可切回仍存在的目录。见[当前目录原生验证](../test/compiler/working_directory_test.dart)。
 
-`Directory.systemTemp` 每次读取当前目标进程的 TMPDIR，未设置时依次尝试 TMP 和 `/tmp`；保留空值并只移除一个非根路径的末尾斜杠，遵循[固定 SDK 的 POSIX 选择逻辑](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/bin/directory_linux.cc)。这与 `Platform.environment` 的缓存快照独立。`createTempSync` 保留官方父路径与前缀拼接、空父路径校验、IOOverrides 工厂和文件系统错误分类，通过 libc `mkdtemp` 创建唯一目录；权限为 0700 再受进程 umask 限制，遇到 EINTR 重试。相对路径、Unicode、首个 NUL 结束前缀、缺失父目录、非目录父路径和过长名称见[临时目录原生验证](../test/compiler/temporary_directories_test.dart)。
+`Directory.systemTemp` 每次读取当前目标进程的 TMPDIR，未设置时依次尝试 TMP 和 `/tmp`；保留空值并只移除一个非根路径的末尾斜杠，遵循[固定 SDK 的 POSIX 选择逻辑](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/bin/directory_linux.cc)。前导 U+FEFF 保留为路径数据。这与 `Platform.environment` 的缓存快照独立。`createTempSync` 保留官方父路径与前缀拼接、空父路径校验、IOOverrides 工厂和文件系统错误分类，通过 libc `mkdtemp` 创建唯一目录；权限为 0700 再受进程 umask 限制，遇到 EINTR 重试。相对路径、Unicode、首个 NUL 结束前缀、缺失父目录、非目录父路径和过长名称见[临时目录原生验证](../test/compiler/temporary_directories_test.dart)。
 
-异步临时目录创建、文件和目录的其他操作、Uri.base 及默认文件 URI 平台选择仍待接通。
+`File`、`Directory` 和 `Link` 的 `resolveSymbolicLinksSync` 复用官方 FileSystemEntity 正文，只将外部操作接到 POSIX `realpath`；通过动态符号查找选择默认版本，避免 glibc 旧兼容入口拒绝自动分配输出缓冲区。按实际文件系统顺序解析符号链接及 `.`/`..`，返回绝对路径并重试 EINTR；缺失目标、链接环、非目录中间段和过长名称保留原始路径及 errno。返回文本使用与当前目录相同的 UTF-8 策略，原始名称的非法字节无法无损表示。相对/绝对路径、Unicode、链接链、NUL、方法值和回收后的结果见[同步链接解析验证](../test/compiler/resolve_symbolic_links_test.dart)。
+
+异步临时目录创建和符号链接解析、文件和目录的其他操作、Uri.base 及默认文件 URI 平台选择仍待接通。
 
 ## 原生库
 
