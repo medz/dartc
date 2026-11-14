@@ -1468,7 +1468,10 @@ final class ProgramFlow(
       privateScope: null,
     )).target;
     if (target == null || program.implementationOf(target) == null) return null;
-    throw StateError('Normalize dynamic dispatch before program flow.');
+    throw StateError(
+      'Missing normalized ${operation.runtimeType} ${selector.name} '
+      'on ${receiverType.dartName} in ${activation.body.target.name}.',
+    );
   }
 
   FlowResult _instantiate(

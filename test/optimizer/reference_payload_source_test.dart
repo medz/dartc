@@ -2,7 +2,6 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
-import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 

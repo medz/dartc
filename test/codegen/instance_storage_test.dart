@@ -4,7 +4,6 @@ import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/instance_storage.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';

@@ -276,7 +276,15 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
               arguments: entry.parameterTypes.map(FlowValue.unknown).toList(),
             ),
           ],
-        ], openEntries: [...exports.keys, ?runtime.processExitCode]).program;
+        ],
+        openEntries: [...exports.keys, ?runtime.processExitCode],
+        memoryLayoutFor: (program) => ProgramLayout(
+          program.classes,
+          functions: program.functions,
+          nativeLayout: NativeLayout(target),
+          typeRuntime: runtime.types,
+        ),
+      ).program;
     final definitions = reachableDefinitions(
       program,
       roots,

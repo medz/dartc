@@ -1,6 +1,6 @@
 import 'package:dartc/ir.dart';
 
-/// Binds List storage and construction to checked SDK declarations.
+/// Binds constant List layout to checked SDK storage declarations.
 final class ListStorage(Iterable<IrClass> classes) {
   final _classes = classes.toList();
   late final declaration = _storage();
@@ -22,28 +22,4 @@ final class ListStorage(Iterable<IrClass> classes) {
   ClassType get buffer => data.type as ClassType;
   InstanceField get length => declaration.listStorage!.length;
   InstanceField get data => declaration.listStorage!.data;
-
-  FunctionTarget? callFor(Instruction operation) {
-    if (operation case CollectionSpread(isMethodCall: false, :final collection)
-        when CoreTypes.view(collection.type, CoreTypes.list) != null) {
-      return declaration.listStorage!.spread;
-    }
-    final name = switch (operation) {
-      NewCollection(:final collectionType)
-          when collectionType.declaration == CoreTypes.list =>
-        'empty',
-      ListFilled() => 'filled',
-      ListFrom() => 'from',
-      _ => null,
-    };
-    return name == null
-        ? null
-        : _classes
-              .singleWhere(
-                (c) => c.type == CoreTypes.list,
-                orElse: () =>
-                    throw ArgumentError('Lists require checked SDK factories.'),
-              )
-              .constructors[name]!;
-  }
 }

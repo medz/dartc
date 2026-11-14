@@ -84,6 +84,49 @@ void main() {
     );
   });
 
+  test(
+    'native exports enter through their ABI bridge without adding source roots',
+    () {
+      final pointer = FfiTypes.int64Pointer;
+      final identity = FunctionTarget(uri, 'identity', pointer, [pointer]);
+      final body = Block(identity.parameterTypes);
+      body.finish(Return(body.parameters.single));
+      final program = IrProgram([], [
+        IrFunction(identity, [body]),
+      ]);
+      final exports = {
+        identity: NativeExport(
+          'identity',
+          NativeSignature(Pointer<Int64>, [Pointer<Int64>]),
+        ),
+      };
+      final preparation = ProgramPreparation(target, program, exports: exports);
+      final entry = preparation.roots.single;
+      expect(entry.parameterTypes, [ValueType.integer]);
+      expect(entry.returnType, ValueType.integer);
+      final facts = ProgramFlow(
+        preparation.program,
+        const [],
+        openEntries: preparation.roots,
+      ).facts;
+      expect(facts.openEntries, isNot(contains(identity)));
+      expect(facts.definitions, contains(identity));
+      final explicit = ProgramPreparation(
+        target,
+        program,
+        roots: [identity],
+        exports: exports,
+      );
+      expect(explicit.roots, contains(identity));
+      final module = Arm64CodeGenerator(target)
+          .generate(Compiler(target).prepare(program, exports: exports));
+      expect(
+        module.symbols.where((symbol) => symbol.exported).single.name,
+        'identity',
+      );
+    },
+  );
+
   test('native addresses must be bound before emission', () {
     final reference = NativeReference(
       'fixture',

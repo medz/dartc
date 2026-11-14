@@ -74,18 +74,18 @@ final class ProgramPreparation(
   this {
     final entries = {
       ...roots,
-      ...exports.keys,
       if (entryPoint != null) ...[
         entryPoint.function,
         ?runtime?.processExitCode,
       ],
     };
-    if (entries.isEmpty || exports.keys.any(imports.containsKey)) {
+    final sourceEntries = {...entries, ...exports.keys};
+    if (sourceEntries.isEmpty || exports.keys.any(imports.containsKey)) {
       throw ArgumentError(
         'Expected roots and distinct native imports and exports.',
       );
     }
-    for (final entry in entries) {
+    for (final entry in sourceEntries) {
       if (source.implementationOf(entry) == null) {
         throw ArgumentError('Missing entry definition: ${entry.name}');
       }
@@ -107,7 +107,7 @@ final class ProgramPreparation(
         );
       }
     }
-    _bindings = NativeBindings(source, imports, exports, entries);
+    _bindings = NativeBindings(source, imports, exports, sourceEntries);
     program = _bindings.program;
     this.roots = .unmodifiable({...entries, ..._bindings.exports.keys});
   }

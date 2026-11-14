@@ -79,12 +79,6 @@ final class ProgramLayout(
     );
   }
 
-  FunctionTarget collectionFactory(ClassType type) =>
-      _classes[type.declaration]?.constructors['new'] ??
-      (throw ArgumentError(
-        'Collection construction requires the checked SDK factory: ${type.name}',
-      ));
-
   TypeTestKind typeTest(ValueType source, ValueType tested) {
     if (FfiTypes.isPointer(source)) source = FfiTypes.pointerRuntimeType;
     if (tested.accepts(source)) return .constantTrue;

@@ -462,51 +462,16 @@ final class FunctionRepresentation(
           operands[instruction] = block.parameters;
           continue;
         }
-        if (instruction case NewCollection(:final collectionType)
-            when collectionType.declaration == CoreTypes.map ||
-                collectionType.declaration == CoreTypes.set) {
-          final target = layouts
-              .collectionFactory(collectionType)
-              .implementation;
-          invocations[instruction] = target;
-          operands[instruction] = [
-            ...target.signature.bind<Value>(
-              [],
-              {},
-              (index) =>
-                  members.program.implementationOf(target)!.defaults[index]!,
-            ),
-            _reify(
-              target.owner!.instantiate(collectionType.typeArguments),
-              body,
-            ),
-          ];
-          body.add(instruction);
-          continue;
-        }
-        if (layouts.lists.callFor(instruction) case final target?) {
-          final element = instruction is CollectionSpread
-              ? CoreTypes.view(
-                  instruction.collection.type,
-                  CoreTypes.list,
-                )!.typeArguments.single
-              : (instruction.type as ClassType).typeArguments.single;
-          final inputs = instruction is NewCollection
-              ? [instruction.growable ?? const Constant.boolean(true)]
-              : instruction.inputs.toList();
-          invocations[instruction] = target;
-          operands[instruction] = [
-            for (final (i, input) in inputs.indexed)
-              convert(input, target.parameterTypes[i], body),
-            _reify(
-              instruction is CollectionSpread
-                  ? element
-                  : CoreTypes.listOf(element),
-              body,
-            ),
-          ];
-          body.add(instruction);
-          continue;
+        if (instruction is NewCollection ||
+            instruction is ListFilled ||
+            instruction is ListFrom ||
+            instruction is CollectionSpread &&
+                !instruction.isMethodCall &&
+                CoreTypes.view(instruction.collection.type, CoreTypes.list) !=
+                    null) {
+          throw StateError(
+            'Normalize collection construction before representation.',
+          );
         }
         if (instruction case MakeRecord(
           type: final RecordType type,
