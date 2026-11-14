@@ -2,6 +2,9 @@ import 'package:dartc/frontend.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_value.dart';
 import 'package:dartc/src/optimizer/program_flow.dart';
+import 'package:dartc/src/optimizer/program_optimizer.dart';
+import 'package:dartc/src/optimizer/simplification.dart';
+import 'package:dartc/src/optimizer/storage_elimination.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
@@ -62,6 +65,41 @@ void main() {
         ]);
         expect(facts.hasUnknownCall(savedCall), isFalse);
         expect(facts.definitions, isNot(contains(saved.initializer)));
+        final optimized = ProgramOptimizer(const [
+          ProgramSimplification(),
+          ProgramStorageElimination(),
+        ]).run(program, facts.entries);
+        final rewritten =
+            optimized.program.implementationOf(entry.target) as IrFunction;
+        expect(
+          IrInterpreter(optimized.program, {}).run(rewritten, [first]),
+          expected,
+        );
+        final residual = optimized.program.functions
+            .where((body) => optimized.definitions.contains(body.target))
+            .expand((body) => body.blocks)
+            .expand(
+              (block) => [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ],
+            )
+            .toList();
+        expect(
+          residual.where(
+            (op) => op is StoreGlobal || op is StoreField || op is WriteCell,
+          ),
+          isEmpty,
+          reason: 'the remaining result no longer observes the source storage',
+        );
+        expect(
+          residual.where(
+            (op) => op is Construct || op is NewCell || op is MakeClosure,
+          ),
+          isEmpty,
+          reason:
+              'source object and closure shapes are not execution obligations',
+        );
       },
     );
   }
