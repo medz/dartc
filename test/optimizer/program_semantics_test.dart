@@ -123,6 +123,156 @@ void main() {
     });
   }
 
+  test('an exposed constructor publishes its initialized object fields', () {
+    final observed = <int>[];
+    source.exposeConstructor((construct) {
+      final product = construct();
+      expect(product.kind, int);
+      observed.add(product.callback());
+    });
+    expect(observed, [23]);
+    final entry = program.functions.singleWhere(
+      (f) => f.target.name == 'exposeConstructor',
+    );
+    final callback = program.functions.singleWhere(
+      (f) => f.target.name == 'constructedCallback',
+    );
+    final constructor = program.functions.singleWhere(
+      (f) =>
+          f.target.owner?.name == 'CallbackProduct' &&
+          f.target.kind == .initializer,
+    );
+    final facts = ProgramFlow(program, [
+      (
+        target: entry.target,
+        arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+      ),
+    ]).facts;
+    expect(facts.definitions, contains(callback.target));
+    expect(
+      facts.returnedBy(callback.target).constant?.structuralKey,
+      const Constant.integer(23).structuralKey,
+    );
+    expect(
+      facts.valueOf(constructor.entry.parameters.first).objects,
+      hasLength(1),
+    );
+    expect(
+      facts.valueOf(constructor.entry.parameters.first).unknownTypes,
+      isEmpty,
+    );
+  });
+
+  test(
+    'an exposed generic constructor does not choose one external type argument',
+    () {
+      source.exposeUnappliedConstructor((construct) {
+        expect(construct<int>().kind, int);
+        expect(construct<String>().kind, String);
+      });
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'exposeUnappliedConstructor',
+      );
+      final constructor = program.functions.singleWhere(
+        (f) =>
+            f.target.owner?.name == 'CallbackProduct' &&
+            f.target.kind == .initializer,
+      );
+      final facts = ProgramFlow(program, [
+        (
+          target: entry.target,
+          arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(facts.definitions, contains(constructor.target));
+      final reified = constructor.blocks
+          .expand((block) => block.instructions)
+          .whereType<ReifyType>()
+          .single;
+      expect(facts.valueOf(reified).constant, isNull);
+      expect(facts.valueOf(reified).unknownTypes, {ValueType.typeType});
+    },
+  );
+
+  test(
+    'an exception object crossing an external boundary exposes its fields',
+    () {
+      final observed = <int>[];
+      source.exposeThrowingFunction((throwing) {
+        try {
+          throwing();
+        } on source.CallbackProduct<int> catch (product) {
+          observed.add(product.callback());
+        }
+      });
+      expect(observed, [23]);
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'exposeThrowingFunction',
+      );
+      final callback = program.functions.singleWhere(
+        (f) => f.target.name == 'constructedCallback',
+      );
+      final facts = ProgramFlow(program, [
+        (
+          target: entry.target,
+          arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(facts.definitions, contains(callback.target));
+      expect(
+        facts.returnedBy(callback.target).constant?.structuralKey,
+        const Constant.integer(23).structuralKey,
+      );
+    },
+  );
+
+  test(
+    'a failed external construction does not publish the unfinished object',
+    () {
+      source.exposeFailingConstructor((construct) {
+        expect(construct, throwsA(7));
+      });
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'exposeFailingConstructor',
+      );
+      final callback = program.functions.singleWhere(
+        (f) => f.target.name == 'unexposedCallback',
+      );
+      final facts = ProgramFlow(program, [
+        (
+          target: entry.target,
+          arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(facts.definitions, isNot(contains(callback.target)));
+    },
+  );
+
+  test(
+    'storing a callback into an external object exposes the stored callable',
+    () {
+      final destination = source.ExternalSlot();
+      source.publishCallback(destination);
+      expect(destination.callback!(), 23);
+      final entry = program.functions.singleWhere(
+        (f) => f.target.name == 'publishCallback',
+      );
+      final callback = program.functions.singleWhere(
+        (f) => f.target.name == 'constructedCallback',
+      );
+      final facts = ProgramFlow(
+        program,
+        const [],
+        openEntries: [entry.target],
+      ).facts;
+      expect(facts.definitions, contains(callback.target));
+      expect(
+        facts.returnedBy(callback.target).constant?.structuralKey,
+        const Constant.integer(23).structuralKey,
+      );
+    },
+  );
+
   for (final example in <String, int Function()>{
     'rejectedCovariantCall': source.rejectedCovariantCall,
     'constructorValue': source.constructorValue,

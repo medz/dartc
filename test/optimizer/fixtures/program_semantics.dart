@@ -188,3 +188,51 @@ int genericBoundMethodOtherType() {
   final kind = GenericMethod().kind<String>;
   return kind();
 }
+
+int constructedCallback() => 23;
+
+class CallbackProduct<T>() {
+  final Type kind = T;
+  final int Function() callback = constructedCallback;
+}
+
+void exposeConstructor(
+  void Function(CallbackProduct<int> Function()) boundary,
+) {
+  boundary(CallbackProduct<int>.new);
+}
+
+class ExternalSlot() {
+  int Function()? callback;
+}
+
+void publishCallback(ExternalSlot destination) {
+  destination.callback = constructedCallback;
+}
+
+Never throwProduct() => throw CallbackProduct<int>();
+
+void exposeThrowingFunction(void Function(Never Function()) boundary) {
+  boundary(throwProduct);
+}
+
+int unexposedCallback() => 41;
+
+class FailingProduct() {
+  final int Function() callback = unexposedCallback;
+  this {
+    throw 7;
+  }
+}
+
+void exposeFailingConstructor(
+  void Function(FailingProduct Function()) boundary,
+) {
+  boundary(FailingProduct.new);
+}
+
+void exposeUnappliedConstructor(
+  void Function(CallbackProduct<T> Function<T>()) boundary,
+) {
+  boundary(CallbackProduct.new);
+}

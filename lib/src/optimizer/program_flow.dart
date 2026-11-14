@@ -31,6 +31,7 @@ final class ProgramFlow(
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
   final _escapingActivations = <_Activation>{};
+  final _constructedReturns = <_Activation, FlowValue>{};
   ProgramFlowFacts? _facts;
 
   this {
@@ -433,6 +434,10 @@ final class ProgramFlow(
         '${body.target.library}::${body.target.name}.',
       );
     }
+    final escapes =
+        _escapingActivations.contains(activation) ||
+        (_escapingReturns.contains(body.target) &&
+            identical(_roots[body.target], activation));
     final incoming = <Block, FlowState>{body.entry: activation.input!.copy()};
     final pending = <Block>{body.entry};
     final readers = <Value, Set<Block>>{};
@@ -502,6 +507,10 @@ final class ProgramFlow(
       FlowValue exception,
       FlowValue stackTrace,
     ) {
+      if (escapes) {
+        state.escape([exception, stackTrace]);
+        _admitEscaped(state);
+      }
       final joinedException = activation.exception.join(exception);
       final joinedTrace = activation.stackTrace.join(stackTrace);
       summaryChanged |=
@@ -572,10 +581,8 @@ final class ProgramFlow(
       switch (block.end) {
         case Return(:final value):
           final returned = value == null ? _null : read(value);
-          if (_escapingActivations.contains(activation) ||
-              (_escapingReturns.contains(body.target) &&
-                  identical(_roots[body.target], activation))) {
-            state.escape([returned]);
+          if (escapes) {
+            state.escape([returned, ?_constructedReturns[activation]]);
             _admitEscaped(state);
           }
           final joined = activation.returned.join(returned);
@@ -653,9 +660,7 @@ final class ProgramFlow(
     }
     if (activation.exceptional != null) activation.effects.add(Effect.mayThrow);
     summaryChanged |= beforeEffects != activation.effects.length;
-    if (_escapingActivations.contains(activation) ||
-        (_escapingReturns.contains(body.target) &&
-            identical(_roots[body.target], activation))) {
+    if (escapes) {
       for (final state in [activation.normal, activation.exceptional]) {
         if (state != null) _publishExternal(state);
       }
@@ -1433,16 +1438,21 @@ final class ProgramFlow(
         type.substitute(activation.environment),
     ];
     for (final constant in function.constants.whereType<FunctionConstant>()) {
-      var target = constant.target;
-      var signature = constant.type as FunctionType;
+      final signature = constant.type as FunctionType;
       final effective = appliedArguments.isEmpty && checkAllArguments
           ? [
               for (final parameter in signature.typeParameters)
                 parameter.defaultType ?? parameter.bound,
             ]
           : appliedArguments;
+      late final ({
+        FunctionTarget target,
+        ClassType? owner,
+        List<ValueType> typeArguments,
+      })
+      binding;
       try {
-        signature = signature.instantiate(effective);
+        binding = _constantCall(constant, effective);
       } on ArgumentError {
         result = _joinResult(result, FlowResult(exceptional: state.copy()));
         activation.operationEffects[site] = {
@@ -1451,27 +1461,7 @@ final class ProgramFlow(
         };
         continue;
       }
-      var owner = constant.ownerType;
-      var genericArguments = constant.typeArguments ?? effective;
-      if (constant.constructorTypeArguments case final template?) {
-        genericArguments = [
-          for (final type in template)
-            type.substitute({
-              for (final (index, parameter)
-                  in constant.constructorSignature!.typeParameters.indexed)
-                parameter: genericArguments[index],
-            }),
-        ];
-      }
-      if (target.kind == .initializer || target.kind == .factory) {
-        final resolved = target.resolveConstruction(
-          signature.result as ClassType,
-        );
-        target = resolved.target;
-        owner = resolved.ownerType;
-        genericArguments = const [];
-      }
-      target = target.implementation;
+      final (:target, :owner, typeArguments: genericArguments) = binding;
       final body = program.implementationOf(target);
       final arguments = bind(target, body);
       if (arguments == null) continue;
@@ -1671,22 +1661,31 @@ final class ProgramFlow(
 
   void _admitEscaped(FlowState state) {
     final reachable = state.exposedValues;
-    void admit(
+    _Activation? prepare(
       Object key,
       FunctionTarget target,
-      List<FlowValue> arguments, {
-      Map<TypeParameterType, ValueType> environment = const {},
-    }) {
+      Map<TypeParameterType, ValueType> environment,
+    ) {
       final body = program.implementationOf(target);
-      if (body is! IrFunction) return;
+      if (body is! IrFunction) return null;
       final activation = _escapedCalls.putIfAbsent(
         key,
         () => _Activation(body),
       );
       activation.repeated = true;
       _escapingActivations.add(activation);
-      activation.mergeEnvironment(environment);
-      _supply(activation, arguments, state);
+      if (activation.mergeEnvironment(environment)) _pending.add(activation);
+      return activation;
+    }
+
+    void admit(
+      Object key,
+      FunctionTarget target,
+      List<FlowValue> arguments, {
+      Map<TypeParameterType, ValueType> environment = const {},
+    }) {
+      final activation = prepare(key, target, environment);
+      if (activation != null) _supply(activation, arguments, state);
     }
 
     final visited = <(FlowObject, Object?)>{};
@@ -1704,20 +1703,48 @@ final class ProgramFlow(
       ];
 
       for (final constant in value.constants.whereType<FunctionConstant>()) {
-        final target = constant.target.implementation;
+        final (:target, :owner, typeArguments: applied) = _constantCall(
+          constant,
+          typeArguments.isEmpty
+              ? (constant.type as FunctionType).typeParameters
+              : typeArguments,
+        );
         final environment = {
-          if (constant.ownerType != null)
-            ...target.environmentFor(constant.ownerType!),
-          for (final (i, type)
-              in (constant.typeArguments ?? typeArguments).indexed)
-            if (i < target.typeParameters.length)
-              target.typeParameters[i]: type,
+          if (owner != null) ...target.environmentFor(owner),
+          for (final (i, type) in applied.indexed)
+            target.typeParameters[i]: type,
         };
-        admit(identity ?? constant.structuralKey, target, [
-          if (target.kind.hasReceiver)
-            FlowValue.unknown(constant.ownerType ?? target.owner!),
-          ...parameters(target, environment),
-        ], environment: environment);
+        final key = identity ?? constant.structuralKey;
+        final arguments = parameters(target, environment);
+        if (target.kind != .initializer) {
+          admit(key, target, arguments, environment: environment);
+          continue;
+        }
+        final activation = prepare(key, target, environment);
+        if (activation == null) continue;
+        final receiver = _constructedReturns.putIfAbsent(
+          activation,
+          () => FlowValue.object(
+            FlowObject(
+              Construct(
+                target,
+                blockParameters(target.signatureFor(owner!).parameters),
+                instantiatedType: owner,
+              ),
+              activation,
+            ),
+          ),
+        );
+        state.construct(
+          receiver.objects.single,
+          target,
+          arguments,
+          repeated: true,
+          invoke: (_, arguments, input) {
+            _supply(activation, arguments, input);
+            return _unreachable;
+          },
+        );
       }
       for (final object in value.objects) {
         if (!visited.add((object, _typeKey(typeArguments)))) continue;
@@ -2287,6 +2314,31 @@ FlowResult _joinResult(FlowResult left, FlowResult right) {
     stackTrace: left.stackTrace.join(right.stackTrace),
     effects: {...left.effects, ...right.effects},
   );
+}
+
+({FunctionTarget target, ClassType? owner, List<ValueType> typeArguments})
+_constantCall(FunctionConstant constant, List<ValueType> arguments) {
+  var target = constant.target;
+  final signature = (constant.type as FunctionType).instantiate(arguments);
+  var owner = constant.ownerType;
+  var applied = constant.typeArguments ?? arguments;
+  if (constant.constructorTypeArguments case final template?) {
+    applied = [
+      for (final type in template)
+        type.substitute({
+          for (final (index, parameter)
+              in constant.constructorSignature!.typeParameters.indexed)
+            parameter: applied[index],
+        }),
+    ];
+  }
+  if (target.kind == .initializer || target.kind == .factory) {
+    final resolved = target.resolveConstruction(signature.result as ClassType);
+    target = resolved.target;
+    owner = resolved.ownerType;
+    applied = const [];
+  }
+  return (target: target.implementation, owner: owner, typeArguments: applied);
 }
 
 Object? _typeKey(Iterable<ValueType> types) =>
