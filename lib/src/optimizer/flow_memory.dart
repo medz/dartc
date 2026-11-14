@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 import 'package:dartc/interop.dart';
 
 import 'flow_value.dart';
@@ -35,7 +36,7 @@ final class FlowMemory {
   FlowValue get references {
     var value = _retained;
     for (final byte in _bytes.values) {
-      value = value.join(byte.value.references);
+      value = value.join(byte.references);
     }
     return value;
   }
@@ -102,6 +103,41 @@ final class FlowMemory {
     }
     return FlowValue.unknown(FfiTypes.valueType(type))
         .withReferences([_retained, for (final byte in bytes) byte.value]);
+  }
+
+  /// Reads a complete traced slot; partial bytes never become a Dart value.
+  FlowValue? readReference(int offset) {
+    if (offset % ObjectHeader.alignment != 0 ||
+        !contains(offset, ObjectHeader.alignment)) {
+      return null;
+    }
+    final bytes = [
+      for (var i = 0; i < ObjectHeader.alignment; i++) _at(offset + i),
+    ];
+    if (bytes.every((byte) => byte == _zero)) return _null;
+    final first = bytes.first;
+    return first.type == null &&
+            bytes.indexed.every(
+              (entry) =>
+                  entry.$2.type == null &&
+                  entry.$2.index == entry.$1 &&
+                  entry.$2.value == first.value,
+            )
+        ? first.value
+        : null;
+  }
+
+  /// Stores the language value, including boxed scalars, in one traced slot.
+  FlowMemory writeReference(int offset, FlowValue value) {
+    if (offset % ObjectHeader.alignment != 0 ||
+        !contains(offset, ObjectHeader.alignment)) {
+      return invalidate();
+    }
+    var bytes = _bytes;
+    for (var i = 0; i < ObjectHeader.alignment; i++) {
+      bytes = bytes.withEntry(offset + i, _Byte(value, null, i));
+    }
+    return FlowMemory._(start, length, _zeroes, bytes, _retained);
   }
 
   FlowMemory write(
@@ -272,16 +308,29 @@ final class FlowMemory {
 
 final class _Byte(
   final FlowValue value,
-  final NativeTypeRef type,
+  // A null native type denotes a traced reference fragment.
+  final NativeTypeRef? type,
   final int index,
 ) {
-  _Byte join(_Byte other) => type == other.type && index == other.index
-      ? _Byte(value.join(other.value), type, index)
-      : _Byte(
-          FlowValue.unknown(.integer).withReferences([value, other.value]),
-          _uint8,
-          0,
-        );
+  FlowValue get references => type == null ? value : value.references;
+
+  _Byte join(_Byte other) {
+    if (type == other.type && index == other.index) {
+      return _Byte(value.join(other.value), type, index);
+    }
+    if (type == null && other == _zero) {
+      return _Byte(value.join(_null), null, index);
+    }
+    if (this == _zero && other.type == null) {
+      return _Byte(_null.join(other.value), null, other.index);
+    }
+    return _Byte(
+      FlowValue.unknown(.integer)
+          .withReferences([references, other.references]),
+      _uint8,
+      0,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -294,6 +343,7 @@ final class _Byte(
   int get hashCode => Object.hash(value, type, index);
 }
 
+final _null = FlowValue.constant(const Constant.nullValue());
 final _uint8 = NativeScalarType(Uint8);
 final _zero = _Byte(.constant(const Constant.integer(0)), _uint8, 0);
 final _unknown = _Byte(.unknown(.integer), _uint8, 0);

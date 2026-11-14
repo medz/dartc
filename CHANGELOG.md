@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Track actual function and object values in traced inline payloads through overwrites, copies, aliases and call summaries. Promote proven payload reads to SSA values and remove unused storage while preserving escaped references and raw memory invalidation.
+
 - Expose Invocation construction and dynamic getter calls before program analysis, preserving actual arguments and generic receiver behavior. Track managed address origins through native pointer arithmetic and shared byte storage before selecting machine representation.
 
 - Preserve native callback declaration identity through graph cloning and inlining, including its thread binding and exception fallback. NativeCallable callbacks may use lexical generic types in unused optional parameters while retaining independent registration lifetimes.

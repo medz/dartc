@@ -1,4 +1,6 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
+import 'package:dartc/layout.dart';
 
 import 'flow_memory.dart';
 import 'flow_value.dart';
@@ -384,12 +386,38 @@ final class FlowState {
           exceptional: valid ? null : copy(),
           effects: const {Effect.allocates},
         );
-      case LoadNative(:final nativeType):
-        if (operands.single.isBottom) return _unreachable;
+      case LoadObjectReference():
+        if (operands.any((value) => value.isBottom)) return _unreachable;
+        final value =
+            _readReference(operands.first, operands[1]) ??
+            FlowValue.unknown(.object.nullable).withReferences([
+              reachableValues([operands.first]),
+            ]);
+        return _withEffects(_normal(value, copy()), const {
+          Effect.readsStorage,
+        });
+      case StoreObjectReference():
+        if (operands.any((value) => value.isBottom)) return _unreachable;
+        final address = _objectAddress(operands.first, operands[1]);
+        final next = _writeNative(
+          address,
+          _referenceSlot(operands.first, operands[1])
+              ? ObjectHeader.alignment
+              : null,
+          operands.last,
+          (memory, offset) => memory.writeReference(offset, operands.last),
+        );
+        return _withEffects(_normal(_null, next), const {Effect.writesStorage});
+      case LoadNative(nativeType: final NativeTypeRef nativeType) ||
+          LoadObjectData(nativeType: final NativeTypeRef nativeType):
+        if (operands.any((value) => value.isBottom)) return _unreachable;
+        final input = operation is LoadObjectData
+            ? _objectAddress(operands.first, operands.last)
+            : operands.single;
         var value = const FlowValue.bottom();
         final layout = memoryLayout?.nativeLayout;
         final size = layout?.of(nativeType).size;
-        for (final address in operands.single.addresses) {
+        for (final address in input.addresses) {
           final memory = address.base is FlowObject
               ? _objects[address.base as FlowObject]?.memory
               : null;
@@ -404,23 +432,27 @@ final class FlowState {
                       .withReferences([address.reference]),
           );
         }
-        if (operands.single.addresses.isEmpty ||
-            operands.single.unknownTypes.isNotEmpty ||
-            operands.single.constants.isNotEmpty) {
+        if (input.addresses.isEmpty ||
+            input.unknownTypes.isNotEmpty ||
+            input.constants.isNotEmpty) {
           value = value.join(
             FlowValue.unknown(operation.type)
-                .withReferences([operands.single.references]),
+                .withReferences([input.references]),
           );
         }
         return _withEffects(_normal(value, copy()), const {
           Effect.readsStorage,
         });
-      case StoreNative(:final nativeType):
+      case StoreNative(nativeType: final NativeTypeRef nativeType) ||
+          StoreObjectData(nativeType: final NativeTypeRef nativeType):
         if (operands.any((v) => v.isBottom)) return _unreachable;
+        final address = operation is StoreObjectData
+            ? _objectAddress(operands.first, operands[1])
+            : operands.first;
         final layout = memoryLayout?.nativeLayout;
         final size = layout?.of(nativeType).size;
         final next = _writeNative(
-          operands.first,
+          address,
           size,
           operands.last,
           (memory, offset) =>
@@ -567,6 +599,59 @@ final class FlowState {
       default:
         return null;
     }
+  }
+
+  FlowValue _objectAddress(FlowValue owner, FlowValue offset) {
+    final constant = offset.constant;
+    final amount = constant is ScalarConstant && constant.value is int
+        ? constant.value as int
+        : null;
+    var value = const FlowValue.bottom();
+    for (final base in <Object>[...owner.objects, ...owner.constants]) {
+      value = value.join(FlowValue.address(FlowAddress(base, amount)));
+    }
+    if (owner.unknownTypes.isNotEmpty || value.isBottom) {
+      value = value.join(FlowValue.unknown(.integer).withReferences([owner]));
+    }
+    return value;
+  }
+
+  bool _referenceSlot(FlowValue owner, FlowValue offset) {
+    final constant = offset.constant;
+    final amount = constant is ScalarConstant && constant.value is int
+        ? constant.value as int
+        : null;
+    if (owner.objects.isEmpty ||
+        owner.unknownTypes.isNotEmpty ||
+        owner.constants.isNotEmpty ||
+        amount == null) {
+      return false;
+    }
+    return amount % ObjectHeader.alignment == 0 &&
+        owner.objects.every(
+          (object) =>
+              memoryLayout
+                      ?.objectLayout(object.type as ClassType)
+                      .tracesPayload ==
+                  true &&
+              (_objects[object]?.memory?.contains(
+                    amount,
+                    ObjectHeader.alignment,
+                  ) ??
+                  false),
+        );
+  }
+
+  FlowValue? _readReference(FlowValue owner, FlowValue offset) {
+    if (!_referenceSlot(owner, offset)) return null;
+    final amount = (offset.constant as ScalarConstant).value as int;
+    var value = const FlowValue.bottom();
+    for (final object in owner.objects) {
+      final read = _objects[object]!.memory!.readReference(amount);
+      if (read == null) return null;
+      value = value.join(read);
+    }
+    return value;
   }
 
   FlowState _writeNative(
@@ -1015,6 +1100,9 @@ final class FlowState {
     if (operands.length != read.inputs.length) {
       throw ArgumentError('Storage operands must match the read instruction.');
     }
+    if (read is LoadObjectReference) {
+      return _readReference(operands.first, operands.last);
+    }
     if (read case LoadGlobal(:final global)) {
       _requireGlobal(global);
       final slot = _globals[global] ?? _initial(global);
@@ -1028,7 +1116,7 @@ final class FlowState {
       case ReadCell():
         key = _cell;
       default:
-        throw ArgumentError('Expected a field, cell or global read.');
+        throw ArgumentError('Expected a field, cell, global or payload read.');
     }
     final receiver = operands.single;
     if (receiver.isBottom || receiver.unknownTypes.isNotEmpty) return null;

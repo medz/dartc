@@ -37,8 +37,8 @@ final class const ProgramStoragePromotion() implements ProgramPass {
   }
 }
 
-typedef _Access = ({Instruction read, Value? receiver});
-typedef _Entry = (Block, Object, Value?, ValueType);
+typedef _Access = ({Instruction read, Value? receiver, Value? offset});
+typedef _Entry = (Block, Object, Value?, Value?, ValueType);
 
 final class _Promotion(
   final ProgramFlowFacts facts,
@@ -73,14 +73,19 @@ final class _Promotion(
       ]) {
         if (operation is LoadField ||
             operation is ReadCell ||
-            operation is LoadGlobal) {
+            operation is LoadGlobal ||
+            operation is LoadObjectReference) {
           var receiver = operation.inputs.firstOrNull;
           while (receiver is TypeView || receiver is UncheckedCast) {
             receiver = (receiver as Instruction).inputs.single;
           }
-          final access = (read: operation, receiver: receiver);
+          final offset = operation is LoadObjectReference
+              ? operation.byteOffset
+              : null;
+          final access = (read: operation, receiver: receiver, offset: offset);
           if (facts.canDiscard(operation) &&
               (receiver == null || dominance.atEntry(receiver, block)) &&
+              (offset == null || dominance.atEntry(offset, block)) &&
               prior.every((instruction) => _preserves(access, instruction))) {
             final before = cache.keys.toSet();
             final value = _atEntry(access, block);
@@ -110,7 +115,13 @@ final class _Promotion(
   }
 
   Value? _atEntry(_Access access, Block block) {
-    final key = (block, _slot(access.read), access.receiver, access.read.type);
+    final key = (
+      block,
+      _slot(access.read),
+      access.receiver,
+      access.offset,
+      access.read.type,
+    );
     if (cache.containsKey(key)) return cache[key];
     if (block == function.entry || incoming[block]!.isEmpty) return null;
     final phi = blockParameters([access.read.type]).single;
@@ -119,12 +130,18 @@ final class _Promotion(
     phis[phi] = (block: block, incoming: arguments);
     for (final edge in incoming[block]!) {
       if (!facts.reachesEdge(edge)) return null;
-      var receiver = access.receiver;
-      final index = receiver is BlockParameter
-          ? block.parameters.indexOf(receiver)
-          : -1;
-      if (index >= 0) receiver = edge.arguments[index];
-      final value = _onEdge((read: access.read, receiver: receiver), edge);
+      Value? argument(Value? value) {
+        final index = value is BlockParameter
+            ? block.parameters.indexOf(value)
+            : -1;
+        return index < 0 ? value : edge.arguments[index];
+      }
+
+      final value = _onEdge((
+        read: access.read,
+        receiver: argument(access.receiver),
+        offset: argument(access.offset),
+      ), edge);
       if (value == null) return null;
       arguments[edge] = value;
     }
@@ -164,8 +181,10 @@ final class _Promotion(
     final predecessors = owners[edge]!;
     if (predecessors.length != 1) return null;
     final block = predecessors.single;
-    if (access.receiver case final receiver?
-        when !dominance.atEntry(receiver, block)) {
+    if ([
+      access.receiver,
+      access.offset,
+    ].nonNulls.any((value) => !dominance.atEntry(value, block))) {
       return null;
     }
     for (final operation in [
@@ -181,6 +200,8 @@ final class _Promotion(
       state.boundValueOf(access.read, [
         if (access.receiver case final receiver?)
           facts.valueOf(receiver, activation: activation),
+        if (access.offset case final offset?)
+          facts.valueOf(offset, activation: activation),
       ]);
 
   bool _preserves(_Access access, Instruction operation) {
@@ -198,6 +219,8 @@ final class _Promotion(
     final written = switch (operation) {
       StoreField(:final receiver) => receiver,
       WriteCell(:final cell) => cell,
+      StoreObjectReference(:final object) ||
+      StoreObjectData(:final object) => object,
       _ => null,
     };
     for (final activation in activations) {
@@ -231,10 +254,12 @@ Object _slot(Instruction read) => switch (read) {
   LoadGlobal(:final global) => global,
   LoadField(:final field) => field,
   ReadCell() => _cell,
+  LoadObjectReference() => _payload,
   _ => throw ArgumentError('Expected storage read.'),
 };
 
 final _cell = Object();
+final _payload = Object();
 
 bool _disjoint(FlowValue first, FlowValue second) =>
     first.unknownTypes.isEmpty &&

@@ -21,6 +21,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
     final reads = <InstanceField, FlowValue>{};
     final globals = <GlobalVariable>{};
     var cells = const FlowValue.bottom();
+    var payloads = const FlowValue.bottom();
     var visible = const FlowValue.bottom();
     var lifetimes = const FlowValue.bottom();
     final points = <Instruction, List<FlowState>>{};
@@ -115,9 +116,10 @@ final class const ProgramStorageElimination() implements ProgramPass {
                   state.reachableValues([facts.valueOf(value)]),
                 );
               }
-            case ReferenceAddress(:final object) ||
-                LoadObjectReference(:final object) ||
+            case LoadObjectReference(:final object) ||
                 LoadObjectData(:final object):
+              payloads = payloads.join(facts.valueOf(object));
+            case ReferenceAddress(:final object):
               visible = visible.join(facts.valueOf(operation));
               lifetimes = lifetimes.join(facts.valueOf(object));
             default:
@@ -178,6 +180,21 @@ final class const ProgramStorageElimination() implements ProgramPass {
               value,
               _overlaps(facts.valueOf(cell), cells),
             ),
+            StoreObjectReference(
+              :final object,
+              :final byteOffset,
+              :final value,
+            ) =>
+              (
+                facts.valueOf(object),
+                value,
+                _overlaps(facts.valueOf(object), payloads) ||
+                    facts.pointStateOf(operation)!.normal!.boundValueOf(
+                          LoadObjectReference(object, byteOffset),
+                          [facts.valueOf(object), facts.valueOf(byteOffset)],
+                        ) ==
+                        null,
+              ),
             _ => (const FlowValue.bottom(), null, true),
           };
           if (stored == null ||
