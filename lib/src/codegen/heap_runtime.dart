@@ -217,7 +217,7 @@ final class AsyncRuntime(
             )
           : FunctionType(
               .voidType,
-              [.object, .object.nullable, .string.nullable],
+              [.object, .object.nullable, .string.nullable, callback],
               typeParameters: [t],
             );
       if (target.signature != signature) {
@@ -253,7 +253,7 @@ final class SyncRuntime(
             ) ||
         yieldValue.kind != .function ||
         yieldValue.signature !=
-            FunctionType(.voidType, [.object, .object.nullable])) {
+            FunctionType(.voidType, [.object, .object.nullable, callback])) {
       throw ArgumentError('Invalid generator entry signature.');
     }
   }
@@ -285,11 +285,21 @@ final class AsyncGeneratorRuntime(
     for (final (target, signature) in [
       (
         yieldValue,
-        FunctionType(.boolean, [.object, .object.nullable, .string.nullable]),
+        FunctionType(.boolean, [
+          .object,
+          .object.nullable,
+          .string.nullable,
+          AsyncRuntime.callback,
+        ]),
       ),
       (
         yieldStream,
-        FunctionType(.boolean, [.object, .object, .string.nullable]),
+        FunctionType(.boolean, [
+          .object,
+          .object,
+          .string.nullable,
+          AsyncRuntime.callback,
+        ]),
       ),
       (complete, FunctionType(.voidType, [.object, .object.nullable])),
     ]) {

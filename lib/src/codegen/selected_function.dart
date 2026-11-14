@@ -33,13 +33,9 @@ base class SelectedFunction(
   final aliases = <Instruction>{};
   final resultTypes = <Value, ValueType>{};
   final stackCells = <NewCell>{};
-  final operandsForAwait = <Await, Value>{};
-  final operandsForYield = <Yield, Value>{};
-  final parameterOverrides = <Block, List<BlockParameter>>{};
 
   List<BlockParameter> parametersOf(Block block) =>
-      parameterOverrides[block] ??
-      (block == entry ? entryParameters : block.parameters);
+      block == entry ? entryParameters : block.parameters;
 
   Iterable<Value> inputsOf(Value operation) =>
       operands[operation] ??
@@ -99,19 +95,5 @@ base class SelectedFunction(
     boxes.removeWhere((value, _) => !retained.contains(value));
   }
 
-  Iterable<Jump> successors(Block block) => switch (ends[block]!) {
-    final Jump jump => [jump],
-    Branch(:final ifTrue, :final ifFalse) => [ifTrue, ifFalse],
-    Invoke(:final onReturn, :final onThrow) => [?onReturn, onThrow],
-    Throw(:final onThrow) ||
-    ExhaustivenessFailure(:final onThrow) => [?onThrow],
-    Await(:final onResume, :final onThrow) => [?onResume, ?onThrow],
-    Yield(:final onResume, :final onCancel) => [onResume, ?onCancel],
-    YieldStream(:final onResume, :final onCancel, :final onThrow) => [
-      onResume,
-      onCancel,
-      ?onThrow,
-    ],
-    Return() || Unreachable() => const [],
-  };
+  Iterable<Jump> successors(Block block) => ends[block]!.successors;
 }

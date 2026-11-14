@@ -101,8 +101,8 @@ final class IrExternal(
 
 /// A verified SSA control-flow graph for one callable body.
 ///
-/// Suspendable graphs explicitly represent their continuations; a backend must
-/// preserve activations or lower them to state machines before ordinary codegen.
+/// Suspendable graphs explicitly represent their continuations. Semantic
+/// normalization exposes their calls and state before analysis and codegen.
 final class IrFunction(
   super.target,
   Iterable<Block> blocks, {

@@ -70,8 +70,14 @@ Future<T> _asyncStart<T>(Object state) {
 }
 
 @runtime.RuntimeEntry(.asyncAwait)
-void _asyncAwait<T>(Object state, Object? value, String? location) {
+void _asyncAwait<T>(
+  Object state,
+  Object? value,
+  String? location,
+  void Function(Object?, Object?, StackTrace?) next,
+) {
   final activation = state as _SuspendState;
+  activation._step = next;
   activation._suspended = true;
   activation._stackLocation = location;
   activation._awaitWithTypeCheck<T>(value);
@@ -103,17 +109,16 @@ Iterable<T> _syncCreate<T>(bool Function(Object) Function() create) {
 }
 
 @runtime.RuntimeEntry(.syncYield)
-void _syncYield(Object iterator, Object? value) {
-  (iterator as _SyncStarIterator<dynamic>)._current = value;
+void _syncYield(Object iterator, Object? value, bool Function(Object) next) {
+  final current = iterator as _SyncStarIterator<dynamic>;
+  current._state!._syncStep = next;
+  current._current = value;
 }
 
 @patch
 class _SyncStarIterable<T> {
   @patch
-  @pragma(
-    'dartc:patch',
-    'storage: guard reentry into a native suspension frame',
-  )
+  @pragma('dartc:patch', 'storage: reject recursive iterator resumption')
   Iterator<T> get iterator =>
       _GuardedSyncStarIterator<T>(_stateAtStart!._clone());
 }
@@ -147,8 +152,14 @@ Stream<T> _asyncStarStart<T>(Object state) =>
     (state as _SuspendState)._yieldAsyncStar(null) as Stream<T>;
 
 @runtime.RuntimeEntry(.asyncStarYield)
-bool _asyncStarYield(Object state, Object? value, String? location) {
+bool _asyncStarYield(
+  Object state,
+  Object? value,
+  String? location,
+  void Function(Object?, Object?, StackTrace?) next,
+) {
   final activation = state as _SuspendState;
+  activation._step = next;
   activation._stackLocation = location;
   return (activation._functionData as _AsyncStarStreamController<dynamic>).add(
     value,
@@ -156,8 +167,14 @@ bool _asyncStarYield(Object state, Object? value, String? location) {
 }
 
 @runtime.RuntimeEntry(.asyncStarYieldStream)
-bool _asyncStarYieldStream(Object state, Object stream, String? location) {
+bool _asyncStarYieldStream(
+  Object state,
+  Object stream,
+  String? location,
+  void Function(Object?, Object?, StackTrace?) next,
+) {
   final activation = state as _SuspendState;
+  activation._step = next;
   activation._stackLocation = location;
   final controller =
       activation._functionData as _AsyncStarStreamController<dynamic>;

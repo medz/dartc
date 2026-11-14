@@ -404,6 +404,40 @@ void main() {
     expect(cell.accepts(CellType(.number)), isFalse);
   });
 
+  test(
+    'generated continuations retain lexical scope without exposing siblings',
+    () {
+      final local = FunctionTarget(
+        f.library,
+        'local',
+        .integer,
+        [],
+        kind: .closure,
+        enclosing: f,
+        sourceOffset: 1,
+      );
+      final continuation = FunctionTarget(
+        null,
+        'resume',
+        .integer,
+        [],
+        kind: .closure,
+        enclosing: f,
+        sourceOffset: 0,
+      );
+      final resumed = Block(continuation.parameterTypes);
+      resumed.emit(MakeClosure(local, []));
+      resumed.finish(const Return(one));
+      expect(() => IrFunction(continuation, [resumed]), returnsNormally);
+
+      final unrelated = FunctionTarget(f.library, 'other', .integer, []);
+      final invalid = Block(unrelated.parameterTypes);
+      invalid.emit(MakeClosure(local, []));
+      invalid.finish(const Return(one));
+      expect(() => IrFunction(unrelated, [invalid]), throwsStateError);
+    },
+  );
+
   test('a protected operation and its exception have distinct SSA edges', () {
     final target = FunctionTarget(f.library, 'invoke', .object, [.object]);
     final entry = Block(target.parameterTypes);

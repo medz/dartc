@@ -398,8 +398,12 @@ FunctionReferences verifyCallable(
         case LoadGlobal(:final global) || StoreGlobal(:final global):
           (globals ??= {}).add(global);
         case MakeClosure(target: final child):
-          if (child.enclosing != target) {
-            throw StateError('Closure created outside its lexical parent.');
+          FunctionTarget? scope = target;
+          while (scope != null && scope != child.enclosing) {
+            scope = scope.enclosing;
+          }
+          if (scope == null) {
+            throw StateError('Closure created outside its lexical scope.');
           }
           (closures ??= {}).add(child);
         case StoreField(:final field, :final receiver)

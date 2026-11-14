@@ -27,7 +27,6 @@ final class FunctionRepresentation(
   HeapPlan heap, {
   FunctionTarget? captureTrace,
 }) extends SelectedFunction {
-  final awaitTypes = <Await, Value>{};
   final _prologue = <Value>[];
   bool get _factoryEnvironment =>
       function.target.kind == .factory &&
@@ -125,6 +124,11 @@ final class FunctionRepresentation(
           ).parameters,
         ],
       ) {
+    if (function.bodyKind != .synchronous) {
+      throw ArgumentError(
+        'Suspensions must be normalized before representation.',
+      );
+    }
     final nonNull = NonNullValues(function);
     final valueOperations = ValueOperations(this, layouts, heap.invalid);
     checkCellInitialization(function);
@@ -160,7 +164,6 @@ final class FunctionRepresentation(
     for (final operation in operations) {
       if (addressOnly.contains(operation)) resultTypes[operation] = .integer;
     }
-    if (function.bodyKind != .synchronous) stackCells.clear();
     Value pointerAddress(Value pointer, List<Value> into) {
       if (typeOf(pointer) != .integer) {
         return _load(layouts.pointers.address, pointer, into);
@@ -300,8 +303,6 @@ final class FunctionRepresentation(
         ...switch (block.end) {
           Invoke(:final onThrow) => [onThrow],
           Throw(:final onThrow) ||
-          Await(:final onThrow) ||
-          YieldStream(:final onThrow) ||
           ExhaustivenessFailure(:final onThrow) => [?onThrow],
           _ => const <Jump>[],
         },
@@ -2091,7 +2092,7 @@ final class FunctionRepresentation(
       finishOperation();
       final handler = switch (sourceBlock.end) {
         Invoke(:final onThrow) => onThrow,
-        Throw(:final onThrow) || Await(:final onThrow) => onThrow,
+        Throw(:final onThrow) => onThrow,
         _ => null,
       };
       final location =
@@ -2140,9 +2141,7 @@ final class FunctionRepresentation(
         Return(:final value) => Return(
           convert(
             value ?? const Constant.nullValue(),
-            function.bodyKind != .synchronous
-                ? .object.nullable
-                : layouts.returnType(function.target),
+            layouts.returnType(function.target),
             body,
           ),
         ),
@@ -2162,43 +2161,6 @@ final class FunctionRepresentation(
         ),
         final end => end,
       };
-      if (ends[block] case final YieldStream end) {
-        ends[block] = YieldStream(
-          end.stream,
-          edge(end.onResume),
-          onCancel: edge(end.onCancel),
-          onThrow: end.onThrow == null ? null : edge(end.onThrow!),
-        );
-      }
-      if (ends[block] case final Yield end) {
-        final suspended = Yield(
-          end.value,
-          edge(end.onResume),
-          onCancel: end.onCancel == null ? null : edge(end.onCancel!),
-        );
-        ends[block] = suspended;
-        operandsForYield[suspended] = convert(
-          end.value,
-          .object.nullable,
-          body,
-        );
-      }
-      if (ends[block] case final Await end) {
-        final suspended = Await(
-          end.operand,
-          end.result,
-          onResume: end.onResume == null ? null : edge(end.onResume!),
-          onThrow: end.onThrow == null ? null : edge(end.onThrow!),
-        );
-        // The original operand proves FutureOr<T>; the selected operand is boxed.
-        ends[block] = suspended;
-        operandsForAwait[suspended] = convert(
-          end.operand,
-          .object.nullable,
-          body,
-        );
-        awaitTypes[suspended] = _reify(end.result.type, body);
-      }
       if (block != sourceBlock) block.finish(sourceBlock.end);
     }
     finishOperation();

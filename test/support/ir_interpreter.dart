@@ -19,12 +19,17 @@ final class IrInterpreter(
   final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports, {
   final Object? Function(NativeCall, int, List<Object?>)? callNative,
+  final Map<FunctionTarget, Object? Function(List<Object?>)> externalCalls =
+      const {},
 }) {
   static Object exceptionType(Object error) => switch (error) {
     _Instance(:final type) => type,
     NoSuchMethodError() => ValueType.noSuchMethodError,
     _ => error.runtimeType,
   };
+
+  Object? call(Object? function, List<Object?> arguments) =>
+      _call(function, arguments, const {});
 
   final _loadedLibraries = <DeferredImport>{};
   final _globals = <GlobalVariable, Object?>{
@@ -339,6 +344,7 @@ final class IrInterpreter(
     if (program.implementationOf(target) case final IrFunction body) {
       return run(body, arguments, environment);
     }
+    if (externalCalls[target] case final external?) return external(arguments);
     if (target.owner == ValueType.string) {
       final receiver = arguments.first as String;
       if (target.name == '+') return receiver + (arguments[1] as String);

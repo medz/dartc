@@ -19,7 +19,6 @@ import 'closure_storage.dart';
 import 'string_storage.dart';
 import 'list_storage.dart';
 import 'record_storage.dart';
-import 'suspension_functions.dart';
 
 /// A target preparation step, either closed or requiring more source facts.
 sealed class const PreparationResult();
@@ -97,7 +96,7 @@ final class ProgramPreparation(
         throw ArgumentError.value(symbol, 'entryPoint.symbol');
       }
       if (body is! IrFunction ||
-          (body.bodyKind != .synchronous && body.bodyKind != .asynchronous) ||
+          body.bodyKind != .synchronous ||
           function.kind != .function ||
           (function.parameterTypes.isNotEmpty &&
               function.signature !=
@@ -223,13 +222,9 @@ final class ProgramPreparation(
       callTypes: facts,
     );
     final functions = [...bodies, ...helpers];
-    final suspensions = SuspensionFunctions(functions);
     final closures = ClosureStorage(
-      [...sourceBodies, ...helpers, ...suspensions.entries],
-      boundMethods: [
-        ...members.tearOffTargets,
-        ...suspensions.entries.map((entry) => entry.target),
-      ],
+      [...sourceBodies, ...helpers],
+      boundMethods: members.tearOffTargets,
       lateFailure: instances.failure?.target,
     );
     final layouts = ProgramLayout(
@@ -239,7 +234,6 @@ final class ProgramPreparation(
         ...program.classes,
         if (!globals.isEmpty) globals.declaration,
         ...closures.classes,
-        ...suspensions.classes,
       ],
       nativeLayout: NativeLayout(target),
       functions: functions,
@@ -256,7 +250,6 @@ final class ProgramPreparation(
           ...arithmetic.classes,
           if (!globals.isEmpty) globals.declaration,
           ...closures.classes,
-          ...suspensions.classes,
           ?records.declaration,
         ])
           declaration.type,
@@ -273,7 +266,6 @@ final class ProgramPreparation(
       arithmetic,
       globals,
       instances,
-      suspensions: suspensions,
       imports: imports,
       callbacks: {
         for (final entry in callbacks.entries) entry.key: entry.value.address,

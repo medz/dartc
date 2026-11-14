@@ -12,7 +12,6 @@ import 'native_invocation.dart';
 import 'numeric_operations.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
-import 'suspension_functions.dart';
 
 /// Selects function bodies and closes generated call dependencies before emission.
 final class ProgramSelection(
@@ -24,11 +23,9 @@ final class ProgramSelection(
   final NumericOperations arithmetic,
   final GlobalStorage globals,
   final InstanceStorage instances, {
-  SuspensionFunctions? suspensions,
   final Map<FunctionTarget, NativeImport> imports = const {},
   final Map<NativeCallbackEntry, FunctionTarget> callbacks = const {},
 }) {
-  final suspensions = suspensions ?? SuspensionFunctions(const []);
   final functions = <FunctionTarget, SelectedFunction>{};
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
@@ -110,7 +107,7 @@ final class ProgramSelection(
 
   void include(IrFunction function) {
     if (functions.containsKey(function.target)) return;
-    var body = FunctionRepresentation(
+    final body = FunctionRepresentation(
       function,
       layouts,
       casts,
@@ -118,33 +115,6 @@ final class ProgramSelection(
       heap,
       captureTrace: traces.capture,
     );
-    if (suspensions.frames[function.target] case final frame?) {
-      final runtime =
-          heap.runtime ??
-          (throw UnsupportedError('Suspension runtime unavailable.'));
-      if (frame.synchronous
-          ? runtime.sync == null
-          : runtime.async == null ||
-                frame.streaming && runtime.asyncGenerator == null) {
-        throw UnsupportedError(
-          'Missing runtime entries for ${function.bodyKind}.',
-        );
-      }
-      final resumed = frame.lower(body, runtime, heap.invalid);
-      final entryParameters = body.entryParameters;
-      body = FunctionRepresentation(
-        frame.wrapper(runtime),
-        layouts,
-        casts,
-        members,
-        heap,
-        captureTrace: traces.capture,
-      );
-      frame.initialize(body, entryParameters);
-      if (frame.synchronous) include(frame.factory(entryParameters));
-      _bind(resumed);
-      functions[frame.resume] = resumed;
-    }
     _bind(body);
     functions[function.target] = body;
   }
@@ -321,7 +291,6 @@ final class ProgramSelection(
         ...arithmetic.classes,
         ...layouts.closures.classes,
         ?layouts.records.generatedClass,
-        ...suspensions.classes,
         layouts.strings.declaration,
         ...layouts.types.classes,
         if (functions.containsKey(layouts.pointers.initializer))
@@ -353,7 +322,6 @@ final class ProgramSelection(
               defaults: members.program.implementationOf(target)!.defaults,
             ),
         if (!globals.isEmpty) IrExternal(globals.address),
-        ...suspensions.entries,
       ],
     );
     return {};

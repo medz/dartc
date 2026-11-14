@@ -372,7 +372,7 @@ final class FunctionTarget(
     }
     if (kind == .closure) {
       if (enclosing == null ||
-          enclosing!.library != library ||
+          library != null && enclosing!.library != library ||
           owner != null ||
           sourceOffset == null ||
           sourceOffset! < 0) {
