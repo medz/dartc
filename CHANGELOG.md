@@ -10,7 +10,7 @@
 
 - Register event delivery through ordinary Dart state so inlining scheduling helpers preserves pending callbacks and process keep-alive. Programs without scheduling still omit the event loop and its clock/wait dependencies.
 
-- Keep live values in registers across branches and loops, skipping unchanged edge transfers while preserving simultaneous parameter swaps, exceptions and initialized GC stack roots.
+- Allocate operand locations, spill/reload transfers, parallel edge copies, frames and GC roots before emitting each function. Keep unchanged locations across branches and loops, resolve register and stack cycles directly, and preserve distinct predecessors, local exceptions and asynchronous unwinding.
 
 - Prepare IR with `Compiler.prepare` before calling `CodeGenerator.generate`. Preparation closes source, runtime, callback and native dependencies for an explicit target; emission rejects mismatched targets or invalidated analysis. Direct IR callers supply roots and bindings instead of a separately computed definition set. Generated support follows retained calls, so eliminated numeric operations do not require a runtime.
 - Preserve logical function names and call sites through nested inlining in stack traces, including rethrows and asynchronous gaps. `SourceLocation` now carries immutable source coordinates and an optional logical caller chain.

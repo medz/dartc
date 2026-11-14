@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
+import 'package:dartc/src/codegen/suspension_functions.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/closure_storage.dart';
@@ -21,6 +22,73 @@ void main() {
   setUpAll(prepareRuntime);
   late final layouts = ProgramLayout([], typeRuntime: heapRuntime.types);
   final members = MemberCalls(IrProgram([], []), {});
+
+  test('suspension exception bridges receive ordinary live parameters', () {
+    for (final invoked in [false, true]) {
+      final target = FunctionTarget(
+        uri,
+        'asyncCatch',
+        CoreTypes.futureOf(.object),
+        [.object, .stackTrace],
+      );
+      final entry = Block(target.parameterTypes),
+          handler = Block([ValueType.object, ValueType.stackTrace]);
+      final edge = Jump(handler, [
+        UnwindValue.exception,
+        UnwindValue.stackTrace,
+      ]);
+      final callee = FunctionTarget(uri, 'throwing', .never, []);
+      entry.finish(
+        invoked
+            ? Invoke(DirectCall(callee, []), onReturn: null, onThrow: edge)
+            : Throw(
+                entry.parameters[0],
+                stackTrace: entry.parameters[1],
+                onThrow: edge,
+              ),
+      );
+      handler.emit(KeepAlive(handler.parameters[1]));
+      handler.finish(Return(handler.parameters[0]));
+      final source = IrFunction(
+        target,
+        [entry, handler],
+        bodyKind: .asynchronous,
+        completionType: .object,
+      );
+      final representation = FunctionRepresentation(
+        source,
+        layouts,
+        CheckedCasts(),
+        members,
+        HeapPlan(),
+      );
+      final body = SuspensionFrame(
+        source,
+        0,
+      ).lower(representation, heapRuntime, callee);
+      final Jump failed = switch (body.ends[entry]!) {
+        Invoke(:final onThrow) => onThrow,
+        Throw(onThrow: final edge!) => edge,
+        _ => throw StateError('Missing exception edge'),
+      };
+      expect(body.argumentsOf(failed), [
+        UnwindValue.exception,
+        UnwindValue.stackTrace,
+      ]);
+      final bridge = failed.target;
+      expect(bridge.parameters.map((value) => value.type), [
+        ValueType.object,
+        ValueType.stackTrace,
+      ]);
+      expect(body.argumentsOf(body.ends[bridge]! as Jump), bridge.parameters);
+      final flow = FunctionLiveness(
+        body,
+        body.inputsOf,
+        body.invocations.keys.toSet(),
+      );
+      expect(flow.liveIn[bridge]!.containsAll(bridge.parameters), isTrue);
+    }
+  });
 
   test('non-generic member access does not prepare owner type arguments', () {
     final t = TypeParameterType('T')..initializeBound(.object.nullable);

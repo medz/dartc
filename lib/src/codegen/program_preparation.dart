@@ -41,8 +41,9 @@ final class PreparationDependencies._(
 
 /// Binds native entries and prepares storage from immutable source facts.
 ///
-/// This stage does not run source analysis. A driver supplies current facts,
-/// processes [PreparationDependencies], and repeats until [PreparedProgram].
+/// Construction uses nominal reachability when registering native callbacks.
+/// Preparation consumes driver-supplied call and type facts, reporting
+/// [PreparationDependencies] until the driver obtains a [PreparedProgram].
 /// Runtime source definitions must be supplied with the input program.
 final class ProgramPreparation(
   /// The output platform used for layouts and native bindings.

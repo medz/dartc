@@ -126,15 +126,25 @@ final class SuspensionFrame(final IrFunction source, int index) {
     }
 
     Jump transfer(Jump edge, [Map<Value, Value> incoming = const {}]) {
-      final bridge = result.addBlock();
+      final unwind = body
+          .argumentsOf(edge)
+          .whereType<UnwindValue>()
+          .where((value) => !incoming.containsKey(value))
+          .toSet()
+          .toList();
+      final bridge = result.addBlock([for (final value in unwind) value.type]);
+      final received = {
+        ...incoming,
+        for (final (i, value) in unwind.indexed) value: bridge.parameters[i],
+      };
       final values = result.instructions[bridge]!;
       final jump = Jump(edge.target, edge.arguments);
       result.edgeArguments[jump] = [
         for (final value in body.argumentsOf(edge))
-          incoming[value] ?? reload(value, values),
+          received[value] ?? reload(value, values),
       ];
       result.ends[bridge] = jump;
-      return Jump(bridge);
+      return Jump(bridge, unwind);
     }
 
     var dispatch = entry;

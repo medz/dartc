@@ -13,6 +13,8 @@ import 'package:dartc/runtime/contracts.dart' show NativeCallbackLayout;
 import 'code_generator.dart';
 import 'program_preparation.dart';
 import 'function_emitter.dart';
+import 'function_allocation.dart';
+import 'function_selection.dart';
 import 'scalar_function.dart';
 import 'native_adapter.dart';
 import 'native_callback.dart';
@@ -63,16 +65,22 @@ base class ScalarCodeGenerator<R extends Object>(
       callback,
       (fixup) => (callbackOwners[callback] ??= []).add((code.length, fixup)),
     );
+    final constraints = _createFunction();
     final functions = {
       for (final body in selection.functions.values)
-        body.target: ScalarFunction(body, _createFunction()),
+        body.target: FunctionSelection(body, constraints),
     };
     final capture = selection.capture, managed = selection.managed;
     final primitives = selection.primitives;
     final indices = {
       for (final (i, declaration) in selected.indexed) declaration: i,
     };
-    final hasRoots = managed || functions.values.any((f) => f.hasRoots);
+    final hasRoots =
+        managed ||
+        functions.values.any(
+          (function) =>
+              function.liveReferences.values.any((roots) => roots.isNotEmpty),
+        );
     bool needsEntry(NativeSignature signature) =>
         hasRoots || _needsEntry(signature);
     final maps = StackMaps();
@@ -158,12 +166,12 @@ base class ScalarCodeGenerator<R extends Object>(
     }
 
     for (final declaration in selected) {
-      final source = functions[declaration]?.sourceTarget ?? declaration;
+      final source = functions[declaration]?.body.sourceTarget ?? declaration;
       frameSource = capture ? source : null;
       final binding = imports[declaration], export = exports[declaration];
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
-      final emitter = functions[declaration]?.emitter ?? _createFunction();
+      final emitter = _createFunction();
       final bytes = declaration == cleanup
           ? release(emitter)
           : declaration == globals.address
@@ -258,7 +266,10 @@ base class ScalarCodeGenerator<R extends Object>(
               heap: entry(emitter),
               codeAddress: codeAddress,
             )
-          : functions[declaration]!.generate(
+          : ScalarFunction(
+              FunctionAllocation(functions[declaration]!),
+              emitter,
+            ).generate(
               call,
               (fixup, constant) {
                 relocations.add(
