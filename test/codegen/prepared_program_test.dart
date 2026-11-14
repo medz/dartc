@@ -189,6 +189,29 @@ void main() {
     },
   );
 
+  test('eliminated operations do not retain generated support', () {
+    final start = Block(), live = Block(), dead = Block();
+    start.finish(Branch(const Constant.boolean(true), Jump(live), Jump(dead)));
+    live.finish(const Return(Constant.integer(7)));
+    dead.finish(
+      Return(
+        dead.emit(
+          IntBinary(
+            .truncateDivide,
+            const Constant.integer(1),
+            const Constant.integer(0),
+          ),
+        ),
+      ),
+    );
+    final input = IrProgram([], [
+      IrFunction(entry, [start, live, dead]),
+    ]);
+    final prepared = Compiler(target).prepare(input, roots: [entry]);
+    expect(prepared.definitions, {entry});
+    expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
+  });
+
   test('an eliminated callback does not require a persistent runtime', () {
     final start = Block(), live = Block(), dead = Block();
     start.finish(Branch(const Constant.boolean(true), Jump(live), Jump(dead)));

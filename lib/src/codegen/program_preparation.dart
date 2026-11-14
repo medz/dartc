@@ -206,10 +206,7 @@ final class ProgramPreparation(
       ...globals.functions,
       ...instances.functions,
     ];
-    selected.addAll([
-      for (final function in helpers) function.target,
-      if (!globals.isEmpty) globals.address,
-    ]);
+    if (!globals.isEmpty) selected.add(globals.address);
     final requiredTypes = {
       ...instantiatedTypes,
       for (final function in helpers) ...function.instantiatedClasses,
@@ -301,9 +298,6 @@ final class ProgramPreparation(
       } else {
         selection.include(function);
       }
-    }
-    for (final function in helpers) {
-      selection.include(function);
     }
     final calls = {
       for (final body in selection.functions.values) ...body.invocations.values,
