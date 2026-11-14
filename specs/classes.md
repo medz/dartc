@@ -45,6 +45,8 @@ typed noSuchMethod 转发的绑定参数、泛型与协变入口、返回检查�
 
 同步原生入口内支持对象分配与不可达对象回收，保留引用别名及循环引用。含引用全局槽的模块跨入口保留堆，同模块、同线程的同步原生回调重入共享堆及 GC 根，包括暂停的外层栈帧。没有引用全局槽时，入口及重入仍使用各自的独立堆，返回即释放。持久堆在 dartc 链接的共享库卸载时释放，独立程序退出前显式释放，见[模块清理与卸载](libraries.md#模块清理与卸载)。异步及生成器的挂起帧保留活跃引用，见[函数原生执行](functions.md)。并发调用、跨线程调用和跨模块托管值 ABI 尚未实现。同步异常传播与清理见[原生异常范围](statements.md#原生异常与清理)。托管存储和 GC 控制存储分配失败时抛出可捕获的 `OutOfMemoryError`，初始化及页登记失败先释放本次持有的资源；恢复内存后可以重新分配。错误对象预先物化，关联轨迹为 `StackTrace.empty`，其 `stackTrace` getter 按 SDK 契约返回 null。捕获、重抛和 finally 沿普通异常路径执行，未捕获时仍释放入口资源并以 255 退出。
 
+调用的实参位置、破坏寄存器与异常边在函数位置分配前确定；分配器预先生成安全点栈根偏移，发码只关联实际返回地址。安全点前必须初始化活跃引用的栈位置，返回后重新读取可能被回收器更新的引用；已经消耗的实参、整数和原生地址不因此成为根。见[分配与重载契约](../test/codegen/function_allocation_test.dart)。
+
 GC 根扫描与栈轨迹共用按返回地址排序的帧索引，以二分查找定位变长记录；仅在源码描述、异步续帧槽、调用者链接和全部根偏移一致时共享记录。查找本身不分配，原生重入及挂起外层帧仍沿原有链接遍历。见[栈映射格式契约](../test/codegen/stack_maps_test.dart)、[原生根扫描](../test/codegen/stack_roots_native_test.dart)和[异步父栈验证](../test/compiler/async_stack_traces_test.dart)。
 
 GC 关键入口的 `NonAllocating` 调用闭包在生成原生代码前按选定操作与传递调用的效果检查，包含表示变化、数值范围证明和机器桥接后的 Dart 目标。禁止托管分配、Dart 异常及 Dart 重入；已验证的原语使用显式效果，普通原生调用须有声明身份对应的可信契约或 `NativeImport.isNonAllocating` 的显式承诺，`isLeaf` 不能替代该契约。该承诺也约束原生实现的间接调用，不由编译器证明外部代码。用户源码不能伪造受信 runtime 注解。栈捕获会构造 StackTrace，因此不能从关键闭包调用。见[关键调用效果验证](../test/codegen/runtime_test.dart)和[注解来源验证](../test/frontend/runtime_declarations_test.dart)。

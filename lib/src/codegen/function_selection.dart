@@ -33,12 +33,24 @@ final class FunctionSelection<R>(
   final calls =
       <
         Value,
-        ({CallLayout<R> layout, FunctionTarget? target, List<Value> arguments})
+        ({
+          CallLayout<R> layout,
+          FunctionTarget? target,
+          List<Value> arguments,
+          List<ValueType>? parameterTypes,
+          Map<RegisterBank, R> stackScratch,
+          R? addressRegister,
+          R? parkRegister,
+          Jump? onThrow,
+        })
       >{};
   final constantTests = <TypeTest, bool>{};
   final cells = <NewCell>{};
   late final CallLayout<R> entry;
   late final FunctionLiveness liveness;
+
+  /// Live managed values at each selected call, before assigning their homes.
+  late final Map<Value, Set<Value>> liveReferences;
   int _generalTemporaries = 0, _floatingTemporaries = 0;
 
   /// The maximum additional scratch demand of a selected operation.
@@ -79,7 +91,12 @@ final class FunctionSelection<R>(
         if (instruction is Instruction) {
           final target = body.invocations[instruction];
           if (target != null) {
-            _call(instruction, target, body.inputsOf(instruction).toList());
+            _call(
+              instruction,
+              target,
+              body.inputsOf(instruction).toList(),
+              block,
+            );
             continue;
           }
         }
@@ -115,10 +132,11 @@ final class FunctionSelection<R>(
               );
             }
           case NativeInvocation(:final signature):
-            calls[instruction] = (
-              layout: emitter.convention.classify(signature),
-              target: null,
-              arguments: body.inputsOf(instruction).skip(1).toList(),
+            _selectCall(
+              instruction,
+              emitter.convention.classify(signature),
+              body.inputsOf(instruction).skip(1).toList(),
+              block,
             );
           case KeepAlive():
           case NativeSymbolAddress():
@@ -188,6 +206,7 @@ final class FunctionSelection<R>(
               _floatingTemporaries = 1;
             }
           case NumericNegate(:final type):
+            if (emitter.negationNeedsTemporary) _generalTemporaries = 1;
             if (type != .floating) {
               throw UnsupportedError('Native numeric negation: $type');
             }
@@ -340,6 +359,14 @@ final class FunctionSelection<R>(
     calls.removeWhere(
       (instruction, _) => liveness.omitted.contains(instruction),
     );
+    liveReferences = Map.unmodifiable({
+      for (final instruction in calls.keys)
+        instruction: Set<Value>.unmodifiable(
+          liveness.acrossCalls[instruction]!.where(
+            (value) => layouts.isReference(body.typeOf(value)),
+          ),
+        ),
+    });
     for (final block in body.blocks) {
       if (body.ends[block] case Return(value: final value?)) {
         layouts.checkTransfer(
@@ -364,7 +391,12 @@ final class FunctionSelection<R>(
     }
   }
 
-  void _call(Instruction operation, FunctionTarget target, List<Value> inputs) {
+  void _call(
+    Instruction operation,
+    FunctionTarget target,
+    List<Value> inputs,
+    Block block,
+  ) {
     final parameters = layouts.entryTypes(target);
     if (inputs.length != parameters.length) {
       throw StateError('Selected call arity does not match ${target.name}.');
@@ -379,15 +411,75 @@ final class FunctionSelection<R>(
         constant: input is ScalarConstant,
       );
     }
-    calls[operation] = (
-      layout: emitter.convention.classify(
+    _selectCall(
+      operation,
+      emitter.convention.classify(
         NativeSignature.types(
           layouts.callType(layouts.returnType(target)),
           parameters.map(layouts.callType),
         ),
       ),
+      inputs,
+      block,
       target: target,
-      arguments: inputs,
+      parameterTypes: parameters,
+    );
+  }
+
+  void _selectCall(
+    Value operation,
+    CallLayout<R> layout,
+    List<Value> arguments,
+    Block block, {
+    FunctionTarget? target,
+    List<ValueType>? parameterTypes,
+  }) {
+    final clobbered = layout.clobberedRegisters;
+    final stackScratch = <RegisterBank, R>{};
+    for (final (i, location) in layout.parameters.indexed) {
+      if (location is! StackArgument) continue;
+      final kind = bank(parameterTypes?[i] ?? body.typeOf(arguments[i]));
+      stackScratch.putIfAbsent(
+        kind,
+        () => emitter.allocatableRegisters.firstWhere(
+          (register) =>
+              emitter.bank(register) == kind && clobbered.contains(register),
+        ),
+      );
+    }
+    calls[operation] = (
+      layout: layout,
+      target: target,
+      arguments: List.unmodifiable(arguments),
+      parameterTypes: parameterTypes == null
+          ? null
+          : List.unmodifiable(parameterTypes),
+      stackScratch: Map.unmodifiable(stackScratch),
+      addressRegister: target != null
+          ? null
+          : emitter.allocatableRegisters.lastWhere(
+              (register) =>
+                  emitter.bank(register) == .general &&
+                  clobbered.contains(register) &&
+                  !layout.registerInputs.containsKey(register) &&
+                  !layout.parameters.any(
+                    (location) => location.registers.contains(register),
+                  ),
+            ),
+      parkRegister: target != null
+          ? null
+          : emitter.allocatableRegisters.firstWhere(
+              (register) =>
+                  emitter.bank(register) == .general &&
+                  register != emitter.failureRegister &&
+                  clobbered.contains(register),
+            ),
+      onThrow: switch (body.ends[block]) {
+        Invoke(operation: final invoked, :final onThrow)
+            when target != null && invoked == operation =>
+          onThrow,
+        _ => null,
+      },
     );
   }
 

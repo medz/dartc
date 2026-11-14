@@ -25,6 +25,9 @@ final class FunctionAllocation<R extends Object>(
   late Map<Value, int> _uses;
   late final int _stagingOffset;
 
+  /// Stack locations fixed before emission; only the return PCs remain unknown.
+  late final Map<Value, StackRoots> safepoints;
+
   /// The queried frame, absent when the function needs no stack storage or calls.
   late final FrameLayout<R>? frame;
 
@@ -114,6 +117,34 @@ final class FunctionAllocation<R extends Object>(
         _slots[key] = frame.incomingStackOffset + value;
       }
     }
+    safepoints = Map.unmodifiable({
+      for (final MapEntry(:key, :value) in selection.liveReferences.entries)
+        key: _stackRoots(value),
+    });
+  }
+
+  StackRoots _stackRoots(Set<Value> values) {
+    final frame = this.frame!;
+    final offsets = <int>[];
+    for (final value in values) {
+      final offset = _slot(value);
+      final local =
+          offset >= frame.localOffset &&
+          offset < frame.localOffset + frame.localBytes;
+      final incoming =
+          offset >= frame.incomingStackOffset &&
+          offset < frame.incomingStackOffset + selection.entry.stackBytes;
+      if (!local && !incoming || frame.savedRegisters.containsValue(offset)) {
+        throw StateError('Live reference is outside value storage.');
+      }
+      offsets.add(offset);
+    }
+    offsets.sort();
+    return StackRoots(
+      frame.incomingStackOffset,
+      frame.returnAddressOffset,
+      offsets,
+    );
   }
 
   /// The traced continuation home relative to this function's stack pointer.
@@ -365,41 +396,88 @@ final class FunctionAllocation<R extends Object>(
     });
   }
 
-  /// Homes caller-live references before argument staging and invalidates registers.
-  StackRoots prepareCall(Value instruction, Set<R> clobbered) {
-    final roots = selection.liveness.acrossCalls[instruction]!
-        .where((v) => selection.layouts.isReference(selection.body.typeOf(v)))
-        .toSet();
+  /// Assigns the fixed or overlapping operands required by the selected encoding.
+  ({R result, R left, R right, Set<R> reserved}) binaryOperands(
+    Value operation,
+  ) {
+    final (:encoding, :left, :right, :floatingInputs) =
+        selection.binaries[operation]!;
+    if (encoding.fixed case final fixed?) {
+      final reserved = {
+        fixed.left,
+        fixed.right,
+        fixed.result,
+        ...fixed.clobbered,
+      };
+      reserve(reserved);
+      load(left, fixed.left, except: reserved);
+      load(right, fixed.right, except: reserved);
+      release(left);
+      release(right);
+      return (
+        result: fixed.result,
+        left: fixed.left,
+        right: fixed.right,
+        reserved: reserved,
+      );
+    }
+    var a = read(left), b = read(right, except: [a]);
+    final temporaries = <R>[];
+    R convert(Value value, R register) {
+      if (!floatingInputs || value.type == .floating) return register;
+      final temporary = allocate(.floating, except: [a, b]);
+      emitter.convertIntToDouble(temporary, register);
+      temporaries.add(temporary);
+      return temporary;
+    }
+
+    a = convert(left, a);
+    b = convert(right, b);
+    release(left);
+    release(right);
+    temporaries.forEach(releaseTemporary);
+    final destination = encoding.reuseLeft
+        ? allocate(
+            selection.bank(operation.type),
+            preferred: a,
+            except: a == b ? [] : [b],
+          )
+        : allocate(selection.bank(operation.type));
+    if (encoding.reuseLeft) emitter.move(destination, a);
+    return (
+      result: destination,
+      left: encoding.reuseLeft ? destination : a,
+      right: b,
+      reserved: const {},
+    );
+  }
+
+  /// Releases selected clobbers and publishes the already assigned result.
+  void finishBinary(
+    Value operation,
+    ({R result, R left, R right, Set<R> reserved}) operands,
+  ) {
+    operands.reserved
+        .where((register) => register != operands.result)
+        .forEach(releaseTemporary);
+    define(operation, operands.result);
+  }
+
+  /// Initializes the already assigned roots and preserves call-clobbered values.
+  void prepareCall(Value instruction) {
+    final roots = selection.liveReferences[instruction]!;
+    final clobbered = selection.calls[instruction]!.layout.clobberedRegisters;
     _registers.removeWhere((value, register) {
       if (!clobbered.contains(register) && !roots.contains(value)) return false;
       _spill(value, register);
       _free.add(register);
       return true;
     });
-    final frame = this.frame!;
-    final offsets = <int>[];
     for (final root in roots) {
       if (!selection.cells.contains(root) && !_spilled.contains(root)) {
         throw StateError('Live reference has no initialized stack home.');
       }
-      final offset = _slot(root);
-      final local =
-          offset >= frame.localOffset &&
-          offset < frame.localOffset + frame.localBytes;
-      final incoming =
-          offset >= frame.incomingStackOffset &&
-          offset < frame.incomingStackOffset + selection.entry.stackBytes;
-      if (!local && !incoming || frame.savedRegisters.containsValue(offset)) {
-        throw StateError('Live reference is outside value storage.');
-      }
-      offsets.add(offset);
     }
-    offsets.sort();
-    return StackRoots(
-      frame.incomingStackOffset,
-      frame.returnAddressOffset,
-      offsets,
-    );
   }
 
   /// Assigns block parameters simultaneously after [flush], using one register.

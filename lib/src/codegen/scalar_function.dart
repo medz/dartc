@@ -27,10 +27,8 @@ final class ScalarFunction<R extends Object>(
   final layouts = body.layouts;
   final selection = FunctionSelection(body, emitter);
 
-  bool get hasRoots => selection.liveness.acrossCalls.values.any(
-    (values) =>
-        values.any((v) => layouts.isReference(selection.body.typeOf(v))),
-  );
+  bool get hasRoots =>
+      selection.liveReferences.values.any((values) => values.isNotEmpty);
 
   /// Emits the body and reports direct call sites to the module generator.
   Uint8List generate(
@@ -174,37 +172,26 @@ final class ScalarFunction<R extends Object>(
           :final layout,
           :final target,
           :final arguments,
+          :final parameterTypes,
+          :final stackScratch,
+          :final addressRegister,
+          :final parkRegister,
+          :final onThrow,
         )) {
           final native = instruction is NativeInvocation ? instruction : null;
-          final parameterTypes = target == null
-              ? null
-              : layouts.entryTypes(target);
-          final roots = allocation.prepareCall(
-            instruction,
-            layout.clobberedRegisters,
-          );
+          allocation.prepareCall(instruction);
           final parked = persistent && native != null
-              ? HeapEntry.park(
-                  emitter,
-                  emitter.allocatableRegisters.firstWhere(
-                    (r) =>
-                        emitter.bank(r) == .general &&
-                        r != emitter.failureRegister &&
-                        layout.clobberedRegisters.contains(r),
-                  ),
-                )
+              ? HeapEntry.park(emitter, parkRegister!)
               : const <Fixup>[];
           // Stage stack words before populating registers that the scratch may alias.
           if (layout.stackBytes != 0) {
             for (final (i, location) in layout.parameters.indexed) {
               if (location case StackArgument(:final offset)) {
                 final value = arguments[i];
-                final scratch = emitter.allocatableRegisters.firstWhere(
-                  (r) =>
-                      emitter.bank(r) ==
-                          selection.bank(parameterTypes?[i] ?? value.type) &&
-                      layout.clobberedRegisters.contains(r),
-                );
+                final scratch =
+                    stackScratch[selection.bank(
+                      parameterTypes?[i] ?? selection.body.typeOf(value),
+                    )]!;
                 allocation.load(value, scratch, asType: parameterTypes?[i]);
                 final type = native?.signature.parameters[i].resolveAbi(
                   emitter.convention.target.abi,
@@ -243,15 +230,7 @@ final class ScalarFunction<R extends Object>(
             call(emitter.call(), target!);
           } else {
             // Load last so argument staging cannot overwrite the callee address.
-            final address = emitter.allocatableRegisters.lastWhere(
-              (r) =>
-                  emitter.bank(r) == .general &&
-                  layout.clobberedRegisters.contains(r) &&
-                  !layout.registerInputs.containsKey(r) &&
-                  !layout.parameters.any(
-                    (p) => p is RegisterArgument<R> && p.register == r,
-                  ),
-            );
+            final address = addressRegister!;
             allocation.load(selection.body.inputsOf(native).first, address);
             allocation.release(selection.body.inputsOf(native).first);
             for (final MapEntry(:key, :value)
@@ -265,19 +244,17 @@ final class ScalarFunction<R extends Object>(
           }
           safepoint(
             emitter.position,
-            roots,
+            allocation.safepoints[instruction]!,
             selection.body.sourceLocations[instruction],
             allocation.contextOffset,
           );
           if (failures && native == null) {
             final returned = emitter.label();
-            final end = selection.body.ends[block]!;
-            if (end is Invoke && end.operation == instruction) {
+            if (onThrow != null) {
               allocation.flush(live: selection.liveness.liveOut[block]);
             }
             emitter.jumpIfZero(emitter.failureRegister, returned);
-            if (end case Invoke(:final operation, :final onThrow)
-                when operation == instruction) {
+            if (onThrow != null) {
               allocation.saveUnwind();
               edge(onThrow);
             } else {
@@ -600,53 +577,13 @@ final class ScalarFunction<R extends Object>(
           allocation.releaseTemporary(converted);
           allocation.define(instruction, destination);
         } else {
-          final (:encoding, :left, :right, :floatingInputs) =
-              selection.binaries[instruction]!;
-          if (encoding.fixed case final fixed?) {
-            final reserved = {
-              fixed.left,
-              fixed.right,
-              fixed.result,
-              ...fixed.clobbered,
-            };
-            allocation.reserve(reserved);
-            allocation.load(left, fixed.left, except: reserved);
-            allocation.load(right, fixed.right, except: reserved);
-            encoding.emit(fixed.result, fixed.left, fixed.right);
-            allocation.release(left);
-            allocation.release(right);
-            reserved
-                .where((r) => r != fixed.result)
-                .forEach(allocation.releaseTemporary);
-            allocation.define(instruction, fixed.result);
-            continue;
-          }
-          var a = allocation.read(left),
-              b = allocation.read(right, except: [a]);
-          final temporaries = <R>[];
-          R convert(Value value, R register) {
-            if (!floatingInputs || value.type == .floating) return register;
-            final temporary = allocation.allocate(.floating, except: [a, b]);
-            emitter.convertIntToDouble(temporary, register);
-            temporaries.add(temporary);
-            return temporary;
-          }
-
-          a = convert(left, a);
-          b = convert(right, b);
-          allocation.release(left);
-          allocation.release(right);
-          temporaries.forEach(allocation.releaseTemporary);
-          final destination = encoding.reuseLeft
-              ? allocation.allocate(
-                  selection.bank(instruction.type),
-                  preferred: a,
-                  except: a == b ? [] : [b],
-                )
-              : allocation.allocate(selection.bank(instruction.type));
-          if (encoding.reuseLeft) emitter.move(destination, a);
-          encoding.emit(destination, encoding.reuseLeft ? destination : a, b);
-          allocation.define(instruction, destination);
+          final operands = allocation.binaryOperands(instruction);
+          selection.binaries[instruction]!.encoding.emit(
+            operands.result,
+            operands.left,
+            operands.right,
+          );
+          allocation.finishBinary(instruction, operands);
         }
       }
       switch (selection.body.ends[block]!) {
