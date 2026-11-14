@@ -126,8 +126,7 @@ final class ProgramPreparation(
     if (roots.any((root) => !facts.admitsUnknownCall(root))) {
       throw ArgumentError('Call facts must cover every preparation root.');
     }
-    final sourceProgram = this.program;
-    var program = sourceProgram;
+    final program = this.program;
     final runtime = _runtime;
     final imports = _bindings.imports;
     final callbacks = _bindings.callbacks;
@@ -155,9 +154,11 @@ final class ProgramPreparation(
         )
         .firstOrNull
         ?.type;
-    final bodies = sourceDefinitions
-        .map(sourceProgram.implementationOf)
-        .whereType<IrFunction>();
+    final sourceBodies = sourceDefinitions
+        .map(program.implementationOf)
+        .whereType<IrCallable>()
+        .toList();
+    final bodies = sourceBodies.whereType<IrFunction>().toList();
     final strings = StringStorage(
       source: program.classes
           .where((c) => c.type == ValueType.string)
@@ -210,28 +211,10 @@ final class ProgramPreparation(
       ...globals.functions,
       ...instances.functions,
     ];
-    if (helpers.isNotEmpty || constantLists) {
-      final expanded = IrProgram(
-        [
-          ...sourceProgram.classes,
-          if (!globals.isEmpty) globals.declaration,
-          for (final declaration in arithmetic.classes)
-            if (!sourceProgram.classes.any((c) => c.type == declaration.type))
-              declaration,
-        ],
-        [...sourceProgram.functions, ...helpers],
-        globals: sourceProgram.globals,
-        externals: [
-          ...sourceProgram.externals,
-          if (!globals.isEmpty) IrExternal(globals.address),
-        ],
-      );
-      program = expanded;
-      selected.addAll([
-        for (final function in helpers) function.target,
-        if (!globals.isEmpty) globals.address,
-      ]);
-    }
+    selected.addAll([
+      for (final function in helpers) function.target,
+      if (!globals.isEmpty) globals.address,
+    ]);
     final requiredTypes = {
       ...instantiatedTypes,
       for (final function in helpers) ...function.instantiatedClasses,
@@ -241,19 +224,15 @@ final class ProgramPreparation(
     }
     final members = MemberCalls(
       program,
-      selected,
+      sourceDefinitions,
       records: records,
-      instantiatedTypes: instantiatedTypes,
+      instantiatedTypes: requiredTypes,
       callTypes: facts,
     );
-    final suspensions = SuspensionFunctions(
-      selected.map(program.implementationOf).whereType<IrFunction>(),
-    );
+    final functions = [...bodies, ...helpers];
+    final suspensions = SuspensionFunctions(functions);
     final closures = ClosureStorage(
-      [
-        ...selected.map(program.implementationOf).whereType<IrCallable>(),
-        ...suspensions.entries,
-      ],
+      [...sourceBodies, ...helpers, ...suspensions.entries],
       boundMethods: [
         ...members.tearOffTargets,
         ...suspensions.entries.map((entry) => entry.target),
@@ -265,11 +244,12 @@ final class ProgramPreparation(
         ...casts.classes,
         ...arithmetic.classes,
         ...program.classes,
+        if (!globals.isEmpty) globals.declaration,
         ...closures.classes,
         ...suspensions.classes,
       ],
       nativeLayout: NativeLayout(target),
-      functions: program.functions,
+      functions: functions,
       instanceStorage: instances,
       closureStorage: closures,
       stringStorage: strings,
@@ -281,13 +261,14 @@ final class ProgramPreparation(
         for (final declaration in [
           ...casts.classes,
           ...arithmetic.classes,
+          if (!globals.isEmpty) globals.declaration,
           ...closures.classes,
           ...suspensions.classes,
           ?records.declaration,
         ])
           declaration.type,
-        for (final target in selected)
-          ...?program.implementationOf(target)?.referencedClasses,
+        for (final function in [...sourceBodies, ...helpers])
+          ...function.referencedClasses,
       ],
     );
     final selection = ProgramSelection(
@@ -305,7 +286,7 @@ final class ProgramPreparation(
         for (final entry in callbacks.entries) entry.key: entry.value.address,
       },
     );
-    for (final declaration in selected) {
+    for (final declaration in sourceDefinitions) {
       final function = program.implementationOf(declaration);
       final binding = imports[declaration];
       if (binding != null ||
@@ -326,6 +307,9 @@ final class ProgramPreparation(
         selection.include(function);
       }
     }
+    for (final function in helpers) {
+      selection.include(function);
+    }
     final calls = {
       for (final body in selection.functions.values) ...body.invocations.values,
     };
@@ -338,7 +322,7 @@ final class ProgramPreparation(
         !globals.isEmpty && globals.hasReferences(layouts);
     final missing = selection.close(persistent: persistent);
     for (final target in missing) {
-      if (sourceProgram.implementationOf(target) == null) {
+      if (program.implementationOf(target) == null) {
         throw ArgumentError('Missing support dependency: ${target.name}');
       }
     }
@@ -349,7 +333,7 @@ final class ProgramPreparation(
         callback.target,
       ],
       for (final target in selection.implicitCalls)
-        if (sourceProgram.implementationOf(target) is IrFunction) target,
+        if (program.implementationOf(target) is IrFunction) target,
     }.where((target) => !facts.admitsUnknownCall(target)).toSet();
     if (additional.isNotEmpty) {
       return PreparationDependencies._(additional, requiredTypes);

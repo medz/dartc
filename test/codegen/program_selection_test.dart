@@ -233,6 +233,7 @@ void main() {
       heapRuntime.allocate,
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
+      heapRuntime.runEvents,
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,
     });
@@ -246,6 +247,7 @@ void main() {
       heapRuntime.allocate,
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
+      heapRuntime.runEvents,
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,
       if (selection.capture) traces.capture,
@@ -318,6 +320,7 @@ void main() {
       heapRuntime.allocate,
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
+      heapRuntime.runEvents,
       heapRuntime.captureStackTrace,
       heapRuntime.recordError,
     });

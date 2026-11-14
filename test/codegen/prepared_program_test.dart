@@ -108,6 +108,31 @@ void main() {
     ]);
   });
 
+  test('unused pointer tear-offs do not require managed allocation', () {
+    final pointer = FfiTypes.int64Pointer;
+    final forward = FunctionTarget(uri, 'forward', pointer, [pointer]);
+    final pass = Block(forward.parameterTypes);
+    pass.finish(Return(pass.parameters.single));
+    final start = Block();
+    final address = start.emit(
+      PointerFromAddress(const Constant.integer(32), pointer),
+    );
+    start.finish(
+      Return(
+        start.emit(PointerAddress(start.emit(DirectCall(forward, [address])))),
+      ),
+    );
+    final unused = FunctionTarget(uri, 'unused', forward.signature, []);
+    final input = IrProgram([], [
+      IrFunction(entry, [start]),
+      IrFunction(forward, [pass]),
+      IrFunction(unused, [Block()..finish(Return(FunctionConstant(forward)))]),
+    ]);
+    final prepared = Compiler(target).prepare(input, roots: [entry]);
+    expect(prepared.definitions, {entry, forward});
+    expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
+  });
+
   test('an eliminated callback does not require a persistent runtime', () {
     final start = Block(), live = Block(), dead = Block();
     start.finish(Branch(const Constant.boolean(true), Jump(live), Jump(dead)));
