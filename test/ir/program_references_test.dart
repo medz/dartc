@@ -69,6 +69,55 @@ void main() {
     );
   });
 
+  test('bound lexical calls use declaration identity rather than labels', () {
+    final outer = FunctionTarget(_uri, 'outer', .integer, []);
+    FunctionTarget closure(int offset) => FunctionTarget(
+      _uri,
+      '<anonymous>',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: outer,
+      sourceOffset: offset,
+    );
+    final first = closure(1), second = closure(2), missing = closure(3);
+    final entry = Block();
+    final left = entry.emit(
+      FunctionCall(entry.emit(MakeClosure(first, [])), [], {}, [], first),
+    );
+    final right = entry.emit(
+      FunctionCall(entry.emit(MakeClosure(second, [])), [], {}, [], second),
+    );
+    entry.finish(Return(entry.emit(IntBinary(.add, left, right))));
+    final body = IrFunction(outer, [entry]);
+    final definitions = [
+      body,
+      IrFunction(first, [
+        Block(first.parameterTypes)..finish(const Return(_one)),
+      ]),
+      IrFunction(second, [
+        Block(second.parameterTypes)..finish(const Return(Constant.integer(2))),
+      ]),
+    ];
+    final program = IrProgram([], definitions);
+    expect(IrInterpreter(program, {}).run(body, []), 3);
+
+    final invoke = FunctionTarget(_uri, 'invoke', .integer, [first.signature]);
+    final call = Block(invoke.parameterTypes);
+    call.finish(
+      Return(
+        call.emit(FunctionCall(call.parameters.single, [], {}, [], missing)),
+      ),
+    );
+    expect(
+      () => IrProgram([], [
+        ...definitions,
+        IrFunction(invoke, [call]),
+      ]),
+      throwsArgumentError,
+    );
+  });
+
   test('nested constants, iterator calls and addAll retain dependencies', () {
     final inner = SequenceConstant(CoreTypes.listOf(.integer), [_one]);
     final outer = SequenceConstant(CoreTypes.listOf(inner.type), [inner]);

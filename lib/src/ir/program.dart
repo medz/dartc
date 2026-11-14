@@ -467,6 +467,7 @@ final class IrProgram(
       final owner = target.owner;
       final c = owner == null ? null : definitionOf(owner);
       final known = switch (target.kind) {
+        .closure => implementationOf(target)?.target,
         .getter || .setter || .method when c != null =>
           target.isAbstract
               ? c.members[target.selector]
