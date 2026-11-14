@@ -1,5 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_value.dart';
+import 'package:dartc/src/optimizer/program_flow.dart';
 import 'package:dartc/src/optimizer/program_optimizer.dart';
 import 'package:dartc/src/optimizer/simplification.dart';
 import 'package:dartc/src/optimizer/storage_elimination.dart';
@@ -11,6 +12,103 @@ import '../support/ir_interpreter.dart';
 final _uri = Uri.parse('memory:storage-promotion');
 
 void main() {
+  for (final invoke in [false, true]) {
+    test(
+      'exception payload fields promote from their actual unwind edge (invoke=$invoke)',
+      () {
+        final box = ClassType(_uri, 'ThrownBox');
+        final field = InstanceField(box, 'value', .integer);
+        final constructor = FunctionTarget(
+          _uri,
+          '',
+          .voidType,
+          [.integer],
+          owner: box,
+          kind: .initializer,
+        );
+        final initializing = Block(constructor.parameterTypes);
+        initializing.emit(
+          StoreField(
+            field,
+            initializing.parameters[0],
+            initializing.parameters[1],
+          ),
+        );
+        initializing.finish(const Return());
+        final fail = FunctionTarget(_uri, 'fail', .never, [box]);
+        final target = FunctionTarget(_uri, 'catchValue', .integer, [
+          .boolean,
+          .integer,
+          .integer,
+        ]);
+        final entry = Block(target.parameterTypes),
+            left = Block(),
+            right = Block(),
+            handler = Block([.object]);
+        entry.finish(Branch(entry.parameters[0], Jump(left), Jump(right)));
+        for (final (block, argument) in [
+          (left, entry.parameters[1]),
+          (right, entry.parameters[2]),
+        ]) {
+          final payload = block.emit(Construct(constructor, [argument]));
+          final edge = Jump(handler, [UnwindValue.exception]);
+          if (invoke) {
+            block.finish(
+              Invoke(
+                DirectCall(fail, [payload]),
+                onReturn: null,
+                onThrow: edge,
+              ),
+            );
+          } else {
+            block.finish(Throw(payload, onThrow: edge));
+          }
+        }
+        final receiver = handler.emit(
+          UncheckedCast(handler.parameters.single, box),
+        );
+        handler.finish(Return(handler.emit(LoadField(field, receiver))));
+        final original = IrFunction(target, [entry, left, right, handler]);
+        final throwing = Block(fail.parameterTypes);
+        throwing.finish(Throw(throwing.parameters.single));
+        final program = IrProgram(
+          [
+            IrClass(box, [field], constructors: [constructor]),
+          ],
+          [
+            IrFunction(constructor, [initializing]),
+            IrFunction(fail, [throwing]),
+            original,
+          ],
+        );
+        final facts = ProgramFlow(program, [
+          (
+            target: target,
+            arguments: target.parameterTypes.map(FlowValue.unknown).toList(),
+          ),
+        ]).facts;
+        final optimized = const ProgramStoragePromotion().run(facts);
+        for (final graph in [program, optimized]) {
+          final body = graph.implementationOf(target) as IrFunction;
+          for (final choose in [true, false]) {
+            for (final (left, right) in [(-4, 9), (0, 41), (7, -2)]) {
+              expect(
+                IrInterpreter(graph, {}).run(body, [choose, left, right]),
+                choose ? left : right,
+              );
+            }
+          }
+        }
+        expect(
+          (optimized.implementationOf(target) as IrFunction).blocks
+              .expand((block) => block.instructions)
+              .whereType<LoadField>(),
+          isEmpty,
+        );
+      },
+    );
+  }
+
   test(
     'unknown reentry writes survive both the normal and exceptional edge',
     () {

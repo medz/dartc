@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Promote caught exception fields using their actual exceptional edge values, preserving runtime inputs and preventing compiler failures in ordinary SDK range checks.
+
 - Join changing invocation inputs within their call site so factories in loops converge without merging independent callers. Expire stored SSA equalities when control flow rebinds their definitions, preserving values saved by earlier loop iterations and recursive calls.
 
 - Distinguish finite calls through different known callback declarations from recursive cycles, while summarizing recursion through the same callback independently of changing captures.

@@ -149,7 +149,7 @@ final class _Promotion(
     for (final activation in activations) {
       if (!facts.reachesEdge(edge, activation: activation)) continue;
       final state = facts.edgeStateOf(edge, activation: activation)!;
-      final value = _bound(state, access, activation);
+      final value = _bound(state, access, activation, edge: edge);
       if (value == null || value.isBottom) return null;
       values.add((activation, value));
     }
@@ -174,6 +174,10 @@ final class _Promotion(
       sources = sources == null ? available : sources.intersection(available);
     }
     if (sources!.isNotEmpty) return sources.first;
+    // Unwind values are produced on this edge, after its predecessor's operations.
+    if (access.receiver is UnwindValue || access.offset is UnwindValue) {
+      return null;
+    }
     final predecessors = owners[edge]!;
     if (predecessors.length != 1) return null;
     final block = predecessors.single;
@@ -186,13 +190,53 @@ final class _Promotion(
     return _atEntry(access, block);
   }
 
-  FlowValue? _bound(FlowState state, _Access access, Object activation) =>
-      state.boundValueOf(access.read, [
-        if (access.receiver case final receiver?)
-          facts.valueOf(receiver, activation: activation),
-        if (access.offset case final offset?)
-          facts.valueOf(offset, activation: activation),
-      ]);
+  FlowValue? _bound(
+    FlowState state,
+    _Access access,
+    Object activation, {
+    Jump? edge,
+  }) => state.boundValueOf(access.read, [
+    if (access.receiver case final receiver?)
+      _value(receiver, activation, edge),
+    if (access.offset case final offset?) _value(offset, activation, edge),
+  ]);
+
+  FlowValue _value(Value value, Object activation, Jump? edge) {
+    if (value is! UnwindValue) {
+      return facts.valueOf(value, activation: activation);
+    }
+    if (edge == null) {
+      throw StateError('An unwind value requires its exceptional edge.');
+    }
+    var result = const FlowValue.bottom();
+    for (final block in owners[edge]!) {
+      if (!facts.reachesBlock(block, activation: activation)) continue;
+      final FlowValue exception, trace;
+      switch (block.end) {
+        case Invoke(:final operation, :final onThrow)
+            when identical(onThrow, edge):
+          final failure = facts.failureOf(operation, activation: activation);
+          exception = failure.exception;
+          trace = failure.stackTrace;
+        case Throw(exception: final operand, :final stackTrace, :final onThrow)
+            when identical(onThrow, edge):
+          exception = facts.valueOf(operand, activation: activation);
+          trace = stackTrace == null
+              ? FlowValue.unknown(.stackTrace)
+              : facts.valueOf(stackTrace, activation: activation);
+        case ExhaustivenessFailure(:final onThrow)
+            when identical(onThrow, edge):
+          exception = FlowValue.unknown(.object);
+          trace = FlowValue.unknown(.stackTrace);
+        default:
+          throw StateError(
+            'An unwind operand requires an exceptional predecessor.',
+          );
+      }
+      result = result.join(value == UnwindValue.exception ? exception : trace);
+    }
+    return result;
+  }
 
   bool _preserves(_Access access, Instruction operation) {
     if (!facts.effectsOf(operation).contains(Effect.writesStorage)) return true;
