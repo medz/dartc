@@ -62,7 +62,7 @@ void main() {
         isA<StateError>().having(
           (error) => error.message,
           'stage contract',
-          contains('Normalize dynamic dispatch'),
+          contains('Missing normalized DynamicDispatch'),
         ),
       ),
     );

@@ -8,7 +8,163 @@ import 'fixtures/type_refinement.dart' as source;
 
 void main() {
   final uri = Uri.parse('memory:type-refinement');
+  test(
+    'generic external and unknown function results use their call environment',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final external = FunctionTarget(
+        uri,
+        'external',
+        t,
+        [],
+        typeParameters: [t],
+      );
+      final u = TypeParameterType('U')..initializeBound(.object.nullable);
+      final forward = FunctionTarget(
+        uri,
+        'forwardExternal',
+        u,
+        [],
+        typeParameters: [u],
+      );
+      final forwarding = Block();
+      forwarding.finish(
+        Return(forwarding.emit(DirectCall(external, [], typeArguments: [u]))),
+      );
+      final v = TypeParameterType('V')..initializeBound(.object.nullable);
+      final indirect = FunctionTarget(
+        uri,
+        'forwardFunction',
+        v,
+        [FunctionType(v, [])],
+        typeParameters: [v],
+      );
+      final indirectBody = Block(indirect.parameterTypes);
+      indirectBody.finish(
+        Return(
+          indirectBody.emit(FunctionCall(indirectBody.parameters.single, [])),
+        ),
+      );
+      final root = FunctionTarget(uri, 'entry', .voidType, [
+        FunctionType(.integer, []),
+        FunctionType(.string, []),
+      ]);
+      final entry = Block(root.parameterTypes);
+      final operations = <DirectCall>[];
+      for (final (index, type) in [
+        ValueType.integer,
+        ValueType.string,
+      ].indexed) {
+        operations.add(
+          entry.emit(DirectCall(forward, [], typeArguments: [type])),
+        );
+        operations.add(
+          entry.emit(
+            DirectCall(
+              indirect,
+              [entry.parameters[index]],
+              typeArguments: [type],
+            ),
+          ),
+        );
+      }
+      entry.finish(const Return());
+      final program = IrProgram(
+        [],
+        [
+          IrFunction(forward, [forwarding]),
+          IrFunction(indirect, [indirectBody]),
+          IrFunction(root, [entry]),
+        ],
+        externals: [IrExternal(external, effects: const {})],
+      );
+      final facts = ProgramFlow(program, [
+        (
+          target: root,
+          arguments: root.parameterTypes.map(FlowValue.unknown).toList(),
+        ),
+      ]).facts;
+      for (final call in operations) {
+        expect(facts.valueOf(call).unknownTypes, {call.type});
+        expect(
+          facts
+              .valueOf(call)
+              .types
+              .every((type) => type.freeTypeParameters.isEmpty),
+          isTrue,
+        );
+      }
+    },
+  );
+
   late IrProgram sourceProgram;
+  test('generic field and record reads receive the resolved result type', () {
+    final parameter = TypeParameterType('E')..initializeBound(.object.nullable);
+    final box = ClassType(uri, 'Box', typeParameters: [parameter]);
+    final field = InstanceField(box, 'value', parameter);
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final record = RecordType([t]);
+    final read = FunctionTarget(
+      uri,
+      'read',
+      t,
+      [
+        box.instantiate([t]),
+        record,
+      ],
+      typeParameters: [t],
+    );
+    final body = Block(read.parameterTypes);
+    final fieldValue = body.emit(LoadField(field, body.parameters.first));
+    final recordValue = body.emit(RecordGet(body.parameters.last, 0));
+    body.finish(Return(recordValue));
+    final main = FunctionTarget(uri, 'main', .voidType, [
+      for (final type in [ValueType.integer, ValueType.string]) ...[
+        box.instantiate([type]),
+        RecordType([type]),
+      ],
+    ]);
+    final entry = Block(main.parameterTypes);
+    for (final (index, type) in [ValueType.integer, ValueType.string].indexed) {
+      entry.emit(
+        DirectCall(
+          read,
+          entry.parameters.skip(index * 2).take(2),
+          typeArguments: [type],
+        ),
+      );
+    }
+    entry.finish(const Return());
+    final program = IrProgram(
+      [
+        IrClass(box, [field]),
+      ],
+      [
+        IrFunction(read, [body]),
+        IrFunction(main, [entry]),
+      ],
+    );
+    final facts = ProgramFlow(program, [
+      (
+        target: main,
+        arguments: main.parameterTypes.map(FlowValue.unknown).toList(),
+      ),
+    ]).facts;
+    for (final activation in facts.activationsOf(read)) {
+      final owner =
+          facts
+                  .valueOf(body.parameters.first, activation: activation)
+                  .unknownTypes
+                  .single
+              as ClassType;
+      for (final operation in [fieldValue, recordValue]) {
+        expect(facts.valueOf(operation, activation: activation).unknownTypes, {
+          owner.typeArguments.single,
+        });
+      }
+    }
+  });
+
   setUpAll(() async {
     sourceProgram = await AnalysisSession([
       'test/optimizer/fixtures/type_refinement.dart',

@@ -33,6 +33,90 @@ ProgramFlowFacts _analyze(
 }
 
 void main() {
+  test('generic address operations retain the actual invocation types', () {
+    final t = TypeParameterType('T')..initializeBound(FfiTypes.nativeType);
+    final pointerType = FfiTypes.pointer.instantiate([
+      FfiTypes.pointer.instantiate([t]),
+    ]);
+    final pointer = FunctionTarget(
+      _uri,
+      'pointerAt',
+      pointerType,
+      [.integer],
+      typeParameters: [t],
+    );
+    final pointerBody = Block(pointer.parameterTypes);
+    final converted = pointerBody.emit(
+      PointerFromAddress(pointerBody.parameters.single, pointerType),
+    );
+    final shifted = pointerBody.emit(
+      PointerOffset(converted, const Constant.integer(2)),
+    );
+    pointerBody.finish(Return(shifted));
+    final u = TypeParameterType('U')..initializeBound(.object.nullable);
+    final recover = FunctionTarget(
+      _uri,
+      'objectAt',
+      u,
+      [.integer],
+      typeParameters: [u],
+    );
+    final recovered = Block(recover.parameterTypes);
+    final reference = recovered.emit(
+      ReferenceFromAddress(recovered.parameters.single, u),
+    );
+    recovered.finish(Return(reference));
+    final target = FunctionTarget(_uri, 'entry', .voidType, [.integer]);
+    final entry = Block(target.parameterTypes);
+    final base = entry.emit(ReferenceAddress(_object));
+    final calls = <DirectCall>[];
+    for (final native in [FfiTypes.int64, FfiTypes.scalarTypes[Uint8]!]) {
+      calls.add(
+        entry.emit(DirectCall(pointer, [base], typeArguments: [native])),
+      );
+    }
+    final known = entry.emit(
+      DirectCall(recover, [base], typeArguments: [_type]),
+    );
+    final unknown = entry.emit(
+      DirectCall(recover, entry.parameters, typeArguments: [_type]),
+    );
+    entry.finish(const Return());
+    final program = IrProgram(
+      [IrClass(_type, [])],
+      [
+        IrFunction(pointer, [pointerBody]),
+        IrFunction(recover, [recovered]),
+        IrFunction(target, [entry]),
+      ],
+    );
+    final facts = ProgramFlow(program, [
+      (target: target, arguments: [FlowValue.unknown(.integer)]),
+    ], memoryLayout: _Memory()).facts;
+    for (final call in calls) {
+      final address = facts.valueOf(call).addresses.single;
+      expect(address.type, call.type);
+      expect(address.type.freeTypeParameters, isEmpty);
+      expect(address.offset, 16);
+    }
+    expect(
+      facts
+          .valueOf(converted)
+          .types
+          .every((type) => type.freeTypeParameters.isEmpty),
+      isTrue,
+    );
+    expect(facts.valueOf(known).constant?.structuralKey, _object.structuralKey);
+    expect(facts.valueOf(unknown).unknownTypes, {_type});
+    expect(
+      facts
+          .valueOf(reference)
+          .types
+          .every((type) => type.freeTypeParameters.isEmpty),
+      isTrue,
+    );
+  });
+
   test(
     'managed offsets survive pointer views, scaled offsets and recovery',
     () {

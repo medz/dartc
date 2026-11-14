@@ -291,7 +291,7 @@ final class ProgramFlow(
         operation,
         arguments,
         input,
-        target.returnType,
+        target.returnType.substitute(environment),
         effects: effects,
       );
     }
@@ -706,6 +706,7 @@ final class ProgramFlow(
     FlowValue Function(Value) read,
   ) {
     if (inputs.any((value) => value.isBottom)) return _unreachable;
+    final resultType = operation.type.substitute(activation.environment);
     final repeated =
         activation.repeated || _loopBlocks(activation.body).contains(block);
     FlowObject allocate(Instruction site) => FlowObject(
@@ -727,6 +728,7 @@ final class ProgramFlow(
     final stored = state.transfer(
       operation,
       inputs,
+      resultType: resultType,
       allocate: allocate,
       repeated: repeated,
       invoke: invoke,
@@ -821,7 +823,7 @@ final class ProgramFlow(
             result,
             target == null
                 ? FlowResult(
-                    value: FlowValue.unknown(operation.type),
+                    value: FlowValue.unknown(resultType),
                     normal: state.copy(),
                     exceptional: state.copy(),
                   )
@@ -839,7 +841,7 @@ final class ProgramFlow(
         return found
             ? result
             : FlowResult(
-                value: FlowValue.unknown(operation.type),
+                value: FlowValue.unknown(resultType),
                 normal: state.copy(),
                 exceptional: state.copy(),
               );
@@ -909,14 +911,14 @@ final class ProgramFlow(
         for (final address in input.addresses) {
           value = value.join(
             FlowValue.address(
-              FlowAddress(address.base, address.offset, type: operation.type),
+              FlowAddress(address.base, address.offset, type: resultType),
             ),
           );
         }
         if (input.constants.isNotEmpty ||
             input.objects.isNotEmpty ||
             input.unknownTypes.isNotEmpty) {
-          value = value.join(FlowValue.unknown(operation.type));
+          value = value.join(FlowValue.unknown(resultType));
         }
         if (operation is PointerAddress) {
           for (final source in input.sources) {
@@ -942,9 +944,7 @@ final class ProgramFlow(
         final index = constant is ScalarConstant && constant.value is int
             ? constant.value as int
             : null;
-        final stride = layout
-            ?.of(FfiTypes.pointerElement(operation.type)!)
-            .size;
+        final stride = layout?.of(FfiTypes.pointerElement(resultType)!).size;
         var value = const FlowValue.bottom();
         for (final address in input.addresses) {
           final offset =
@@ -955,14 +955,14 @@ final class ProgramFlow(
                 );
           value = value.join(
             FlowValue.address(
-              FlowAddress(address.base, offset, type: operation.type),
+              FlowAddress(address.base, offset, type: resultType),
             ),
           );
         }
         if (input.unknownTypes.isNotEmpty ||
             input.objects.isNotEmpty ||
             input.constants.isNotEmpty) {
-          value = value.join(FlowValue.unknown(operation.type));
+          value = value.join(FlowValue.unknown(resultType));
         }
         activation.operationEffects[operation] = operation.effects;
         return FlowResult(
@@ -975,8 +975,8 @@ final class ProgramFlow(
         for (final address in input.addresses) {
           value = value.join(
             address.offset == 0
-                ? address.reference.check(operation.type).value
-                : FlowValue.unknown(operation.type)
+                ? address.reference.check(resultType).value
+                : FlowValue.unknown(resultType)
                       .withReferences([address.reference]),
           );
         }
@@ -984,13 +984,13 @@ final class ProgramFlow(
           value = value.join(
             constant is ScalarConstant &&
                     constant.value == 0 &&
-                    operation.type.mayBeNull
+                    resultType.mayBeNull
                 ? FlowValue.constant(const Constant.nullValue())
-                : FlowValue.unknown(operation.type),
+                : FlowValue.unknown(resultType),
           );
         }
         if (input.unknownTypes.isNotEmpty || input.objects.isNotEmpty) {
-          value = value.join(FlowValue.unknown(operation.type));
+          value = value.join(FlowValue.unknown(resultType));
         }
         for (final source in input.sources) {
           if (source.value case ReferenceAddress(:final object)
@@ -999,11 +999,11 @@ final class ProgramFlow(
             value = object is Constant
                 ? FlowValue.constant(object)
                 : creator.values[object] ?? value;
-            value = value.check(operation.type).value;
+            value = value.check(resultType).value;
             break;
           }
         }
-        if (value.isBottom) value = FlowValue.unknown(operation.type);
+        if (value.isBottom) value = FlowValue.unknown(resultType);
         activation.operationEffects[operation] = const {Effect.readsStorage};
         return FlowResult(
           value: value.withReferences([input.references]),
@@ -1059,9 +1059,7 @@ final class ProgramFlow(
         );
       case TypeCast() || NullCheck():
         final checked = inputs.single.check(
-          operation is NullCheck
-              ? ValueType.object
-              : operation.type.substitute(activation.environment),
+          operation is NullCheck ? ValueType.object : resultType,
         );
         activation.operationEffects[operation] = {
           if (checked.mayFail) Effect.mayThrow,
@@ -1072,9 +1070,7 @@ final class ProgramFlow(
           exceptional: checked.mayFail ? state.copy() : null,
         );
       case TypeView() || UncheckedCast():
-        final value = inputs.single
-            .check(operation.type.substitute(activation.environment))
-            .value;
+        final value = inputs.single.check(resultType).value;
         activation.operationEffects[operation] = const {};
         return FlowResult(
           value: value,
@@ -1128,7 +1124,7 @@ final class ProgramFlow(
             operation,
             inputs,
             state,
-            operation.type,
+            resultType,
           );
         }
         final next = state.copy();
@@ -1136,11 +1132,11 @@ final class ProgramFlow(
           next.invalidate(inputs);
         }
         return FlowResult(
-          value: operation.type == .never
+          value: resultType == .never
               ? const FlowValue.bottom()
-              : FlowValue.unknown(operation.type)
+              : FlowValue.unknown(resultType)
                     .withReferences(inputs.map((value) => value.references)),
-          normal: operation.type == .never ? null : next,
+          normal: resultType == .never ? null : next,
           exceptional: operation.mayThrow ? next.copy() : null,
         );
     }
@@ -1373,7 +1369,7 @@ final class ProgramFlow(
           operation,
           [receiver, ...positional, ...named.values],
           state,
-          operation.type,
+          operation.type.substitute(activation.environment),
         ),
       );
     }
@@ -1652,7 +1648,11 @@ final class ProgramFlow(
           Effect.allocates,
         };
         invoked = state.construct(
-          FlowObject(site, activation, type: owner!),
+          FlowObject(
+            site,
+            activation,
+            type: owner!.substitute(activation.environment),
+          ),
           target,
           arguments,
           repeated:
@@ -1781,7 +1781,7 @@ final class ProgramFlow(
           site,
           [function, ...positional, ...named.values],
           state,
-          site.type,
+          site.type.substitute(activation.environment),
         ),
       );
     }
