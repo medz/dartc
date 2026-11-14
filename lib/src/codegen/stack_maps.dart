@@ -10,7 +10,7 @@ final class StackMaps() {
   final _entries = <(int, StackRoots, int?, int?)>[];
   final _addresses = <int, List<(int, FixupEncoding)>>{};
 
-  /// Adds roots and the optional constant String symbol describing their frame.
+  /// Adds roots and the optional immutable source-frame metadata symbol.
   void add(
     int returnAddress,
     StackRoots roots,

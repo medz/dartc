@@ -18,7 +18,6 @@ import 'native_adapter.dart';
 import 'native_callback.dart';
 import 'constant_data.dart';
 import 'stack_maps.dart';
-import 'frame_description.dart';
 import 'heap_entry.dart';
 
 /// Generates native modules with target-specific function emitters.
@@ -96,15 +95,8 @@ base class ScalarCodeGenerator<R extends Object>(
       if (hasRoots) {
         final description = frameSource == null
             ? null
-            : frameDescription(frameSource, location);
-        maps.add(
-          code.length + position,
-          roots,
-          description == null
-              ? null
-              : constants.addressOf(Constant.string(description)),
-          context,
-        );
+            : constants.frameAddress(frameSource, location);
+        maps.add(code.length + position, roots, description, context);
       }
     }
 

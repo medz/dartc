@@ -8,4 +8,5 @@ export '../src/layout/memory_layout.dart'
         RuntimeContext,
         StackMapTable,
         StackMapRecord,
+        SourceFrameMetadata,
         ClosureTraceMetadata;

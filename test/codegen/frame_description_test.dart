@@ -1,5 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 import 'package:dartc/optimizer.dart';
+import 'package:dartc/src/codegen/constant_data.dart';
+import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/frame_description.dart';
 import 'package:test/test.dart';
 
@@ -7,6 +12,66 @@ import '../../sdk/runtime/stack_trace.dart';
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test('source metadata shares names and paths without merging call sites', () {
+    final uri = Uri.parse('file:///shared/part.dart');
+    final root = FunctionTarget(uri, 'root', .voidType, []);
+    final leaf = FunctionTarget(uri, 'leaf', .voidType, []);
+    final generated = FunctionTarget(null, 'generated', .voidType, []);
+    final outer = SourceLocation((
+      uri: uri,
+      line: 7,
+      column: 8,
+    ), function: root);
+    SourceLocation origin(int column) => SourceLocation(
+      (uri: uri, line: 3, column: column),
+      function: leaf,
+      caller: outer,
+    );
+    const symbolBase = 10;
+    final data = ConstantData(ProgramLayout([]), symbolBase);
+    final first = data.frameAddress(root, origin(4))!;
+    final second = data.frameAddress(root, origin(5))!;
+    final caller = data.frameAddress(root, outer)!;
+    expect(first, isNot(second));
+    expect(data.frameAddress(root, origin(4)), first);
+    expect(
+      data.frameAddress(generated, SourceLocation(null, caller: origin(4))),
+      first,
+    );
+    expect(data.frameAddress(generated), isNull);
+    final unnamed = data.frameAddress(leaf)!;
+    final bytes = ByteData.sublistView(data.finish().bytes);
+    int offset(int symbol) => data.symbols[symbol - symbolBase].offset;
+    int? reference(int symbol, int field) => data.relocations
+        .where((r) => r.offset == offset(symbol) + field)
+        .firstOrNull
+        ?.symbol;
+    int number(int symbol, int field) =>
+        bytes.getInt64(offset(symbol) + field, Endian.little);
+    expect(
+      reference(first, SourceFrameMetadata.name),
+      reference(second, SourceFrameMetadata.name),
+    );
+    expect(
+      reference(first, SourceFrameMetadata.uri),
+      reference(caller, SourceFrameMetadata.uri),
+    );
+    expect(reference(first, SourceFrameMetadata.caller), caller);
+    expect(reference(second, SourceFrameMetadata.caller), caller);
+    expect(reference(caller, SourceFrameMetadata.caller), isNull);
+    expect(number(first, SourceFrameMetadata.line), 3);
+    expect(number(first, SourceFrameMetadata.column), 4);
+    expect(number(second, SourceFrameMetadata.column), 5);
+    expect(number(caller, SourceFrameMetadata.line), 7);
+    expect(number(caller, SourceFrameMetadata.column), 8);
+    expect(
+      reference(unnamed, SourceFrameMetadata.name),
+      reference(first, SourceFrameMetadata.name),
+    );
+    expect(reference(unnamed, SourceFrameMetadata.uri), isNull);
+    expect(data.symbols.where((s) => s.name.startsWith('frame')), hasLength(4));
+  });
+
   test(
     'nested inlining preserves throw and rethrow frame identities and sites',
     () {

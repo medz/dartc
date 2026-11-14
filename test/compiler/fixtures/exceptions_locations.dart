@@ -14,8 +14,11 @@ Never throwInPart() {
 }
 
 bool sourceLocations() {
-  final first = chooseTrace(true).toString();
-  final second = chooseTrace(false).toString();
+  final firstTrace = chooseTrace(true);
+  final secondTrace = chooseTrace(false);
+  allocate(40000);
+  final first = firstTrace.toString();
+  final second = secondTrace.toString();
   if (!first.contains('exceptions_locations.dart:3:') ||
       !first.contains('exceptions_locations.dart:7:12)') ||
       !second.contains('exceptions_locations.dart:9:10)')) {
@@ -24,6 +27,21 @@ bool sourceLocations() {
   try {
     throwInPart();
   } catch (_, trace) {
-    return trace.toString().contains('exceptions_locations.dart:13:3)');
+    return trace.toString().contains('exceptions_locations.dart:13:3)') &&
+        inlinedSourceLocations();
   }
+}
+
+int inlineTraceNull(int? value) => value!;
+
+bool inlinedSourceLocations() {
+  try {
+    inlineTraceNull(null);
+  } catch (_, trace) {
+    final text = trace.toString();
+    final leaf = text.indexOf('inlineTraceNull (');
+    final caller = text.indexOf('inlinedSourceLocations (');
+    return leaf >= 0 && caller > leaf;
+  }
+  return false;
 }

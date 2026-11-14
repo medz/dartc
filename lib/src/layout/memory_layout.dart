@@ -82,7 +82,7 @@ abstract final class StackMapTable() {
 
 /// Byte offsets in a root record addressed by the stack-map index.
 abstract final class StackMapRecord() {
-  /// The constant frame-description address, or zero for an unnamed frame.
+  /// The source-frame metadata address, or zero for an unnamed frame.
   static const description = 0;
 
   /// One plus the stack offset of the traced continuation, or zero.
@@ -91,6 +91,16 @@ abstract final class StackMapRecord() {
   static const returnAddress = 24;
   static const rootCount = 32;
   static const roots = 40;
+}
+
+/// Byte offsets in shared, immutable logical source-frame metadata.
+abstract final class SourceFrameMetadata() {
+  static const name = 0;
+  static const uri = 8;
+  static const line = 16;
+  static const column = 24;
+  static const caller = 32;
+  static const size = 40;
 }
 
 /// Byte offsets in optional immutable function-value metadata.

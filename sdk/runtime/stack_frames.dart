@@ -10,13 +10,9 @@ final class StackFrames(final int context) {
 
   int get pc => _pc;
 
-  /// The source frame description, or `null` for a generated machine frame.
-  String? get description {
-    final address = Pointer<Int64>.fromAddress(
-      _record + StackMapRecord.description,
-    ).value;
-    return address == 0 ? null : Memory.objectAt<String>(address);
-  }
+  /// Immutable source-frame metadata, or zero for a generated machine frame.
+  int get description =>
+      Pointer<Int64>.fromAddress(_record + StackMapRecord.description).value;
 
   /// The managed continuation saved in this frame, if any.
   Object? get continuation {

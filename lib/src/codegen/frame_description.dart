@@ -1,7 +1,10 @@
 import 'package:dartc/ir.dart';
 
-/// Describes logical source frames, innermost first, separated by newlines.
-String? frameDescription(FunctionTarget function, [SourceLocation? location]) {
+/// Logical source frames, innermost first, excluding generated machine frames.
+Iterable<(String, SourceLocation?)> sourceFrames(
+  FunctionTarget function, [
+  SourceLocation? location,
+]) sync* {
   String name(FunctionTarget target) {
     final prefix = target.enclosing == null
         ? target.owner?.name
@@ -13,20 +16,25 @@ String? frameDescription(FunctionTarget function, [SourceLocation? location]) {
         : '$prefix.${target.name}';
   }
 
-  final frames = <String>[];
   var current = location;
   do {
     final target = current?.function ?? function;
     if (target.library != null) {
-      final label = name(target);
-      final position = current?.position;
-      frames.add(
-        position == null
-            ? label
-            : '$label (${position.uri}:${position.line}:${position.column})',
-      );
+      yield (name(target), current);
     }
     current = current?.caller;
   } while (current != null);
+}
+
+/// Describes logical source frames for suspended Dart continuations.
+String? frameDescription(FunctionTarget function, [SourceLocation? location]) {
+  final frames = [
+    for (final (name, source) in sourceFrames(function, location))
+      switch (source?.position) {
+        null => name,
+        final position =>
+          '$name (${position.uri}:${position.line}:${position.column})',
+      },
+  ];
   return frames.isEmpty ? null : frames.join('\n');
 }

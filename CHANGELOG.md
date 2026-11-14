@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Share stack-frame names, source URIs and inline caller metadata across call sites, formatting captured traces on demand while preserving source locations and asynchronous frame order.
+
 - Skip callback reachability analysis when a program has no native callback entries, preserving native binding and rewritten-program checks.
 
 - Select direct inlining from current program roots without a preliminary type-flow solve, and prefer small leaf operations over allocation and call expansion to limit compile time and code growth.

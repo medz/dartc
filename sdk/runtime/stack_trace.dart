@@ -13,8 +13,9 @@ external StackTrace currentStackTrace();
 final class CapturedStackTrace(
   final int pc,
   final CapturedStackTrace? caller,
-  final String? description,
-) implements StackTrace {
+  final String? description, {
+  final int source = 0,
+}) implements StackTrace {
   /// Adds an asynchronous gap followed by the next suspended frame.
   CapturedStackTrace followedBy(String description) =>
       CapturedStackTrace(0, CapturedStackTrace(0, this, null), description);
@@ -29,6 +30,7 @@ final class CapturedStackTrace(
     ) {
       names.add(
         frame.description ??
+            _describeFrame(frame.source) ??
             (frame.pc == 0
                 ? '<asynchronous suspension>'
                 : '0x${frame.pc.toRadixString(16)}'),
@@ -49,7 +51,12 @@ StackTrace captureStackTrace(int sp, int pc) {
   CapturedStackTrace? head;
   while (frames.moveNext()) {
     if (!frames.isBoundary) {
-      head = CapturedStackTrace(frames.pc, head, frames.description);
+      head = CapturedStackTrace(
+        frames.pc,
+        head,
+        null,
+        source: frames.description,
+      );
       var context = frames.continuation;
       if (context is Function) {
         final visited = Set<Function>.identity();
@@ -112,7 +119,24 @@ String? closureDescription(Function closure) {
   final name = Pointer<Int64>.fromAddress(
     metadata + ClosureTraceMetadata.description,
   ).value;
-  return name == 0 ? null : Memory.objectAt<String>(name);
+  return _describeFrame(name);
+}
+
+String? _describeFrame(int address) {
+  if (address == 0) return null;
+  final frames = <String>[];
+  while (address != 0) {
+    final frame = Pointer<Int64>.fromAddress(address);
+    final name = Memory.objectAt<String>(frame[SourceFrameMetadata.name ~/ 8]);
+    final uri = frame[SourceFrameMetadata.uri ~/ 8];
+    frames.add(
+      uri == 0
+          ? name
+          : '$name (${Memory.objectAt<String>(uri)}:${frame[SourceFrameMetadata.line ~/ 8]}:${frame[SourceFrameMetadata.column ~/ 8]})',
+    );
+    address = frame[SourceFrameMetadata.caller ~/ 8];
+  }
+  return frames.join('\n');
 }
 
 int _traceOffset(Object error) {

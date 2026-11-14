@@ -19,6 +19,51 @@ final class ConstantData(
   final _words = <int>[];
   final _constants = <Object, int>{};
   final _types = <ClassType, int>{};
+  final _frames = <Object, int>{};
+
+  /// Shares source names, URIs and logical caller chains across safepoints.
+  int? frameAddress(FunctionTarget function, [SourceLocation? location]) {
+    int? caller;
+    for (final (name, source) in sourceFrames(
+      function,
+      location,
+    ).toList().reversed) {
+      final position = source?.position;
+      final key = (name, position, caller);
+      if (_frames[key] case final existing?) {
+        caller = existing;
+        continue;
+      }
+      final offset = _words.length * 8;
+      final symbol = _reserve('frame', SourceFrameMetadata.size ~/ 8);
+      _frames[key] = symbol;
+      relocations.add(
+        .address(
+          1,
+          offset + SourceFrameMetadata.name,
+          addressOf(Constant.string(name)),
+        ),
+      );
+      if (position != null) {
+        relocations.add(
+          .address(
+            1,
+            offset + SourceFrameMetadata.uri,
+            addressOf(Constant.string(position.uri.toString())),
+          ),
+        );
+        _words[(offset + SourceFrameMetadata.line) ~/ 8] = position.line;
+        _words[(offset + SourceFrameMetadata.column) ~/ 8] = position.column;
+      }
+      if (caller != null) {
+        relocations.add(
+          .address(1, offset + SourceFrameMetadata.caller, caller),
+        );
+      }
+      caller = symbol;
+    }
+    return caller;
+  }
 
   int typeAddress(ClassType type) => _type(
     type,
@@ -266,7 +311,7 @@ final class ConstantData(
             metadata,
           ),
         );
-        final description = frameDescription(
+        final description = frameAddress(
           closure.sourceTarget,
           closure.sourceTarget.declarationLocation,
         );
@@ -275,7 +320,7 @@ final class ConstantData(
             .address(
               1,
               metadataStart * 8 + ClosureTraceMetadata.description,
-              addressOf(Constant.string(description)),
+              description,
             ),
           );
         }
