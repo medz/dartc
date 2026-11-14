@@ -3,6 +3,76 @@ import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('source call facts constrain typed and dynamic member candidates', () {
+    final uri = Uri.parse('memory:dispatch-flow');
+    final base = ClassType(uri, 'Base');
+    final classes = [
+      ClassType(uri, 'Used', superclass: base),
+      ClassType(uri, 'Other', superclass: base),
+    ];
+    final methods = [
+      for (final type in classes)
+        FunctionTarget(uri, 'value', .integer, [], owner: type, kind: .method),
+    ];
+    final forward = FunctionTarget(uri, 'forward', .dynamicType, [base]);
+    final body = Block(forward.parameterTypes);
+    final call = body.emit(
+      DynamicDispatch(body.parameters.single, methods.first.selector, []),
+    );
+    body.finish(Return(call));
+    final entry = Block();
+    entry.finish(
+      Return(
+        entry.emit(DirectCall(forward, [ObjectConstant(classes.first, {})])),
+      ),
+    );
+    final root = IrFunction(FunctionTarget(uri, 'root', .dynamicType, []), [
+      entry,
+    ]);
+    final program = IrProgram(
+      [
+        IrClass(base, []),
+        for (final (i, type) in classes.indexed)
+          IrClass(type, [], members: [methods[i]]),
+      ],
+      [
+        root,
+        IrFunction(forward, [body]),
+        for (final method in methods)
+          IrFunction(method, [
+            Block(method.parameterTypes)
+              ..finish(const Return(Constant.integer(1))),
+          ]),
+      ],
+    );
+    final facts = CallTypeFlow(program, [
+      root.target,
+    ], instantiatedTypes: classes);
+    final calls = MemberCalls(
+      program,
+      facts.definitions,
+      instantiatedTypes: classes,
+      callTypes: facts,
+    );
+    expect(calls.dynamicTargets(call), {classes.first: methods.first});
+    expect(
+      calls.targetsFor(
+        base,
+        methods.first.selector,
+        receiverValue: body.parameters.single,
+      ),
+      {classes.first: methods.first},
+    );
+    expect(calls.targetsFor(base, methods.first.selector), {
+      for (final (i, type) in classes.indexed) type: methods[i],
+    });
+    final generated = Block([base]).parameters.single;
+    expect(
+      calls.targetsFor(base, methods.first.selector, receiverValue: generated),
+      calls.targetsFor(base, methods.first.selector),
+    );
+  });
+
   test('reachability and dispatch respect closed generic receiver bounds', () {
     final element = TypeParameterType('E')..initializeBound(.object.nullable);
     final classes = [

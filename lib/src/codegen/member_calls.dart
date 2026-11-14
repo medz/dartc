@@ -9,6 +9,7 @@ final class MemberCalls(
   final Set<FunctionTarget> definitions, {
   Iterable<ClassType> instantiatedTypes = const [],
   final RecordStorage? records,
+  final CallTypeFlow? callTypes,
 }) {
   final _instances = {
     ...instantiatedTypes,
@@ -80,7 +81,8 @@ final class MemberCalls(
     TypeValues? types,
   }) => {
     for (final type in _receivers(call.receiver.unviewedType))
-      if (program.classes.any((declaration) => declaration.type == type))
+      if ((callTypes?.allows(call.receiver, type) ?? true) &&
+          program.classes.any((declaration) => declaration.type == type))
         type:
             ?(type == records?.declaration?.type && types != null
                 ? records!.getter(call.selector, types)
@@ -244,9 +246,14 @@ final class MemberCalls(
     ValueType receiver,
     MemberSelector selector, {
     bool hasBuiltin = false,
+    Value? receiverValue,
   }) {
     final targets = <ClassType, FunctionTarget>{};
     for (final type in _receivers(receiver)) {
+      if (receiverValue != null &&
+          !(callTypes?.allows(receiverValue, type) ?? true)) {
+        continue;
+      }
       if (hasBuiltin &&
           (type == FfiTypes.pointer ||
               type == ValueType.string ||
