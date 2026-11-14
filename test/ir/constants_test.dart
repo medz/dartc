@@ -4,6 +4,47 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'reference payloads retain identity, dependencies and storage validation',
+    () {
+      final uri = Uri.parse('memory:constant-payload');
+      final type = ClassType(uri, 'References');
+      final callback = FunctionTarget(uri, 'callback', .integer, []);
+      final entry = FunctionTarget(uri, 'entry', type, []);
+      final input = <Constant>[FunctionConstant(callback)];
+      final constant = ObjectConstant(type, {}, payload: input);
+      input.clear();
+      final function = IrFunction(entry, [Block()..finish(Return(constant))]);
+      expect(function.callees, contains(callback));
+      expect(constant.payload, hasLength(1));
+      expect(() => constant.payload.clear(), throwsUnsupportedError);
+      expect(
+        constant.structuralKey,
+        ObjectConstant(
+          type,
+          {},
+          payload: [FunctionConstant(callback)],
+        ).structuralKey,
+      );
+      expect(
+        constant.structuralKey,
+        isNot(ObjectConstant(type, {}).structuralKey),
+      );
+      final callbackBody = IrFunction(callback, [
+        Block()..finish(const Return(Constant.integer(7))),
+      ]);
+      expect(
+        () => IrProgram([IrClass(type, [])], [function, callbackBody]),
+        throwsArgumentError,
+      );
+      final program = IrProgram(
+        [IrClass(type, [], referencePayload: true)],
+        [function, callbackBody],
+      );
+      expect(program.implementationOf(callback), same(callbackBody));
+    },
+  );
+
   final library = Uri.parse('memory:constants');
   const one = Constant.integer(1);
   const two = Constant.integer(2);

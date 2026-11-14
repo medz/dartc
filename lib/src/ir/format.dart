@@ -55,8 +55,8 @@ void writeFunction(
       'const ${type.dartName}[${elements.map(value).join(', ')}]',
     MapConstant(:final type, :final entries) =>
       'const ${type.dartName}{${entries.map((e) => '${value(e.$1)}: ${value(e.$2)}').join(', ')}}',
-    ObjectConstant(:final type, :final fields) =>
-      'const ${type.dartName}{${fields.entries.map((e) => '${e.key.owner.library}::${e.key.owner.dartName}.${e.key.name}: ${value(e.value)}').join(', ')}}',
+    ObjectConstant(:final type, :final fields, :final payload) =>
+      'const ${type.dartName}{${fields.entries.map((e) => '${e.key.owner.library}::${e.key.owner.dartName}.${e.key.name}: ${value(e.value)}').join(', ')}}${payload.isEmpty ? '' : '[${payload.map(value).join(', ')}]'}',
     TestedValue(:final test, :final type) =>
       '${value(test.operand)} as ${type.dartName}',
     UnwindValue() => v == UnwindValue.exception ? 'exception' : 'stackTrace',

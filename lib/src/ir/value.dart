@@ -78,12 +78,13 @@ sealed class const Constant(super.type) extends Value {
         (tail, entry) => (tail, entry.$1.structuralKey, entry.$2.structuralKey),
       ),
     ),
-    ObjectConstant(:final type, :final fields) => (
+    ObjectConstant(:final type, :final fields, :final payload) => (
       type.normalize(),
       _orderedFields(fields).fold<Object?>(
         null,
         (tail, field) => (tail, field, (fields[field]!).structuralKey),
       ),
+      payload.fold<Object?>(null, (tail, value) => (tail, value.structuralKey)),
     ),
   };
 
@@ -369,9 +370,17 @@ final class MapConstant(ClassType type, Iterable<(Constant, Constant)> entries)
 }
 
 /// A fully initialized immutable instance, independent of its constructor site.
-final class ObjectConstant(ClassType type, Map<InstanceField, Constant> fields)
-    extends Constant {
+final class ObjectConstant(
+  ClassType type,
+  Map<InstanceField, Constant> fields, {
+  Iterable<Constant> payload = const [],
+}) extends Constant {
   final Map<InstanceField, Constant> fields = .unmodifiable(fields);
+
+  /// Immutable reference slots after the fixed fields.
+  ///
+  /// Nonempty payloads require a declared reference-payload class in the program.
+  final List<Constant> payload = .unmodifiable(payload);
 
   this : super(type) {
     type.validateTypeArguments();

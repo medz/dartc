@@ -160,7 +160,9 @@ FunctionReferences verifyCallable(
       MapConstant(:final entries) => entries.expand(
         (entry) => [entry.$1, entry.$2],
       ),
-      ObjectConstant(:final fields) => fields.values,
+      ObjectConstant(:final fields, :final payload) => fields.values.followedBy(
+        payload,
+      ),
       _ => const <Constant>[],
     };
     for (final child in children) {

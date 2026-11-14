@@ -513,6 +513,12 @@ final class IrProgram(
         }
       }
       for (final object in f.objects) {
+        if (object.payload.isNotEmpty &&
+            definitionOf(object.type as ClassType)?.referencePayload != true) {
+          throw ArgumentError(
+            'Constant reference payload requires a declared storage contract.',
+          );
+        }
         for (
           ClassType? t = object.type as ClassType;
           t != null;
