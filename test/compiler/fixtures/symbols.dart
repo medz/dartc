@@ -1,6 +1,7 @@
 // shortcut: analyzer 14.7 drops private Symbol libraries, remove suppressions when its evaluator preserves them.
 // ignore_for_file: equal_keys_in_const_map, equal_elements_in_const_set, const_eval_throws_exception, equal_keys_in_map_pattern, unreachable_switch_case
 
+import '../../codegen/fixtures/invocations.dart' as invocations;
 import 'symbols_dependency.dart' as other;
 import 'public_symbols.dart' as public;
 part 'symbols_part.dart';
@@ -75,6 +76,12 @@ void main() {
   print(
     'qualified:${identical(#_prefix.name, other.qualified)}:'
     '${#_prefix.name == const Symbol('_prefix.name')}',
+  );
+  print(
+    'normalized-invocations:${invocations.missing()}:${invocations.forwarded()}:'
+    '${invocations.accessors()}:${invocations.getterCall()}:'
+    '${invocations.rejectedShape()}:${invocations.rejectedTypes()}:'
+    '${invocations.nullable(true)}:${invocations.nullable(false)}',
   );
   public.main();
 }

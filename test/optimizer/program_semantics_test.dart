@@ -51,19 +51,21 @@ void main() {
     );
   });
 
-  test('a nullable receiver keeps the null exception alternative', () {
-    expect(source.nullableDynamic(source.ReturnsSeven()), 7);
-    expect(() => source.nullableDynamic(null), throwsNoSuchMethodError);
+  test('missing dispatch requires its real Invocation implementation', () {
+    expect(source.noSuchMethodEffects(), 48);
     final entry = program.functions.singleWhere(
-      (f) => f.target.name == 'nullableDynamic',
+      (f) => f.target.name == 'noSuchMethodEffects',
     );
-    final facts = ProgramFlow(program, [
-      (
-        target: entry.target,
-        arguments: [FlowValue.unknown(entry.target.parameterTypes.single)],
+    expect(
+      () => ProgramFlow(program, [(target: entry.target, arguments: [])]),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'stage contract',
+          contains('Normalize dynamic dispatch'),
+        ),
       ),
-    ]).facts;
-    expect(facts.thrownBy(entry.target).exception.isBottom, isFalse);
+    );
   });
 
   test(
@@ -285,7 +287,6 @@ void main() {
     'returnedClosures': source.returnedClosures,
     'dynamicEffects': source.dynamicEffects,
     'dynamicRejectedArgument': source.dynamicRejectedArgument,
-    'noSuchMethodEffects': source.noSuchMethodEffects,
     'dynamicFunctionValue': source.dynamicFunctionValue,
     'dynamicFunctionRejectsArgument': source.dynamicFunctionRejectsArgument,
     'dynamicMethodValue': source.dynamicMethodValue,

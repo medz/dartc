@@ -5,7 +5,23 @@ import 'package:test/test.dart';
 import '../support/runtime.dart';
 
 void main() {
-  setUpAll(prepareRuntime);
+  late IrProgram runtimeProgram;
+  setUpAll(() async {
+    await prepareRuntime();
+    runtimeProgram = ProgramNormalization(
+      heapRuntime.program,
+      runtime: heapRuntime,
+    ).run();
+  });
+  IrProgram normalize(IrFunction body) => ProgramNormalization(
+    IrProgram(
+      runtimeProgram.classes,
+      [...runtimeProgram.functions, body],
+      globals: runtimeProgram.globals,
+      externals: runtimeProgram.externals,
+    ),
+    runtime: heapRuntime,
+  ).run();
 
   test(
     'collection construction exposes checked factories and actual arguments',
@@ -37,8 +53,8 @@ void main() {
         ),
       );
       block.finish(const Return());
-      final normalized = ProgramNormalization(heapRuntime.program)
-          .function(IrFunction(root, [block]));
+      final whole = normalize(IrFunction(root, [block]));
+      final normalized = whole.implementationOf(root) as IrFunction;
       final calls = normalized.entry.instructions
           .whereType<DirectCall>()
           .toList();
@@ -69,8 +85,8 @@ void main() {
       expect(calls[5].inputs.first, same(calls[4]));
       expect((calls[5].inputs.last as ScalarConstant).value, true);
       expect(
-        ProgramNormalization(heapRuntime.program).function(normalized),
-        same(normalized),
+        ProgramNormalization(whole, runtime: heapRuntime).run(),
+        same(whole),
       );
     },
   );
@@ -97,8 +113,9 @@ void main() {
       );
       normal.finish(Return(normal.parameters.single));
       caught.finish(Throw(const Constant.integer(73)));
-      final normalized = ProgramNormalization(heapRuntime.program)
-          .function(IrFunction(root, [block, normal, caught]));
+      final normalized = normalize(
+        IrFunction(root, [block, normal, caught]),
+      ).implementationOf(root) as IrFunction;
       final creation = normalized.entry.instructions.single as DirectCall;
       expect(creation.ownerType!.typeArguments, [element]);
       final invocation = normalized.entry.end as Invoke;

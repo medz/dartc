@@ -567,6 +567,8 @@ sealed class Instruction(super.type) extends Value {
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
         v.typeArguments.map(type),
+        v.failure,
+        v.getterCalls,
       ),
       final MakeInvocation v => MakeInvocation(
         v.selector,
@@ -1688,7 +1690,16 @@ final class DynamicDispatch(
   Iterable<Value> positional, [
   Map<String, Value> named = const {},
   Iterable<ValueType> typeArguments = const [],
+
+  /// Normalized missing-member behavior, receiving the receiver and supplied values.
+  /// Its type parameters receive this operation's explicit type arguments.
+  final FunctionTarget? failure,
+  Map<FunctionTarget, FunctionTarget> getterCalls = const {},
 ]) extends Instruction {
+  /// Normalized getter-then-call bodies, selected by the actual getter identity.
+  final Map<FunctionTarget, FunctionTarget> getterCalls = .unmodifiable(
+    getterCalls,
+  );
   final List<Value> positional = .unmodifiable(positional);
   final Map<String, Value> named = .unmodifiable(named);
   final List<ValueType> typeArguments = .unmodifiable(typeArguments);
@@ -1702,6 +1713,23 @@ final class DynamicDispatch(
     );
     if (!isDartType(receiver.type)) {
       throw ArgumentError('Dynamic dispatch requires a Dart receiver.');
+    }
+    for (final fallback in [?failure, ...this.getterCalls.values]) {
+      if (fallback.kind != .function ||
+          fallback.owner != null ||
+          fallback.captures.isNotEmpty ||
+          fallback.returnType != .dynamicType ||
+          fallback.typeParameters.length != this.typeArguments.length ||
+          fallback.parameterTypes.length != inputs.length ||
+          fallback.parameterTypes.any((type) => type != .dynamicType) ||
+          fallback.signature.optionalPositional != 0 ||
+          fallback.signature.namedParameters.isNotEmpty) {
+        throw ArgumentError('Invalid normalized dispatch signature.');
+      }
+    }
+    if (this.getterCalls.keys.any((getter) => getter.kind != .getter) ||
+        this.getterCalls.isNotEmpty && selector.kind != .method) {
+      throw ArgumentError('Getter calls require a method invocation.');
     }
   }
 

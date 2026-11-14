@@ -59,6 +59,66 @@ void main() {
     },
   );
 
+  test(
+    'normalized nullable dispatch preserves its result and actual failure',
+    () {
+      final owner = ClassType(_uri, 'NullableReceiver');
+      final method = FunctionTarget(
+        _uri,
+        'answer',
+        .integer,
+        [],
+        owner: owner,
+        kind: .method,
+      );
+      final answer = Block(method.parameterTypes)
+        ..finish(const Return(Constant.integer(7)));
+      final failure = FunctionTarget(null, 'missing', .dynamicType, [
+        .dynamicType,
+      ]);
+      final failed = Block(failure.parameterTypes)
+        ..finish(Throw(const Constant.integer(41)));
+      final entry = Block([owner.nullable]);
+      final call = entry.emit(
+        DynamicDispatch(
+          entry.parameters.single,
+          method.selector,
+          [],
+          const {},
+          const [],
+          failure,
+        ),
+      );
+      entry.finish(Return(call));
+      final main = IrFunction(
+        FunctionTarget(_uri, 'nullable', .dynamicType, [owner.nullable]),
+        [entry],
+      );
+      final program = IrProgram(
+        [
+          IrClass(owner, [], members: [method]),
+        ],
+        [
+          main,
+          IrFunction(method, [answer]),
+          IrFunction(failure, [failed]),
+        ],
+      );
+      final facts = ProgramFlow(program, [
+        (target: main.target, arguments: [FlowValue.unknown(owner.nullable)]),
+      ]).facts;
+      expect(
+        facts.returnedBy(main.target).constant?.structuralKey,
+        const Constant.integer(7).structuralKey,
+      );
+      expect(
+        facts.thrownBy(main.target).exception.constant?.structuralKey,
+        const Constant.integer(41).structuralKey,
+      );
+      expect(facts.targetsOf(call), unorderedEquals([method, failure]));
+    },
+  );
+
   test('function arguments and returned values select actual call targets', () {
     final add = _addOne();
     final other = _constant('other', 99, parameters: [.integer]);

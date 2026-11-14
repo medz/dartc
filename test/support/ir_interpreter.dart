@@ -644,8 +644,9 @@ final class IrInterpreter(
     Map<String, Object?> named,
     List<ValueType> types,
     Object? failureReceiver,
-    MemberSelector selector,
-  ) {
+    MemberSelector selector, {
+    FunctionTarget? failure,
+  }) {
     final signature = function.reifiedSignature;
     if (!_matchesShape(signature, positional, named, types)) {
       return _missingDynamic(
@@ -654,6 +655,7 @@ final class IrInterpreter(
         positional,
         named,
         types,
+        failure: failure,
       );
     }
     final arguments =
@@ -733,8 +735,17 @@ final class IrInterpreter(
     MemberSelector selector,
     List<Object?> positional,
     Map<String, Object?> named,
-    List<ValueType> types,
-  ) {
+    List<ValueType> types, {
+    FunctionTarget? failure,
+  }) {
+    if (failure != null) {
+      return _invoke(
+        _FunctionValue(failure),
+        [receiver, ...positional, ...named.values],
+        const {},
+        types,
+      );
+    }
     final name = selector.kind == .setter ? '${selector.name}=' : selector.name;
     if (receiver is _Instance) {
       final lookup = program.lookupMember(
@@ -775,8 +786,9 @@ final class IrInterpreter(
     MemberSelector selector,
     List<Object?> positional,
     Map<String, Object?> named,
-    List<ValueType> types,
-  ) {
+    List<ValueType> types, {
+    DynamicDispatch? operation,
+  }) {
     if (receiver is _FunctionValue && selector.name == 'call') {
       if (selector.kind == .getter) return receiver;
       if (selector.kind == .method) {
@@ -787,6 +799,7 @@ final class IrInterpreter(
           types,
           receiver,
           selector,
+          failure: operation?.failure,
         );
       }
     }
@@ -795,7 +808,14 @@ final class IrInterpreter(
     }
     if (receiver is _NativeFunction && selector == _selector('call')) {
       if (!_matchesShape(receiver.signature, positional, named, types)) {
-        return _missingDynamic(receiver, selector, positional, named, types);
+        return _missingDynamic(
+          receiver,
+          selector,
+          positional,
+          named,
+          types,
+          failure: operation?.failure,
+        );
       }
       if (named.isNotEmpty ||
           types.isNotEmpty ||
@@ -818,6 +838,7 @@ final class IrInterpreter(
           types,
           receiver,
           selector,
+          failure: operation?.failure,
         );
       }
       if (lookup.unsupportedForwarder) {
@@ -837,6 +858,14 @@ final class IrInterpreter(
         if (other.target case final target?) {
           final function = _FunctionValue(target, receiver);
           if (selector.kind == .getter) return function;
+          if (operation?.getterCalls[target] case final helper?) {
+            return _invoke(
+              _FunctionValue(helper),
+              [receiver, ...positional, ...named.values],
+              const {},
+              types,
+            );
+          }
           final value = _invoke(function, const [], const {});
           return _dynamicDispatch(
             value,
@@ -919,7 +948,14 @@ final class IrInterpreter(
         types,
       );
     }
-    final bridge = _dynamicBridge(receiver, selector, positional, named, types);
+    final bridge = _dynamicBridge(
+      receiver,
+      selector,
+      positional,
+      named,
+      types,
+      failure: operation?.failure,
+    );
     if (!identical(bridge, _noDynamicBridge)) return bridge;
     if (receiver == null ||
         receiver is _Instance ||
@@ -932,7 +968,14 @@ final class IrInterpreter(
                 receiver is _TypeValue ||
                 receiver is _CollectionValue ||
                 receiver is _RecordValue)) {
-      return _missingDynamic(receiver, selector, positional, named, types);
+      return _missingDynamic(
+        receiver,
+        selector,
+        positional,
+        named,
+        types,
+        failure: operation?.failure,
+      );
     }
     throw UnsupportedError(
       'Unmodeled fixture dynamic member: ${selector.name}',
@@ -944,8 +987,9 @@ final class IrInterpreter(
     MemberSelector selector,
     List<Object?> positional,
     Map<String, Object?> named,
-    List<ValueType> types,
-  ) {
+    List<ValueType> types, {
+    FunctionTarget? failure,
+  }) {
     if (receiver is _GuestFuture ||
         receiver is _GuestCompleter ||
         receiver is _GuestStreamIterator) {
@@ -959,7 +1003,14 @@ final class IrInterpreter(
     final name = selector.name;
     Object? invoke(int count, Object? Function() body) {
       if (positional.length != count || named.isNotEmpty || types.isNotEmpty) {
-        return _missingDynamic(receiver, selector, positional, named, types);
+        return _missingDynamic(
+          receiver,
+          selector,
+          positional,
+          named,
+          types,
+          failure: failure,
+        );
       }
       return body();
     }
@@ -2197,6 +2248,7 @@ final class IrInterpreter(
             positional.map(read).toList(),
             {for (final e in named.entries) e.key: read(e.value)},
             typeArguments.map(resolve).toList(),
+            operation: op,
           );
         case FunctionCall(
           :final function,

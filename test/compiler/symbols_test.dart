@@ -38,6 +38,7 @@ patterns:1:2:3
 map-pattern:3
 invocations:true:true:true
 qualified:true:true
+normalized-invocations:31:31:19:19:37:41:19:43
 public-symbols:ok
 ''');
     },

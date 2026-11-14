@@ -330,8 +330,13 @@ FunctionReferences verifyCallable(
           (deferredImports ??= {}).add(reference);
         case MakeInvocation():
           (instantiatedClasses ??= {}).add(CoreTypes.symbolStorage);
-        case DynamicDispatch(:final receiver, :final selector):
-          (instantiatedClasses ??= {}).add(CoreTypes.symbolStorage);
+        case DynamicDispatch(
+          :final receiver,
+          :final selector,
+          :final failure,
+          :final getterCalls,
+        ):
+          (callees ??= {}).addAll([?failure, ...getterCalls.values]);
           (instantiatedClasses ??= {}).add(ValueType.nullClass);
           for (final selected in [
             selector,

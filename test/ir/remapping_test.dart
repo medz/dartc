@@ -186,18 +186,38 @@ void main() {
       name: 'invoke',
       privateScope: null,
     );
+    final type = TypeParameterType('T')..initializeBound(.object.nullable);
+    final fallback = FunctionTarget(
+      null,
+      'missing',
+      .dynamicType,
+      List.filled(4, ValueType.dynamicType),
+      typeParameters: [type],
+    );
+    final getter = FunctionTarget(
+      null,
+      'invoke',
+      .dynamicType,
+      [],
+      owner: ClassType(null, 'Getter'),
+      kind: .getter,
+    );
     final call = DynamicDispatch(
       before.parameters[0],
       selector,
       [before.parameters[1]],
       {'second': before.parameters[1], 'first': const Constant.integer(1)},
       [ValueType.string],
+      fallback,
+      {getter: fallback},
     );
     Value remap(Value value) => value is BlockParameter
         ? after.parameters[before.parameters.indexOf(value)]
         : value;
     final copy = call.mapInputs(remap) as DynamicDispatch;
     expect(copy.selector, selector);
+    expect(copy.failure, same(fallback));
+    expect(copy.getterCalls, {getter: fallback});
     expect(copy.named.keys, ['second', 'first']);
     expect(copy.named['second'], same(after.parameters[1]));
     expect(copy.typeArguments, [ValueType.string]);

@@ -911,20 +911,7 @@ final class FunctionRepresentation(
           continue;
         }
         if (instruction is MakeInvocation) {
-          final factory =
-              heap.runtime?.invocation ??
-              (throw UnsupportedError('Invocation runtime unavailable'));
-          invocations[instruction] = members.invocationFor(
-            instruction,
-            factory,
-          );
-          operands[instruction] = [
-            for (final input in instruction.inputs)
-              convert(input, .dynamicType, body),
-            for (final type in instruction.typeArguments) _reify(type, body),
-          ];
-          body.add(instruction);
-          continue;
+          throw StateError('Normalize Invocation before representation.');
         }
         final invocation = switch (instruction) {
           DynamicDispatch(:final receiver, :final typeArguments) => (
@@ -1143,35 +1130,22 @@ final class FunctionRepresentation(
             case DynamicDispatch():
               final missingBody = <Value>[];
               instructions[missing] = missingBody;
-              final names = dynamicCall!.named.keys.toList()..sort();
-              final operation = MakeInvocation(
-                dynamicCall.selector,
-                dynamicCall.positional,
-                {for (final name in names) name: dynamicCall.named[name]!},
-                dynamicCall.typeArguments,
+              final target =
+                  dynamicCall!.failure ??
+                  (throw StateError(
+                    'Normalize dynamic dispatch before representation.',
+                  ));
+              final failure = DirectCall(
+                target,
+                dynamicCall.inputs,
+                typeArguments: dynamicCall.typeArguments,
               );
-              final factory =
-                  heap.runtime?.invocation ??
-                  (throw UnsupportedError('Invocation runtime unavailable'));
-              invocations[operation] = members.invocationFor(
-                operation,
-                factory,
-              );
-              operands[operation] = [
-                for (final input in operation.inputs)
+              operands[failure] = [
+                for (final input in failure.inputs)
                   convert(input, .dynamicType, missingBody),
                 ...types,
               ];
-              var failed = appendTo(missing, operation, handler);
-              final arguments = <Value>[];
-              final failure = DirectCall(heap.runtime!.dispatchFailure!, [
-                convert(receiver, .object.nullable, arguments),
-                operation,
-              ]);
-              for (final argument in arguments) {
-                failed = appendTo(failed, argument, handler);
-              }
-              failed = appendTo(failed, failure, handler);
+              final failed = appendTo(missing, failure, handler);
               ends[failed] = Jump(join!, [failure]);
             case ObjectRuntimeType():
               instructions[missing] = [];
@@ -1334,13 +1308,19 @@ final class FunctionRepresentation(
               }
               if (dynamicCall.selector.kind == .method &&
                   target.kind == .getter) {
-                final bridge = members.getterCall(target, dynamicCall);
+                final bridge =
+                    dynamicCall.getterCalls[target] ??
+                    (throw StateError(
+                      'Normalize getter calls before representation.',
+                    ));
                 final call = DynamicDispatch(
                   receiver,
                   dynamicCall.selector,
                   dynamicCall.positional,
                   dynamicCall.named,
                   typeArguments,
+                  dynamicCall.failure,
+                  dynamicCall.getterCalls,
                 );
                 invocations[call] = bridge;
                 operands[call] = [
@@ -1666,6 +1646,8 @@ final class FunctionRepresentation(
                 :final selector,
                 :final positional,
                 :final named,
+                :final failure,
+                :final getterCalls,
               ) =>
                 DynamicDispatch(
                   receiver,
@@ -1673,6 +1655,8 @@ final class FunctionRepresentation(
                   positional,
                   named,
                   typeArguments,
+                  failure,
+                  getterCalls,
                 ),
               FunctionCall(:final function, :final positional, :final named) =>
                 FunctionCall(function, positional, named, typeArguments),

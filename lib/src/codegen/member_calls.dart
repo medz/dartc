@@ -35,13 +35,9 @@ final class MemberCalls(
       ...?program.implementationOf(target)?.instantiatedClasses,
     if (records != null && records.shapes.isNotEmpty) records.type,
   };
-  final _helpers = <Object, IrFunction>{};
   final _builtins = <(ValueType, bool), IrFunction>{};
 
-  Iterable<IrFunction> get functions => [
-    ..._builtins.values,
-    ..._helpers.values,
-  ];
+  Iterable<IrFunction> get functions => _builtins.values;
 
   FunctionTarget builtin(
     ValueType type, {
@@ -134,128 +130,6 @@ final class MemberCalls(
         else
           ...targetsFor(tearOff.receiver, tearOff.method.selector).values,
   };
-
-  FunctionTarget invocationFor(
-    MakeInvocation operation,
-    FunctionTarget factory,
-  ) => _helpers.putIfAbsent(
-    (
-      operation.selector,
-      operation.positional.length,
-      operation.named.keys.join(','),
-      operation.typeArguments.length,
-    ),
-    () {
-      final target = FunctionTarget(
-        null,
-        'invocation${_helpers.length}',
-        CoreTypes.invocation,
-        [
-          for (final _ in operation.inputs) ValueType.dynamicType,
-          for (final _ in operation.typeArguments) ValueType.typeType,
-        ],
-      );
-      final block = Block(target.parameterTypes);
-      Value list(ValueType element, Iterable<Value> values) {
-        final result = block.emit(NewCollection(CoreTypes.listOf(element)));
-        for (final value in values) {
-          block.emit(CollectionAdd(result, value));
-        }
-        return result;
-      }
-
-      ObjectConstant symbol(String name, [Object? library]) =>
-          ObjectConstant(CoreTypes.symbolStorage, {
-            CoreTypes.symbolName: Constant.string(name),
-            CoreTypes.symbolPrivateLibrary: library == null
-                ? const Constant.nullValue()
-                : Constant.string(library.toString()),
-          });
-      final named = block.emit(
-        NewCollection(CoreTypes.mapOf(CoreTypes.symbol, .object.nullable)),
-      );
-      for (final (index, name) in operation.named.keys.indexed) {
-        block.emit(
-          MapPut(
-            named,
-            symbol(name),
-            block.parameters[operation.positional.length + index],
-          ),
-        );
-      }
-      final selector = operation.selector;
-      final result = block.emit(
-        DirectCall(factory, [
-          symbol(
-            selector.kind == .setter ? '${selector.name}=' : selector.name,
-            selector.privateScope,
-          ),
-          Constant.integer(
-            selector.kind == .getter
-                ? 1
-                : selector.kind == .setter
-                ? 2
-                : 0,
-          ),
-          list(.typeType, block.parameters.skip(operation.inputs.length)),
-          list(
-            .object.nullable,
-            block.parameters.take(operation.positional.length),
-          ),
-          named,
-        ]),
-      );
-      block.finish(Return(result));
-      return IrFunction(target, [block]);
-    },
-  ).target;
-
-  FunctionTarget getterCall(FunctionTarget getter, DynamicDispatch operation) =>
-      _helpers.putIfAbsent(
-        (
-          getter,
-          operation.positional.length,
-          operation.named.keys.join(','),
-          operation.typeArguments.length,
-        ),
-        () {
-          final types = [
-            for (var i = 0; i < operation.typeArguments.length; i++)
-              TypeParameterType('T$i')
-                ..initializeBound(.object.nullable)
-                ..initializeDefaultType(.dynamicType),
-          ];
-          final target = FunctionTarget(
-            null,
-            'getterCall${_helpers.length}',
-            .dynamicType,
-            [for (final _ in operation.inputs) ValueType.dynamicType],
-            typeParameters: types,
-          );
-          final block = Block(target.parameterTypes);
-          final owner = getter.owner!.instantiate([
-            for (final _ in getter.owner!.typeParameters) ValueType.dynamicType,
-          ]);
-          final receiver = block.emit(TypeCast(block.parameters.first, owner));
-          final value = block.emit(
-            DirectCall(getter, [receiver], ownerType: owner),
-          );
-          final result = block.emit(
-            DynamicDispatch(
-              value,
-              (kind: .method, name: 'call', privateScope: null),
-              block.parameters.skip(1).take(operation.positional.length),
-              {
-                for (final (i, name) in operation.named.keys.indexed)
-                  name: block.parameters[1 + operation.positional.length + i],
-              },
-              types,
-            ),
-          );
-          block.finish(Return(result));
-          return IrFunction(target, [block]);
-        },
-      ).target;
 
   Iterable<ClassType> _receivers(ValueType receiver) =>
       _instances.where(receiver.mayHaveInstance);

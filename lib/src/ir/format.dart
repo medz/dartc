@@ -164,7 +164,8 @@ void writeFunction(
     DynamicDispatch() =>
       'dynamicDispatch ${value(op.receiver)} ${op.selector.kind.name} '
           '${op.selector.privateScope == null ? "" : "${op.selector.privateScope}::"}'
-          '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
+          '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})'
+          '${op.failure == null ? "" : " otherwise ${symbol(op.failure!)}"}',
     MakeInvocation() =>
       'makeInvocation ${op.selector.kind.name} '
           '${op.selector.privateScope == null ? "" : "${op.selector.privateScope}::"}'

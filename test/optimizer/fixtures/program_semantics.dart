@@ -152,12 +152,6 @@ int dynamicMethodValue() {
   return observed;
 }
 
-class ReturnsSeven {
-  int answer() => 7;
-}
-
-int nullableDynamic(ReturnsSeven? value) => (value as dynamic).answer();
-
 int hiddenIncrement(int value) => value + 1;
 
 void exposePrivateArgument(void Function(int Function()) boundary) {

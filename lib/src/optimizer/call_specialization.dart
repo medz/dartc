@@ -30,6 +30,16 @@ final class const ProgramCallSpecialization() implements ProgramPass {
             final targets = facts.targetsOf(operation);
             if (targets.length != 1) continue;
             final target = targets.single;
+            if (operation is DynamicDispatch &&
+                (operation.failure == target ||
+                    operation.getterCalls.containsValue(target))) {
+              operations[operation] = DirectCall(
+                target,
+                operation.inputs,
+                typeArguments: operation.typeArguments,
+              );
+              continue;
+            }
             final (
               receiver,
               selector,
