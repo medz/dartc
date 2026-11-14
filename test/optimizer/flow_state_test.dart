@@ -293,7 +293,7 @@ void main() {
   );
 
   test(
-    'closure escape reaches a captured cell and later invalidation sees it',
+    'callable escape preserves captures until their storage address is exposed',
     () {
       final cell = NewCell(CellType(.integer), _one);
       final allocated = _step(FlowState(IrProgram([], [])), cell);
@@ -319,7 +319,27 @@ void main() {
       expect(state.capturesOf(captured.value.objects.single), [
         allocated.value,
       ]);
-      state.invalidate([state.escapedValues]);
+      expect(
+        state.exposedValues.objects,
+        isNot(contains(allocated.value.objects.single)),
+      );
+      state.invalidate([state.exposedValues]);
+      expect(
+        _step(
+          state,
+          ReadCell(cell),
+          operands: [allocated.value],
+        ).value.constant?.structuralKey,
+        _one.structuralKey,
+      );
+      final pointer = FlowValue.unknown(.integer)
+          .withReferences([captured.value]);
+      state.escape([pointer]);
+      expect(
+        state.exposedValues.objects,
+        contains(allocated.value.objects.single),
+      );
+      state.invalidate([state.exposedValues]);
       expect(
         _step(
           state,
@@ -327,6 +347,19 @@ void main() {
           operands: [allocated.value],
         ).value.constant,
         isNull,
+      );
+      final rewritten = _step(
+        state,
+        WriteCell(cell, _two),
+        operands: [allocated.value, .constant(_two)],
+      );
+      expect(
+        _step(
+          rewritten.normal!,
+          ReadCell(cell),
+          operands: [allocated.value],
+        ).value.constant?.structuralKey,
+        _two.structuralKey,
       );
       expect(
         _step(
@@ -779,6 +812,52 @@ void main() {
       expect(() => bound.boundValueOf(read, []), throwsArgumentError);
     },
   );
+
+  test('a boundary retains independently exposed values after their owner is overwritten', () {
+    final type = ClassType(_uri, 'Reachable');
+    final constructor = FunctionTarget(
+      _uri,
+      '',
+      .voidType,
+      [],
+      owner: type,
+      kind: .initializer,
+    );
+    final oldObject = Construct(constructor, []),
+        newObject = Construct(constructor, []);
+    final program = IrProgram(
+      [
+        IrClass(type, [], constructors: [constructor]),
+      ],
+      [_body(constructor, const Return())],
+    );
+    FlowResult initialize(
+      FunctionTarget _,
+      List<FlowValue> _,
+      FlowState state,
+    ) => _normal(.constant(const Constant.nullValue()), state);
+    final old = _step(FlowState(program), oldObject, invoke: initialize);
+    final replacement = _step(old.normal!, newObject, invoke: initialize);
+    final owner = NewCell(CellType(type), oldObject);
+    final allocated = _step(replacement.normal!, owner, operands: [old.value]);
+    final boundary = allocated.normal!..escape([allocated.value]);
+    final changed = _step(
+      boundary,
+      WriteCell(owner, newObject),
+      operands: [allocated.value, replacement.value],
+    ).normal!;
+    expect(changed.exposedValues.objects, contains(old.value.objects.single));
+    expect(
+      changed.exposedValues.objects,
+      contains(replacement.value.objects.single),
+    );
+    final current = _step(
+      changed,
+      ReadCell(owner),
+      operands: [allocated.value],
+    ).value;
+    expect(current.objects, [replacement.value.objects.single]);
+  });
 
   test('storage snapshots reject a different semantic graph', () {
     expect(

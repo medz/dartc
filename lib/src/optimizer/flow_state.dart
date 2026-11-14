@@ -189,10 +189,7 @@ final class FlowState {
         }
         current = current!.withSlot(slot.key, slot.after!.map(mapValue));
       }
-      current = current!.withFlags(
-        summary: next.summary && !prior.summary,
-        escaped: next.escaped && !prior.escaped,
-      );
+      current = current!.withFlags(summary: next.summary && !prior.summary);
       if (!_sameCaptures(next.captures, prior.captures)) {
         current = _ObjectState._(
           current.slots,
@@ -200,7 +197,6 @@ final class FlowState {
               ? null
               : List.unmodifiable(next.captures!.map(mapValue)),
           current.summary,
-          current.escaped,
         );
       }
       result._objects = result._objects.withEntry(object, current);
@@ -232,27 +228,27 @@ final class FlowState {
     _allocate(object, _ObjectState({}, captures: captures, summary: repeated));
   }
 
-  /// Values that an external operation may still reach after earlier escapes.
+  /// GC reachability, including environments hidden behind callable values.
   FlowValue get escapedValues => reachableValues([_escaped]);
 
-  /// Records external reachability, including nested closures and shared cells.
+  /// Values unknown code may access independently of calling a closure.
+  FlowValue get exposedValues => exposedFrom([_escaped]);
+
+  /// Records capabilities crossing a boundary, including values already read there.
   FlowValue escape(Iterable<FlowValue> roots) {
-    final reachable = reachableValues(roots);
-    _escaped = _escaped.join(reachable);
-    for (final object in reachable.objects) {
-      final state = _objects[object];
-      if (state != null && !state.escaped) {
-        _objects = _objects.withEntry(object, state.withFlags(escaped: true));
-      }
+    for (final root in roots) {
+      _escaped = _escaped.join(root);
     }
-    return reachable;
+    // Outside code may retain a field value even after its owner overwrites it.
+    _escaped = _escaped.join(exposedValues);
+    return escapedValues;
   }
 
   /// Forgets values an external operation can write through the given roots.
   ///
   /// The caller supplies previously escaped roots and global access explicitly.
   void invalidate(Iterable<FlowValue> roots, {bool globals = false}) {
-    final reachable = reachableValues([
+    final reachable = exposedFrom([
       ...roots,
       if (globals)
         for (final slot in _globals.values) ...[slot.value, slot.initializer],
@@ -645,7 +641,6 @@ final class FlowState {
             object,
             state.withSlot(key, slot.join(_Slot.bound(checked.value))),
           );
-          if (state.escaped) next.escape([checked.value]);
         }
       }
       result = _merge(
@@ -743,9 +738,6 @@ final class FlowState {
     }
     final next = copy();
     next._set(location, _Slot.bound(checked.value));
-    if (location.$1 case final object? when next._objects[object]!.escaped) {
-      next.escape([checked.value]);
-    }
     return FlowResult(
       value: checked.value,
       normal: next,
@@ -779,9 +771,7 @@ final class FlowState {
         object,
         state.withSlot(
           location.$2,
-          state.summary || state.escaped
-              ? state.slots[location.$2]!.join(slot)
-              : slot,
+          state.summary ? state.slots[location.$2]!.join(slot) : slot,
         ),
       );
     }
@@ -789,8 +779,7 @@ final class FlowState {
 
   void _refine((FlowObject?, Object) location, _Slot slot) {
     final object = location.$1;
-    if (object == null ||
-        !(_objects[object]!.summary || _objects[object]!.escaped)) {
+    if (object == null || !_objects[object]!.summary) {
       _set(location, slot);
     }
   }
@@ -856,27 +845,39 @@ final class FlowState {
       FlowValue.unknown(field.typeFor(object.type as ClassType));
 
   /// Values accessible through current fields, cells and closure captures.
-  FlowValue reachableValues(Iterable<FlowValue> roots) {
+  FlowValue reachableValues(Iterable<FlowValue> roots) =>
+      _reachable(roots, expose: false);
+
+  /// External access follows ordinary slots; raw addresses also expose captures.
+  FlowValue exposedFrom(Iterable<FlowValue> roots) =>
+      _reachable(roots, expose: true);
+
+  FlowValue _reachable(Iterable<FlowValue> roots, {required bool expose}) {
     var result = const FlowValue.bottom();
-    final pending = roots.toList();
-    final objects = <FlowObject>{};
-    final constants = <Object>{};
+    final pending = [for (final value in roots) (value, !expose)];
+    final objects = <(FlowObject, bool)>{};
+    final constants = <(Object, bool)>{};
     while (pending.isNotEmpty) {
-      final value = pending.removeLast();
+      final (value, raw) = pending.removeLast();
       result = result.join(value);
-      if (!value.references.isBottom) pending.add(value.references);
+      if (!value.references.isBottom) pending.add((value.references, true));
       for (final object in value.objects) {
-        if (!objects.add(object)) continue;
+        if (!objects.add((object, raw))) continue;
         final state = _objects[object];
         if (state == null) continue;
-        pending.addAll(state.captures ?? const []);
+        if (raw) {
+          pending.addAll([
+            for (final capture in state.captures ?? const <FlowValue>[])
+              (capture, raw),
+          ]);
+        }
         for (final slot in state.slots.values) {
-          pending.add(slot.value);
-          if (slot.unbound) pending.add(slot.initializer);
+          pending.add((slot.value, raw));
+          if (raw && slot.unbound) pending.add((slot.initializer, raw));
         }
       }
       for (final constant in value.constants) {
-        if (!constants.add(constant.structuralKey)) continue;
+        if (!constants.add((constant.structuralKey, raw))) continue;
         final nested = switch (constant) {
           ObjectConstant(:final fields) => fields.values,
           RecordConstant(:final fields) => fields,
@@ -884,7 +885,9 @@ final class FlowState {
           MapConstant(:final entries) => entries.expand((e) => [e.$1, e.$2]),
           _ => const <Constant>[],
         };
-        pending.addAll(nested.map(FlowValue.constant));
+        pending.addAll([
+          for (final child in nested) (FlowValue.constant(child), raw),
+        ]);
       }
     }
     return result;
@@ -987,34 +990,25 @@ final class _ObjectState {
   final StateMap<Object, _Slot> slots;
   final List<FlowValue>? captures;
   final bool summary;
-  final bool escaped;
 
   new(
     Map<Object, _Slot> slots, {
     List<FlowValue>? captures,
     this.summary = false,
-  }) : escaped = false,
-       slots = StateMap.fromEntries(slots.entries),
+  }) : slots = StateMap.fromEntries(slots.entries),
        captures = captures == null ? null : List.unmodifiable(captures);
 
-  new _(this.slots, this.captures, this.summary, this.escaped);
+  new _(this.slots, this.captures, this.summary);
 
   _ObjectState withSlot(Object key, _Slot value) {
     final next = slots.withEntry(key, value);
     return identical(next, slots)
         ? this
-        : _ObjectState._(next, captures, summary, escaped);
+        : _ObjectState._(next, captures, summary);
   }
 
-  _ObjectState withFlags({bool summary = false, bool escaped = false}) =>
-      (!summary || this.summary) && (!escaped || this.escaped)
-      ? this
-      : _ObjectState._(
-          slots,
-          captures,
-          summary || this.summary,
-          escaped || this.escaped,
-        );
+  _ObjectState withFlags({bool summary = false}) =>
+      !summary || this.summary ? this : _ObjectState._(slots, captures, true);
 
   _ObjectState map(FlowValue Function(FlowValue) transform) {
     final mappedSlots = slots.mapValues((_, value) => value.map(transform));
@@ -1024,7 +1018,7 @@ final class _ObjectState {
     return identical(mappedSlots, slots) &&
             _sameCaptures(mappedCaptures, captures)
         ? this
-        : _ObjectState._(mappedSlots, mappedCaptures, summary, escaped);
+        : _ObjectState._(mappedSlots, mappedCaptures, summary);
   }
 
   @override
@@ -1033,7 +1027,6 @@ final class _ObjectState {
       other is _ObjectState &&
           slots == other.slots &&
           summary == other.summary &&
-          escaped == other.escaped &&
           _sameCaptures(captures, other.captures);
 
   @override
@@ -1042,7 +1035,6 @@ final class _ObjectState {
     captures != null,
     Object.hashAll(captures ?? const <FlowValue>[]),
     summary,
-    escaped,
   );
 
   _ObjectState join(_ObjectState incoming) {
@@ -1056,9 +1048,7 @@ final class _ObjectState {
           : left.join(right),
     );
     var changed =
-        !identical(joinedSlots, slots) ||
-        incoming.summary && !summary ||
-        incoming.escaped && !escaped;
+        !identical(joinedSlots, slots) || incoming.summary && !summary;
     var joinedCaptures = captures;
     if (incoming.captures case final other?) {
       if (captures == null) {
@@ -1084,7 +1074,6 @@ final class _ObjectState {
             joinedSlots,
             joinedCaptures,
             summary || incoming.summary,
-            escaped || incoming.escaped,
           )
         : this;
   }

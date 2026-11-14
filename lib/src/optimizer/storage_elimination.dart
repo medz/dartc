@@ -60,7 +60,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
             ?point.exceptional,
           ];
           for (final state in states) {
-            visible = visible.join(state.escapedValues);
+            visible = visible.join(state.exposedValues);
           }
           switch (operation) {
             case LoadGlobal(:final global):
@@ -118,7 +118,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
             case ReferenceAddress(:final object) ||
                 LoadObjectReference(:final object) ||
                 LoadObjectData(:final object):
-              visible = visible.join(facts.valueOf(object));
+              visible = visible.join(facts.valueOf(operation));
               lifetimes = lifetimes.join(facts.valueOf(object));
             default:
               break;
@@ -138,7 +138,7 @@ final class const ProgramStorageElimination() implements ProgramPass {
 
     for (final states in points.values) {
       for (final state in states) {
-        visible = visible.join(state.reachableValues([visible]));
+        visible = visible.join(state.exposedFrom([visible]));
       }
     }
 
