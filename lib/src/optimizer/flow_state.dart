@@ -217,6 +217,9 @@ final class FlowState {
         : _globals.withEntry(global, slot);
   }
 
+  /// Whether this state contains storage for the analysis allocation.
+  bool containsObject(FlowObject object) => _objects[object] != null;
+
   /// Captures of this allocation, preserving shared cell identities.
   List<FlowValue>? capturesOf(FlowObject object) => _objects[object]?.captures;
 

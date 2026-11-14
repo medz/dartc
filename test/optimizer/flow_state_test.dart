@@ -586,6 +586,10 @@ void main() {
       operands: [d.value],
     ).normal!..escape([b.value]);
     final projected = stored.project([]);
+    expect(projected.containsObject(a.value.objects.single), isTrue);
+    expect(projected.containsObject(b.value.objects.single), isTrue);
+    expect(projected.containsObject(c.value.objects.single), isFalse);
+    expect(stored.containsObject(c.value.objects.single), isTrue);
     expect(
       _step(
         projected,
