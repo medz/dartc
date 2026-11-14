@@ -176,7 +176,9 @@ void main() {
         ProgramPreparation(target, input, roots: [entry]),
         ProgramPreparation(
           target,
-          inlineDirectCalls(input, [entry]),
+          const DirectCallInlining().run(
+            ProgramFlow(input, const [], openEntries: [entry]).facts,
+          ),
           roots: [entry],
         ),
         ProgramPreparation(

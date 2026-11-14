@@ -57,10 +57,10 @@ final class FunctionRewrite(
     late Block current;
     final ends = <Block, Terminator>{};
     final locations = <Object, SourceLocation>{};
-    final expansions = <DirectCall, List<Instruction>>{};
-    final continuations = <Instruction, Block>{};
+    final expansions = <DirectCall, ({Block entry, Block exit})>{};
     late Value Function(Value) value;
     late Value Function(Value, Value) viewed;
+    late Jump Function(Jump, {bool collapsed}) jump;
 
     void locate(
       Object source,
@@ -79,6 +79,16 @@ final class FunctionRewrite(
       }
     }
 
+    Unreachable impossible(Value result, Block block) {
+      if (result.type == .never || result is Instruction) {
+        return Unreachable(result);
+      }
+      // The call site proves infeasible returns, including remaining callee arms.
+      final proof = TypeView(result, result.type);
+      instructions[block]!.add(proof);
+      return Unreachable(proof);
+    }
+
     Value expand(DirectCall call) {
       final site = inlined[call]!;
       final body = site.body;
@@ -88,43 +98,160 @@ final class FunctionRewrite(
         for (final (i, type) in call.typeArguments.indexed)
           body.target.typeParameters[i]: type,
       };
-      final output = expansions[call] = [];
-      final locals = <Value, Value>{};
-      Value read(Value operand) =>
-          operand is Constant ? operand : locals[operand]!;
-      Value append(Instruction instruction, Object source) {
-        output.add(instruction);
-        locate(source, instruction, body, call);
-        if (site.handler != null && instruction.mayThrow) {
-          final next = continuations[instruction] = Block([instruction.type]);
-          return next.parameters.single;
-        }
-        return instruction;
+      final handler = site.handler == null ? null : jump(site.handler!);
+      final linear = body.blocks.length == 1 && body.entry.end is Return;
+      final copiedBlocks = {
+        for (final block in body.blocks)
+          block: Block(
+            block == body.entry
+                ? const <ValueType>[]
+                : block.parameters.map((p) => p.type.substitute(environment)),
+          ),
+      };
+      final entry = copiedBlocks[body.entry]!;
+      final join = linear ? null : Block([call.type]);
+      for (final block in [...copiedBlocks.values, ?join]) {
+        instructions[block] = [];
       }
-
+      final resumed = {
+        if (handler != null)
+          for (final block in body.blocks)
+            for (final operation in block.instructions)
+              if (operation.mayThrow && operation.type != .never)
+                operation: Block([operation.type.substitute(environment)]),
+      };
+      for (final block in resumed.values) {
+        instructions[block] = [];
+      }
+      final locals = <Value, Value>{
+        for (final block in body.blocks)
+          if (block != body.entry)
+            for (final (i, parameter) in block.parameters.indexed)
+              parameter: copiedBlocks[block]!.parameters[i],
+      };
+      final copied = <Instruction, Instruction>{};
+      late Value Function(Value) read;
+      Instruction clone(Instruction source) => copied.putIfAbsent(source, () {
+        final result = source.mapInputs(read, environment: environment);
+        locate(source, result, body, call);
+        return result;
+      });
+      read = (source) {
+        if (source is Constant || source is UnwindValue) return source;
+        if (locals[source] case final result?) return result;
+        if (source is Instruction) {
+          return resumed[source]?.parameters.single ?? clone(source);
+        }
+        if (source is TestedValue) {
+          return (clone(source.test) as TypeTest).refinement(source.outcome)!;
+        }
+        throw StateError('Unexpected value in an inlined graph.');
+      };
       for (final (i, parameter) in body.entry.parameters.indexed) {
         final argument = value(call.inputs[i]);
         final type = parameter.type.substitute(environment);
-        locals[parameter] = argument.type == type
-            ? argument
-            : append(TypeView(argument, type), parameter);
+        if (argument.type == type) {
+          locals[parameter] = argument;
+        } else {
+          final view = TypeView(argument, type);
+          instructions[entry]!.add(view);
+          locals[parameter] = view;
+        }
       }
-      for (final operation in body.entry.instructions) {
-        locals[operation] = append(
-          operation.mapInputs(read, environment: environment),
-          operation,
-        );
+      Jump edge(Jump source) =>
+          Jump(copiedBlocks[source.target]!, source.arguments.map(read));
+      late Block exit;
+      late Value result;
+      for (final source in body.blocks) {
+        var cursor = copiedBlocks[source]!;
+        var stopped = false;
+        for (final original in source.instructions) {
+          final mapped = clone(original);
+          if (handler != null && mapped.mayThrow) {
+            final next = resumed[original];
+            ends[cursor] = Invoke(
+              mapped,
+              onReturn: next == null ? null : Jump(next, [mapped]),
+              onThrow: handler,
+            );
+            if (next == null) {
+              stopped = true;
+              break;
+            }
+            cursor = next;
+          } else {
+            instructions[cursor]!.add(mapped);
+          }
+        }
+        locate(source, cursor, body, call);
+        if (stopped) continue;
+        switch (source.end) {
+          case Return(:final value):
+            var returned = value == null
+                ? const Constant.nullValue()
+                : read(value);
+            if (call.target.requiresResultCheck) {
+              final cast = TypeCast(returned, call.type);
+              locate(source, cast, body, call);
+              if (handler == null) {
+                instructions[cursor]!.add(cast);
+                returned = cast;
+              } else {
+                final next = Block([call.type]);
+                instructions[next] = [];
+                ends[cursor] = Invoke(
+                  cast,
+                  onReturn: Jump(next, [cast]),
+                  onThrow: handler,
+                );
+                cursor = next;
+                returned = next.parameters.single;
+              }
+            }
+            if (linear) {
+              exit = cursor;
+              if (returned.type != call.type) {
+                final view = TypeView(returned, call.type);
+                locate(source, view, body, call);
+                instructions[cursor]!.add(view);
+                returned = view;
+              }
+              result = returned;
+            } else {
+              ends[cursor] = Jump(join!, [returned]);
+            }
+          case final Jump next:
+            ends[cursor] = edge(next);
+          case Branch(:final condition, :final ifTrue, :final ifFalse):
+            ends[cursor] = Branch(read(condition), edge(ifTrue), edge(ifFalse));
+          case Invoke(:final operation, :final onReturn, :final onThrow):
+            ends[cursor] = Invoke(
+              clone(operation),
+              onReturn: onReturn == null ? null : edge(onReturn),
+              onThrow: edge(onThrow),
+            );
+          case Throw(:final exception, :final stackTrace, :final onThrow):
+            ends[cursor] = Throw(
+              read(exception),
+              stackTrace: stackTrace == null ? null : read(stackTrace),
+              onThrow: onThrow == null ? handler : edge(onThrow),
+            );
+          case ExhaustivenessFailure(:final onThrow):
+            ends[cursor] = ExhaustivenessFailure(
+              onThrow == null ? handler : edge(onThrow),
+            );
+          case Unreachable(:final cause):
+            ends[cursor] = impossible(read(cause), cursor);
+          case Await() || Yield() || YieldStream():
+            throw ArgumentError('Normalize suspension before inlining.');
+        }
       }
-      final returned = (body.entry.end as Return).value;
-      final result = returned == null
-          ? const Constant.nullValue()
-          : read(returned);
-      if (call.target.requiresResultCheck) {
-        return append(TypeCast(result, call.type), body.entry);
+      if (!linear) {
+        exit = join!;
+        result = join.parameters.single;
       }
-      return result.type == call.type
-          ? result
-          : append(TypeView(result, call.type), body.entry);
+      expansions[call] = (entry: entry, exit: exit);
+      return result;
     }
 
     Instruction copy(Instruction original) {
@@ -205,7 +332,7 @@ final class FunctionRewrite(
       return cast;
     }
 
-    Jump jump(Jump edge, {bool collapsed = false}) {
+    jump = (edge, {collapsed = false}) {
       Value argument(Value original) => collapsed && original is TestedValue
           ? refined(original)
           : value(original);
@@ -215,7 +342,7 @@ final class FunctionRewrite(
         for (final parameter in added[edge.target]!)
           argument(phis[parameter]!.incoming[edge]!),
       ]);
-    }
+    };
 
     Terminator branchEnd(Branch branch) {
       final condition = value(branch.condition);
@@ -313,18 +440,13 @@ final class FunctionRewrite(
           if (!expansions.containsKey(operation)) {
             values[operation] = expand(operation);
           }
-          for (final copied in expansions[operation]!) {
-            if (continuations[copied] case final next?) {
-              ends[current] = Invoke(
-                copied,
-                onReturn: Jump(next, [copied]),
-                onThrow: jump(inlined[operation]!.handler!),
-              );
-              current = next;
-              instructions[current] = [];
-            } else {
-              instructions[current]!.add(copied);
-            }
+          final fragment = expansions[operation]!;
+          instructions[current]!.addAll(instructions.remove(fragment.entry)!);
+          if (fragment.exit != fragment.entry) {
+            ends[current] = ends.remove(fragment.entry)!;
+            final source = inlined[operation]!.body;
+            locate(source.entry, current, source, operation);
+            current = fragment.exit;
           }
         } else {
           instructions[current]!.add(copy(operation));
@@ -347,14 +469,16 @@ final class FunctionRewrite(
         changed |=
             original.end is! Unreachable ||
             (original.end as Unreachable).cause != last;
-        ends[current] = Unreachable(copy(last));
+        ends[current] = impossible(value(last), current);
         locate(original, current, function);
         continue;
       }
       final terminal = original.end;
       if (terminal is Invoke && inlined.containsKey(terminal.operation)) {
         emit(terminal.operation);
-        ends[current] = jump(terminal.onReturn!);
+        ends[current] = terminal.onReturn == null
+            ? impossible(value(terminal.operation), current)
+            : jump(terminal.onReturn!);
       } else {
         ends[current] = end(terminal);
       }

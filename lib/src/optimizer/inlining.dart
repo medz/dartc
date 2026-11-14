@@ -1,53 +1,52 @@
 import 'package:dartc/ir.dart';
 
-import 'reachability.dart';
+import 'function_rewrite.dart';
+import 'program_flow.dart';
+import 'program_pass.dart';
 
-/// Inlines small direct callees reachable from [roots] in this [program].
+/// Expands bounded direct calls in the executable bodies selected by analysis.
 ///
-/// A single pass visits original call sites, without recursively expanding new
-/// calls. Selection follows direct and nominal virtual dependencies, including
-/// [instantiatedTypes], without solving argument and result types. Supply actual
-/// roots, never retained definitions from a previous program.
+/// Costs include copied operations, argument views and logical frame metadata.
+/// Limits must be nonnegative; zero disables expansion. Callees must be
+/// synchronous bodies that can be copied with their parameter and type bindings.
+/// Arguments retain evaluation order, effects and exceptional continuations.
 ///
-/// Cost counts copied operations, parameter views and return adaptation. An
-/// operation that can allocate (including calls) costs twelve ordinary operations,
-/// since expansion retains that work and adds logical frame metadata. Caller
-/// growth counts copies and exceptional continuations without that penalty.
-/// Both limits must be nonnegative, and zero disables expansion.
-///
-/// Candidates are synchronous, nongeneric, single-block bodies ending in a
-/// return, without lexical captures or constructor-only writes. Callback address
-/// operations preserve the original native entry declaration. Call arguments
-/// still execute in order, including unused arguments with effects. Throwing
-/// operations keep the call site's exceptional continuation and logical frame
-/// chain, including inlined function identities and call sites. Cleanup removes
-/// constant branches, unreachable blocks and unused operations without effects.
-///
-/// Unchanged input is returned by identity. Otherwise only changed functions
-/// are copied, and the new verified program invalidates prior call, reachability
-/// and preparation facts. Reanalyze it from the actual roots and supplemental
-/// facts, never from the old retained definitions.
-IrProgram inlineDirectCalls(
+/// This expansion runs once per pipeline position; subsequent shrinking passes
+/// may simplify its results without resetting and repeatedly spending its budget.
+final class const DirectCallInlining({
+  final int maxCalleeCost = 12,
+  final int maxCallerGrowth = 64,
+}) implements ProgramPass {
+  @override
+  bool get repeatUntilStable => false;
+
+  @override
+  IrProgram run(ProgramFlowFacts facts) {
+    facts.checkProgram(facts.program);
+    RangeError.checkNotNegative(maxCalleeCost, 'maxCalleeCost');
+    RangeError.checkNotNegative(maxCallerGrowth, 'maxCallerGrowth');
+    if (maxCalleeCost == 0 || maxCallerGrowth == 0) return facts.program;
+    return _inlineSelected(
+      facts.program,
+      facts,
+      maxCalleeCost,
+      maxCallerGrowth,
+    );
+  }
+}
+
+IrProgram _inlineSelected(
   IrProgram program,
-  Iterable<FunctionTarget> roots, {
-  Iterable<ClassType> instantiatedTypes = const [],
-  int maxCalleeCost = 12,
-  int maxCallerGrowth = 64,
-}) {
-  RangeError.checkNotNegative(maxCalleeCost, 'maxCalleeCost');
-  RangeError.checkNotNegative(maxCallerGrowth, 'maxCallerGrowth');
-  if (maxCalleeCost == 0 || maxCallerGrowth == 0) return program;
-  final definitions = reachableDefinitions(
-    program,
-    roots,
-    instantiatedTypes: instantiatedTypes,
-  );
+  ProgramFlowFacts facts,
+  int maxCalleeCost,
+  int maxCallerGrowth,
+) {
   var changed = false;
   final functions = <IrFunction>[];
   for (final function in program.functions) {
     final sites = <DirectCall, ({IrFunction body, Jump? handler})>{};
     var budget = maxCallerGrowth;
-    if (definitions.contains(function.target) &&
+    if (facts.definitions.contains(function.target) &&
         function.bodyKind == .synchronous) {
       for (final block in function.blocks) {
         for (final (operation, handler) in [
@@ -55,32 +54,32 @@ IrProgram inlineDirectCalls(
           if (block.end case Invoke(:final operation, :final onThrow))
             (operation, onThrow),
         ]) {
-          if (operation is! DirectCall || operation.target == function.target) {
+          if (operation is! DirectCall ||
+              operation.target == function.target ||
+              !facts.reachesOperation(operation)) {
             continue;
           }
           final body = program.implementationOf(operation.target);
-          // shortcut: single-block monomorphic bodies, expand with CFG and binder substitution.
           if (body is! IrFunction ||
               body.bodyKind != .synchronous ||
-              body.blocks.length != 1 ||
-              body.entry.end is! Return ||
               body.target.kind == .initializer ||
               body.target.enclosing != null ||
               body.target.awaiterCapture != null ||
-              body.target.typeParameters.isNotEmpty ||
-              (body.target.owner?.typeParameters.isNotEmpty ?? false) ||
               body.closures.isNotEmpty ||
-              body.entry.instructions.any((op) => op.type == .never)) {
+              !_entryChecksProved(operation, facts)) {
             continue;
           }
-          final copies =
-              body.entry.instructions.length + body.entry.parameters.length + 1;
-          final cost =
-              copies +
-              11 *
-                  body.entry.instructions
-                      .where((op) => op.effects.contains(Effect.allocates))
-                      .length;
+          var copies = 0, allocations = 0;
+          for (final block in body.blocks) {
+            copies += block.instructions.length + block.parameters.length + 1;
+            for (final operation in [
+              ...block.instructions,
+              if (block.end case Invoke(:final operation)) operation,
+            ]) {
+              if (operation.effects.contains(Effect.allocates)) allocations++;
+            }
+          }
+          final cost = copies + 11 * allocations;
           final growth = copies + (handler == null ? 0 : 2 * copies);
           if (cost > maxCalleeCost || growth > budget) continue;
           budget -= growth;
@@ -91,7 +90,7 @@ IrProgram inlineDirectCalls(
     if (sites.isEmpty) {
       functions.add(function);
     } else {
-      functions.add(_inline(function, sites));
+      functions.add(FunctionRewrite(function, inlined: sites).run());
       changed = true;
     }
   }
@@ -105,220 +104,31 @@ IrProgram inlineDirectCalls(
       : program;
 }
 
-IrFunction _inline(
-  IrFunction function,
-  Map<DirectCall, ({IrFunction body, Jump? handler})> sites,
-) {
-  final blocks = <Block, Block>{
-    for (final block in function.blocks)
-      block: Block(block.parameters.map((p) => p.type)),
-  };
-  final values = <Value, Value>{
-    for (final block in function.blocks)
-      for (final (i, parameter) in block.parameters.indexed)
-        parameter: blocks[block]!.parameters[i],
-  };
-  final instructions = <Block, List<Instruction>>{};
-  final ends = <Block, Terminator>{};
-  final locations = <Object, SourceLocation>{};
-  final expansions = <DirectCall, List<Instruction>>{};
-  final continuations = <Instruction, Block>{};
-  late Value Function(Value) value;
-
-  void locate(
-    Object source,
-    Object copy,
-    IrFunction owner, [
-    Object? callSite,
-  ]) {
-    final location = owner.sourceLocations[source];
-    if (identical(owner, function)) {
-      if (location != null) locations[copy] = location;
-    } else {
-      locations[copy] = (location ?? SourceLocation(null)).inlinedAt(
-        owner.target,
-        function.sourceLocations[callSite] ?? SourceLocation(null),
-      );
-    }
-  }
-
-  Value expand(DirectCall call) {
-    final site = sites[call]!;
-    final body = site.body;
-    final output = expansions[call] = [];
-    final locals = <Value, Value>{};
-    Value read(Value operand) =>
-        operand is Constant ? operand : locals[operand]!;
-    Value append(Instruction instruction, Object source) {
-      output.add(instruction);
-      locate(source, instruction, body, call);
-      if (site.handler != null && instruction.mayThrow) {
-        final next = continuations[instruction] = Block([instruction.type]);
-        return next.parameters.single;
-      }
-      return instruction;
-    }
-
-    for (final (i, parameter) in body.entry.parameters.indexed) {
-      final argument = value(call.inputs[i]);
-      locals[parameter] = argument.type == parameter.type
-          ? argument
-          : append(TypeView(argument, parameter.type), parameter);
-    }
-    for (final operation in body.entry.instructions) {
-      locals[operation] = append(operation.mapInputs(read), operation);
-    }
-    final returned = (body.entry.end as Return).value;
-    final result = returned == null
-        ? const Constant.nullValue()
-        : read(returned);
-    return result.type == call.type
-        ? result
-        : append(TypeView(result, call.type), body.entry);
-  }
-
-  value = (original) {
-    if (original is Constant || original is UnwindValue) return original;
-    if (values[original] case final known?) return known;
-    final Value result;
-    if (original is DirectCall && sites.containsKey(original)) {
-      result = expand(original);
-    } else if (original is Instruction) {
-      result = original.mapInputs(value);
-      locate(original, result, function);
-    } else if (original is TestedValue) {
-      result = (value(original.test) as TypeTest).refinement(original.outcome)!;
-    } else {
-      throw StateError('Unexpected value in a synchronous IR graph.');
-    }
-    return values[original] = result;
-  };
-  Jump jump(Jump edge) => Jump(blocks[edge.target]!, edge.arguments.map(value));
-  Terminator end(Terminator original) => switch (original) {
-    Return(value: final returned) => Return(
-      returned == null ? null : value(returned),
-    ),
-    final Jump edge => jump(edge),
-    Branch(:final condition, :final ifTrue, :final ifFalse) => switch (value(
-      condition,
-    )) {
-      ScalarConstant(value: final bool condition) => jump(
-        condition ? ifTrue : ifFalse,
-      ),
-      final condition => Branch(condition, jump(ifTrue), jump(ifFalse)),
-    },
-    Invoke(:final operation, :final onReturn, :final onThrow) => Invoke(
-      value(operation) as Instruction,
-      onReturn: onReturn == null ? null : jump(onReturn),
-      onThrow: jump(onThrow),
-    ),
-    Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
-      value(exception),
-      stackTrace: stackTrace == null ? null : value(stackTrace),
-      onThrow: onThrow == null ? null : jump(onThrow),
-    ),
-    ExhaustivenessFailure(:final onThrow) => ExhaustivenessFailure(
-      onThrow == null ? null : jump(onThrow),
-    ),
-    Unreachable(:final cause) => Unreachable(value(cause)),
-    Await() ||
-    Yield() ||
-    YieldStream() => throw StateError('A synchronous IR graph cannot suspend.'),
-  };
-
-  for (final original in function.blocks) {
-    var current = blocks[original]!;
-    instructions[current] = [];
-    void emit(Instruction operation) {
-      if (operation is DirectCall && sites.containsKey(operation)) {
-        value(operation);
-        for (final copied in expansions[operation]!) {
-          if (continuations[copied] case final next?) {
-            ends[current] = Invoke(
-              copied,
-              onReturn: Jump(next, [copied]),
-              onThrow: jump(sites[operation]!.handler!),
-            );
-            current = next;
-            instructions[current] = [];
-          } else {
-            instructions[current]!.add(copied);
-          }
-        }
-      } else {
-        instructions[current]!.add(value(operation) as Instruction);
+bool _entryChecksProved(DirectCall call, ProgramFlowFacts facts) {
+  final target = call.target;
+  if (target.covariantParameters.isEmpty) return true;
+  final owner = target.owner!;
+  final receiver = facts.valueOf(call.inputs.first);
+  for (final slot in target.covariantParameters) {
+    final parameter = target.signature.parameters[slot];
+    final ownerDependent = parameter.freeTypeParameters.any(
+      owner.typeParameters.contains,
+    );
+    if (ownerDependent && receiver.unknownTypes.isNotEmpty) return false;
+    final actualTypes = receiver.types.whereType<ClassType>().toList();
+    if (actualTypes.isEmpty) return false;
+    for (final type in actualTypes) {
+      final environment = {
+        ...target.environmentFor(type),
+        for (final (i, type) in call.typeArguments.indexed)
+          target.typeParameters[i]: type,
+      };
+      final actual = facts.valueOf(call.inputs[target.argumentOffset + slot]);
+      if (actual.isBottom ||
+          actual.check(parameter.substitute(environment)).mayFail) {
+        return false;
       }
     }
-
-    for (final operation in original.instructions) {
-      emit(operation);
-    }
-    final terminal = original.end;
-    if (terminal is Invoke && sites.containsKey(terminal.operation)) {
-      emit(terminal.operation);
-      ends[current] = jump(terminal.onReturn!);
-    } else {
-      ends[current] = end(terminal);
-    }
-    locate(original, current, function);
   }
-
-  final reachable = <Block>{}, pending = [blocks[function.entry]!];
-  while (pending.isNotEmpty) {
-    final block = pending.removeLast();
-    if (reachable.add(block)) {
-      pending.addAll(ends[block]!.successors.map((edge) => edge.target));
-    }
-  }
-  final used = <Value>{};
-  void retain(Value operand) {
-    if (!used.add(operand)) return;
-    if (operand is Instruction) operand.inputs.forEach(retain);
-    if (operand is TestedValue) retain(operand.test);
-  }
-
-  for (final block in reachable) {
-    for (final operation in instructions[block]!) {
-      if (operation.effects.isNotEmpty) retain(operation);
-    }
-    final terminal = ends[block]!;
-    for (final edge in terminal.successors) {
-      edge.arguments.forEach(retain);
-    }
-    switch (terminal) {
-      case Return(:final value?):
-        retain(value);
-      case Branch(:final condition):
-        retain(condition);
-      case Invoke(:final operation):
-        retain(operation);
-      case Throw(:final exception, :final stackTrace):
-        retain(exception);
-        if (stackTrace != null) retain(stackTrace);
-      case Unreachable(:final cause):
-        retain(cause);
-      default:
-        break;
-    }
-  }
-  final owned = <Object>{...reachable};
-  for (final block in reachable) {
-    for (final operation in instructions[block]!) {
-      if (used.contains(operation)) {
-        block.emit(operation);
-        owned.add(operation);
-      }
-    }
-    block.finish(ends[block]!);
-    if (block.end case Invoke(:final operation)) owned.add(operation);
-  }
-  return IrFunction(
-    function.target,
-    reachable,
-    defaults: function.defaults,
-    sourceLocations: {
-      for (final e in locations.entries)
-        if (owned.contains(e.key)) e.key: e.value,
-    },
-  );
+  return true;
 }

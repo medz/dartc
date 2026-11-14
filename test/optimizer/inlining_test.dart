@@ -19,6 +19,16 @@ Object? _run(
   },
 }).run(program.implementationOf(target) as IrFunction, arguments);
 
+IrProgram _inline(
+  IrProgram program,
+  Iterable<FunctionTarget> roots, {
+  int maxCalleeCost = 12,
+  int maxCallerGrowth = 64,
+}) => DirectCallInlining(
+  maxCalleeCost: maxCalleeCost,
+  maxCallerGrowth: maxCallerGrowth,
+).run(ProgramFlow(program, const [], openEntries: roots).facts);
+
 void main() {
   test('cleanup retains caller and inlined lifetime markers after calls', () {
     final helper = FunctionTarget(_uri, 'retain', .voidType, [.object]);
@@ -43,7 +53,7 @@ void main() {
       ],
       externals: [IrExternal(_tick)],
     );
-    final rewritten = inlineDirectCalls(program, [
+    final rewritten = _inline(program, [
       root,
     ], maxCalleeCost: 32).implementationOf(root) as IrFunction;
     expect(rewritten.callees, {_tick});
@@ -93,7 +103,7 @@ void main() {
         externals: [IrExternal(_tick)],
       );
       final facts = CallTypeFlow(program, [root]).facts;
-      final result = inlineDirectCalls(program, [root]);
+      final result = _inline(program, [root]);
       expect(result, isNot(same(program)));
       for (final input in [program, result]) {
         final events = <int>[];
@@ -148,7 +158,7 @@ void main() {
           IrFunction(root, [entry]),
         ],
       );
-      final result = inlineDirectCalls(program, [root], maxCalleeCost: 32);
+      final result = _inline(program, [root], maxCalleeCost: 32);
       expect(_run(program, root, []), 'leftright');
       expect(_run(result, root, []), 'leftright');
       expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
@@ -197,10 +207,7 @@ void main() {
         ],
         externals: [IrExternal(_tick)],
       );
-      final result = inlineDirectCalls(program, [
-        root,
-        unhandled,
-      ], maxCalleeCost: 32);
+      final result = _inline(program, [root, unhandled], maxCalleeCost: 32);
       for (final input in [program, result]) {
         final events = <int>[];
         expect(_run(input, root, [42], events), -1);
@@ -267,7 +274,7 @@ void main() {
       IrFunction(helper, [body]),
       IrFunction(root, [entry, done, step, loop]),
     ]);
-    final result = inlineDirectCalls(program, [root]);
+    final result = _inline(program, [root]);
     for (final count in [0, 1, 5, 12]) {
       expect(_run(result, root, [count]), _run(program, root, [count]));
     }
@@ -331,7 +338,7 @@ void main() {
       );
       final facts = CallTypeFlow(program, [root]).facts;
       expect(facts.definitions, {root, helper, _tick, initialize, drain});
-      final result = inlineDirectCalls(program, [root]);
+      final result = _inline(program, [root]);
       final events = <int>[];
       expect(_run(result, root, [], events), 11);
       expect(events, isEmpty);
@@ -358,16 +365,13 @@ void main() {
 
     final unused = calls(FunctionTarget(_uri, 'unused', .integer, []));
     final program = IrProgram([], [identity, calls(root), unused]);
-    expect(inlineDirectCalls(program, [root], maxCalleeCost: 1), same(program));
+    expect(_inline(program, [root], maxCalleeCost: 1), same(program));
+    expect(_inline(program, [root], maxCallerGrowth: 0), same(program));
     expect(
-      inlineDirectCalls(program, [root], maxCallerGrowth: 0),
-      same(program),
-    );
-    expect(
-      () => inlineDirectCalls(program, [root], maxCallerGrowth: -1),
+      () => _inline(program, [root], maxCallerGrowth: -1),
       throwsRangeError,
     );
-    final result = inlineDirectCalls(program, [root], maxCallerGrowth: 2);
+    final result = _inline(program, [root], maxCallerGrowth: 2);
     expect(_run(result, root, []), 5);
     expect(
       (result.implementationOf(root) as IrFunction).entry.instructions
@@ -378,55 +382,41 @@ void main() {
     expect(result.implementationOf(unused.target), same(unused));
   });
 
-  test(
-    'roots and supplied instance types select callers in the current graph',
-    () {
-      final type = ClassType(_uri, 'Box');
-      final helper = FunctionTarget(_uri, 'value', .integer, []);
-      final method = FunctionTarget(
-        _uri,
-        'read',
-        .integer,
-        [],
-        owner: type,
-        kind: .method,
-      );
-      final methodBody = Block(method.parameterTypes);
-      methodBody.finish(Return(methodBody.emit(DirectCall(helper, []))));
-      final root = FunctionTarget(_uri, 'root', .integer, [type]);
-      final entry = Block(root.parameterTypes);
-      entry.finish(
-        Return(entry.emit(InstanceCall(method, entry.parameters.single, []))),
-      );
-      final program = IrProgram(
-        [
-          IrClass(type, [], members: [method]),
-        ],
-        [
-          IrFunction(helper, [
-            Block()..finish(const Return(Constant.integer(5))),
-          ]),
-          IrFunction(method, [methodBody]),
-          IrFunction(root, [entry]),
-        ],
-      );
-      expect(inlineDirectCalls(program, [root]), same(program));
-      final result = inlineDirectCalls(
-        program,
-        [root],
-        instantiatedTypes: [type],
-      );
-      expect((result.implementationOf(method) as IrFunction).callees, isEmpty);
-      expect(
-        result.implementationOf(root),
-        same(program.implementationOf(root)),
-      );
-      expect(
-        inlineDirectCalls(result, [root], instantiatedTypes: [type]),
-        same(result),
-      );
-    },
-  );
+  test('entry arguments select virtual callers in the current graph', () {
+    final type = ClassType(_uri, 'Box');
+    final helper = FunctionTarget(_uri, 'value', .integer, []);
+    final method = FunctionTarget(
+      _uri,
+      'read',
+      .integer,
+      [],
+      owner: type,
+      kind: .method,
+    );
+    final methodBody = Block(method.parameterTypes);
+    methodBody.finish(Return(methodBody.emit(DirectCall(helper, []))));
+    final root = FunctionTarget(_uri, 'root', .integer, [type]);
+    final entry = Block(root.parameterTypes);
+    entry.finish(
+      Return(entry.emit(InstanceCall(method, entry.parameters.single, []))),
+    );
+    final program = IrProgram(
+      [
+        IrClass(type, [], members: [method]),
+      ],
+      [
+        IrFunction(helper, [
+          Block()..finish(const Return(Constant.integer(5))),
+        ]),
+        IrFunction(method, [methodBody]),
+        IrFunction(root, [entry]),
+      ],
+    );
+    final result = _inline(program, [root]);
+    expect((result.implementationOf(method) as IrFunction).callees, isEmpty);
+    expect(result.implementationOf(root), same(program.implementationOf(root)));
+    expect(_inline(result, [root]), same(result));
+  });
 
   test('default costs prefer leaf work over calls and allocation', () {
     final wrapper = FunctionTarget(_uri, 'wrapper', .integer, [.integer]);
@@ -474,7 +464,7 @@ void main() {
       ],
       externals: [IrExternal(_tick)],
     );
-    final result = inlineDirectCalls(program, [root]);
+    final result = _inline(program, [root]);
     expect((result.implementationOf(root) as IrFunction).callees, {
       wrapper,
       allocate,
@@ -488,41 +478,48 @@ void main() {
     expect(events, [7]);
   });
 
-  test('self recursion and generic callees retain their calls', () {
-    final t = TypeParameterType('T')..initializeBound(.object.nullable);
-    final identity = FunctionTarget(
-      _uri,
-      'identity',
-      t,
-      [t],
-      typeParameters: [t],
-    );
-    final generic = Block(identity.parameterTypes);
-    generic.finish(Return(generic.parameters.single));
-    final root = FunctionTarget(_uri, 'root', .integer, []);
-    final entry = Block();
-    entry.finish(
-      Return(
-        entry.emit(
-          DirectCall(
-            identity,
-            [const Constant.integer(8)],
-            typeArguments: [ValueType.integer],
+  test(
+    'generic callees use actual binders while self recursion stays a call',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final identity = FunctionTarget(
+        _uri,
+        'identity',
+        t,
+        [t],
+        typeParameters: [t],
+      );
+      final generic = Block(identity.parameterTypes);
+      generic.finish(Return(generic.parameters.single));
+      final root = FunctionTarget(_uri, 'root', .integer, []);
+      final entry = Block();
+      entry.finish(
+        Return(
+          entry.emit(
+            DirectCall(
+              identity,
+              [const Constant.integer(8)],
+              typeArguments: [ValueType.integer],
+            ),
           ),
         ),
-      ),
-    );
-    final recursive = FunctionTarget(_uri, 'recursive', .integer, [.integer]);
-    final loop = Block(recursive.parameterTypes);
-    loop.finish(Return(loop.emit(DirectCall(recursive, loop.parameters))));
-    final program = IrProgram([], [
-      IrFunction(identity, [generic]),
-      IrFunction(root, [entry]),
-      IrFunction(recursive, [loop]),
-    ]);
-    expect(inlineDirectCalls(program, [root, recursive]), same(program));
-    expect(_run(program, root, []), 8);
-  });
+      );
+      final recursive = FunctionTarget(_uri, 'recursive', .integer, [.integer]);
+      final loop = Block(recursive.parameterTypes);
+      loop.finish(Return(loop.emit(DirectCall(recursive, loop.parameters))));
+      final program = IrProgram([], [
+        IrFunction(identity, [generic]),
+        IrFunction(root, [entry]),
+        IrFunction(recursive, [loop]),
+      ]);
+      final result = _inline(program, [root, recursive]);
+      expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
+      expect((result.implementationOf(recursive) as IrFunction).callees, {
+        recursive,
+      });
+      expect(_run(result, root, []), 8);
+    },
+  );
 
   test('void calls retain their actual return values', () {
     final helper = FunctionTarget(_uri, 'voidValue', .voidType, []);
@@ -534,7 +531,7 @@ void main() {
       IrFunction(helper, [body]),
       IrFunction(root, [entry]),
     ]);
-    final result = inlineDirectCalls(program, [root]);
+    final result = _inline(program, [root]);
     expect(_run(program, root, []), 'kept');
     expect(_run(result, root, []), 'kept');
     expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
@@ -569,7 +566,7 @@ void main() {
       IrFunction(helper, [body]),
       IrFunction(root, [entry]),
     ]);
-    final rewritten = inlineDirectCalls(program, [root]);
+    final rewritten = _inline(program, [root]);
     expect(_run(program, root, []), isTrue);
     expect(_run(rewritten, root, []), isTrue);
     expect(

@@ -89,6 +89,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         }.values,
       );
     }
+    program = ProgramNormalization(program, runtime: runtime).run();
     return _close(
       ProgramPreparation(
         target,
@@ -260,11 +261,22 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       ...exports.keys,
       if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
     ];
-    program = inlineDirectCalls(
-      program,
-      roots,
-      instantiatedTypes: TypeMetadata.fields.keys,
-    );
+    program = ProgramNormalization(program, runtime: runtime).run();
+    program =
+        ProgramOptimizer(const [
+          ProgramSimplification(),
+          ProgramCallSpecialization(),
+          ProgramStoragePromotion(),
+          ProgramStorageElimination(),
+          DirectCallInlining(),
+        ]).run(program, [
+          if (output is ExecutableOutput) ...[
+            (
+              target: entry!,
+              arguments: entry.parameterTypes.map(FlowValue.unknown).toList(),
+            ),
+          ],
+        ], openEntries: [...exports.keys, ?runtime.processExitCode]).program;
     final definitions = reachableDefinitions(
       program,
       roots,

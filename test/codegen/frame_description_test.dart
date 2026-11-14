@@ -1,7 +1,8 @@
+import 'package:dartc/target.dart';
+import 'package:dartc/abi.dart';
+
 import 'dart:typed_data';
 
-import 'package:dartc/abi.dart';
-import 'package:dartc/target.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/optimizer.dart';
@@ -143,10 +144,10 @@ void main() {
         externals: [IrExternal(failure)],
       );
       IrProgram inline(IrProgram program) =>
-          inlineDirectCalls(program, [root], maxCalleeCost: 32);
-      final preparedCallee = inlineDirectCalls(source, [
-        middle,
-      ], maxCalleeCost: 32);
+          const DirectCallInlining(maxCalleeCost: 32)
+              .run(ProgramFlow(program, const [], openEntries: [root]).facts);
+      final preparedCallee = const DirectCallInlining(maxCalleeCost: 32)
+          .run(ProgramFlow(source, const [], openEntries: [middle]).facts);
       for (final result in [inline(inline(source)), inline(preparedCallee)]) {
         expect(CallTypeFlow(result, [root]).facts.definitions, {root, failure});
         final rewritten = result.implementationOf(root) as IrFunction;
