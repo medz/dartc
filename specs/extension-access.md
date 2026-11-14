@@ -14,6 +14,8 @@
 
 [SDK 差分样本](../test/frontend/lowering/fixtures/extension_access.dart)覆盖结果、异常和副作用；[测试](../test/frontend/lowering/extension_access_test.dart)单独标明下述规范顺序检查。
 
+这些访问、隐式调用和方法提取样本也经[原生测试](../test/compiler/extensions_test.dart)在 macOS ARM64 与 Linux ARM64 上执行，覆盖结果、类型失败、异常清理、副作用和泛型默认值。赋值表达式的两处顺序差异采用独立源码顺序预期，其余观测与 SDK 对照。
+
 ## 隐式调用
 
 普通 extension 的 `call` 可通过隐式函数调用语法访问，复用 receiver-first 静态调用。保留泛型静态视图、可空接收者及显式 override；真实成员优先，dynamic 不查找 extension。虚 getter-call 的 getter 读取在实参之后，括号、静态和 extension getter 则先读取，见[调用样本](../test/frontend/lowering/fixtures/extension_call.dart)。

@@ -21,6 +21,8 @@ void observe(String name, Object? Function() run, [Object? input]) {
     value = run();
   } on AssertionError catch (failure) {
     error = 'assert:${failure.message}';
+  } on int catch (failure) {
+    error = 'int:$failure';
   } on String catch (failure) {
     error = failure;
   } on TypeError {
