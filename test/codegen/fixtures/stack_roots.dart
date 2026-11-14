@@ -3,6 +3,7 @@ import 'dart:ffi';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
 import 'package:dartc/assembler/x64.dart' as x64;
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -125,23 +126,25 @@ ObjectModule stackRoots(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   final module = generator.generate(
-    IrProgram(
-      [
-        IrClass(base, [field]),
-        IrClass(type, []),
-      ],
-      functions,
-      externals: [IrExternal(external)],
-    ),
-    runtime: heapRuntime,
-    definitions: [...functions.map((f) => f.target), external],
-    exports: {
-      run: NativeExport(
-        'roots_run',
-        NativeSignature(Int64, List.filled(4, Int64)),
+    Compiler(generator.target).prepare(
+      IrProgram(
+        [
+          IrClass(base, [field]),
+          IrClass(type, []),
+        ],
+        functions,
+        externals: [IrExternal(external)],
       ),
-    },
-    imports: {external: NativeImport('roots_probe', signature)},
+      runtime: heapRuntime,
+      roots: [...functions.map((f) => f.target), external],
+      exports: {
+        run: NativeExport(
+          'roots_run',
+          NativeSignature(Int64, List.filled(4, Int64)),
+        ),
+      },
+      imports: {external: NativeImport('roots_probe', signature)},
+    ),
   );
   final constantGetters = [
     for (final name in ['original', 'replacement'])

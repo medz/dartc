@@ -1,9 +1,9 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/object/mach_o.dart';
 import 'package:dartc/object/elf.dart';
@@ -40,9 +40,11 @@ void main() {
         expect(
           generator
               .generate(
-                program,
-                runtime: heapRuntime,
-                definitions: [function.target],
+                Compiler(generator.target).prepare(
+                  program,
+                  runtime: heapRuntime,
+                  roots: [function.target],
+                ),
               )
               .symbols
               .map((s) => s.name),
@@ -64,10 +66,8 @@ void main() {
         X64CodeGenerator(const Target(.linux, .x64)),
       ]) {
         final module = generator.generate(
-          lowered.program,
-          runtime: heapRuntime,
-          definitions: reachableDefinitions(lowered.program, [entry]),
-          roots: [entry],
+          Compiler(generator.target)
+              .prepare(lowered.program, runtime: heapRuntime, roots: [entry]),
         );
         final names = module.symbols.map((symbol) => symbol.name);
         expect(names, contains('[]'));
@@ -101,10 +101,8 @@ void main() {
           externals: lowered.program.externals,
         );
         final enlarged = generator.generate(
-          expanded,
-          runtime: heapRuntime,
-          definitions: reachableDefinitions(expanded, [entry]),
-          roots: [entry],
+          Compiler(generator.target)
+              .prepare(expanded, runtime: heapRuntime, roots: [entry]),
         );
         if (generator.target.operatingSystem == .macos) {
           expect(
@@ -146,9 +144,8 @@ void main() {
         X64CodeGenerator(Target(os, .x64)),
       ]) {
         final module = generator.generate(
-          program,
-          runtime: heapRuntime,
-          definitions: [target],
+          Compiler(generator.target)
+              .prepare(program, runtime: heapRuntime, roots: [target]),
         );
         expect(module.relocations, isEmpty);
         expect(module.symbols.single.name, 'invoke');
@@ -157,7 +154,7 @@ void main() {
   });
 
   test(
-    'definition selection and native exports are separate checked inputs',
+    'roots discover their callees and exports validate native signatures',
     () {
       final arithmeticProgram = arithmetic();
       final callee = arithmeticProgram.functions.first.target;
@@ -183,14 +180,9 @@ void main() {
         Arm64CodeGenerator(const Target(.linux, .arm64)),
         X64CodeGenerator(const Target(.linux, .x64)),
       ]) {
-        expect(
-          () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [entry],
-          ),
-          throwsArgumentError,
-        );
+        final prepared = Compiler(generator.target)
+            .prepare(program, runtime: heapRuntime, roots: [entry]);
+        expect(prepared.definitions, containsAll([entry, callee]));
         final withSupport = Block();
         withSupport.emit(
           NumericRoundToDouble(const Constant.floating(1.5), .round),
@@ -205,50 +197,46 @@ void main() {
             ),
           ),
         );
-        expect(
-          () => generator.generate(
-            IrProgram([], [
-              ...arithmeticProgram.functions,
-              IrFunction(entry, [withSupport]),
-            ]),
-            runtime: heapRuntime,
-            definitions: [entry],
-          ),
-          throwsArgumentError,
-        );
-        expect(
-          () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [callee],
-            exports: {
-              entry: NativeExport(
-                'caller',
-                NativeSignature(Int64, List.filled(0, Int64)),
-              ),
-            },
-          ),
-          throwsArgumentError,
-        );
-        expect(
-          () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [callee],
-            exports: {
-              callee: NativeExport(
-                'add',
-                NativeSignature(Int64, List.filled(0, Int64)),
-              ),
-            },
-          ),
-          throwsArgumentError,
-        );
-        final module = generator.generate(
-          program,
+        final supported = Compiler(generator.target).prepare(
+          IrProgram([], [
+            ...arithmeticProgram.functions,
+            IrFunction(entry, [withSupport]),
+          ]),
           runtime: heapRuntime,
-          definitions: [entry, callee],
+          roots: [entry],
         );
+        expect(supported.definitions, containsAll([entry, callee]));
+        expect(generator.generate(supported).sections, isNotEmpty);
+        final exported = generator.generate(
+          Compiler(generator.target).prepare(
+            program,
+            runtime: heapRuntime,
+            exports: {
+              entry: NativeExport('caller', NativeSignature(Int64, [])),
+            },
+          ),
+        );
+        expect(
+          exported.symbols.where((symbol) => symbol.exported).single.name,
+          'caller',
+        );
+        expect(
+          () => generator.generate(
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: [callee],
+              exports: {
+                callee: NativeExport(
+                  'add',
+                  NativeSignature(Int64, List.filled(0, Int64)),
+                ),
+              },
+            ),
+          ),
+          throwsArgumentError,
+        );
+        final module = generator.generate(prepared);
         expect(
           module.symbols.every(
             (symbol) => symbol.binding == .local && !symbol.exported,
@@ -285,16 +273,20 @@ void main() {
       X64CodeGenerator(const Target(.linux, .x64)),
     ]) {
       final first = generator.generate(
-        program,
-        runtime: heapRuntime,
-        definitions: exports.keys,
-        exports: exports,
+        Compiler(generator.target).prepare(
+          program,
+          runtime: heapRuntime,
+          roots: exports.keys,
+          exports: exports,
+        ),
       );
       final second = generator.generate(
-        program,
-        runtime: heapRuntime,
-        definitions: exports.keys,
-        exports: exports,
+        Compiler(generator.target).prepare(
+          program,
+          runtime: heapRuntime,
+          roots: exports.keys,
+          exports: exports,
+        ),
       );
       expect(second.sections.single.bytes, first.sections.single.bytes);
       expect(second.target, generator.target);

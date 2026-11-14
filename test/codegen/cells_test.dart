@@ -1,3 +1,4 @@
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/codegen/cell_initialization.dart';
@@ -206,9 +207,11 @@ void main() {
           ]);
           expect(
             () => generator.generate(
-              program,
-              runtime: heapRuntime,
-              definitions: [declaration, child],
+              Compiler(generator.target).prepare(
+                program,
+                runtime: heapRuntime,
+                roots: [declaration, child],
+              ),
             ),
             throwsA(
               isA<UnsupportedError>().having(
@@ -249,9 +252,11 @@ void main() {
             expect(
               generator
                   .generate(
-                    program,
-                    runtime: heapRuntime,
-                    definitions: [declaration],
+                    Compiler(generator.target).prepare(
+                      program,
+                      runtime: heapRuntime,
+                      roots: [declaration],
+                    ),
                   )
                   .sections,
               isNotEmpty,
@@ -259,9 +264,9 @@ void main() {
           } else {
             expect(
               () => generator.generate(
-                program,
-                runtime: heapRuntime,
-                definitions: [declaration],
+                Compiler(
+                  generator.target,
+                ).prepare(program, runtime: heapRuntime, roots: [declaration]),
               ),
               throwsA(
                 isA<UnsupportedError>().having(
@@ -293,9 +298,8 @@ void main() {
           ]);
           expect(
             () => generator.generate(
-              program,
-              runtime: heapRuntime,
-              definitions: [declaration],
+              Compiler(generator.target)
+                  .prepare(program, runtime: heapRuntime, roots: [declaration]),
             ),
             throwsA(
               isA<UnsupportedError>().having(
@@ -325,9 +329,11 @@ void main() {
           expect(
             generator
                 .generate(
-                  program,
-                  runtime: heapRuntime,
-                  definitions: [declaration],
+                  Compiler(generator.target).prepare(
+                    program,
+                    runtime: heapRuntime,
+                    roots: [declaration],
+                  ),
                 )
                 .sections,
             isNotEmpty,

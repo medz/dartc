@@ -1,6 +1,6 @@
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/type_relations.dart';
 import 'package:dartc/src/codegen/type_values.dart';
@@ -37,9 +37,8 @@ void main() {
       externals: source.externals,
     );
     final module = Arm64CodeGenerator(const Target(.linux, .arm64)).generate(
-      program,
-      definitions: reachableDefinitions(program, [target]),
-      runtime: heapRuntime,
+      Compiler(const Target(.linux, .arm64))
+          .prepare(program, roots: [target], runtime: heapRuntime),
     );
     expect(module.symbols.map((symbol) => symbol.name), contains('_isSubtype'));
   });

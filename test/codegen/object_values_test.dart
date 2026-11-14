@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
@@ -49,9 +50,11 @@ void main() {
           _returning(library, 'string$i', Constant.string(text), .string),
       ];
       final module = generator.generate(
-        IrProgram([], functions),
-        runtime: heapRuntime,
-        definitions: functions.map((f) => f.target),
+        Compiler(generator.target).prepare(
+          IrProgram([], functions),
+          runtime: heapRuntime,
+          roots: functions.map((f) => f.target),
+        ),
       );
       final data = ByteData.sublistView(module.sections[1].bytes);
       expect(module.sections[1].kind, SectionKind.readOnlyData);
@@ -146,9 +149,9 @@ void main() {
         expect(
           generator
               .generate(
-                program,
-                runtime: heapRuntime,
-                definitions: [ctor, create],
+                Compiler(
+                  generator.target,
+                ).prepare(program, runtime: heapRuntime, roots: [ctor, create]),
               )
               .sections,
           isNotEmpty,
@@ -170,9 +173,11 @@ void main() {
           _returning(library, 'constant$i', value, .object),
       ];
       final module = generator.generate(
-        IrProgram(classes, functions),
-        runtime: heapRuntime,
-        definitions: functions.map((f) => f.target),
+        Compiler(generator.target).prepare(
+          IrProgram(classes, functions),
+          runtime: heapRuntime,
+          roots: functions.map((f) => f.target),
+        ),
       );
       final addresses = [
         for (final function in module.symbols.take(functions.length))
@@ -257,9 +262,11 @@ void main() {
         final missing = _returning(library, 'missing', first, base);
         expect(
           () => generator.generate(
-            IrProgram([], [missing]),
-            runtime: heapRuntime,
-            definitions: [missing.target],
+            Compiler(generator.target).prepare(
+              IrProgram([], [missing]),
+              runtime: heapRuntime,
+              roots: [missing.target],
+            ),
           ),
           throwsA(
             isA<UnsupportedError>().having(
@@ -278,11 +285,13 @@ void main() {
         expect(
           generator
               .generate(
-                IrProgram(classes, [
-                  IrFunction(declaration, [body]),
-                ]),
-                runtime: heapRuntime,
-                definitions: [declaration],
+                Compiler(generator.target).prepare(
+                  IrProgram(classes, [
+                    IrFunction(declaration, [body]),
+                  ]),
+                  runtime: heapRuntime,
+                  roots: [declaration],
+                ),
               )
               .sections
               .single
@@ -298,9 +307,11 @@ void main() {
         expect(
           generator
               .generate(
-                IrProgram(classes, [boxedInteger]),
-                runtime: heapRuntime,
-                definitions: [boxedInteger.target],
+                Compiler(generator.target).prepare(
+                  IrProgram(classes, [boxedInteger]),
+                  runtime: heapRuntime,
+                  roots: [boxedInteger.target],
+                ),
               )
               .sections
               .last

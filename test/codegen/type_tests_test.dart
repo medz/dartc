@@ -1,8 +1,8 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
-import 'package:dartc/optimizer.dart';
 import 'package:dartc/object.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -68,30 +68,10 @@ void main() {
             IrFunction(root, [entry]),
           ],
         );
-        final definitions = reachableDefinitions(program, [root]);
-        expect(definitions, {root, target, if (!direct) getter});
-        expect(
-          generator
-              .generate(program, runtime: heapRuntime, definitions: definitions)
-              .sections,
-          isNotEmpty,
-        );
-        if (!direct) {
-          expect(
-            () => generator.generate(
-              program,
-              runtime: heapRuntime,
-              definitions: [root, target],
-            ),
-            throwsA(
-              isA<ArgumentError>().having(
-                (e) => e.message,
-                'reason',
-                contains('Missing member definition'),
-              ),
-            ),
-          );
-        }
+        final prepared = Compiler(generator.target)
+            .prepare(program, runtime: heapRuntime, roots: [root]);
+        expect(prepared.definitions.contains(getter), !direct);
+        expect(generator.generate(prepared).sections, isNotEmpty);
       }
     });
     test('${generator.target} rejects conflicting SDK Type members', () {
@@ -135,9 +115,8 @@ void main() {
       );
       expect(
         () => generator.generate(
-          program,
-          runtime: heapRuntime,
-          definitions: reachableDefinitions(program, [target]),
+          Compiler(generator.target)
+              .prepare(program, runtime: heapRuntime, roots: [target]),
         ),
         throwsA(
           isA<ArgumentError>().having(
@@ -170,11 +149,13 @@ void main() {
             final constant = Block()
               ..finish(Return(Constant.boolean(expected != negated)));
             ObjectModule generate(Block block) => generator.generate(
-              IrProgram([], [
-                IrFunction(target, [block]),
-              ]),
-              runtime: heapRuntime,
-              definitions: [target],
+              Compiler(generator.target).prepare(
+                IrProgram([], [
+                  IrFunction(target, [block]),
+                ]),
+                runtime: heapRuntime,
+                roots: [target],
+              ),
             );
             expect(
               generate(body).sections.single.bytes,
@@ -198,12 +179,14 @@ void main() {
           ),
         );
         final module = generator.generate(
-          IrProgram([], [
-            IrFunction(producer, [produced]),
-            IrFunction(target, [body]),
-          ]),
-          runtime: heapRuntime,
-          definitions: [producer, target],
+          Compiler(generator.target).prepare(
+            IrProgram([], [
+              IrFunction(producer, [produced]),
+              IrFunction(target, [body]),
+            ]),
+            runtime: heapRuntime,
+            roots: [producer, target],
+          ),
         );
         final call = module.relocations
             .whereType<InstructionRelocation>()
@@ -266,7 +249,10 @@ void main() {
         );
         expect(
           generator
-              .generate(program, runtime: heapRuntime, definitions: [target])
+              .generate(
+                Compiler(generator.target)
+                    .prepare(program, runtime: heapRuntime, roots: [target]),
+              )
               .sections,
           isNotEmpty,
         );
@@ -313,7 +299,10 @@ void main() {
         );
         expect(
           generator
-              .generate(program, runtime: heapRuntime, definitions: [target])
+              .generate(
+                Compiler(generator.target)
+                    .prepare(program, runtime: heapRuntime, roots: [target]),
+              )
               .sections,
           isNotEmpty,
         );

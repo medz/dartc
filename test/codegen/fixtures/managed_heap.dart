@@ -1,5 +1,6 @@
 import 'dart:ffi';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -342,44 +343,52 @@ ObjectModule managedHeap(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   return generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: [...functions.map((f) => f.target), qsort],
-    imports: {qsort: NativeImport('qsort', qsortSignature)},
-    exports: {
-      importedReenter: NativeExport(
-        importedReenter.name,
-        NativeSignature.types(NativeScalarType(Int64), [
-          pointerType,
-          comparatorType,
-        ]),
-      ),
-      mutateShared: NativeExport(
-        mutateShared.name,
-        NativeSignature(Int64, [Int64]),
-      ),
-      readState: NativeExport(readState.name, NativeSignature(Int64, [])),
-      writeState: NativeExport(writeState.name, NativeSignature(Void, [Int64])),
-      globalReenter: NativeExport(
-        globalReenter.name,
-        NativeSignature.types(NativeScalarType(Int64), [
-          callbackType,
-          NativeScalarType(Int64),
-        ]),
-      ),
-      for (final function in [chain, cycles])
-        function: NativeExport(function.name, NativeSignature(Int64, [Int64])),
-      nested: NativeExport(
-        nested.name,
-        NativeSignature(Int64, [...List.filled(9, Int8), Int64]),
-      ),
-      reenter: NativeExport(
-        reenter.name,
-        NativeSignature.types(NativeScalarType(Int64), [
-          callbackType,
-          NativeScalarType(Int64),
-        ]),
-      ),
-    },
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: [...functions.map((f) => f.target), qsort],
+      imports: {qsort: NativeImport('qsort', qsortSignature)},
+      exports: {
+        importedReenter: NativeExport(
+          importedReenter.name,
+          NativeSignature.types(NativeScalarType(Int64), [
+            pointerType,
+            comparatorType,
+          ]),
+        ),
+        mutateShared: NativeExport(
+          mutateShared.name,
+          NativeSignature(Int64, [Int64]),
+        ),
+        readState: NativeExport(readState.name, NativeSignature(Int64, [])),
+        writeState: NativeExport(
+          writeState.name,
+          NativeSignature(Void, [Int64]),
+        ),
+        globalReenter: NativeExport(
+          globalReenter.name,
+          NativeSignature.types(NativeScalarType(Int64), [
+            callbackType,
+            NativeScalarType(Int64),
+          ]),
+        ),
+        for (final function in [chain, cycles])
+          function: NativeExport(
+            function.name,
+            NativeSignature(Int64, [Int64]),
+          ),
+        nested: NativeExport(
+          nested.name,
+          NativeSignature(Int64, [...List.filled(9, Int8), Int64]),
+        ),
+        reenter: NativeExport(
+          reenter.name,
+          NativeSignature.types(NativeScalarType(Int64), [
+            callbackType,
+            NativeScalarType(Int64),
+          ]),
+        ),
+      },
+    ),
   );
 }

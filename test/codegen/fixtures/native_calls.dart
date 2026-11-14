@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler/arm64.dart' as arm;
 import 'package:dartc/assembler/x64.dart' as x64;
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -233,11 +234,13 @@ List<ObjectModule> nativeCalls(Target target) {
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);
   final caller = generator.generate(
-    program,
-    runtime: heapRuntime,
-    definitions: [...functions.map((f) => f.target), ...imports.keys],
-    exports: exports,
-    imports: imports,
+    Compiler(generator.target).prepare(
+      program,
+      runtime: heapRuntime,
+      roots: [...functions.map((f) => f.target), ...imports.keys],
+      exports: exports,
+      imports: imports,
+    ),
   );
   final bytes = BytesBuilder(copy: false), symbols = <Symbol>[];
   for (final MapEntry(:key, :value) in signatures.entries) {

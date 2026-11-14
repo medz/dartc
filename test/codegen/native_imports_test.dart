@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:dartc/abi.dart';
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -50,13 +51,17 @@ void main() {
             IrFunction(target, [block]),
           ]);
           expect(
-            () => generator.generate(program, definitions: [target]),
+            () => generator.generate(
+              Compiler(generator.target).prepare(program, roots: [target]),
+            ),
             throwsArgumentError,
           );
           final object = generator.generate(
-            program,
-            definitions: [target],
-            nativeSymbols: {field: 'actual_data'},
+            Compiler(generator.target).prepare(
+              program,
+              roots: [target],
+              nativeSymbols: {field: 'actual_data'},
+            ),
           );
           expect(object.imports, [
             generator.target.nativeSymbol('actual_data'),
@@ -73,13 +78,15 @@ void main() {
         '$target binds declaration identities and deduplicates native symbols',
         () {
           final module = generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [first, caller, second],
-            imports: {first: binding, second: binding},
-            exports: {
-              caller: NativeExport('caller', NativeSignature(Int8, [Int8])),
-            },
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: [first, caller, second],
+              imports: {first: binding, second: binding},
+              exports: {
+                caller: NativeExport('caller', NativeSignature(Int8, [Int8])),
+              },
+            ),
           );
           expect(module.imports, [target.nativeSymbol('actual_native')]);
           expect(module.symbols, hasLength(4));
@@ -101,9 +108,8 @@ void main() {
         final definitions = [first, caller, second];
         expect(
           () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: definitions,
+            Compiler(generator.target)
+                .prepare(program, runtime: heapRuntime, roots: definitions),
           ),
           throwsArgumentError,
         );
@@ -113,20 +119,27 @@ void main() {
         ]) {
           expect(
             () => generator.generate(
-              program,
-              runtime: heapRuntime,
-              definitions: definitions,
-              imports: {first: NativeImport('wrong', invalid), second: binding},
+              Compiler(generator.target).prepare(
+                program,
+                runtime: heapRuntime,
+                roots: definitions,
+                imports: {
+                  first: NativeImport('wrong', invalid),
+                  second: binding,
+                },
+              ),
             ),
             throwsArgumentError,
           );
         }
         expect(
           () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: definitions,
-            imports: {first: binding, second: binding, caller: binding},
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: definitions,
+              imports: {first: binding, second: binding, caller: binding},
+            ),
           ),
           throwsArgumentError,
         );
@@ -143,38 +156,44 @@ void main() {
         );
         expect(
           () => generator.generate(
-            pointerProgram,
-            runtime: heapRuntime,
-            definitions: [withPointer],
-            imports: {
-              withPointer: NativeImport(
-                'other_signature',
-                NativeSignature.types(NativeScalarType(Int64), [
-                  NativePointerType(
-                    NativeFunctionType(NativeSignature(Int64, [Uint8])),
-                  ),
-                ]),
-              ),
-            },
+            Compiler(generator.target).prepare(
+              pointerProgram,
+              runtime: heapRuntime,
+              roots: [withPointer],
+              imports: {
+                withPointer: NativeImport(
+                  'other_signature',
+                  NativeSignature.types(NativeScalarType(Int64), [
+                    NativePointerType(
+                      NativeFunctionType(NativeSignature(Int64, [Uint8])),
+                    ),
+                  ]),
+                ),
+              },
+            ),
           ),
           throwsArgumentError,
         );
         expect(
           () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [caller],
-            imports: {first: binding},
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: [caller],
+              imports: {first: binding},
+            ),
           ),
           throwsArgumentError,
         );
         expect(
           () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: definitions,
-            imports: {first: binding, second: binding},
-            exports: {first: NativeExport('first', binding.signature)},
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: definitions,
+              imports: {first: binding, second: binding},
+              exports: {first: NativeExport('first', binding.signature)},
+            ),
           ),
           throwsArgumentError,
         );

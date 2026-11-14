@@ -2,6 +2,7 @@ import 'dart:ffi';
 
 import 'dart:typed_data';
 
+import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
@@ -28,9 +29,8 @@ void main() {
       X64CodeGenerator(const Target(.linux, .x64)),
     ]) {
       final module = generator.generate(
-        program,
-        runtime: heapRuntime,
-        definitions: [target],
+        Compiler(generator.target)
+            .prepare(program, runtime: heapRuntime, roots: [target]),
       );
       expect(module.imports, isEmpty);
       expect(
@@ -89,15 +89,17 @@ void main() {
       ]) {
         expect(
           () => generator.generate(
-            program,
-            runtime: heapRuntime,
-            definitions: [target],
-            exports: {
-              target: NativeExport(
-                'predicate',
-                NativeSignature(Int64, List.filled(0, Int64)),
-              ),
-            },
+            Compiler(generator.target).prepare(
+              program,
+              runtime: heapRuntime,
+              roots: [target],
+              exports: {
+                target: NativeExport(
+                  'predicate',
+                  NativeSignature(Int64, List.filled(0, Int64)),
+                ),
+              },
+            ),
           ),
           throwsArgumentError,
         );
