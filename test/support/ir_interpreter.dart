@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart';
 import 'package:dartc/abi.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
@@ -138,10 +139,10 @@ final class IrInterpreter(
         resolve(type) as ClassType,
         entries.map((e) => (child(e.$1), child(e.$2))),
       ),
-      ObjectConstant(:final type, :final fields) => ObjectConstant(
-        resolve(type) as ClassType,
-        {for (final e in fields.entries) e.key: child(e.value)},
-      ),
+      ObjectConstant(:final type, :final fields, :final payload) =>
+        ObjectConstant(resolve(type) as ClassType, {
+          for (final e in fields.entries) e.key: child(e.value),
+        }, payload: payload.map(child)),
     };
   }
 
@@ -203,13 +204,21 @@ final class IrInterpreter(
           for (final e in entries) _constant(e.$1): _constant(e.$2),
         }, immutable: true),
       ),
-      ObjectConstant(:final type, :final fields) => _constants.putIfAbsent(
-        value.structuralKey,
-        () => _Instance(type as ClassType, this)
-          ..fields.addAll({
-            for (final e in fields.entries) e.key: _constant(e.value),
-          }),
-      ),
+      ObjectConstant(:final type, :final fields, :final payload) =>
+        _constants.putIfAbsent(
+          value.structuralKey,
+          () =>
+              _Instance(
+                  type as ClassType,
+                  this,
+                  payload: List.unmodifiable(
+                    payload.map((value) => _constant(value)),
+                  ),
+                )
+                ..fields.addAll({
+                  for (final e in fields.entries) e.key: _constant(e.value),
+                }),
+        ),
     };
   }
 
@@ -1876,8 +1885,37 @@ final class IrInterpreter(
 
     void execute(Instruction op) {
       switch (op) {
-        case NewPayload() ||
-            NativeView() ||
+        case NewPayload(:final bytes):
+          final type = resolve(op.type) as ClassType;
+          final declaration = program.classes.singleWhere(
+            (c) => c.type == type.declaration,
+          );
+          if (!declaration.referencePayload) {
+            throw UnsupportedError(
+              'Raw inline bytes require target execution.',
+            );
+          }
+          final length = read(bytes) as int;
+          RangeError.checkNotNegative(length, 'bytes');
+          values[op] = _Instance(
+            type,
+            this,
+            payload: List.filled(length ~/ ObjectHeader.alignment, null),
+          );
+        case LoadObjectReference(:final object, :final byteOffset):
+          final instance = read(object) as _Instance;
+          values[op] =
+              instance.payload![instance.payloadIndex(read(byteOffset) as int)];
+        case StoreObjectReference(
+          :final object,
+          :final byteOffset,
+          :final value,
+        ):
+          final instance = read(object) as _Instance;
+          instance.payload![instance.payloadIndex(read(byteOffset) as int)] =
+              read(value);
+          values[op] = null;
+        case NativeView() ||
             NativeAddress() ||
             NativeSymbolAddress() ||
             NativeSize() ||
@@ -1917,9 +1955,7 @@ final class IrInterpreter(
         case LoadObjectData() ||
             ReferenceAddress() ||
             ReferenceFromAddress() ||
-            StoreObjectData() ||
-            LoadObjectReference() ||
-            StoreObjectReference():
+            StoreObjectData():
           throw UnsupportedError(
             'Managed physical storage requires native execution.',
           );
@@ -2954,8 +2990,29 @@ final class _FunctionValue(
         );
 }
 
-final class _Instance(final ClassType type, final IrInterpreter runner) {
+final class _Instance(
+  final ClassType type,
+  final IrInterpreter runner, {
+  final List<Object?>? payload,
+}) {
   final fields = <InstanceField, Object?>{};
+
+  int payloadIndex(int offset) {
+    final relative = offset - ObjectHeader.fieldsOffset;
+    if (payload == null ||
+        relative < 0 ||
+        relative % ObjectHeader.alignment != 0) {
+      throw RangeError.value(
+        offset,
+        'offset',
+        'Expected an aligned reference payload slot.',
+      );
+    }
+    return RangeError.checkValidIndex(
+      relative ~/ ObjectHeader.alignment,
+      payload!,
+    );
+  }
 
   static final _equality = FunctionTarget(
     ValueType.object.library,

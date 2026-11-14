@@ -23,6 +23,137 @@ final _callback = FunctionTarget(null, 'callback', .integer, [.integer]);
 final _function = FlowValue.constant(FunctionConstant(_callback));
 
 void main() {
+  test('immutable payload reads preserve functions, objects and owner alternatives', () {
+    final child = ObjectConstant(
+      _type,
+      {},
+      payload: [const Constant.integer(37)],
+    );
+    final data = ObjectConstant(
+      _type,
+      {},
+      payload: [FunctionConstant(_callback), child, const Constant.nullValue()],
+    );
+    final owner = FlowValue.constant(data);
+    final state = FlowState(_program, memoryLayout: _layout);
+    expect(_load(state, owner), _function);
+    expect(_load(state, owner, offset: _start + 8).constant, same(child));
+    expect(
+      _load(state, owner, offset: _start + 16).constant?.structuralKey,
+      const Constant.nullValue().structuralKey,
+    );
+    final other = ObjectConstant(_type, {}, payload: [child]);
+    final alternatives = _load(state, owner.join(FlowValue.constant(other)));
+    expect(
+      alternatives.constants.map((value) => value.structuralKey),
+      unorderedEquals([
+        FunctionConstant(_callback).structuralKey,
+        child.structuralKey,
+      ]),
+    );
+    for (final offset in [_start - 8, _start + 1, _start + 24]) {
+      expect(_load(state, owner, offset: offset).constant, isNull);
+    }
+    expect(_load(FlowState(_program), owner).constant, isNull);
+    final unknown = _step(state, LoadObjectReference(data, _offset), [
+      owner,
+      FlowValue.unknown(.integer),
+    ]).value;
+    expect(unknown.constant, isNull);
+    expect(
+      state
+          .reachableValues([unknown.references])
+          .constants
+          .map((value) => value.structuralKey),
+      contains(FunctionConstant(_callback).structuralKey),
+    );
+    state.escape([owner]);
+    expect(
+      state.escapedValues.constants.map((value) => value.structuralKey),
+      contains(const Constant.integer(37).structuralKey),
+    );
+    state.invalidate([owner]);
+    expect(_load(state, owner), _function);
+  });
+
+  test(
+    'constant reference bytes retain language values through raw copies',
+    () {
+      final data = ObjectConstant(
+        _type,
+        {},
+        payload: [FunctionConstant(_callback)],
+      );
+      final allocation = _allocate(
+        FlowState(_program, memoryLayout: _layout),
+        8,
+      );
+      final address = FlowValue.address(FlowAddress(data, _start));
+      final raw = _step(
+        allocation.state,
+        LoadNative(const Constant.integer(0), NativeScalarType(Int64)),
+        [address],
+      ).value;
+      expect(raw.constant, isNull);
+      expect(raw.types, [ValueType.integer]);
+      expect(
+        raw.references.constants.map((value) => value.structuralKey),
+        contains(FunctionConstant(_callback).structuralKey),
+      );
+      final copied = _step(
+        allocation.state,
+        CopyNative(
+          const Constant.integer(0),
+          const Constant.integer(0),
+          NativeScalarType(Int64),
+        ),
+        [_address(allocation.value, _start), address],
+      );
+      expect(_load(copied.normal!, allocation.value), _function);
+    },
+  );
+
+  test(
+    'ordinary IR executes immutable and newly allocated reference payloads',
+    () {
+      final source = ObjectConstant(
+        _type,
+        {},
+        payload: [const Constant.integer(37)],
+      );
+      final t = TypeParameterType('T')
+        ..initializeBound(ValueType.object.nullable);
+      final root = FunctionTarget(
+        null,
+        'copyReference',
+        ValueType.object.nullable,
+        [],
+        typeParameters: [t],
+      );
+      final block = Block();
+      final value = block.emit(LoadObjectReference(source, _offset));
+      final allocation = block.emit(
+        NewPayload(_type, const Constant.integer(8)),
+      );
+      block.emit(StoreObjectReference(allocation, _offset, value));
+      block.finish(
+        Return(block.emit(LoadObjectReference(allocation, _offset))),
+      );
+      final body = IrFunction(root, [block]);
+      final program = IrProgram([_class], [body]);
+      for (final type in [ValueType.integer, ValueType.string]) {
+        expect(IrInterpreter(program, {}).run(body, [], {t: type}), 37);
+      }
+      final facts = ProgramFlow(program, [
+        (target: root, arguments: <FlowValue>[]),
+      ], memoryLayout: _layout).facts;
+      expect(
+        facts.returnedBy(root).constant?.structuralKey,
+        const Constant.integer(37).structuralKey,
+      );
+    },
+  );
+
   test(
     'new payload has null reference slots only within its declared bounds',
     () {

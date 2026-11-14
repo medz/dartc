@@ -59,6 +59,7 @@ final class FlowState {
   final FlowMemoryLayout? memoryLayout;
   final Set<GlobalVariable> _declaredGlobals;
   final Map<ClassType, IrClass> _classes;
+  final Map<Object, FlowMemory> _constantMemory;
   StateMap<GlobalVariable, _Slot> _globals;
   StateMap<FlowObject, _ObjectState> _objects;
   FlowValue _escaped;
@@ -66,6 +67,7 @@ final class FlowState {
   new(this.program, {this.memoryLayout})
     : _declaredGlobals = Set.unmodifiable(program.globals),
       _classes = Map.unmodifiable({for (final c in program.classes) c.type: c}),
+      _constantMemory = {},
       _globals = const .empty(),
       _objects = const .empty(),
       _escaped = const .bottom();
@@ -75,6 +77,7 @@ final class FlowState {
     this.memoryLayout,
     this._declaredGlobals,
     this._classes,
+    this._constantMemory,
     this._globals,
     this._objects,
     this._escaped,
@@ -86,6 +89,7 @@ final class FlowState {
     memoryLayout,
     _declaredGlobals,
     _classes,
+    _constantMemory,
     _globals,
     _objects,
     _escaped,
@@ -161,6 +165,7 @@ final class FlowState {
       memoryLayout,
       _declaredGlobals,
       _classes,
+      _constantMemory,
       _globals,
       objects,
       _escaped,
@@ -421,9 +426,7 @@ final class FlowState {
         final layout = memoryLayout?.nativeLayout;
         final size = layout?.of(nativeType).size;
         for (final address in input.addresses) {
-          final memory = address.base is FlowObject
-              ? _objects[address.base as FlowObject]?.memory
-              : null;
+          final memory = _memoryOf(address.base);
           value = value.join(
             layout != null &&
                     size != null &&
@@ -472,9 +475,7 @@ final class FlowState {
         ) {
           FlowMemory? result;
           for (final address in source.addresses) {
-            final from = address.base is FlowObject
-                ? _objects[address.base as FlowObject]?.memory
-                : null;
+            final from = _memoryOf(address.base);
             final copied = from != null && address.offset != null
                 ? memory.copyFrom(offset, from, address.offset!, size!)
                 : memory.forget(offset, size!, retained: source.references);
@@ -618,39 +619,58 @@ final class FlowState {
     return value;
   }
 
+  FlowMemory? _memoryOf(Object base) {
+    if (base is FlowObject) return _objects[base]?.memory;
+    if (base is! ObjectConstant ||
+        base.payload.isEmpty ||
+        memoryLayout == null) {
+      return null;
+    }
+    final layout = memoryLayout!.objectLayout(base.type as ClassType);
+    if (!layout.tracesPayload) return null;
+    return _constantMemory.putIfAbsent(base.structuralKey, () {
+      var memory = FlowMemory(
+        layout.size,
+        base.payload.length * ObjectHeader.alignment,
+      );
+      for (final (index, value) in base.payload.indexed) {
+        memory = memory.writeReference(
+          layout.size + index * ObjectHeader.alignment,
+          FlowValue.constant(value),
+        );
+      }
+      return memory;
+    });
+  }
+
   bool _referenceSlot(FlowValue owner, FlowValue offset) {
     final constant = offset.constant;
     final amount = constant is ScalarConstant && constant.value is int
         ? constant.value as int
         : null;
-    if (owner.objects.isEmpty ||
-        owner.unknownTypes.isNotEmpty ||
-        owner.constants.isNotEmpty ||
-        amount == null) {
+    final bases = <Object>[...owner.objects, ...owner.constants];
+    if (bases.isEmpty || owner.unknownTypes.isNotEmpty || amount == null) {
       return false;
     }
     return amount % ObjectHeader.alignment == 0 &&
-        owner.objects.every(
-          (object) =>
-              object.type is ClassType &&
-              memoryLayout
-                      ?.objectLayout(object.type as ClassType)
-                      .tracesPayload ==
-                  true &&
-              (_objects[object]?.memory?.contains(
-                    amount,
-                    ObjectHeader.alignment,
-                  ) ??
-                  false),
-        );
+        bases.every((base) {
+          final type = switch (base) {
+            FlowObject(:final type) || ObjectConstant(:final type) => type,
+            _ => null,
+          };
+          return type is ClassType &&
+              memoryLayout?.objectLayout(type).tracesPayload == true &&
+              (_memoryOf(base)?.contains(amount, ObjectHeader.alignment) ??
+                  false);
+        });
   }
 
   FlowValue? _readReference(FlowValue owner, FlowValue offset) {
     if (!_referenceSlot(owner, offset)) return null;
     final amount = (offset.constant as ScalarConstant).value as int;
     var value = const FlowValue.bottom();
-    for (final object in owner.objects) {
-      final read = _objects[object]!.memory!.readReference(amount);
+    for (final base in <Object>[...owner.objects, ...owner.constants]) {
+      final read = _memoryOf(base)!.readReference(amount);
       if (read == null) return null;
       value = value.join(read);
     }
@@ -1181,7 +1201,8 @@ final class FlowState {
       for (final constant in value.constants) {
         if (!constants.add((constant.structuralKey, raw))) continue;
         final nested = switch (constant) {
-          ObjectConstant(:final fields) => fields.values,
+          ObjectConstant(:final fields, :final payload) =>
+            fields.values.followedBy(payload),
           RecordConstant(:final fields) => fields,
           SequenceConstant(:final elements) => elements,
           MapConstant(:final entries) => entries.expand((e) => [e.$1, e.$2]),
