@@ -47,3 +47,27 @@ double deferredDouble(double value, int count) {
   } while (count > 0);
   return result;
 }
+
+int deferredLocals(int count) {
+  final int base;
+  bool positive;
+  if (count > 0) {
+    base = count + 1;
+    positive = true;
+  } else {
+    base = -count + 1;
+    positive = false;
+  }
+  int result;
+  do {
+    final int current;
+    if (positive) {
+      current = count;
+    } else {
+      current = -count;
+    }
+    result = current + base + 1;
+    count--;
+  } while (count > 0);
+  return result;
+}

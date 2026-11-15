@@ -339,6 +339,9 @@ final class FlowState {
   /// Whether this state contains storage for the analysis allocation.
   bool containsObject(FlowObject object) => _objects[object] != null;
 
+  /// Allocation identities whose state can be changed by an invocation.
+  Iterable<FlowObject> get objects => _objects.keys;
+
   /// Captures of this allocation, preserving shared cell identities.
   List<FlowValue>? capturesOf(FlowObject object) => _objects[object]?.captures;
 

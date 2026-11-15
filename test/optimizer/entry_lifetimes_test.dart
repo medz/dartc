@@ -109,4 +109,40 @@ void main() {
       }
     }
   });
+
+  test('each loop iteration assigns its own local across both branches', () {
+    final function = body('deferredLocals');
+    final facts = ProgramFlow(
+      program,
+      [],
+      openEntries: [function.target],
+    ).facts;
+    for (final read
+        in function.blocks
+            .expand(
+              (block) => [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ],
+            )
+            .whereType<ReadCell>()) {
+      expect(facts.exitsOf(read).exceptional, isFalse);
+    }
+    final optimized = ProgramOptimizer(const [
+      ProgramSimplification(),
+      ProgramCallSpecialization(),
+      ProgramStoragePromotion(),
+      ProgramStorageElimination(),
+      DirectCallInlining(),
+    ]).run(program, [], openEntries: [function.target]);
+    final rewritten =
+        optimized.program.implementationOf(function.target) as IrFunction;
+    for (final count in [-7, -3, 0, 1, 4, 9]) {
+      expect(
+        IrInterpreter(optimized.program, {}).run(rewritten, [count]),
+        source.deferredLocals(count),
+      );
+    }
+    expect(optimized.thrownBy(function.target).exception.isBottom, isTrue);
+  });
 }

@@ -34,6 +34,8 @@ void main() {
 
   for (final (name, evaluate) in <(String, int Function(int))>[
     ('factoryLoop', source.factoryLoop),
+    ('retainedIterations', source.retainedIterations),
+    ('retainedCallerAlias', source.retainedCallerAlias),
     ('previousIteration', source.previousIteration),
     ('preservedCaller', source.preservedCaller),
     ('chainSum', source.chainSum),

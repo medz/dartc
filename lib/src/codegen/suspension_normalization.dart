@@ -1,7 +1,6 @@
 import 'package:dartc/ir.dart';
 
 import 'frame_description.dart';
-import 'function_liveness.dart';
 import 'heap_runtime.dart';
 
 /// Exposes suspension and resumption as ordinary Dart calls and lexical closures.
@@ -42,7 +41,7 @@ final class _SuspensionBody(
   final IrFunction source,
   final HeapRuntime runtime,
 ) {
-  late final flow = FunctionLiveness.source(source);
+  late final flow = ValueLiveness.source(source);
   late final inputs = {
     for (final block in source.blocks) block: flow.liveIn[block]!.toList(),
   };

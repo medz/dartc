@@ -28,6 +28,7 @@
 library;
 
 export 'src/ir/dominance.dart' show ValueDominance;
+export 'src/ir/value_liveness.dart' show ValueLiveness;
 export 'src/ir/block.dart'
     show
         Await,

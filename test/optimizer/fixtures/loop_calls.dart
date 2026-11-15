@@ -1,5 +1,49 @@
 class Link(final Link? previous, final int value);
 
+class CallbackLink(final CallbackLink? previous, final int Function() value);
+
+class MutableBox(var int value);
+
+class BoxHolder(var MutableBox value);
+
+int detachThenLoop(BoxHolder holder, int count) {
+  holder.value.value = 73;
+  holder.value = MutableBox(-1);
+  var sum = 0;
+  for (var i = 0; i < count; i++) {
+    final int current;
+    if (i.isEven) {
+      current = i;
+    } else {
+      current = -i;
+    }
+    sum += current;
+  }
+  return sum;
+}
+
+int retainedCallerAlias(int count) {
+  final original = MutableBox(0);
+  final holder = BoxHolder(original);
+  final result = detachThenLoop(holder, count);
+  return original.value + result;
+}
+
+int retainedIterations(int count) {
+  CallbackLink? head;
+  for (var i = 0; i < count; i++) {
+    late int value;
+    value = i;
+    head = CallbackLink(head, () => value);
+  }
+  var result = 0;
+  while (head != null) {
+    result = result * 3 + head.value();
+    head = head.previous;
+  }
+  return result;
+}
+
 Link append(Link? previous, int value) => Link(previous, value);
 
 int factoryLoop(int count) {

@@ -41,6 +41,7 @@ final class ProgramFlow(
   final _pending = <_Activation>{};
   final _owners = <Object, FunctionTarget>{};
   final _cyclic = <FunctionTarget, Set<Block>>{};
+  final _liveness = <FunctionTarget, ValueLiveness>{};
   final _readSets = <FunctionTarget, FlowReadSet?>{};
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
@@ -490,7 +491,12 @@ final class ProgramFlow(
         ? null
         : input.applySummary(
             projected,
-            after.project([...arguments, callee.returned, callee.exception]),
+            after.project([
+              ...arguments,
+              ...projected.objects.map(FlowValue.object),
+              callee.returned,
+              callee.exception,
+            ]),
             mapObject: mapObject,
             mapValue: (value) => mapValue(value, normal: normal),
             preservesInputSources: callee.effects.every(
@@ -1078,8 +1084,29 @@ final class ProgramFlow(
   ) {
     if (inputs.any((value) => value.isBottom)) return _unreachable;
     final resultType = operation.type.substitute(activation.environment);
-    // Calls get fresh local storage; retained instances are joined by _allocate.
-    final repeated = _loopBlocks(activation.body).contains(block);
+    if (_loopBlocks(activation.body).contains(block) &&
+        operation.effects.contains(Effect.allocates)) {
+      final liveness = _liveness.putIfAbsent(activation.body.target, () {
+        final body = activation.body as IrFunction;
+        return ValueLiveness.source(
+          body,
+          calls: {
+            for (final block in body.blocks)
+              for (final instruction in [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ])
+                if (instruction.effects.contains(Effect.allocates)) instruction,
+          },
+        );
+      });
+      state = state.project([
+        // A caller can retain old aliases even after this body detaches them.
+        ...activation.input!.objects.map(FlowValue.object),
+        ...liveness.acrossCalls[operation]!.map(read),
+        ...inputs,
+      ]);
+    }
     FlowObject allocate(Instruction site) => FlowObject(
       site,
       activation,
@@ -1101,7 +1128,7 @@ final class ProgramFlow(
       inputs,
       resultType: resultType,
       allocate: allocate,
-      repeated: repeated,
+      repeated: false,
       invoke: invoke,
       call: call,
     );
@@ -1245,7 +1272,7 @@ final class ProgramFlow(
               type.substitute(activation.environment),
           ],
           state,
-          repeated: repeated,
+          repeated: false,
         );
       case InstantiateFunctionFrom(
         :final function,
@@ -1264,7 +1291,7 @@ final class ProgramFlow(
               read(function),
               view.typeArguments,
               state,
-              repeated: repeated,
+              repeated: false,
             ),
           );
         }
@@ -1828,11 +1855,9 @@ final class ProgramFlow(
     }
     final object = FlowObject(site, activation, type: actual, variant: target);
     final next = state.copy()
-      ..retain(
-        object,
-        [_receiverValue(receiver, receiverType)],
-        repeated: _loopBlocks(activation.body).contains(block),
-      );
+      ..retain(object, [
+        _receiverValue(receiver, receiverType),
+      ], repeated: false);
     activation.boundMethods.putIfAbsent(object, () => {}).add(target);
     activation.operationEffects[site] = {
       ...?activation.operationEffects[site],
@@ -2085,7 +2110,7 @@ final class ProgramFlow(
           ),
           target,
           arguments,
-          repeated: _loopBlocks(activation.body).contains(block),
+          repeated: false,
           invoke: (target, arguments, input) => _invoke(
             activation,
             block,
