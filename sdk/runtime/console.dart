@@ -43,7 +43,8 @@ void writeLine(String line) {
     while (written < length) {
       final count = Memory.writeBytes(1, buffer + written, length - written);
       if (count == -4) continue;
-      if (count <= 0) throw StateError('Console write failed');
+      // Console output ignores descriptor errors; conversion and Zone errors propagate.
+      if (count <= 0) break;
       written += count;
     }
   } finally {

@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Keep native `print` calls from throwing when stdout rejects a write, matching the pinned SDK's console behavior. Object conversion and Zone errors still propagate.
+
+- Fix invalid control-flow graphs when inlining a throwing type test inside an exception handler.
+
 - Avoid compiler stack overflow when hashing wide immutable constants. Cache flat structural keys while preserving declared types, field identity and element order.
 
 - Preserve handlers and pre-failure storage for retained allocations and stack captures. Unused allocations can still disappear; explicit throws remain observable. Allocation failures share the ordinary target reporting body, and known incoming type tests keep their value and trace relationships through bounded control-flow specialization.

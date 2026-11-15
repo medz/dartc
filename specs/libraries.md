@@ -133,6 +133,10 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 `pid` 返回正在执行的进程 ID；`Platform.numberOfProcessors`、`localHostname` 和 `resolvedExecutable` 读取目标进程所在系统，保留官方 Dart 包装。可执行路径为解析符号链接后的绝对路径，支持空 PATH、相对启动路径、Unicode 和超过初始缓冲区长度的路径，见[进程身份验证](../test/compiler/process_identity_test.dart)。部分 Platform 元数据、文件/目录操作和子进程管理仍有实现缺口。
 
+## 控制台输出
+
+`print` 复用 SDK 的对象转文本和 Zone 拦截路径。原生控制台按 UTF-8 输出并追加换行，保留 NUL、替换孤立 UTF-16 代理项；短写继续写剩余内容，EINTR 重试，描述符输出错误不变为 Dart 异常。后者遵循[固定 SDK 的控制台行为](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/bin/builtin_natives.cc#L100-L106)；公开 `print` 契约没有规定输出错误的异常类型。[原生验证](../test/compiler/console_test.dart)覆盖正常输出和不可写 stdout。`toString` 和 `Zone.print` 自身抛出的异常仍遵循其公开契约，不能被控制台输出错误处理吞掉。
+
 ## 工作目录与临时目录
 
 `Directory.current` 读取和设置 macOS/Linux 目标进程的工作目录；设置影响同一进程的原生宿主与 Dart 调用。复用[SDK directory_impl.dart](../sdk/std/lib/io/directory_impl.dart) 的 String/Directory 输入、相对路径、路径快照、IOOverrides 和 FileSystemException 分类，目标实现只连接 getcwd/chdir 和 OS 错误。路径沿用 SDK 的 UTF-8 与零终止转换；原始路径的首个 NUL 结束传给系统的名称，Linux 非法 UTF-8 名称在读取文本时替换为 U+FFFD，文本不能无损表示原始字节。固定 SDK 3.14 在这个当前目录样本上会从 VM UTF-8 入口直接终止；dartc 沿用 SDK 其他原始路径的替换解码策略，并独立验证结果。

@@ -3,7 +3,11 @@ import 'dart:ffi';
 
 void main(List<String> arguments) {
   if (arguments.length < 2 ||
-      !const ['arguments', 'environment'].contains(arguments.first)) {
+      !const [
+        'arguments',
+        'environment',
+        'read-only-stdout',
+      ].contains(arguments.first)) {
     throw ArgumentError('Expected a raw input mode and executable.');
   }
   final mode = arguments.first;
@@ -53,6 +57,13 @@ void main(List<String> arguments) {
   }
 
   try {
+    if (mode == 'read-only-stdout') {
+      final dup2 = process
+          .lookupFunction<Int32 Function(Int32, Int32), int Function(int, int)>(
+            'dup2',
+          );
+      if (dup2(0, 1) != 1) throw StateError('Cannot replace stdout');
+    }
     final argv = vector([
       for (final argument in arguments.skip(1)) utf8.encode(argument),
       if (mode == 'arguments') [0x61, 0xff, 0x62],
