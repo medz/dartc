@@ -14,6 +14,7 @@ void main() {
   test('nullable scalar calls, tests and refinements preserve values', () {
     for (final mode in [-1, 0, 1, 2]) {
       expect(native.integer(mode), sdk.integer(mode));
+      expect(native.initialized(mode), sdk.initialized(mode));
       expect(native.boolean(mode), sdk.boolean(mode));
       expect(native.predicates(mode), mode < 0 ? 18 : 45);
       expect(native.predicates(mode), sdk.predicates(mode));

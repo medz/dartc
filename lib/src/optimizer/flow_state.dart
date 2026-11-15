@@ -61,6 +61,7 @@ typedef FlowReadSet = ({
   Set<InstanceField> fields,
   Set<GlobalVariable> globals,
   bool cells,
+  bool memory,
 });
 
 /// One stable external address and its entry-state byte facts.
@@ -312,9 +313,9 @@ final class FlowState {
               ? state
               : _ObjectState._(
                   StateMap.fromEntries(_readSlots(state, reads)),
-                  null,
+                  reads.memory ? state.captures : null,
                   state.summary,
-                  null,
+                  reads.memory ? state.memory : null,
                 ),
         );
       }
@@ -1786,10 +1787,11 @@ final class FlowState {
         if (!objects.add((object, raw))) continue;
         final state = _objects[object];
         if (state == null) continue;
-        if (state.memory case final memory? when reads == null) {
+        if (state.memory case final memory?
+            when reads == null || reads.memory) {
           pending.add((memory.references, true));
         }
-        if (raw && reads == null) {
+        if (raw && (reads == null || reads.memory)) {
           pending.addAll([
             for (final capture in state.captures ?? const <FlowValue>[])
               (capture, raw),
@@ -1825,7 +1827,7 @@ final class FlowState {
 Iterable<MapEntry<Object, _Slot>> _readSlots(
   _ObjectState state,
   FlowReadSet? reads,
-) => reads == null
+) => reads == null || reads.memory
     ? state.slots.entries
     : state.slots.entries.where(
         (entry) =>

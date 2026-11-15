@@ -19,6 +19,79 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  for (final changed in [false, true]) {
+    test(
+      'native readers separate memory from unrelated global writes ($changed)',
+      () {
+        final uri = Uri.parse('memory:native-read-dependencies');
+        final global = GlobalVariable(uri, 'unrelated', .integer, isLate: true);
+        final fail = FunctionTarget(uri, 'fail', .never, []);
+        final reader = FunctionTarget(uri, 'read', .integer, [_type]);
+        final reading = Block(reader.parameterTypes),
+            done = Block(),
+            invalid = Block();
+        final offset = Constant.integer(_layout.objectLayout(_type).size);
+        final address = reading.emit(
+          IntBinary(
+            .add,
+            reading.emit(ReferenceAddress(reading.parameters.single)),
+            offset,
+          ),
+        );
+        final value = reading.emit(LoadNative(address, _i64));
+        reading.finish(
+          Branch(
+            reading.emit(
+              IntBinary(.lessThan, value, const Constant.integer(0)),
+            ),
+            Jump(invalid),
+            Jump(done),
+          ),
+        );
+        done.finish(Return(value));
+        invalid.finish(Unreachable(invalid.emit(DirectCall(fail, []))));
+        final root = FunctionTarget(uri, 'root', .integer, []);
+        final entry = Block();
+        final object = entry.emit(NewPayload(_type, const Constant.integer(8)));
+        entry.emit(
+          StoreObjectData(object, offset, _i64, const Constant.integer(7)),
+        );
+        final first = entry.emit(DirectCall(reader, [object]));
+        entry.emit(StoreGlobal(global, const Constant.integer(9)));
+        if (changed) {
+          entry.emit(
+            StoreObjectData(object, offset, _i64, const Constant.integer(9)),
+          );
+        }
+        final second = entry.emit(DirectCall(reader, [object]));
+        entry.finish(Return(entry.emit(IntBinary(.add, first, second))));
+        final facts = ProgramFlow(
+          IrProgram(
+            [IrClass(_type, [])],
+            [
+              IrFunction(root, [entry]),
+              IrFunction(reader, [reading, done, invalid]),
+            ],
+            globals: [global],
+            externals: [
+              IrExternal(
+                fail,
+                effects: const {},
+                memory: const .unchanged(),
+                capturesArguments: false,
+              ),
+            ],
+          ),
+          [(target: root, arguments: <FlowValue>[])],
+          memoryLayout: _layout,
+        ).facts;
+        expect(_number(facts.returnedBy(root)), changed ? 16 : 14);
+        expect(facts.activationsOf(reader), hasLength(changed ? 2 : 1));
+        expect(facts.definitions, isNot(contains(fail)));
+      },
+    );
+  }
+
   for (final (capacity, progress) in [(49, 1), (12, 1), (49, 0)]) {
     test(
       'loop writes preserve globals only with proven bounds ($capacity, $progress)',

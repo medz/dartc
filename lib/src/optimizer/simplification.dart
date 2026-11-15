@@ -16,6 +16,7 @@ final class const ProgramSimplification() extends ProgramPass {
       for (final function in program.functions) {
         final replacements = <Value, Value>{};
         final removed = <Instruction>{};
+        final terminators = <Block, Terminator>{};
         final expressions = <Object, List<Instruction>>{};
         late final dominance = ValueDominance(function);
         final pending = [function.entry], visited = <Block>{};
@@ -23,6 +24,34 @@ final class const ProgramSimplification() extends ProgramPass {
           final block = pending.removeLast();
           if (!visited.add(block)) continue;
           pending.addAll(block.successors.map((edge) => edge.target));
+          if (block.end case Branch(
+            condition: final TypeTest test,
+            :final ifTrue,
+            :final ifFalse,
+          )) {
+            Jump narrow(Jump edge, bool outcome) {
+              final value = test.refinement(outcome);
+              if (value == null) return edge;
+              final arguments = [
+                for (final (index, argument) in edge.arguments.indexed)
+                  if (identical(argument, test.operand) &&
+                      edge.target.parameters[index].type.accepts(value.type))
+                    value
+                  else
+                    argument,
+              ];
+              return arguments.indexed.any(
+                    (entry) => !identical(entry.$2, edge.arguments[entry.$1]),
+                  )
+                  ? Jump(edge.target, arguments)
+                  : edge;
+            }
+
+            final yes = narrow(ifTrue, true), no = narrow(ifFalse, false);
+            if (!identical(yes, ifTrue) || !identical(no, ifFalse)) {
+              terminators[block] = Branch(test, yes, no);
+            }
+          }
           for (final operation in [
             ...block.instructions,
             if (block.end case Invoke(:final operation)) operation,
@@ -48,12 +77,13 @@ final class const ProgramSimplification() extends ProgramPass {
             }
           }
         }
-        final rewritten = replacements.isEmpty
+        final rewritten = replacements.isEmpty && terminators.isEmpty
             ? function
             : FunctionRewrite(
                 function,
                 replacements: replacements,
                 discardable: removed,
+                terminators: terminators,
               ).run();
         changed |= !identical(function, rewritten);
         functions.add(rewritten);

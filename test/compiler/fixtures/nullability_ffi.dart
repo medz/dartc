@@ -9,6 +9,8 @@ final class Nullability() {
 
   late final integer = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('integer');
+  late final initialized = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('initialized');
   late final floating = _library
       .lookupFunction<Double Function(Int64), double Function(int)>('floating');
   late final boolean = _library

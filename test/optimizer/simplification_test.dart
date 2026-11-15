@@ -5,6 +5,51 @@ import 'package:test/test.dart';
 import '../support/ir_interpreter.dart';
 
 void main() {
+  for (final negated in [false, true]) {
+    test(
+      'type-test edges retain narrowing through a nullable join ($negated)',
+      () {
+        final target = FunctionTarget(null, 'ensure', .object, [
+          .object.nullable,
+        ]);
+        final entry = Block(target.parameterTypes),
+            join = Block([ValueType.object.nullable]);
+        final value = entry.parameters.single;
+        final test = entry.emit(TypeTest(value, .nullType, negated: negated));
+        final absent = Jump(join, [const Constant.string('fallback')]);
+        final present = Jump(join, [value]);
+        entry.finish(
+          Branch(test, negated ? present : absent, negated ? absent : present),
+        );
+        join.finish(Return(join.emit(NullCheck(join.parameters.single))));
+        final original = IrFunction(target, [entry, join]);
+        final program = IrProgram([], [original]);
+        final normalized = const ProgramSimplification().bind().normalize(
+          program,
+        );
+        final body = normalized.implementationOf(target) as IrFunction;
+        final check = body.blocks
+            .expand((block) => block.instructions)
+            .whereType<NullCheck>()
+            .single;
+        final facts = ProgramFlow(normalized, [
+          (target: target, arguments: [FlowValue.unknown(.object.nullable)]),
+        ]).facts;
+        expect(facts.failureOf(check).exception.isBottom, isTrue);
+        for (final input in [null, 42, 'present']) {
+          expect(
+            IrInterpreter(normalized, {}).run(body, [input]),
+            input ?? 'fallback',
+          );
+          expect(
+            IrInterpreter(program, {}).run(original, [input]),
+            input ?? 'fallback',
+          );
+        }
+      },
+    );
+  }
+
   test('recomputed arithmetic retains the dominating bounds check', () {
     final target = FunctionTarget(null, 'checked', .integer, [.integer]);
     final use = FunctionTarget(null, 'use', .integer, [.integer]);

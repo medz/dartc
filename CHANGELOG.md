@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Preserve branch-proven types across control-flow joins. Read-only native-memory calls retain observed payloads without depending on unrelated global writes.
+
 - Preserve proven bounds across loop-carried counters and repeated arithmetic, removing unreachable index checks and their runtime dependencies without assuming that overflowing or changing-bound loops terminate.
 
 - Keep native `print` calls from throwing when stdout rejects a write, matching the pinned SDK's console behavior. Object conversion and Zone errors still propagate.

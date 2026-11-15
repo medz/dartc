@@ -689,7 +689,7 @@ final class ProgramFlow(
     _readSets[body.target] = null;
     if (body.bodyKind != .synchronous) return null;
     final fields = <InstanceField>{}, globals = <GlobalVariable>{};
-    var cells = false;
+    var cells = false, memory = false;
     for (final block in body.blocks) {
       for (final operation in [
         ...block.instructions,
@@ -724,11 +724,20 @@ final class ProgramFlow(
         if (targets != null) {
           for (final target in targets) {
             final callee = program.implementationOf(target);
+            if (callee is IrExternal &&
+                callee.memory is UnchangedMemory &&
+                !callee.capturesArguments &&
+                callee.effects.every(
+                  (effect) => effect == .readsStorage || effect == .mayThrow,
+                )) {
+              continue;
+            }
             final reads = callee is IrFunction ? _readsFor(callee) : null;
             if (reads == null) return null;
             fields.addAll(reads.fields);
             globals.addAll(reads.globals);
             cells |= reads.cells;
+            memory |= reads.memory;
           }
           continue;
         }
@@ -745,6 +754,10 @@ final class ProgramFlow(
             globals.add(global);
           case ReadCell():
             cells = true;
+          case LoadNative() || LoadObjectData() || LoadObjectReference():
+            memory = true;
+          case ReferenceAddress() || ReferenceFromAddress():
+            break;
           default:
             return null;
         }
@@ -754,6 +767,7 @@ final class ProgramFlow(
       fields: fields,
       globals: globals,
       cells: cells,
+      memory: memory,
     );
   }
 

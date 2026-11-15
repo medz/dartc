@@ -31,6 +31,15 @@ int integer(int mode) {
   return value;
 }
 
+@Export<Int64 Function(Int64)>()
+int initialized(int mode) {
+  var value = _integer(mode);
+  // Preserve the explicit branch and its nullable join in this regression.
+  // ignore: prefer_conditional_assignment
+  if (value == null) value = 42;
+  return value;
+}
+
 @Export<Double Function(Int64)>()
 double floating(int mode) => _floating(mode) ?? 2.5;
 
