@@ -4,6 +4,7 @@ import 'flow_state.dart';
 import 'flow_memory.dart';
 import 'flow_value.dart';
 import 'integer_range.dart';
+import 'loop_ranges.dart';
 import 'memory_layout.dart';
 
 /// One actual invocation, with all semantic entry arguments.
@@ -48,6 +49,7 @@ final class ProgramFlow(
   final _pending = <_Activation>{};
   final _owners = <Object, FunctionTarget>{};
   final _cyclic = <FunctionTarget, Set<Block>>{};
+  final _loops = <FunctionTarget, LoopRanges>{};
   final _liveness = <FunctionTarget, ValueLiveness>{};
   final _readSets = <FunctionTarget, FlowReadSet?>{};
   final _receiverBounds = <ValueType, List<ClassType>>{};
@@ -784,11 +786,60 @@ final class ProgramFlow(
     };
     final pending = <Block>{body.entry};
     final readers = <Value, Set<Block>>{};
+    final loops = _loops.putIfAbsent(body.target, () => LoopRanges(body));
+    final loopProofs = <LoopRange, LoopRangeProof>{};
+    final evaluated = <Value>{};
+    FlowIntegerRange? loopRange(Value value, Block block) {
+      FlowIntegerRange? result;
+      for (final proof in loopProofs.values) {
+        final range = proof.range(value, block);
+        if (range != null) {
+          result = result == null ? range : result.intersect(range);
+        }
+      }
+      return result;
+    }
+
+    void proveLoop(LoopRange loop) {
+      final proof = loop.prove(
+        (value) => value is Constant
+            ? FlowValue.constant(value).integers
+            : evaluated.contains(value)
+            ? activation.values[value]?.integers
+            : null,
+        (operation) {
+          final calls = activation.calls[operation];
+          final effects = {
+            ...?activation.operationEffects[operation],
+            ...?activation.externalEffects[operation],
+            if (calls != null)
+              for (final call in calls) ...call.effects
+            else if (!activation.operationEffects.containsKey(operation))
+              ...operation.effects,
+          };
+          return effects.every((effect) => effect == .mayThrow);
+        },
+      );
+      if (proof == null) {
+        loopProofs.remove(loop);
+      } else {
+        loopProofs[loop] = proof;
+      }
+    }
+
     late Block readingBlock;
     late Map<Value, FlowIntegerRange> ranges;
     late FlowState point;
     bool mergeValue(Value value, FlowValue incoming, {bool widen = false}) {
-      if (!activation.mergeValue(value, incoming, widen: widen)) return false;
+      evaluated.add(value);
+      if (!activation.mergeValue(
+        value,
+        incoming,
+        widen: widen,
+        bound: loopRange(value, loops.owners[value] ?? body.entry),
+      )) {
+        return false;
+      }
       pending.addAll(readers[value] ?? const []);
       return true;
     }
@@ -805,6 +856,9 @@ final class ProgramFlow(
       for (final source in value.sources) {
         if (!identical(source.activation, activation)) continue;
         if (ranges[source.value] case final range?) {
+          value = value.restrictIntegers(range);
+        }
+        if (loopRange(source.value, readingBlock) case final range?) {
           value = value.restrictIntegers(range);
         }
       }
@@ -831,9 +885,13 @@ final class ProgramFlow(
               activation.values[value] ?? const FlowValue.bottom(),
             ),
           );
-          return switch (ranges[value]) {
+          final bounded = switch (loopRange(value, readingBlock)) {
             final range? => known.restrictIntegers(range),
             null => known,
+          };
+          return switch (ranges[value]) {
+            final range? => bounded.restrictIntegers(range),
+            null => bounded,
           };
       }
     }
@@ -1097,6 +1155,11 @@ final class ProgramFlow(
         case final Jump jump:
           edge(jump, state);
         case Branch(:final condition, :final ifTrue, :final ifFalse):
+          for (final loop in loops.loops) {
+            if (loop.blocks.contains(block) && loop.guards(block)) {
+              proveLoop(loop);
+            }
+          }
           final value = read(condition);
           if (value.isBottom) break;
           if (value.constant case ScalarConstant(value: final bool known)) {
@@ -1184,6 +1247,14 @@ final class ProgramFlow(
   ) {
     if (inputs.any((value) => value.isBottom)) return _unreachable;
     final resultType = operation.type.substitute(activation.environment);
+    final folded = _fold(operation, inputs, program);
+    if (folded != null) {
+      activation.operationEffects[operation] = const {};
+      return FlowResult(
+        value: FlowValue.constant(folded),
+        normal: state.copy(),
+      );
+    }
     if (_loopBlocks(activation.body).contains(block) &&
         (operation is AllocatedObject ||
             operation.effects.contains(Effect.allocates))) {
@@ -1603,15 +1674,6 @@ final class ProgramFlow(
           normal: value.isBottom ? null : state.copy(),
         );
       default:
-        final folded = _fold(operation, inputs, program);
-        if (folded != null) {
-          activation.operationEffects[operation] = const {};
-          return FlowResult(
-            value: FlowValue.constant(folded),
-            normal: state.copy(),
-            exceptional: null,
-          );
-        }
         if (operation is Equals &&
             inputs.first.types.every(ValueType.typeType.accepts)) {
           activation.operationEffects[operation] = const {};
@@ -3325,9 +3387,15 @@ final class _Activation(final IrCallable body) {
     }
   }
 
-  bool mergeValue(Value value, FlowValue incoming, {bool widen = false}) {
+  bool mergeValue(
+    Value value,
+    FlowValue incoming, {
+    bool widen = false,
+    FlowIntegerRange? bound,
+  }) {
     final previous = values[value] ?? const FlowValue.bottom();
-    final joined = previous.join(incoming, widen: widen || recursive);
+    var joined = previous.join(incoming, widen: widen || recursive);
+    if (bound != null) joined = joined.restrictIntegers(bound);
     if (joined == previous) return false;
     values[value] = joined;
     return true;

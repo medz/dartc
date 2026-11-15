@@ -20,7 +20,10 @@ void main() {
     ]) {
       final normal = await Process.run(command.first, command.skip(1).toList());
       expect(normal.exitCode, 0, reason: '${normal.stderr}');
-      expect(normal.stdout, 'Hello, Dart!\n');
+      expect(
+        normal.stdout,
+        'Hello, Dart!\nNUL:\u0000 中文🙂\n\ufffdx\ufffd\nnull\n',
+      );
       expect(normal.stderr, isEmpty);
 
       final failed = await Process.run(Platform.resolvedExecutable, [

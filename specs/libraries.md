@@ -135,7 +135,7 @@ Linux ARM64/x86-64 的静态输入生成固定地址 ELF，无需动态加载器
 
 ## 控制台输出
 
-`print` 复用 SDK 的对象转文本和 Zone 拦截路径。原生控制台按 UTF-8 输出并追加换行，保留 NUL、替换孤立 UTF-16 代理项；短写继续写剩余内容，EINTR 重试，描述符输出错误不变为 Dart 异常。后者遵循[固定 SDK 的控制台行为](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/bin/builtin_natives.cc#L100-L106)；公开 `print` 契约没有规定输出错误的异常类型。[原生验证](../test/compiler/console_test.dart)覆盖正常输出和不可写 stdout。`toString` 和 `Zone.print` 自身抛出的异常仍遵循其公开契约，不能被控制台输出错误处理吞掉。
+`print` 复用 SDK 的对象转文本和 Zone 拦截路径。原生控制台按 UTF-8 输出并追加换行，保留 NUL、替换孤立 UTF-16 代理项；短写继续写剩余内容，EINTR 重试，描述符输出错误不变为 Dart 异常。后者遵循[固定 SDK 的控制台行为](https://github.com/dart-lang/sdk/blob/fa8c1270c374c1346931583a17c3b7f278d3822d/runtime/bin/builtin_natives.cc#L100-L106)；公开 `print` 契约没有规定输出错误的异常类型。[原生验证](../test/compiler/console_test.dart)覆盖连续打印、NUL、BMP 与代理对、孤立代理项、`null` 和不可写 stdout。`toString` 和 `Zone.print` 自身抛出的异常仍遵循其公开契约，不能被控制台输出错误处理吞掉。
 
 ## 工作目录与临时目录
 

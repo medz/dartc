@@ -16,7 +16,13 @@ final class const ProgramSimplification() extends ProgramPass {
       for (final function in program.functions) {
         final replacements = <Value, Value>{};
         final removed = <Instruction>{};
-        for (final block in function.blocks) {
+        final expressions = <Object, List<Instruction>>{};
+        late final dominance = ValueDominance(function);
+        final pending = [function.entry], visited = <Block>{};
+        while (pending.isNotEmpty) {
+          final block = pending.removeLast();
+          if (!visited.add(block)) continue;
+          pending.addAll(block.successors.map((edge) => edge.target));
           for (final operation in [
             ...block.instructions,
             if (block.end case Invoke(:final operation)) operation,
@@ -26,6 +32,19 @@ final class const ProgramSimplification() extends ProgramPass {
             )) {
               replacements[operation] = pointer.address;
               removed.add(pointer);
+              continue;
+            }
+            final key = _expression(operation, replacements);
+            if (key == null) continue;
+            final previous = expressions.putIfAbsent(key, () => []);
+            final shared = previous
+                .where((value) => dominance.before(value, operation))
+                .firstOrNull;
+            if (shared != null) {
+              replacements[operation] = shared;
+              removed.add(operation);
+            } else {
+              previous.add(operation);
             }
           }
         }
@@ -74,6 +93,36 @@ final class const ProgramSimplification() extends ProgramPass {
           )
         : program;
   }
+}
+
+Object? _expression(Instruction operation, Map<Value, Value> replacements) {
+  if (operation.effects.isNotEmpty) return null;
+  final properties = switch (operation) {
+    IntBinary(:final operator, :final checked) => (operator, checked),
+    NumericBinary(:final operator) => operator,
+    Equals(:final negated) => negated,
+    FloatBitCast(:final width) => width,
+    NumericRoundToDouble(:final rounding) => rounding,
+    RecordGet(:final slot) => slot,
+    TypeTest(:final testedType, :final negated) => (testedType, negated),
+    Identical() ||
+    NumericNegate() ||
+    NumericToDouble() ||
+    NumericSquareRoot() ||
+    TypeView() ||
+    UncheckedCast() ||
+    PointerAddress() => (),
+    _ => null,
+  };
+  if (properties == null) return null;
+  Object? inputs;
+  for (var value in operation.inputs) {
+    while (replacements.containsKey(value)) {
+      value = replacements[value]!;
+    }
+    inputs = (inputs, value is Constant ? value.structuralKey : value);
+  }
+  return (operation.runtimeType, operation.type, properties, inputs);
 }
 
 /// Applies the common value and control-flow rewrite to selected executions.

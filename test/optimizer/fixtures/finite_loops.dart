@@ -141,6 +141,15 @@ int lowerLimit() {
   return result;
 }
 
+int changingLimit() {
+  var limit = 3, result = 0;
+  for (var index = 0; index < limit; index++) {
+    if (index == 1) limit = 7;
+    result++;
+  }
+  return result;
+}
+
 int continued(int skip) {
   var result = 0;
   for (var index = 0; index < 4; index++) {

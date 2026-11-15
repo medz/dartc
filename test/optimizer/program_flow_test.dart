@@ -384,6 +384,53 @@ void main() {
     },
   );
 
+  test('loop proofs are rebuilt when entry values change', () {
+    final target = FunctionTarget(_uri, 'advance', .integer, [.integer]);
+    final entry = Block(target.parameterTypes),
+        loop = Block([ValueType.integer, ValueType.integer]),
+        step = Block(),
+        done = Block();
+    entry.finish(
+      Jump(loop, [const Constant.integer(0), entry.parameters.single]),
+    );
+    final count = loop.parameters.first, value = loop.parameters.last;
+    loop.finish(
+      Branch(
+        loop.emit(IntBinary(.lessThan, count, const Constant.integer(4))),
+        Jump(step),
+        Jump(done),
+      ),
+    );
+    step.finish(
+      Jump(loop, [
+        step.emit(IntBinary(.add, count, const Constant.integer(1))),
+        step.emit(IntBinary(.add, value, const Constant.integer(1))),
+      ]),
+    );
+    done.finish(Return(value));
+    final program = IrProgram([], [
+      IrFunction(target, [entry, loop, step, done]),
+    ]);
+    final flow = ProgramFlow(program, [
+      (
+        target: target,
+        arguments: [FlowValue.constant(const Constant.integer(0))],
+      ),
+    ]);
+    expect(flow.facts.returnedBy(target).integers!.contains(4), isTrue);
+    flow.extend(
+      entries: [
+        (
+          target: target,
+          arguments: [FlowValue.constant(const Constant.integer(9))],
+        ),
+      ],
+    );
+    final result = flow.facts.returnedBy(target).integers!;
+    expect(result.contains(4), isTrue);
+    expect(result.contains(13), isTrue);
+  });
+
   test('loop values reschedule consumers across parameterless edges', () {
     final target = FunctionTarget(_uri, 'sum', .integer, [.integer]);
     final entry = Block(target.parameterTypes);

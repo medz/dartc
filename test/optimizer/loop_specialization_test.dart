@@ -213,6 +213,19 @@ void main() {
     }
   });
 
+  test('a changing exit bound is not frozen at its initial value', () {
+    final function = body('changingLimit'),
+        facts = optimize(body('changingLimit'));
+    expect(
+      IrInterpreter(
+        facts.program,
+        {},
+      ).run(facts.program.implementationOf(function.target) as IrFunction, []),
+      source.changingLimit(),
+    );
+    expect(facts.returnedBy(function.target).integers!.contains(7), isTrue);
+  });
+
   test('peeling preserves break, catch, finally and observable call order', () {
     final function = body('earlyExit'), facts = optimize(body('earlyExit'));
     final runner = IrInterpreter(facts.program, {

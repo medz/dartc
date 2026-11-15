@@ -19,6 +19,117 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  for (final (capacity, progress) in [(49, 1), (12, 1), (49, 0)]) {
+    test(
+      'loop writes preserve globals only with proven bounds ($capacity, $progress)',
+      () {
+        final saved = GlobalVariable(
+          Uri.parse('memory:bounded-loop'),
+          'saved',
+          .integer,
+          isLate: true,
+        );
+        final reserve = FunctionTarget(null, 'reserve', .integer, [.integer]);
+        final target = FunctionTarget(null, 'fill', .integer, [.boolean]);
+        final entry = Block(target.parameterTypes),
+            header = Block([ValueType.integer, ValueType.integer]),
+            choose = Block(),
+            small = Block(),
+            large = Block(),
+            done = Block(),
+            failed = Block()..finish(const Return(Constant.integer(-1)));
+        entry.emit(StoreGlobal(saved, const Constant.integer(37)));
+        final address = entry.emit(
+          DirectCall(reserve, [Constant.integer(capacity)]),
+        );
+        entry.finish(
+          Branch(
+            entry.emit(Equals(address, const Constant.integer(0))),
+            Jump(failed),
+            Jump(header, const [Constant.integer(0), Constant.integer(0)]),
+          ),
+        );
+        final index = header.parameters.first, count = header.parameters.last;
+        header.finish(
+          Branch(
+            header.emit(
+              IntBinary(.lessThan, index, const Constant.integer(12)),
+            ),
+            Jump(choose),
+            Jump(done),
+          ),
+        );
+        choose.finish(
+          Branch(entry.parameters.single, Jump(small), Jump(large)),
+        );
+        for (final (block, size) in [(small, 1), (large, 4)]) {
+          Value next = count;
+          for (var byte = 0; byte < size; byte++) {
+            block.emit(
+              StoreNative(
+                block.emit(IntBinary(.add, address, next)),
+                _u8,
+                const Constant.integer(65),
+              ),
+            );
+            next = block.emit(IntBinary(.add, next, const Constant.integer(1)));
+          }
+          block.finish(
+            Jump(header, [
+              block.emit(IntBinary(.add, index, Constant.integer(progress))),
+              next,
+            ]),
+          );
+        }
+        done.emit(
+          StoreNative(
+            done.emit(IntBinary(.add, address, count)),
+            _u8,
+            const Constant.integer(10),
+          ),
+        );
+        final read = done.emit(LoadGlobal(saved));
+        done.finish(Return(read));
+        final facts = ProgramFlow(
+          IrProgram(
+            [],
+            [
+              IrFunction(target, [
+                entry,
+                header,
+                choose,
+                small,
+                large,
+                done,
+                failed,
+              ]),
+            ],
+            globals: [saved],
+            externals: [
+              IrExternal(
+                reserve,
+                effects: const {.writesStorage},
+                memory: const .zeroed(0),
+              ),
+            ],
+          ),
+          [
+            (target: target, arguments: [FlowValue.unknown(.boolean)]),
+          ],
+          memoryLayout: _layout,
+        ).facts;
+        if (progress == 0) {
+          expect(facts.reachesBlock(done), isFalse);
+          expect(_number(facts.returnedBy(target)), -1);
+        } else if (capacity == 49) {
+          expect(_number(facts.valueOf(read)), 37);
+        } else {
+          expect(facts.valueOf(read).constant, isNull);
+        }
+      },
+    );
+  }
+
   test('recursive initialization retains its changed entry state', () {
     final context = FunctionTarget(null, 'context', .integer, []);
     final initialize = FunctionTarget(null, 'initialize', .integer, []);
