@@ -1,3 +1,4 @@
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 
 import 'flow_state.dart';
@@ -62,6 +63,31 @@ storageDiscardable(ProgramFlowFacts facts) {
 
   void readField(InstanceField field, FlowValue receiver) {
     reads[field] = (reads[field] ?? const FlowValue.bottom()).join(receiver);
+  }
+
+  FlowValue objectAddress(Value object, Value offset) {
+    final owner = facts.valueOf(object);
+    final offsets = facts.valueOf(offset).integers;
+    var address = const FlowValue.bottom();
+    for (final base in <Object>[...owner.objects, ...owner.constants]) {
+      address = address.join(
+        FlowValue.address(FlowAddress.ranged(base, offsets)),
+      );
+    }
+    if (owner.unknownTypes.isNotEmpty || owner.addresses.isNotEmpty) {
+      address = address.join(
+        FlowValue.unknown(.integer).withReferences([owner]),
+      );
+    }
+    return address;
+  }
+
+  void readNative(FlowValue address, NativeTypeRef storage, FlowState state) {
+    payloads = payloads.join(
+      state.containsNative(address, storage)
+          ? address.references
+          : FlowValue.unknown(.object),
+    );
   }
 
   for (final target in facts.escapingReturns) {
@@ -157,11 +183,30 @@ storageDiscardable(ProgramFlowFacts facts) {
                 state.reachableValues([facts.valueOf(value)]),
               );
             }
-          case LoadObjectReference(:final object) ||
-              LoadObjectData(:final object):
+          case LoadObjectReference(:final object):
             payloads = payloads.join(facts.valueOf(object));
-          case ReferenceAddress():
-            visible = visible.join(facts.valueOf(operation));
+          case LoadObjectData(
+            :final object,
+            :final byteOffset,
+            :final nativeType,
+          ):
+            readNative(
+              objectAddress(object, byteOffset),
+              nativeType,
+              point.before,
+            );
+          case LoadNative(:final address, :final nativeType):
+            readNative(facts.valueOf(address), nativeType, point.before);
+          case CopyNative(:final source, :final nativeType):
+            readNative(facts.valueOf(source), nativeType, point.before);
+          case StringLength(:final string) || StringCodeUnitAt(:final string):
+            payloads = payloads.join(facts.valueOf(string));
+          case StringConcat(:final left, :final right):
+            payloads = payloads
+                .join(facts.valueOf(left))
+                .join(facts.valueOf(right));
+          case StringFromCharCodes(:final codes):
+            payloads = payloads.join(facts.valueOf(codes));
           default:
             break;
         }
@@ -207,6 +252,28 @@ storageDiscardable(ProgramFlowFacts facts) {
     }
   }
 
+  (FlowValue, FlowValue?, bool) rawWrite(
+    Instruction operation,
+    FlowValue address,
+    NativeTypeRef storage,
+    FlowValue stored, {
+    FlowValue? source,
+  }) {
+    final state = points[operation]!.first;
+    if (!state.containsNative(address, storage) ||
+        address.addresses.any((pointer) => pointer.base is! FlowObject) ||
+        source != null && !state.containsNative(source, storage)) {
+      return (const FlowValue.bottom(), null, true);
+    }
+    final owners = address.references;
+    return (
+      owners,
+      source == null ? stored : state.nativeReferences(source),
+      _overlaps(facts, owners, payloads) ||
+          reads.values.any((receivers) => _overlaps(facts, owners, receivers)),
+    );
+  }
+
   return (body, {activations}) {
     if (!identical(program.implementationOf(body.target), body)) {
       throw ArgumentError('Storage proofs require the analyzed function.');
@@ -233,26 +300,27 @@ storageDiscardable(ProgramFlowFacts facts) {
         if (!exits.normal || exits.exceptional) continue;
         final (
           FlowValue receiver,
-          Value? stored,
+          FlowValue? stored,
           bool demanded,
         ) = switch (operation) {
           StoreGlobal(:final global, :final value) => (
             const FlowValue.bottom(),
-            value,
+            facts.valueOf(value),
             globals.contains(global),
           ),
           StoreField(:final field, :final receiver, :final value) => (
             facts.valueOf(receiver),
-            value,
-            _overlaps(
-              facts,
-              facts.valueOf(receiver),
-              reads[field] ?? const .bottom(),
-            ),
+            facts.valueOf(value),
+            _overlaps(facts, facts.valueOf(receiver), payloads) ||
+                _overlaps(
+                  facts,
+                  facts.valueOf(receiver),
+                  reads[field] ?? const .bottom(),
+                ),
           ),
           WriteCell(:final cell, :final value) => (
             facts.valueOf(cell),
-            value,
+            facts.valueOf(value),
             _overlaps(facts, facts.valueOf(cell), cells),
           ),
           StoreObjectReference(
@@ -262,13 +330,40 @@ storageDiscardable(ProgramFlowFacts facts) {
           ) =>
             (
               facts.valueOf(object),
-              value,
+              facts.valueOf(value),
               _overlaps(facts, facts.valueOf(object), payloads) ||
                   facts.pointStateOf(operation)!.normal!.boundValueOf(
                         LoadObjectReference(object, byteOffset),
                         [facts.valueOf(object), facts.valueOf(byteOffset)],
                       ) ==
                       null,
+            ),
+          StoreNative(:final address, :final nativeType, :final value) =>
+            rawWrite(
+              operation,
+              facts.valueOf(address),
+              nativeType,
+              facts.valueOf(value),
+            ),
+          StoreObjectData(
+            :final object,
+            :final byteOffset,
+            :final nativeType,
+            :final value,
+          ) =>
+            rawWrite(
+              operation,
+              objectAddress(object, byteOffset),
+              nativeType,
+              facts.valueOf(value),
+            ),
+          CopyNative(:final destination, :final source, :final nativeType) =>
+            rawWrite(
+              operation,
+              facts.valueOf(destination),
+              nativeType,
+              const FlowValue.bottom(),
+              source: facts.valueOf(source),
             ),
           _ => (const FlowValue.bottom(), null, true),
         };
@@ -278,7 +373,7 @@ storageDiscardable(ProgramFlowFacts facts) {
             _overlaps(facts, receiver, visible)) {
           continue;
         }
-        var references = facts.valueOf(stored);
+        var references = stored;
         for (final state in states) {
           references = references.join(state.reachableValues([references]));
         }
