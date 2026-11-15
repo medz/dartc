@@ -71,4 +71,42 @@ void main() {
       expect(interpreter.call(first, []), 9);
     },
   );
+
+  test('every invocation assigns its local before a do-while exit', () {
+    final function = body('deferredDouble');
+    final facts = ProgramFlow(
+      program,
+      [],
+      openEntries: [function.target],
+    ).facts;
+    final reads = function.blocks
+        .expand(
+          (block) => [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ],
+        )
+        .whereType<ReadCell>();
+    expect(reads, isNotEmpty);
+    for (final read in reads) {
+      expect(facts.exitsOf(read).exceptional, isFalse);
+    }
+    final optimized = ProgramOptimizer(const [
+      ProgramSimplification(),
+      ProgramCallSpecialization(),
+      ProgramStoragePromotion(),
+      ProgramStorageElimination(),
+      DirectCallInlining(),
+    ]).run(program, [], openEntries: [function.target]);
+    final rewritten =
+        optimized.program.implementationOf(function.target) as IrFunction;
+    for (final value in [-3.5, -0.0, 2.5]) {
+      for (final count in [-3, 0, 1, 4, 9]) {
+        expect(
+          IrInterpreter(optimized.program, {}).run(rewritten, [value, count]),
+          source.deferredDouble(value, count),
+        );
+      }
+    }
+  });
 }

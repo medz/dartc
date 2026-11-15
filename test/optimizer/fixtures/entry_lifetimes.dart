@@ -37,3 +37,13 @@ int Function() retainedCounter(int initial) {
   var value = initial;
   return () => ++value;
 }
+
+double deferredDouble(double value, int count) {
+  double result;
+  do {
+    result = value;
+    value += 1.0;
+    count--;
+  } while (count > 0);
+  return result;
+}

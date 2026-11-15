@@ -1187,6 +1187,10 @@ void main() {
     for (final object in facts.valueOf(cell).objects) {
       expect(before.containsObject(object), isFalse);
     }
+    expect(
+      facts.returnedBy(target).constant?.structuralKey,
+      const Constant.integer(1).structuralKey,
+    );
     late IrInterpreter interpreter;
     var entered = false;
     interpreter = IrInterpreter(

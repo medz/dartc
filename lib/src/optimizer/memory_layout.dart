@@ -5,8 +5,7 @@ import 'package:dartc/layout.dart';
 /// Fixed target storage facts shared by analysis and representation selection.
 ///
 /// Replacing the program's layouts or target invalidates analyses using them.
-/// The layout's fixed size locates a NewPayload allocation's zeroed byte region;
-/// its object header is not part of that region.
+/// NewPayload zeroes the fixed fields and inline payload after the object header.
 abstract interface class FlowMemoryLayout() {
   /// Native sizes and ABI-specific integer types for the output target.
   NativeLayout get nativeLayout;

@@ -1078,8 +1078,8 @@ final class ProgramFlow(
   ) {
     if (inputs.any((value) => value.isBottom)) return _unreachable;
     final resultType = operation.type.substitute(activation.environment);
-    final repeated =
-        activation.repeated || _loopBlocks(activation.body).contains(block);
+    // Calls get fresh local storage; retained instances are joined by _allocate.
+    final repeated = _loopBlocks(activation.body).contains(block);
     FlowObject allocate(Instruction site) => FlowObject(
       site,
       activation,
@@ -1831,8 +1831,7 @@ final class ProgramFlow(
       ..retain(
         object,
         [_receiverValue(receiver, receiverType)],
-        repeated:
-            activation.repeated || _loopBlocks(activation.body).contains(block),
+        repeated: _loopBlocks(activation.body).contains(block),
       );
     activation.boundMethods.putIfAbsent(object, () => {}).add(target);
     activation.operationEffects[site] = {
@@ -2086,9 +2085,7 @@ final class ProgramFlow(
           ),
           target,
           arguments,
-          repeated:
-              activation.repeated ||
-              _loopBlocks(activation.body).contains(block),
+          repeated: _loopBlocks(activation.body).contains(block),
           invoke: (target, arguments, input) => _invoke(
             activation,
             block,
