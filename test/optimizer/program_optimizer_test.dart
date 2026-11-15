@@ -119,7 +119,7 @@ void main() {
       IntBinary(
         .add,
         block.emit(ReferenceAddress(object)),
-        Constant.integer(ObjectLayout([]).size),
+        Constant.integer(ObjectLayout([]).size + 8),
       ),
     );
     final read = block.emit(LoadNative(address, NativeScalarType(Uint8)));
@@ -133,13 +133,13 @@ void main() {
     final entries = [(target: root, arguments: <FlowValue>[])];
     final original = ProgramOptimizer(const [])
         .run(program, entries, memoryLayoutFor: _Layout.new);
-    expect(
-      original.valueOf(read).constant?.structuralKey,
-      const Constant.integer(0).structuralKey,
-    );
+    expect(original.valueOf(read).constant, isNull);
     final changed = ProgramOptimizer([_AddField()])
         .run(program, entries, memoryLayoutFor: _Layout.new);
-    expect(changed.valueOf(read).constant, isNull);
+    expect(
+      changed.valueOf(read).constant?.structuralKey,
+      const Constant.integer(0).structuralKey,
+    );
     expect(() => original.checkProgram(changed.program), throwsArgumentError);
   });
 

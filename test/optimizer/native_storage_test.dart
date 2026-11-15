@@ -19,35 +19,186 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
-  test('string constants expose UTF-16 bytes within their payload only', () {
-    const literal = Constant.string('A\u{1f642}\ud800');
-    final state = FlowState(_program, memoryLayout: _layout);
-    final start = _layout.objectLayout(ValueType.string).size;
-    final address = FlowValue.address(FlowAddress(literal, start));
-    for (final (index, unit) in [65, 0xd83d, 0xde42, 0xd800].indexed) {
+  test(
+    'fixed bytes and declared fields never keep stale facts across writes',
+    () {
+      final field = InstanceField(_type, 'value', ValueType.integer);
+      final graph = IrProgram([
+        IrClass(_type, [field]),
+      ], []);
+      final allocate = NewPayload(_type, const Constant.integer(8));
+      final created = _step(FlowState(graph, memoryLayout: _layout), allocate);
+      final object = created.value;
+      final fixed = FlowValue.address(
+        FlowAddress(object.objects.single, ObjectHeader.fieldsOffset),
+      );
+      final payload = _offset(
+        fixed,
+        _layout.objectLayout(_type).size - ObjectHeader.fieldsOffset,
+      );
+      expect(_number(_load(created.normal!, fixed, _i64)), 0);
+      expect(created.normal!.containsNative(fixed, _i64), isTrue);
+      expect(created.normal!.containsNative(_offset(fixed, -1), _i64), isFalse);
+      expect(
+        created.normal!.containsNative(_offset(payload, 1), _i64),
+        isFalse,
+      );
+      expect(
+        created.normal!.containsNative(fixed.join(.unknown(.integer)), _i64),
+        isFalse,
+      );
+      final assigned = _step(
+        created.normal!,
+        StoreField(field, allocate, _placeholder),
+        operands: [object, _integer(42)],
+      ).normal!;
+      final filled = _store(assigned, payload, _i64, _integer(99));
+      FlowValue readField(FlowState state) =>
+          _step(state, LoadField(field, allocate), operands: [object]).value;
+      expect(_number(readField(filled)), 42);
+      expect(_load(filled, fixed, _i64).constant, isNull);
+      final changed = _store(filled, fixed, _i64, _integer(7));
+      expect(_number(_load(changed, fixed, _i64)), 7);
+      expect(_number(_load(changed, payload, _i64)), 99);
+      expect(readField(changed).constant, isNull);
+      final uncertain = _step(
+        changed,
+        StoreField(field, allocate, _placeholder),
+        operands: [FlowValue.unknown(_type), _integer(9)],
+      ).normal!;
+      expect(_load(uncertain, fixed, _i64).constant, isNull);
+      expect(_number(_load(uncertain, payload, _i64)), 99);
+    },
+  );
+
+  test(
+    'string constants expose their length and UTF-16 bytes but no header',
+    () {
+      const literal = Constant.string('A\u{1f642}\ud800');
+      final state = FlowState(_program, memoryLayout: _layout);
+      final start = _layout.objectLayout(ValueType.string).size;
+      final address = FlowValue.address(FlowAddress(literal, start));
+      expect(state.containsNative(address, _i64), isTrue);
+      expect(FlowState(_program).containsNative(address, _i64), isFalse);
       expect(
         _number(
-          _load(state, _offset(address, index * 2), NativeScalarType(Uint16)),
+          _load(
+            state,
+            _offset(address, ObjectHeader.fieldsOffset - start),
+            _i64,
+          ),
         ),
-        unit,
+        4,
+      );
+      expect(_number(_step(state, StringLength(literal)).value), 4);
+      for (final (index, unit) in [65, 0xd83d, 0xde42, 0xd800].indexed) {
+        expect(
+          _number(
+            _load(state, _offset(address, index * 2), NativeScalarType(Uint16)),
+          ),
+          unit,
+        );
+        expect(
+          _number(_load(state, _offset(address, index * 2), _u8)),
+          unit & 0xff,
+        );
+      }
+      for (final offset in [ObjectHeader.fieldsOffset - start - 1, -1, 7, 8]) {
+        expect(
+          _load(
+            state,
+            _offset(address, offset),
+            NativeScalarType(Uint16),
+          ).constant,
+          isNull,
+        );
+      }
+      expect(_load(FlowState(_program), address, _u8).constant, isNull);
+    },
+  );
+
+  test('raw fixed writes invalidate late binding checks as well as values', () {
+    final field = InstanceField(
+      _type,
+      'lateValue',
+      .integer,
+      isLate: true,
+      isFinal: true,
+    );
+    final program = IrProgram([
+      IrClass(_type, [field]),
+    ], []);
+    final allocation = NewPayload(_type, const Constant.integer(0));
+    final created = _step(
+      FlowState(program, memoryLayout: _layout),
+      allocation,
+    );
+    final assigned = _step(
+      created.normal!,
+      StoreField(field, allocation, _placeholder),
+      operands: [created.value, _integer(5)],
+    ).normal!;
+    final fixed = FlowValue.address(
+      FlowAddress(created.value.objects.single, ObjectHeader.fieldsOffset),
+    );
+    final changed = _store(assigned, fixed, _i64, _integer(0));
+    final read = _step(
+      changed,
+      LoadField(field, allocation),
+      operands: [created.value],
+    );
+    expect(read.exceptional, isNotNull);
+    expect(read.value.constant, isNull);
+    final write = _step(
+      changed,
+      StoreField(field, allocation, _placeholder),
+      operands: [created.value, _integer(6)],
+    );
+    expect(write.normal, isNotNull);
+    expect(write.exceptional, isNotNull);
+  });
+
+  test(
+    'string length follows its initialized field, not allocation capacity',
+    () {
+      final operation = NewPayload(
+        ValueType.string,
+        const Constant.integer(20),
+      );
+      final created = _step(
+        FlowState(_program, memoryLayout: _layout),
+        operation,
+      );
+      final address = FlowValue.address(
+        FlowAddress(created.value.objects.single, ObjectHeader.fieldsOffset),
+      );
+      final initialized = _store(created.normal!, address, _i64, _integer(3));
+      expect(
+        _number(
+          _step(
+            initialized,
+            StringLength(operation),
+            operands: [created.value],
+          ).value,
+        ),
+        3,
+      );
+      final overwritten = _store(
+        initialized,
+        address,
+        _i64,
+        FlowValue.unknown(.integer),
       );
       expect(
-        _number(_load(state, _offset(address, index * 2), _u8)),
-        unit & 0xff,
-      );
-    }
-    for (final offset in [-1, 7, 8]) {
-      expect(
-        _load(
-          state,
-          _offset(address, offset),
-          NativeScalarType(Uint16),
-        ).constant,
+        _step(
+          overwritten,
+          StringLength(operation),
+          operands: [created.value],
+        ).value.constant,
         isNull,
       );
-    }
-    expect(_load(FlowState(_program), address, _u8).constant, isNull);
-  });
+    },
+  );
 
   test('rebound SSA definitions do not alias earlier payload contents', () {
     final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
@@ -86,33 +237,34 @@ void main() {
     expect(widened.join(after, widen: true), isFalse);
   });
 
-  test(
-    'zeroed payload excludes the header and requires an explicit target',
-    () {
-      final allocation = _allocate(
-        FlowState(_program, memoryLayout: _layout),
-        16,
+  test('zeroed fields and payload exclude the header and require an explicit target', () {
+    final allocation = _allocate(
+      FlowState(_program, memoryLayout: _layout),
+      16,
+    );
+    final start = _layout.objectLayout(_type).size;
+    expect(
+      _load(allocation.state, allocation.address, _i64).constant,
+      isA<ScalarConstant>().having((c) => c.value, 'value', 0),
+    );
+    for (final offset in [
+      0,
+      ObjectHeader.fieldsOffset - 1,
+      start + 12,
+      start + 16,
+    ]) {
+      final address = FlowValue.address(
+        FlowAddress(allocation.object.objects.single, offset),
       );
-      final start = _layout.objectLayout(_type).size;
-      expect(
-        _load(allocation.state, allocation.address, _i64).constant,
-        isA<ScalarConstant>().having((c) => c.value, 'value', 0),
-      );
-      for (final offset in [0, start - 1, start + 12, start + 16]) {
-        final address = FlowValue.address(
-          FlowAddress(allocation.object.objects.single, offset),
-        );
-        expect(_load(allocation.state, address, _i64).constant, isNull);
-      }
-      final unknown = _allocate(FlowState(_program), 16);
-      expect(_load(unknown.state, unknown.address, _u8).constant, isNull);
-      expect(
-        () =>
-            allocation.state.join(FlowState(_program, memoryLayout: _Layout())),
-        throwsArgumentError,
-      );
-    },
-  );
+      expect(_load(allocation.state, address, _i64).constant, isNull);
+    }
+    final unknown = _allocate(FlowState(_program), 16);
+    expect(_load(unknown.state, unknown.address, _u8).constant, isNull);
+    expect(
+      () => allocation.state.join(FlowState(_program, memoryLayout: _Layout())),
+      throwsArgumentError,
+    );
+  });
 
   test(
     'bounded reads inspect sparse interior changes without enumerating memory',
@@ -251,7 +403,10 @@ void main() {
       }
       expect(_number(_load(written, b.address, _i64)), 0);
       for (final offsets in [
-        FlowIntegerRange(start - 1, start + 1),
+        FlowIntegerRange(
+          ObjectHeader.fieldsOffset - 1,
+          ObjectHeader.fieldsOffset + 1,
+        ),
         FlowIntegerRange(start + 12, start + 13),
       ]) {
         final escaped = _step(

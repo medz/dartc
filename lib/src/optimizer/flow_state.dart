@@ -1,4 +1,4 @@
-import 'dart:ffi' show Uint16;
+import 'dart:ffi' show Int64, Uint16;
 
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
@@ -422,17 +422,11 @@ final class FlowState {
     required FlowInvoke invoke,
   }) {
     if (arguments.any((value) => value.isBottom)) return _unreachable;
-    final type = object.type as ClassType;
     final next = copy();
-    final slots = <Object, _Slot>{};
-    for (ClassType? view = type; view != null; view = view.superclass) {
-      for (final field in _class(view)?.fields ?? <InstanceField>[]) {
-        slots[field] = !field.isLate && field.typeFor(type).mayBeNull
-            ? _Slot.bound(_null)
-            : const _Slot.unbound();
-      }
-    }
-    next._allocate(object, _ObjectState(slots, summary: repeated));
+    next._allocate(
+      object,
+      _ObjectState(_initialFields(object.type as ClassType), summary: repeated),
+    );
     final value = FlowValue.object(object);
     final result = invoke(initializer, [value, ...arguments], next);
     return FlowResult(
@@ -444,6 +438,18 @@ final class FlowState {
       stackTrace: result.stackTrace,
       effects: const {Effect.allocates},
     );
+  }
+
+  Map<Object, _Slot> _initialFields(ClassType type) {
+    final slots = <Object, _Slot>{};
+    for (ClassType? view = type; view != null; view = view.superclass) {
+      for (final field in _class(view)?.fields ?? <InstanceField>[]) {
+        slots[field] = !field.isLate && field.typeFor(type).mayBeNull
+            ? _Slot.bound(_null)
+            : const _Slot.unbound();
+      }
+    }
+    return slots;
   }
 
   /// Evaluates storage operations; null leaves other operations to the solver.
@@ -479,20 +485,27 @@ final class FlowState {
         final length = size is ScalarConstant && size.value is int
             ? size.value as int
             : null;
-        final start = memoryLayout?.objectLayout(object.type as ClassType).size;
+        final fixedSize = memoryLayout
+            ?.objectLayout(object.type as ClassType)
+            .size;
         final valid =
             length != null &&
             length >= 0 &&
-            (start == null || length <= 0x7fffffffffffffff - start);
+            (fixedSize == null || length <= 0x7fffffffffffffff - fixedSize);
         final next = copy()
           .._allocate(
             object,
             _ObjectState(
-              {},
+              _initialFields(object.type as ClassType),
               summary: repeated,
-              memory: start == null
+              memory: fixedSize == null
                   ? null
-                  : FlowMemory(start, valid ? length : null),
+                  : FlowMemory(
+                      ObjectHeader.fieldsOffset,
+                      valid
+                          ? fixedSize - ObjectHeader.fieldsOffset + length
+                          : null,
+                    ),
             ),
           );
         return FlowResult(
@@ -529,32 +542,19 @@ final class FlowState {
         final input = operation is LoadObjectData
             ? _objectAddress(operands.first, operands.last)
             : operands.single;
-        var value = const FlowValue.bottom();
-        final layout = memoryLayout?.nativeLayout;
-        final size = layout?.of(nativeType).size;
-        for (final address in input.addresses) {
-          final memory = _memoryOf(address.base);
-          value = value.join(
-            layout != null &&
-                    size != null &&
-                    address.offsets != null &&
-                    memory != null &&
-                    memory.containsRange(address.offsets!, size)
-                ? memory.readRange(address.offsets!, nativeType, layout)
-                : FlowValue.unknown(resultType)
-                      .withReferences([address.reference]),
-          );
-        }
-        if (input.addresses.isEmpty ||
-            input.unknownTypes.isNotEmpty ||
-            input.constants.isNotEmpty) {
-          value = value.join(
-            FlowValue.unknown(resultType).withReferences([input.references]),
-          );
-        }
-        return _withEffects(_normal(value, copy()), const {
-          Effect.readsStorage,
-        });
+        return _readNative(input, nativeType, resultType);
+      case StringLength():
+        if (operands.single.isBottom) return _unreachable;
+        final layout = memoryLayout?.objectLayout(ValueType.string);
+        if (layout == null) return null;
+        return _readNative(
+          _objectAddress(
+            operands.single,
+            FlowValue.constant(Constant.integer(layout.offsetOf(0))),
+          ),
+          NativeScalarType(Int64),
+          resultType,
+        );
       case StoreNative(nativeType: final NativeTypeRef nativeType) ||
           StoreObjectData(nativeType: final NativeTypeRef nativeType):
         if (operands.any((v) => v.isBottom)) return _unreachable;
@@ -729,8 +729,18 @@ final class FlowState {
     if (base case ScalarConstant(value: final String text)
         when memoryLayout != null) {
       return _constantMemory.putIfAbsent(base.structuralKey, () {
-        final start = memoryLayout!.objectLayout(ValueType.string).size;
-        var memory = FlowMemory(start, text.length * 2);
+        final layout = memoryLayout!.objectLayout(ValueType.string);
+        final start = layout.size;
+        var memory =
+            FlowMemory(
+              ObjectHeader.fieldsOffset,
+              start - ObjectHeader.fieldsOffset + text.length * 2,
+            ).invalidate().write(
+              layout.offsetOf(0),
+              NativeScalarType(Int64),
+              FlowValue.constant(Constant.integer(text.length)),
+              memoryLayout!.nativeLayout,
+            );
         final unit = NativeScalarType(Uint16);
         for (var index = 0; index < text.length; index++) {
           memory = memory.write(
@@ -777,8 +787,12 @@ final class FlowState {
             FlowObject(:final type) || ObjectConstant(:final type) => type,
             _ => null,
           };
-          return type is ClassType &&
-              memoryLayout?.objectLayout(type).tracesPayload == true &&
+          final layout = type is ClassType
+              ? memoryLayout?.objectLayout(type)
+              : null;
+          return layout != null &&
+              layout.tracesPayload &&
+              offsets.lower >= layout.size &&
               (_memoryOf(base)
                       ?.containsRange(offsets, ObjectHeader.alignment) ??
                   false);
@@ -796,6 +810,53 @@ final class FlowState {
     return value;
   }
 
+  FlowResult _readNative(
+    FlowValue input,
+    NativeTypeRef nativeType,
+    ValueType resultType,
+  ) {
+    var value = const FlowValue.bottom();
+    final layout = memoryLayout?.nativeLayout;
+    final size = layout?.of(nativeType).size;
+    for (final address in input.addresses) {
+      final memory = _memoryOf(address.base);
+      value = value.join(
+        layout != null &&
+                size != null &&
+                address.offsets != null &&
+                memory != null &&
+                memory.containsRange(address.offsets!, size)
+            ? memory.readRange(address.offsets!, nativeType, layout)
+            : FlowValue.unknown(resultType).withReferences([address.reference]),
+      );
+    }
+    if (input.addresses.isEmpty ||
+        input.unknownTypes.isNotEmpty ||
+        input.constants.isNotEmpty) {
+      value = value.join(
+        FlowValue.unknown(resultType).withReferences([input.references]),
+      );
+    }
+    return _withEffects(_normal(value, copy()), const {Effect.readsStorage});
+  }
+
+  /// Whether every native access stays within modeled object storage.
+  /// Constants may be read; callers must separately require mutable destinations.
+  bool containsNative(FlowValue address, NativeTypeRef storage) =>
+      _containsNative(address, memoryLayout?.nativeLayout.of(storage).size);
+
+  bool _containsNative(FlowValue address, int? size) =>
+      size != null &&
+      address.addresses.isNotEmpty &&
+      address.constants.isEmpty &&
+      address.unknownTypes.isEmpty &&
+      address.addresses.every(
+        (pointer) =>
+            pointer.offsets != null &&
+            (_memoryOf(pointer.base)?.containsRange(pointer.offsets!, size) ??
+                false),
+      );
+
   FlowState _writeNative(
     FlowValue address,
     int? size,
@@ -803,22 +864,8 @@ final class FlowState {
     FlowMemory Function(FlowMemory, int) write,
   ) {
     final next = copy();
-    final known =
-        size != null &&
-        address.addresses.isNotEmpty &&
-        address.constants.isEmpty &&
-        address.unknownTypes.isEmpty &&
-        address.addresses.every(
-          (a) =>
-              a.base is FlowObject &&
-              a.offsets != null &&
-              (_objects[a.base as FlowObject]?.memory?.containsRange(
-                    a.offsets!,
-                    size,
-                  ) ??
-                  false),
-        );
-    if (!known) {
+    if (!_containsNative(address, size) ||
+        address.addresses.any((pointer) => pointer.base is! FlowObject)) {
       // An unbounded offset can reach other allocations, not just its base.
       next._invalidateRaw();
       next.escape([stored]);
@@ -833,17 +880,29 @@ final class FlowState {
           ? write(state.memory!, offsets.constant!)
           : state.memory!.forget(
               offsets.lower,
-              offsets.upper - offsets.lower + size,
+              offsets.upper - offsets.lower + size!,
               retained: stored,
             );
-      next._objects = next._objects.withEntry(
-        object,
-        next._objects[object]!.withMemory(
-          strong && !state.summary
-              ? memory
-              : next._objects[object]!.memory!.join(memory),
-        ),
+      var updated = next._objects[object]!.withMemory(
+        strong && !state.summary
+            ? memory
+            : next._objects[object]!.memory!.join(memory),
       );
+      if (offsets.lower <
+          memoryLayout!.objectLayout(object.type as ClassType).size) {
+        for (final entry in updated.slots.entries) {
+          if (entry.key case final InstanceField field) {
+            updated = updated.withSlot(
+              field,
+              entry.value.invalidateRaw(
+                field.typeFor(object.type as ClassType),
+                isLate: field.isLate,
+              ),
+            );
+          }
+        }
+      }
+      next._objects = next._objects.withEntry(object, updated);
     }
     next.escape(const []);
     return next;
@@ -864,7 +923,12 @@ final class FlowState {
         final type = key is InstanceField
             ? key.typeFor(object.type as ClassType)
             : (object.type as CellType).content;
-        return slot.invalidate(type, isFinal: false);
+        return slot.invalidateRaw(
+          type,
+          isLate: key is InstanceField
+              ? key.isLate
+              : (object.type as CellType).isLate,
+        );
       });
       return _ObjectState._(
         slots,
@@ -1064,13 +1128,16 @@ final class FlowState {
       final next = copy()..escape([value]);
       for (final object in next._objects.keys) {
         final state = next._objects[object]!;
+        if (!unknownBounds.any(
+          (t) => object.type is ClassType
+              ? t.mayHaveInstance(object.type as ClassType)
+              : t.accepts(object.type),
+        )) {
+          continue;
+        }
         final slot = state.slots[key];
-        if (slot == null ||
-            !unknownBounds.any(
-              (t) => object.type is ClassType
-                  ? t.mayHaveInstance(object.type as ClassType)
-                  : t.accepts(object.type),
-            )) {
+        if (slot == null) {
+          if (key is InstanceField) next._forgetFieldBytes(object);
           continue;
         }
         final type = key is InstanceField
@@ -1086,6 +1153,7 @@ final class FlowState {
             object,
             state.withSlot(key, slot.join(_Slot.bound(checked.value))),
           );
+          if (key is InstanceField) next._forgetFieldBytes(object);
         }
       }
       result = _merge(
@@ -1184,6 +1252,9 @@ final class FlowState {
     }
     final next = copy();
     next._set(location, _Slot.bound(checked.value));
+    if (location case (final FlowObject object, InstanceField())) {
+      next._forgetFieldBytes(object);
+    }
     return FlowResult(
       value: checked.value,
       normal: next,
@@ -1198,6 +1269,22 @@ final class FlowState {
     _objects = _objects.withEntry(
       object,
       prior == null ? state : prior.join(state).withFlags(summary: true),
+    );
+  }
+
+  void _forgetFieldBytes(FlowObject object) {
+    final state = _objects[object]!;
+    final memory = state.memory;
+    if (memory == null) return;
+    _objects = _objects.withEntry(
+      object,
+      state.withMemory(
+        memory.forget(
+          ObjectHeader.fieldsOffset,
+          memoryLayout!.objectLayout(object.type as ClassType).size -
+              ObjectHeader.fieldsOffset,
+        ),
+      ),
     );
   }
 
@@ -1503,6 +1590,9 @@ final class _Slot {
       isFinal && !unbound
       ? this
       : _Slot._(value.join(.unknown(type)), unbound, initializer);
+
+  _Slot invalidateRaw(ValueType type, {required bool isLate}) =>
+      isLate ? join(_Slot.unknown(type)) : invalidate(type, isFinal: false);
 
   @override
   bool operator ==(Object other) =>

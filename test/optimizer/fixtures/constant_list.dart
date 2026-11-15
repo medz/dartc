@@ -23,6 +23,8 @@ int literalUnits() {
       value.codeUnitAt(3);
 }
 
+int createdLength() => String.fromCharCode(0x1f642).length;
+
 int uniform(int index) {
   if (index < 0 || index >= 3) return -1;
   return const [7, 7, 7][index];
