@@ -26,8 +26,13 @@ enum MemoryPrimitive(final Set<Effect> effects) {
     _ => false,
   };
 
-  /// Services that can change or release memory visible to their caller.
-  bool get writesMemory => this == .unmap || this == .entropy;
+  /// Exact native storage touched by each service; no argument is retained.
+  ExternalMemory get memory => switch (this) {
+    .map => const .zeroed(0),
+    .unmap => const .release(0, 1),
+    .entropy => const .write(0, 1),
+    _ => const .unchanged(),
+  };
 }
 
 /// Source program and entry contracts used by managed code generation.

@@ -63,6 +63,9 @@ typedef FlowReadSet = ({
   bool cells,
 });
 
+/// One stable external address and its entry-state byte facts.
+typedef FlowMemoryBinding = ({FlowObject allocation, FlowMemory memory});
+
 /// Storage facts at one executable program point.
 ///
 /// Transfers return independent exit snapshots. Allocation identities and call
@@ -73,6 +76,7 @@ final class FlowState {
 
   /// Explicit output storage; absent layouts never imply host memory facts.
   final FlowMemoryLayout? memoryLayout;
+  final Map<FunctionTarget, FlowMemoryBinding> _externalMemory;
   final Set<GlobalVariable> _declaredGlobals;
   final Map<ClassType, IrClass> _classes;
   final Map<Object, FlowMemory> _constantMemory;
@@ -82,19 +86,32 @@ final class FlowState {
   StateMap<FlowSource, FlowValue> _addresses;
   FlowValue _escaped;
 
-  new(this.program, {this.memoryLayout})
-    : _declaredGlobals = Set.unmodifiable(program.globals),
-      _classes = Map.unmodifiable({for (final c in program.classes) c.type: c}),
-      _constantMemory = {},
-      _globals = const .empty(),
-      _objects = const .empty(),
-      _regions = const .empty(),
-      _addresses = const .empty(),
-      _escaped = const .bottom();
+  new(
+    this.program, {
+    this.memoryLayout,
+    Map<FunctionTarget, FlowMemoryBinding> externalMemory = const {},
+  }) : _externalMemory = Map.unmodifiable(externalMemory),
+       _declaredGlobals = Set.unmodifiable(program.globals),
+       _classes = Map.unmodifiable({
+         for (final c in program.classes) c.type: c,
+       }),
+       _constantMemory = {},
+       _globals = const .empty(),
+       _objects = const .empty(),
+       _regions = StateMap.fromEntries([
+         for (final binding in externalMemory.values)
+           MapEntry(
+             binding.allocation,
+             _ObjectState({}, memory: binding.memory),
+           ),
+       ]),
+       _addresses = const .empty(),
+       _escaped = const .bottom();
 
   new _(
     this.program,
     this.memoryLayout,
+    this._externalMemory,
     this._declaredGlobals,
     this._classes,
     this._constantMemory,
@@ -109,6 +126,7 @@ final class FlowState {
   FlowState copy() => FlowState._(
     program,
     memoryLayout,
+    _externalMemory,
     _declaredGlobals,
     _classes,
     _constantMemory,
@@ -118,6 +136,15 @@ final class FlowState {
     _addresses,
     _escaped,
   );
+
+  /// The stable address returned by a bound external getter.
+  FlowValue? externalResult(FunctionTarget target) =>
+      switch (_externalMemory[target]) {
+        final binding? => FlowValue.address(
+          FlowAddress(FlowRegion(binding.allocation), 0),
+        ),
+        null => null,
+      };
 
   /// Keeps valid SSA equalities without changing stored values or prior snapshots.
   void retainSources(bool Function(FlowSource) retain) {
@@ -267,6 +294,8 @@ final class FlowState {
     final reachable = _reachable(
       [
         ...roots,
+        if (reads == null)
+          for (final target in _externalMemory.keys) externalResult(target)!,
         escaped,
         for (final slot in globals.values) ...[slot.value, slot.initializer],
       ],
@@ -293,6 +322,7 @@ final class FlowState {
     return FlowState._(
       program,
       memoryLayout,
+      _externalMemory,
       _declaredGlobals,
       _classes,
       _constantMemory,
@@ -1103,6 +1133,25 @@ final class FlowState {
             (_memoryOf(pointer.base)?.containsRange(pointer.offsets!, size) ??
                 false),
       );
+
+  /// Invalidates only a native call's written range, without following its contents.
+  FlowState overwriteNative(
+    FlowValue address,
+    FlowValue length, {
+    bool release = false,
+  }) {
+    final count = length.integers;
+    if (count?.constant == 0) return copy();
+    final size = count != null && count.lower >= 0 ? count.upper : null;
+    return _writeNative(
+      resolveValue(address),
+      size,
+      const .bottom(),
+      (memory, offset) => release
+          ? FlowMemory(memory.start, null)
+          : memory.forget(offset, size!),
+    );
+  }
 
   FlowState _writeNative(
     FlowValue address,

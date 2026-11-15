@@ -43,7 +43,17 @@ export 'src/ir/block.dart'
         Yield,
         YieldStream,
         Unreachable;
-export 'src/ir/function.dart' show IrCallable, IrExternal, IrFunction;
+export 'src/ir/function.dart'
+    show
+        IrCallable,
+        IrExternal,
+        IrFunction,
+        ExternalMemory,
+        ArbitraryMemory,
+        UnchangedMemory,
+        ZeroedMemory,
+        WrittenMemory,
+        ReleasedMemory;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/ffi_types.dart' show FfiTypes;
 export 'src/ir/signature.dart'

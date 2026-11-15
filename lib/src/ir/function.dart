@@ -76,6 +76,39 @@ sealed class IrCallable(
   }
 }
 
+/// Native storage touched by an external call, independently of its other effects.
+sealed class const ExternalMemory() {
+  const factory arbitrary() = ArbitraryMemory;
+  const factory unchanged() = UnchangedMemory;
+  const factory zeroed(int lengthParameter) = ZeroedMemory;
+  const factory write(int addressParameter, int lengthParameter) =
+      WrittenMemory;
+  const factory release(int addressParameter, int lengthParameter) =
+      ReleasedMemory;
+}
+
+/// May modify storage reachable through arguments or previously escaped values.
+final class const ArbitraryMemory() extends ExternalMemory;
+
+/// Leaves existing storage and its lifetime unchanged.
+final class const UnchangedMemory() extends ExternalMemory;
+
+/// Returns a fresh zero-filled mapping, or zero on failure; never a GC reference.
+final class const ZeroedMemory(final int lengthParameter)
+    extends ExternalMemory;
+
+/// May overwrite only the supplied address range; follows no stored pointers.
+final class const WrittenMemory(
+  final int addressParameter,
+  final int lengthParameter,
+) extends ExternalMemory;
+
+/// Ends the lifetime of the supplied address range; follows no stored pointers.
+final class const ReleasedMemory(
+  final int addressParameter,
+  final int lengthParameter,
+) extends ExternalMemory;
+
 /// A Dart callable whose implementation is supplied outside the IR graph.
 ///
 /// Calls retain normal Dart argument and return types. A native binding must
@@ -89,13 +122,11 @@ final class IrExternal(
   /// This trusted promise is independent of effects and does not exclude throws.
   final bool terminates = false,
 
-  /// Whether the implementation may mutate arguments or previously escaped storage.
-  /// Observable effects such as output remain in [effects] even when this is false.
-  final bool writesMemory = true,
+  /// Native storage access; output and other observable effects remain in [effects].
+  final ExternalMemory memory = const .arbitrary(),
 
-  /// Parameter containing the size of fresh, zero-filled native storage returned
-  /// as an integer address, or zero on failure. The result is not a GC reference.
-  final int? zeroedMemorySizeParameter,
+  /// Whether argument capabilities can remain accessible after this call returns.
+  final bool capturesArguments = true,
 }) extends IrCallable {
   /// Effects promised by the external implementation, conservative by default.
   ///
@@ -107,12 +138,25 @@ final class IrExternal(
     if (target.kind == .closure || target.kind == .fieldInitializer) {
       throw ArgumentError('Invalid external declaration ${target.name}.');
     }
-    if (zeroedMemorySizeParameter case final index?
-        when target.returnType != ValueType.integer ||
-            index < 0 ||
-            index >= target.parameterTypes.length ||
-            target.parameterTypes[index] != ValueType.integer) {
-      throw ArgumentError('Invalid native allocation contract.');
+    final parameters = switch (memory) {
+      ZeroedMemory(:final lengthParameter) => [lengthParameter],
+      WrittenMemory(:final addressParameter, :final lengthParameter) ||
+      ReleasedMemory(
+        :final addressParameter,
+        :final lengthParameter,
+      ) => [addressParameter, lengthParameter],
+      _ => const <int>[],
+    };
+    if (parameters.any(
+          (index) =>
+              index < 0 ||
+              index >= target.parameterTypes.length ||
+              target.parameterTypes[index] != ValueType.integer,
+        ) ||
+        memory is ZeroedMemory && target.returnType != ValueType.integer ||
+        (memory is WrittenMemory || memory is ReleasedMemory) &&
+            !this.effects.contains(Effect.writesStorage)) {
+      throw ArgumentError('Invalid native storage contract.');
     }
     _references = verifyCallable(target, defaults.values);
   }

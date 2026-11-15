@@ -13,9 +13,14 @@ final _native = FunctionType(FfiTypes.int64, [FfiTypes.int64]);
 final _consume = FunctionTarget(_uri, 'consume', .voidType, [.integer]);
 
 void main() {
-  for (final stored in [false, true]) {
+  for (final (stored, captured) in [
+    (false, false),
+    (false, true),
+    (true, false),
+    (true, true),
+  ]) {
     test(
-      'native callback keeps optional defaults after raw exposure ($stored)',
+      'native callback keeps defaults (stored: $stored, captured: $captured)',
       () {
         final function = FunctionTarget(_uri, 'callback', .integer, [
           .integer,
@@ -61,7 +66,7 @@ void main() {
         final program = IrProgram(
           [IrClass(bytes, [])],
           [root, callback],
-          externals: [IrExternal(_consume)],
+          externals: [IrExternal(_consume, capturesArguments: captured)],
         );
         final facts = ProgramFlow(program, [
           (target: root.target, arguments: []),

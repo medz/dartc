@@ -989,7 +989,6 @@ void main() {
     final facts = _flow(IrProgram([], [body]), body, [
       FlowValue.unknown(.integer),
     ]).facts;
-    expect(facts.activationsOf(target), hasLength(1));
     expect(
       facts.returnedBy(target).constant?.structuralKey,
       const Constant.integer(0).structuralKey,

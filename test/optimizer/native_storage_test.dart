@@ -19,6 +19,156 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('recursive initialization retains its changed entry state', () {
+    final context = FunctionTarget(null, 'context', .integer, []);
+    final initialize = FunctionTarget(null, 'initialize', .integer, []);
+    final body = Block(), start = Block(), ready = Block();
+    final address = body.emit(DirectCall(context, []));
+    body.finish(
+      Branch(
+        body.emit(
+          Equals(
+            body.emit(LoadNative(address, _i64)),
+            const Constant.integer(0),
+          ),
+        ),
+        Jump(start),
+        Jump(ready),
+      ),
+    );
+    ready.finish(const Return(Constant.integer(7)));
+    start.emit(StoreNative(address, _i64, const Constant.integer(1)));
+    final nested = start.emit(DirectCall(initialize, []));
+    start.emit(StoreNative(address, _i64, const Constant.integer(0)));
+    start.finish(
+      Return(start.emit(IntBinary(.add, nested, const Constant.integer(2)))),
+    );
+    final entry = FunctionTarget(null, 'entry', .integer, []);
+    final root = Block();
+    root.finish(Return(root.emit(DirectCall(initialize, []))));
+    final facts = ProgramFlow(
+      IrProgram(
+        [],
+        [
+          IrFunction(initialize, [body, start, ready]),
+          IrFunction(entry, [root]),
+        ],
+        externals: [
+          IrExternal(
+            context,
+            effects: const {.readsStorage},
+            memory: const .unchanged(),
+          ),
+        ],
+      ),
+      [(target: entry, arguments: [])],
+      initialMemory: {context: List.filled(8, 0)},
+      memoryLayout: _layout,
+    ).facts;
+    expect(_number(facts.valueOf(nested)), 7);
+    expect(_number(facts.returnedBy(entry)), 9);
+  });
+
+  test(
+    'entry storage survives getter calls and carries ordinary call writes',
+    () {
+      final context = FunctionTarget(null, 'context', .integer, []);
+      final read = FunctionTarget(null, 'read', .integer, []);
+      final reader = Block();
+      reader.finish(
+        Return(
+          reader.emit(LoadNative(reader.emit(DirectCall(context, [])), _i64)),
+        ),
+      );
+      final update = FunctionTarget(null, 'update', .integer, []);
+      final body = Block();
+      final before = body.emit(DirectCall(read, []));
+      body.emit(
+        StoreNative(
+          body.emit(DirectCall(context, [])),
+          _i64,
+          body.emit(IntBinary(.add, before, const Constant.integer(7))),
+        ),
+      );
+      body.finish(Return(body.emit(DirectCall(read, []))));
+      final program = IrProgram(
+        [],
+        [
+          IrFunction(read, [reader]),
+          IrFunction(update, [body]),
+        ],
+        externals: [
+          IrExternal(
+            context,
+            effects: const {.readsStorage},
+            memory: const .unchanged(),
+          ),
+        ],
+      );
+      final initial = List<int?>.filled(8, 0);
+      final flow = ProgramFlow(
+        program,
+        [(target: update, arguments: [])],
+        initialMemory: {context: initial},
+        memoryLayout: _layout,
+      );
+      initial[0] = 99;
+      expect(_number(flow.facts.valueOf(before)), 0);
+      expect(_number(flow.facts.returnedBy(update)), 7);
+      expect(
+        _number(
+          ProgramOptimizer([])
+              .run(
+                program,
+                [(target: update, arguments: [])],
+                initialMemory: {context: List.filled(8, 0)},
+                memoryLayoutFor: (_) => _layout,
+              )
+              .returnedBy(update),
+        ),
+        7,
+      );
+
+      final persistent = ProgramFlow(
+        program,
+        [(target: update, arguments: [])],
+        initialMemory: {context: List.filled(8, null)},
+        memoryLayout: _layout,
+      ).facts;
+      expect(persistent.returnedBy(update).constant, isNull);
+    },
+  );
+
+  test('unknown native writes invalidate exposed entry storage', () {
+    final context = FunctionTarget(null, 'context', .integer, []);
+    final mutate = FunctionTarget(null, 'mutate', .voidType, [.integer]);
+    final target = FunctionTarget(null, 'entry', .integer, []);
+    final body = Block();
+    final address = body.emit(DirectCall(context, []));
+    body.emit(DirectCall(mutate, [address]));
+    body.finish(Return(body.emit(LoadNative(address, _i64))));
+    final facts = ProgramFlow(
+      IrProgram(
+        [],
+        [
+          IrFunction(target, [body]),
+        ],
+        externals: [
+          IrExternal(
+            context,
+            effects: const {.readsStorage},
+            memory: const .unchanged(),
+          ),
+          IrExternal(mutate, effects: const {.writesStorage}),
+        ],
+      ),
+      [(target: target, arguments: [])],
+      initialMemory: {context: List.filled(8, 0)},
+      memoryLayout: _layout,
+    ).facts;
+    expect(facts.returnedBy(target).constant, isNull);
+  });
+
   test('native mappings preserve private cells and caller byte contents', () {
     final factory = FunctionTarget(null, 'map', .integer, [.integer]);
     final primitive = FunctionTarget(null, 'reserve', .integer, [.integer]);
@@ -44,6 +194,8 @@ void main() {
     success.emit(StoreNative(address, _u8, const Constant.integer(9)));
     final output = FunctionTarget(null, 'output', .voidType, [.integer]);
     final write = success.emit(DirectCall(output, [address]));
+    final unknown = FunctionTarget(null, 'unknown', .voidType, []);
+    success.emit(DirectCall(unknown, []));
     final byte = success.emit(LoadNative(address, _u8));
     final local = success.emit(ReadCell(cell));
     success.finish(Return(success.emit(IntBinary(.add, byte, local))));
@@ -58,15 +210,16 @@ void main() {
           IrExternal(
             primitive,
             effects: const {Effect.writesStorage},
-            writesMemory: false,
-            zeroedMemorySizeParameter: 0,
+            memory: const .zeroed(0),
           ),
           IrExternal(
             output,
             effects: const {Effect.writesStorage},
-            writesMemory: false,
+            memory: const .unchanged(),
+            capturesArguments: false,
             terminates: true,
           ),
+          IrExternal(unknown, effects: const {Effect.writesStorage}),
         ],
       ),
       [
@@ -87,6 +240,94 @@ void main() {
     expect(facts.exitsOf(local).exceptional, isFalse);
     expect(facts.canDiscard(write), isFalse);
   });
+
+  test('native links keep their backing allocation through call summaries', () {
+    final context = FunctionTarget(null, 'context', .integer, []);
+    final reserve = FunctionTarget(null, 'reserve', .integer, [.integer]);
+    final initialize = FunctionTarget(null, 'initialize', .boolean, []);
+    final entry = Block(), success = Block(), failure = Block();
+    final address = entry.emit(
+      DirectCall(reserve, [const Constant.integer(16)]),
+    );
+    entry.finish(
+      Branch(
+        entry.emit(Equals(address, const Constant.integer(0))),
+        Jump(failure),
+        Jump(success),
+      ),
+    );
+    failure.finish(Throw(const Constant.integer(-1)));
+    success.emit(StoreNative(address, _u8, const Constant.integer(9)));
+    success.emit(
+      StoreNative(success.emit(DirectCall(context, [])), _i64, address),
+    );
+    success.finish(const Return(Constant.boolean(true)));
+    final target = FunctionTarget(null, 'use', .integer, []);
+    final root = Block(), read = Block(), failed = Block();
+    root.finish(
+      Branch(root.emit(DirectCall(initialize, [])), Jump(read), Jump(failed)),
+    );
+    failed.finish(const Return(Constant.integer(-1)));
+    final stored = read.emit(
+      LoadNative(read.emit(DirectCall(context, [])), _i64),
+    );
+    final byte = read.emit(LoadNative(stored, _u8));
+    read.finish(Return(byte));
+    final facts = ProgramFlow(
+      IrProgram(
+        [],
+        [
+          IrFunction(initialize, [entry, success, failure]),
+          IrFunction(target, [root, read, failed]),
+        ],
+        externals: [
+          IrExternal(
+            context,
+            effects: const {.readsStorage},
+            memory: const .unchanged(),
+            capturesArguments: false,
+          ),
+          IrExternal(
+            reserve,
+            effects: const {.writesStorage},
+            memory: const .zeroed(0),
+            capturesArguments: false,
+          ),
+        ],
+      ),
+      [(target: target, arguments: [])],
+      initialMemory: {context: List.filled(8, 0)},
+      memoryLayout: _layout,
+    ).facts;
+    expect(_number(facts.valueOf(byte)), 9);
+    expect(facts.valueOf(stored).references.objects, isEmpty);
+  });
+
+  for (final release in [false, true]) {
+    test(
+      'native range invalidation does not follow stored pointers ($release)',
+      () {
+        final first = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+        final second = _allocate(first.state, 8);
+        final linked = _store(
+          second.state,
+          first.address,
+          _i64,
+          second.address,
+        );
+        final initialized = _store(linked, second.address, _u8, _integer(9));
+        final next = initialized.overwriteNative(
+          first.address,
+          _integer(8),
+          release: release,
+        );
+        expect(_number(_load(next, second.address, _u8)), 9);
+        expect(_load(next, first.address, _i64).constant, isNull);
+        expect(next.containsNative(first.address, _i64), !release);
+        expect(initialized.containsNative(first.address, _i64), isTrue);
+      },
+    );
+  }
 
   test(
     'a pure allocation view retains fresh state through its call summary',

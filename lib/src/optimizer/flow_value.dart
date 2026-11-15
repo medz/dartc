@@ -99,7 +99,9 @@ final class FlowAddress.ranged(
     final FlowObject object => FlowValue.object(object),
     final Constant constant => FlowValue.constant(constant),
     ClassType() => const FlowValue.bottom(),
-    FlowRegion() => const FlowValue.bottom(),
+    FlowRegion() => FlowValue._(const {}, const {}, const {}, const {}, null, {
+      FlowAddress(base, 0),
+    }),
     final NativeCallbackTarget target => FlowValue._(
       const {},
       const {},
@@ -146,7 +148,7 @@ final class FlowValue {
   final FlowValue? _references;
   final FlowIntegerRange? _integers;
 
-  /// Capabilities retained through raw memory: managed values and callback entries.
+  /// Capabilities retained through raw memory, including native storage.
   ///
   /// These are not additional alternatives for this value's type.
   FlowValue get references => _references ?? const FlowValue.bottom();
@@ -584,19 +586,20 @@ final class FlowValue {
 
   @override
   bool operator ==(Object other) =>
+      identical(this, other) ||
       other is FlowValue &&
-      _constants.length == other._constants.length &&
-      _constants.keys.every(other._constants.containsKey) &&
-      objects.length == other.objects.length &&
-      objects.containsAll(other.objects) &&
-      addresses.length == other.addresses.length &&
-      addresses.containsAll(other.addresses) &&
-      unknownTypes.length == other.unknownTypes.length &&
-      unknownTypes.containsAll(other.unknownTypes) &&
-      sources.length == other.sources.length &&
-      sources.containsAll(other.sources) &&
-      _integers == other._integers &&
-      _references == other._references;
+          _constants.length == other._constants.length &&
+          _constants.keys.every(other._constants.containsKey) &&
+          objects.length == other.objects.length &&
+          objects.containsAll(other.objects) &&
+          addresses.length == other.addresses.length &&
+          addresses.containsAll(other.addresses) &&
+          unknownTypes.length == other.unknownTypes.length &&
+          unknownTypes.containsAll(other.unknownTypes) &&
+          sources.length == other.sources.length &&
+          sources.containsAll(other.sources) &&
+          _integers == other._integers &&
+          _references == other._references;
 
   @override
   int get hashCode => Object.hash(

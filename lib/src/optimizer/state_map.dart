@@ -166,11 +166,11 @@ _Node<K, V>? _merge<K extends Object, V extends Object>(
   if (b == null) return _map(a, (key, value) => combine(key, value, null));
   if (a is _Leaf<K, V> && b is _Leaf<K, V> && a.hash == b.hash) {
     final keys = <K>{
-      for (final entry in _entries(a)) entry.key,
-      for (final entry in _entries(b)) entry.key,
+      for (final entry in a.items) entry.key,
+      for (final entry in b.items) entry.key,
     };
-    V? get(_Node<K, V>? node, K key) {
-      for (final entry in _entries(node)) {
+    V? get(_Leaf<K, V> node, K key) {
+      for (final entry in node.items) {
         if (entry.key == key) return entry.value;
       }
       return null;

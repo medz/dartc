@@ -78,8 +78,8 @@ final class NativeBoundaries(
             raw,
             effects: declaration.effects,
             terminates: declaration.terminates,
-            writesMemory: declaration.writesMemory,
-            zeroedMemorySizeParameter: declaration.zeroedMemorySizeParameter,
+            memory: declaration.memory,
+            capturesArguments: declaration.capturesArguments,
           ),
         );
         nativeImports[raw] = (source: target, signature: binding);

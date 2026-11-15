@@ -12,7 +12,7 @@ void main() {
     () {
       final mapping = FunctionTarget(null, 'mapping', .integer, [.integer]);
       expect(
-        () => IrExternal(mapping, zeroedMemorySizeParameter: 0),
+        () => IrExternal(mapping, memory: const .zeroed(0)),
         returnsNormally,
       );
       for (final (target, index) in [
@@ -22,9 +22,35 @@ void main() {
         (FunctionTarget(null, 'wrongResult', .object, [.integer]), 0),
       ]) {
         expect(
-          () => IrExternal(target, zeroedMemorySizeParameter: index),
+          () => IrExternal(target, memory: .zeroed(index)),
           throwsArgumentError,
         );
+      }
+    },
+  );
+
+  test(
+    'native write contracts require address and length slots and write effects',
+    () {
+      final target = FunctionTarget(null, 'mutate', .voidType, [
+        .integer,
+        .integer,
+      ]);
+      for (final memory in [
+        const WrittenMemory(0, 1),
+        const ReleasedMemory(0, 1),
+      ]) {
+        expect(() => IrExternal(target, memory: memory), returnsNormally);
+        expect(
+          () => IrExternal(target, memory: memory, effects: const {}),
+          throwsArgumentError,
+        );
+      }
+      for (final memory in [
+        const WrittenMemory(-1, 1),
+        const ReleasedMemory(0, 2),
+      ]) {
+        expect(() => IrExternal(target, memory: memory), throwsArgumentError);
       }
     },
   );

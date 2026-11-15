@@ -25,6 +25,31 @@ final class FlowMemory {
       _bytes = const .empty(),
       _retained = const .bottom();
 
+  /// Entry bytes supplied by an explicit storage contract; null means unknown.
+  factory bytes(List<int?> bytes) {
+    final values = <MapEntry<int, _Byte>>[];
+    for (final (index, byte) in bytes.indexed) {
+      if (byte != null) RangeError.checkValueInInterval(byte, 0, 255, 'byte');
+      if (byte != 0) {
+        values.add(
+          MapEntry(
+            index,
+            byte == null
+                ? _unknown
+                : _Byte(FlowValue.constant(Constant.integer(byte)), _uint8, 0),
+          ),
+        );
+      }
+    }
+    return FlowMemory._(
+      0,
+      bytes.length,
+      [(0, bytes.length)],
+      StateMap.fromEntries(values),
+      const .bottom(),
+    );
+  }
+
   new _(this.start, this.length, this._zeroes, this._bytes, this._retained);
 
   bool contains(int offset, int size) =>
@@ -376,6 +401,7 @@ final class _Byte(
   FlowValue get references => type == null ? value : value.references;
 
   _Byte join(_Byte other, {bool widen = false}) {
+    if (identical(this, other)) return this;
     if (type == other.type && index == other.index) {
       return _Byte(value.join(other.value, widen: widen), type, index);
     }
@@ -395,10 +421,11 @@ final class _Byte(
 
   @override
   bool operator ==(Object other) =>
+      identical(this, other) ||
       other is _Byte &&
-      type == other.type &&
-      index == other.index &&
-      value == other.value;
+          type == other.type &&
+          index == other.index &&
+          value == other.value;
 
   @override
   int get hashCode => Object.hash(value, type, index);

@@ -22,6 +22,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
   /// must not silently reuse the replaced graph's layout decisions.
   /// [allocationFailure] supplies the same ordinary failure body used by target
   /// allocation; its exception values and state remain visible to handlers.
+  /// [initialMemory] binds stable native getters to their actual entry bytes.
   ProgramFlowFacts run(
     IrProgram program,
     Iterable<FlowEntry> entries, {
@@ -30,6 +31,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
     FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
     FunctionTarget? allocationFailure,
+    Map<FunctionTarget, List<int?>> initialMemory = const {},
   }) {
     final initial = [
       for (final entry in entries)
@@ -43,6 +45,10 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     final callbacks = Map<NativeCallbackTarget, FunctionTarget>.unmodifiable(
       nativeEntries,
     );
+    final memory = Map<FunctionTarget, List<int?>>.unmodifiable({
+      for (final entry in initialMemory.entries)
+        entry.key: List<int?>.unmodifiable(entry.value),
+    });
     ProgramFlowFacts analyze(IrProgram input) => ProgramFlow(
       input,
       initial,
@@ -51,6 +57,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       nativeEntries: callbacks,
       memoryLayout: memoryLayoutFor?.call(input),
       allocationFailure: allocationFailure,
+      initialMemory: memory,
     ).facts;
     final stages = [
       for (final pass in passes) (kind: pass.kind, run: pass.bind()),

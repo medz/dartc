@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 
 import 'flow_state.dart';
+import 'flow_memory.dart';
 import 'flow_value.dart';
 import 'integer_range.dart';
 import 'memory_layout.dart';
@@ -26,7 +27,13 @@ final class ProgramFlow(
 
   /// Ordinary target body reporting a retained allocation's failure.
   final FunctionTarget? allocationFailure,
+
+  /// Fixed native regions returned by zero-argument external getters.
+  /// Bytes describe the real entry state; null bytes are unknown. Getters must
+  /// return the same nonzero address throughout this execution context.
+  Map<FunctionTarget, List<int?>> initialMemory = const {},
 }) {
+  late final Map<FunctionTarget, FlowMemoryBinding> _externalMemory;
   final _nativeEntries = Map<NativeCallbackTarget, FunctionTarget>.unmodifiable(
     nativeEntries,
   );
@@ -53,6 +60,23 @@ final class ProgramFlow(
   ProgramFlowFacts? _facts;
 
   this {
+    _externalMemory = {
+      for (final entry in initialMemory.entries)
+        entry.key: (
+          allocation: FlowObject(DirectCall(entry.key, []), this),
+          memory: FlowMemory.bytes(entry.value),
+        ),
+    };
+    for (final target in _externalMemory.keys) {
+      final body = program.implementationOf(target);
+      if (target.signature != FunctionType(.integer, []) ||
+          body is! IrExternal ||
+          body.memory is! UnchangedMemory) {
+        throw ArgumentError(
+          'Entry storage requires a non-mutating external address getter.',
+        );
+      }
+    }
     if (allocationFailure case final target?
         when program.implementationOf(target) is! IrFunction ||
             target.kind != .function ||
@@ -229,8 +253,16 @@ final class ProgramFlow(
       activation,
       entry.arguments,
       open
-          ? (_externalState ??= FlowState(program, memoryLayout: memoryLayout))
-          : FlowState(program, memoryLayout: memoryLayout),
+          ? (_externalState ??= FlowState(
+              program,
+              memoryLayout: memoryLayout,
+              externalMemory: _externalMemory,
+            ))
+          : FlowState(
+              program,
+              memoryLayout: memoryLayout,
+              externalMemory: _externalMemory,
+            ),
     );
   }
 
@@ -330,13 +362,12 @@ final class ProgramFlow(
         input,
         target.returnType.substitute(environment),
         effects: effects,
-        writesMemory: body is! IrExternal || body.writesMemory,
-        zeroedMemorySizeParameter: body is IrExternal
-            ? body.zeroedMemorySizeParameter
-            : null,
+        memory: body is IrExternal ? body.memory : const .arbitrary(),
+        capturesArguments: body is! IrExternal || body.capturesArguments,
+        returned: input.externalResult(target),
       );
     }
-    final path = _recursivePath(caller, target, arguments);
+    final path = _recursivePath(caller, operation, target, arguments);
     final site = _callSites.putIfAbsent((
       caller,
       operation,
@@ -538,11 +569,17 @@ final class ProgramFlow(
 
   List<_Activation> _recursivePath(
     _Activation caller,
+    Instruction operation,
     FunctionTarget target,
     List<FlowValue> arguments,
   ) {
     bool matches(_Activation candidate) {
-      if (candidate.body.target != target) return false;
+      if (candidate.body.target != target ||
+          !candidate.callSites.any(
+            (site) => identical(site.operation, operation),
+          )) {
+        return false;
+      }
       // Distinct callbacks can re-enter the same helper without forming a cycle.
       for (final (index, argument) in arguments.indexed) {
         final incoming = _callableOrigins(argument);
@@ -2319,19 +2356,32 @@ final class ProgramFlow(
     FlowState state,
     ValueType resultType, {
     Set<Effect>? effects,
-    bool writesMemory = true,
-    int? zeroedMemorySizeParameter,
+    ExternalMemory memory = const .arbitrary(),
+    bool capturesArguments = true,
+    FlowValue? returned,
   }) {
     effects ??= operation.effects;
     activation.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
-    final next = state.copy();
-    next.escape(inputs);
-    if (writesMemory && effects.contains(Effect.writesStorage)) {
-      next.invalidate([next.exposedValues]);
+    var next = state.copy();
+    if (capturesArguments) next.escape(inputs);
+    if (effects.contains(Effect.writesStorage)) {
+      switch (memory) {
+        case ArbitraryMemory():
+          next.invalidate([...inputs, next.exposedValues]);
+        case WrittenMemory(:final addressParameter, :final lengthParameter) ||
+            ReleasedMemory(:final addressParameter, :final lengthParameter):
+          next = next.overwriteNative(
+            inputs[addressParameter],
+            inputs[lengthParameter],
+            release: memory is ReleasedMemory,
+          );
+        default:
+          break;
+      }
     }
     if (effects.contains(Effect.callsUserCode)) {
       // Re-entry follows values that crossed this boundary or declared exports.
-      _admitEscaped(next);
+      _admitEscaped(next, arguments: inputs);
       for (final callback in {
         ..._escapingActivations,
         for (final target in _openEntries) _roots[target]!,
@@ -2346,17 +2396,18 @@ final class ProgramFlow(
         }
       }
     }
-    final mapping = zeroedMemorySizeParameter == null
-        ? null
-        : next.allocateMemory(
-            FlowObject(operation, activation, type: resultType),
-            inputs[zeroedMemorySizeParameter],
-            repeated:
-                activation.repeated ||
-                _loopBlocks(activation.body).contains(block),
-          );
+    final mapping = switch (memory) {
+      ZeroedMemory(:final lengthParameter) => next.allocateMemory(
+        FlowObject(operation, activation, type: resultType),
+        inputs[lengthParameter],
+        repeated:
+            activation.repeated || _loopBlocks(activation.body).contains(block),
+      ),
+      _ => null,
+    };
     return FlowResult(
       value:
+          returned ??
           mapping?.value ??
           (resultType == .never
               ? const FlowValue.bottom()
@@ -2389,8 +2440,11 @@ final class ProgramFlow(
     }
   }
 
-  void _admitEscaped(FlowState state) {
-    final reachable = state.exposedValues;
+  void _admitEscaped(
+    FlowState state, {
+    Iterable<FlowValue> arguments = const [],
+  }) {
+    final reachable = state.exposedFrom([state.exposedValues, ...arguments]);
     _Activation? prepare(
       Object key,
       FunctionTarget target,
