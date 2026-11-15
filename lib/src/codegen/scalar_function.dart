@@ -230,6 +230,7 @@ final class ScalarFunction<R extends Object>(
           );
         } else if (instruction is ReferenceAddress ||
             instruction is ReferenceFromAddress ||
+            instruction is AllocatedObject ||
             selection.body.aliases.contains(instruction) ||
             instruction is TypeView ||
             instruction is UncheckedCast ||

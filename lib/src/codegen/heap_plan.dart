@@ -4,7 +4,6 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 
-import 'program_layout.dart';
 import 'heap_runtime.dart';
 
 /// Provides ordinary IR bodies for allocation and initialization.
@@ -64,23 +63,55 @@ final class HeapPlan({final HeapRuntime? runtime}) {
   Set<FunctionTarget> get primitives => {...?runtime?.primitives.keys, invalid};
 
   final _functions = <FunctionTarget, IrFunction>{};
+  final _constructions = <FunctionTarget, IrFunction>{};
+
+  /// Supplies a typed constructor bridge before target representation is erased.
+  IrFunction construction(FunctionTarget initializer) =>
+      _constructions.putIfAbsent(initializer, () {
+        final type = initializer.owner!;
+        final target = FunctionTarget(
+          null,
+          'construct${_constructions.length}',
+          type,
+          initializer.signature.parameters,
+          typeParameters: type.typeParameters,
+        );
+        final entry = Block(target.parameterTypes);
+        final object = _allocate(
+          entry,
+          type,
+          type,
+          entry.emit(ReifyType(type)),
+          const Constant.integer(0),
+        );
+        entry.emit(InitializeObject(initializer, object, entry.parameters));
+        entry.finish(Return(object));
+        return IrFunction(target, [entry]);
+      });
+
+  /// Supplies the same payload bridge consumed by physical preparation.
+  IrFunction payload(ClassType type) {
+    final target = allocatePayload(type);
+    return _functions.putIfAbsent(target, () => _build(target));
+  }
 
   /// Materializes retained allocation behavior before machine selection.
-  Iterable<IrFunction> functions(
-    ProgramLayout layouts,
-    Set<FunctionTarget> calls,
-  ) {
+  Iterable<IrFunction> functions(Set<FunctionTarget> calls) {
     for (final entry in _factories.entries) {
       if (calls.contains(entry.key)) {
-        _functions.putIfAbsent(entry.key, () => _build(entry.key, layouts));
+        _functions.putIfAbsent(entry.key, () => _build(entry.key));
       }
     }
     return _functions.values;
   }
 
-  IrFunction _build(FunctionTarget target, ProgramLayout layouts) {
-    final (:initializer, :type) = _factories[target]!;
-    final entry = Block(target.parameterTypes);
+  Value _allocate(
+    Block entry,
+    ClassType type,
+    ValueType resultType,
+    Value metadata,
+    Value payload,
+  ) {
     final context = _runtime.primitives.entries
         .singleWhere((entry) => entry.value == .context)
         .key;
@@ -90,29 +121,39 @@ final class HeapPlan({final HeapRuntime? runtime}) {
         entry.emit(ObjectDescriptorAddress(type)),
         CallFrameValue.stackPointer,
         CallFrameValue.returnAddress,
-        _payloads[type] == target
-            ? entry.parameters.single
-            : const Constant.integer(0),
+        payload,
       ]),
     );
     final object = entry.emit(
-      ReferenceFromAddress(
-        address,
-        initializer == null
-            ? target.returnType
-            : type.typeParameters.isEmpty
-            ? type
-            : ValueType.object,
-      ),
+      resultType == type
+          ? AllocatedObject(address, type, payload)
+          : ReferenceFromAddress(address, resultType),
     );
     entry.emit(
       StoreObjectReference(
         object,
         const Constant.integer(ObjectHeader.typeOffset),
-        initializer == null
-            ? layouts.types.constant(type)
-            : entry.parameters.last,
+        metadata,
       ),
+    );
+    return object;
+  }
+
+  IrFunction _build(FunctionTarget target) {
+    final (:initializer, :type) = _factories[target]!;
+    final entry = Block(target.parameterTypes);
+    final object = _allocate(
+      entry,
+      type,
+      initializer == null
+          ? target.returnType
+          : type.typeParameters.isEmpty
+          ? type
+          : ValueType.object,
+      initializer == null ? entry.emit(ReifyType(type)) : entry.parameters.last,
+      _payloads[type] == target
+          ? entry.parameters.single
+          : const Constant.integer(0),
     );
     if (initializer != null) {
       entry.emit(

@@ -150,6 +150,8 @@ void writeFunction(
     PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
     ReferenceAddress() => 'referenceAddress ${value(op.object)}',
     ReferenceFromAddress() => 'referenceFromAddress ${value(op.address)}',
+    AllocatedObject() =>
+      'allocatedObject ${op.type.dartName} ${value(op.address)}, ${value(op.payloadBytes)}',
     PointerAddress() => 'pointerAddress ${value(op.pointer)}',
     PointerOffset() => 'pointerOffset ${value(op.pointer)}, ${value(op.index)}',
     LoadNative() => 'loadNative ${op.nativeType} ${value(op.address)}',

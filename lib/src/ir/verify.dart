@@ -398,6 +398,7 @@ FunctionReferences verifyCallable(
             direct: direct,
           ));
         case NativeView(type: final ClassType type) ||
+            AllocatedObject(type: final ClassType type) ||
             NewPayload(type: final ClassType type):
           (instantiatedClasses ??= {}).add(type.declaration);
         case Construct(:final instantiatedType):

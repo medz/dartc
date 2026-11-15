@@ -245,7 +245,9 @@ void main() {
       );
       final create = FunctionTarget(f.library, 'create', sub, []);
       final allocated = Block();
-      final receiver = allocated.emit(ReferenceFromAddress(one, sub));
+      final receiver = allocated.emit(
+        AllocatedObject(one, sub, const Constant.integer(0)),
+      );
       allocated.emit(InitializeObject(init, receiver, []));
       allocated.finish(Return(receiver));
       IrFunction(create, [allocated]);

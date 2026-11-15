@@ -529,6 +529,11 @@ sealed class Instruction(super.type) extends Value {
       final NativeSymbolAddress v => NativeSymbolAddress(v.reference),
       final NativeCallbackAddress v => NativeCallbackAddress(v.target),
       final ReferenceAddress v => ReferenceAddress(map(v.object)),
+      final AllocatedObject v => AllocatedObject(
+        map(v.address),
+        type(v.type) as ClassType,
+        map(v.payloadBytes),
+      ),
       final ReferenceFromAddress v => ReferenceFromAddress(
         map(v.address),
         type(v.type),
@@ -644,7 +649,7 @@ sealed class Instruction(super.type) extends Value {
       ),
       final InitializeObject v => InitializeObject(
         v.initializer,
-        map(v.receiver) as ReferenceFromAddress,
+        map(v.receiver),
         v.inputs.skip(1).map(map),
       ),
       final Construct v => Construct(
@@ -957,6 +962,7 @@ sealed class Instruction(super.type) extends Value {
     PointerOffset() ||
     NativeView() => _allocate,
     FrameValue() ||
+    AllocatedObject() ||
     Identical() ||
     Equals() ||
     IntBinary() ||
@@ -1142,6 +1148,31 @@ final class ReferenceAddress(final Value object) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => [object];
+}
+
+/// Names the fresh storage returned by a successful managed allocation.
+///
+/// The producer proves that [address] is nonzero, uniquely owns this new object,
+/// and has zeroed fixed fields plus [payloadBytes] inline bytes. Header metadata
+/// is initialized separately before user code can observe the object. This view
+/// neither allocates again nor introduces another allocation failure.
+final class AllocatedObject(
+  final Value address,
+  ClassType super.type,
+  final Value payloadBytes,
+) extends Instruction {
+  this {
+    if (address.type != .integer ||
+        payloadBytes.type != .integer ||
+        (type as ClassType).isAbstract && type != ValueType.string) {
+      throw ArgumentError(
+        'Expected fresh object storage and its payload size.',
+      );
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [address, payloadBytes];
 }
 
 /// Recovers an existing reference from initialized storage without allocating.
@@ -1983,14 +2014,19 @@ final class Construct(
 /// Exceptions and writes remain ordinary call effects. This does not allocate.
 final class InitializeObject(
   final FunctionTarget initializer,
-  final ReferenceFromAddress receiver,
+  final Value receiver,
   Iterable<Value> arguments,
 ) extends Instruction {
   @override
   final List<Value> inputs = .unmodifiable([receiver, ...arguments]);
 
   this : super(.voidType) {
-    if (initializer.kind != .initializer || receiver.type.mayBeNull) {
+    if (initializer.kind != .initializer ||
+        receiver.type.mayBeNull ||
+        receiver is! ReferenceFromAddress && receiver is! AllocatedObject ||
+        receiver is AllocatedObject &&
+            (receiver.type as ClassType).declaration !=
+                initializer.owner!.declaration) {
       throw ArgumentError('Initialization requires fresh non-null storage.');
     }
     checkArguments(initializer.erasedParameterTypes, inputs);

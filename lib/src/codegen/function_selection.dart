@@ -96,7 +96,8 @@ final class FunctionSelection<R>(
       }
       for (final instruction in body.instructions[block]!) {
         if (instruction is ReferenceAddress ||
-            instruction is ReferenceFromAddress) {
+            instruction is ReferenceFromAddress ||
+            instruction is AllocatedObject) {
           final type = instruction is ReferenceAddress
               ? instruction.object.type
               : instruction.type;
@@ -217,7 +218,9 @@ final class FunctionSelection<R>(
               StoreNative() ||
               FloatBitCast():
             break;
-          case ReferenceAddress() || ReferenceFromAddress():
+          case ReferenceAddress() ||
+              ReferenceFromAddress() ||
+              AllocatedObject():
             break;
           case NumericNegate(:final type):
             if (type != .floating) {

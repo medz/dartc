@@ -187,7 +187,7 @@ final class ProgramSelection(
     };
     Iterable<IrFunction> supportFunctions() => [
       ..._normalization.supportFunctions,
-      ...heap.functions(layouts, calls),
+      ...heap.functions(calls),
       ...layouts.native.functions,
       ...members.functions,
       ...layouts.closures.functions,

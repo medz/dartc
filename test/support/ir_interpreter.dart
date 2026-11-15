@@ -1961,6 +1961,7 @@ final class IrInterpreter(
         case LoadObjectData() ||
             ReferenceAddress() ||
             ReferenceFromAddress() ||
+            AllocatedObject() ||
             StoreObjectData():
           throw UnsupportedError(
             'Managed physical storage requires native execution.',

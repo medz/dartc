@@ -204,6 +204,40 @@ void main() {
     },
   );
 
+  test('allocated references keep their identity and storage extent', () {
+    final type = ClassType(null, 'Storage');
+    final entry = Block([.integer, .integer]);
+    final object = AllocatedObject(
+      entry.parameters.first,
+      type,
+      entry.parameters.last,
+    );
+    final replacement = Block([.integer, .integer]);
+    final copied = object.mapInputs(
+      (input) => replacement.parameters[entry.parameters.indexOf(input as BlockParameter)],
+    ) as AllocatedObject;
+    expect(copied.address, same(replacement.parameters.first));
+    expect(copied.payloadBytes, same(replacement.parameters.last));
+    expect(copied.type, same(type));
+    expect(copied.mayThrow, isFalse);
+    expect(
+      () => AllocatedObject(const Constant.nullValue(), type, address),
+      throwsArgumentError,
+    );
+    expect(
+      () => AllocatedObject(address, type, const Constant.boolean(false)),
+      throwsArgumentError,
+    );
+    expect(
+      () => AllocatedObject(
+        address,
+        ClassType(null, 'Abstract', isAbstract: true),
+        address,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('reference recovery preserves traced types without allocating', () {
     final object = Block([.object.nullable]).parameters.single;
     final location = ReferenceAddress(object);

@@ -121,6 +121,7 @@ export 'src/ir/value.dart'
         Instruction,
         ReferenceAddress,
         ReferenceFromAddress,
+        AllocatedObject,
         NewPayload,
         NativeView,
         NativeAddress,

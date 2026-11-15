@@ -45,6 +45,7 @@ base class SelectedFunction(
         TypeReference(:final operand) => [operand],
         ReferenceEquality(:final left, :final right) => [left, right],
         NativeInvocation(:final inputs) => inputs,
+        AllocatedObject(:final address) => [address],
         Instruction() => operation.inputs,
         _ => throw ArgumentError('Expected a selected operation.'),
       };

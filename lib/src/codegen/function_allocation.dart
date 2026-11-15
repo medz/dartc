@@ -684,7 +684,8 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         );
       }
     } else if (operation is ReferenceAddress ||
-        operation is ReferenceFromAddress) {
+        operation is ReferenceFromAddress ||
+        operation is AllocatedObject) {
       final source = input(selection.body.inputsOf(operation).single);
       consume();
       result = output(.general, preferred: source);
