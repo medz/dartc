@@ -131,7 +131,9 @@ noSuchMethodForwarderCandidates(
   if (element is! internal.InterfaceElementImpl) {
     throw UnsupportedError('Analyzer noSuchMethod metadata unavailable.');
   }
-  final isAbstract = element is internal.ClassElementImpl && element.isAbstract;
+  final isAbstract =
+      element is MixinElement ||
+      element is internal.ClassElementImpl && element.isAbstract;
   if (isAbstract && checkCovariance == null) return const [];
   final interface = element.inheritanceManager.getInterface(element);
   late final inherited = element.inheritedConcreteMembers;

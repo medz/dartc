@@ -36,6 +36,29 @@ void main() {
       );
     });
 
+    test(
+      'private mixin obligations are resolved by each concrete application',
+      () {
+        for (final value in [-4, 0, 41]) {
+          fixture.compare('inheritedPrivate', [
+            value,
+          ], () => sdk.inheritedPrivate(value));
+          fixture.compare('missingPrivate', [
+            value,
+          ], () => sdk.missingPrivate(value));
+        }
+        expect(
+          fixture.program.functions.where(
+            (body) => [
+              'PrivateConstraint',
+              'PrivateObligation',
+            ].contains(body.target.owner?.name),
+          ),
+          isEmpty,
+        );
+      },
+    );
+
     for (final (name, reference) in <(String, Object? Function())>[
       ('overrideOrder', sdk.overrideOrder),
       ('superMembers', sdk.superMembers),

@@ -57,6 +57,17 @@ class PrivateApplied with foreign.Foreign {
   int localValue() => _value();
 }
 
+mixin PrivateConstraint on foreign.ForeignBase {}
+
+mixin PrivateObligation implements foreign.ForeignRequired {}
+
+class PrivateInherited extends foreign.ForeignBase with PrivateConstraint {}
+
+class PrivateMissing with PrivateObligation {}
+
+int inheritedPrivate(int value) => PrivateInherited().inherited(value);
+int missingPrivate(int value) => foreign.callRequired(PrivateMissing(), value);
+
 String overrideOrder() {
   final applied = Applied(2);
   final own = Own();
