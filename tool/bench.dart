@@ -52,7 +52,10 @@ Future<void> main(List<String> arguments) async {
       'created': DateTime.now().toUtc().toIso8601String(),
       'revision': _gitRevision(),
       'dart': Platform.version,
-      'compiler': compiler,
+      'compiler': {
+        'executable': compiler.executable,
+        'prefix': compiler.prefix,
+      },
       'target': options.target,
       'fixtures': report,
     };
@@ -142,6 +145,7 @@ final class _Options(
   final double maxTimeGrowth,
   final double maxSizeGrowth,
   final bool build,
+  final int runRepeats,
 ) {
   factory _Options.parse(List<String> arguments) {
     var help = false;
@@ -154,6 +158,7 @@ final class _Options(
     var maxTimeGrowth = 10.0;
     var maxSizeGrowth = 5.0;
     var build = false;
+    var runRepeats = 3;
     for (final argument in arguments) {
       if (argument == '--help' || argument == '-h') {
         help = true;
@@ -181,6 +186,15 @@ final class _Options(
         );
       } else if (argument == '--build') {
         build = true;
+      } else if (argument.startsWith('--run-repeats=')) {
+        runRepeats = int.parse(argument.substring('--run-repeats='.length));
+        if (runRepeats < 1) {
+          throw ArgumentError.value(
+            runRepeats,
+            'runRepeats',
+            'Must be positive',
+          );
+        }
       } else {
         throw ArgumentError.value(argument, 'argument', 'Unknown option');
       }
@@ -196,6 +210,7 @@ final class _Options(
       maxTimeGrowth,
       maxSizeGrowth,
       build,
+      runRepeats,
     );
   }
 }
@@ -299,13 +314,19 @@ Future<_Row> _run(
   var runStdout = '';
   var runMatched = true;
   if (fixture.run && !timedOut && exit == 0) {
-    final runWatch = Stopwatch()..start();
-    final run = await Process.run(File(output).absolute.path, const []);
-    runWatch.stop();
-    runMs = runWatch.elapsedMilliseconds;
-    runExitCode = run.exitCode;
-    runStdout = '${run.stdout}';
-    runMatched = fixture.expected == null || runStdout == fixture.expected;
+    final times = <int>[];
+    for (var index = 0; index < options.runRepeats; index++) {
+      final runWatch = Stopwatch()..start();
+      final run = await Process.run(File(output).absolute.path, const []);
+      runWatch.stop();
+      times.add(runWatch.elapsedMilliseconds);
+      runExitCode = run.exitCode;
+      runStdout = '${run.stdout}';
+      runMatched &= fixture.expected == null || runStdout == fixture.expected;
+      if (run.exitCode != 0) break;
+    }
+    times.sort();
+    runMs = times.isEmpty ? null : times[times.length ~/ 2];
   }
   final bytes = File(output).existsSync() ? File(output).lengthSync() : 0;
   return _Row(
@@ -435,6 +456,7 @@ Options:
   --build                 Build build/bench/dartc and use it.
   --target=macos-arm64    Target passed to the compiler.
   --timeout=seconds       Per-compilation limit (default: 120).
+  --run-repeats=3         Executable runs per fixture; the median is reported.
   --output=path           Report path (default: build/bench/latest.json).
   --baseline=path         Compare against a previous report.
   --max-time-growth=10    Allowed time growth percentage.
