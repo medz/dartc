@@ -20,6 +20,8 @@
 
 - Preserve integer bounds on executable branch paths and across stored or returned SSA aliases, and widen loop state only when bounds expand, retaining overflow and arithmetic exceptions. Exclude unrelated concrete receivers from generic member calls and analyze constant lists through their declared object storage.
 
+- Expose proven finite integer loops to shared program analysis, allowing known accumulated results, nested loops and local object computations to become constants. Preserve early exits, observable call order, exception paths and source locations; retain residual execution when the code expansion budget is spent.
+
 - Relate definite field, cell and global reads to their stored values across ordinary calls. Checked bounds reach later reads while writes, weak references, ambiguous receivers and repeated allocations retain conservative behavior.
 
 - Track actual function and object values in traced inline payloads through overwrites, copies, aliases and call summaries. Promote proven payload reads to SSA values and remove unused storage while preserving escaped references and raw memory invalidation. Unobserved intermediate lists and pure initialization of mutable or final bindings disappear after their stored values are propagated, while observable initialization effects and timing remain. Simple synchronous `runZoned` wrappers reduce to their callback computation without Zone or closure storage. Local catch handlers no longer force unobserved exception fields to remain; reads and rethrows still preserve their payload. Proven local throws without implicit Error state or a newly observed trace become ordinary control flow, eliminating transient exception objects while retaining operand effects, finalizers and observed traces.

@@ -19,6 +19,10 @@ final class FunctionRewrite(
   /// New operations use source SSA values and inherit the replaced source origin.
   final Map<Block, Terminator> terminators = const {},
 
+  /// Source sites for new instructions and blocks introduced by [terminators].
+  /// Each origin belongs to the original function and preserves its inline chain.
+  final Map<Object, Object> origins = const {},
+
   /// New block parameters, with a value supplied by each retained incoming edge.
   final Map<BlockParameter, ({Block block, Map<Jump, Value> incoming})> phis =
       const {},
@@ -43,7 +47,7 @@ final class FunctionRewrite(
       inlined =
       const {},
 }) {
-  final _origins = <Object, Block>{};
+  final _origins = <Object, Object>{};
   late final _blocks = _sourceBlocks();
 
   Terminator _end(Block block) => terminators[block] ?? block.end;
@@ -71,6 +75,31 @@ final class FunctionRewrite(
         pending.addAll(block.successors.map((edge) => edge.target));
       }
     }
+    if (origins.isEmpty) return blocks;
+    Set<Object> sites(Iterable<Block> blocks) => {
+      for (final block in blocks) ...[
+        block,
+        ...block.instructions,
+        if (block.end case Invoke(:final operation)) operation,
+      ],
+    };
+    final original = sites(function.blocks),
+        introduced = {
+          ...sites(blocks),
+          for (final end in terminators.values)
+            if (end case Invoke(:final operation)) operation,
+        };
+    if (origins.entries.any(
+      (entry) =>
+          original.contains(entry.key) ||
+          !introduced.contains(entry.key) ||
+          !original.contains(entry.value),
+    )) {
+      throw ArgumentError(
+        'New graph sites require an original function source site.',
+      );
+    }
+    _origins.addAll(origins);
     return blocks;
   }
 

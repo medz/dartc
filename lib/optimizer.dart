@@ -19,6 +19,7 @@ export 'src/optimizer/program_pass.dart' show ProgramPass, ProgramTransform;
 export 'src/optimizer/program_optimizer.dart' show ProgramOptimizer;
 export 'src/optimizer/simplification.dart' show ProgramSimplification;
 export 'src/optimizer/inlining.dart' show DirectCallInlining;
+export 'src/optimizer/loop_specialization.dart' show ProgramLoopSpecialization;
 export 'src/optimizer/function_rewrite.dart' show FunctionRewrite;
 export 'src/optimizer/storage_elimination.dart' show ProgramStorageElimination;
 export 'src/optimizer/storage_promotion.dart' show ProgramStoragePromotion;
