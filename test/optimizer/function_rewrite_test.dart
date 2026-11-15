@@ -619,6 +619,52 @@ void main() {
     expect(after.blocks.first.end, isA<Invoke>());
   });
 
+  test('inlined throwing type tests narrow only their successful edge', () {
+    final calleeTarget = FunctionTarget(_uri, 'narrow', .integer, [
+      .object.nullable,
+    ]);
+    final entry = Block(calleeTarget.parameterTypes),
+        yes = Block([ValueType.integer]),
+        no = Block();
+    final test = entry.emit(TypeTest(entry.parameters.single, .integer));
+    entry.finish(Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)));
+    yes.finish(Return(yes.parameters.single));
+    no.finish(Throw(const Constant.string('wrong type')));
+    final callee = IrFunction(calleeTarget, [entry, yes, no]);
+    final target = FunctionTarget(_uri, 'caller', .integer, [.object.nullable]);
+    final start = Block(target.parameterTypes),
+        returned = Block([ValueType.integer]),
+        caught = Block([.object, .stackTrace]);
+    final call = DirectCall(calleeTarget, start.parameters);
+    final handler = Jump(caught, [
+      UnwindValue.exception,
+      UnwindValue.stackTrace,
+    ]);
+    start.finish(
+      Invoke(call, onReturn: Jump(returned, [call]), onThrow: handler),
+    );
+    returned.finish(Return(returned.parameters.single));
+    caught.finish(const Return(Constant.integer(-1)));
+    final before = IrFunction(target, [start, returned, caught]);
+    final after = FunctionRewrite(
+      before,
+      inlined: {
+        call: (
+          body: callee,
+          arguments: start.parameters,
+          environment: const {},
+          handler: handler,
+        ),
+      },
+    ).run();
+    for (final function in [before, after]) {
+      final interpreter = IrInterpreter(IrProgram([], [function, callee]), {});
+      expect(interpreter.run(function, [41]), 41);
+      expect(interpreter.run(function, ['wrong']), -1);
+      expect(interpreter.run(function, [null]), -1);
+    }
+  });
+
   test('a collapsed type-test edge retains a valid refined operand', () {
     final target = FunctionTarget(_uri, 'refine', .integer, [.object]);
     final entry = Block(target.parameterTypes),

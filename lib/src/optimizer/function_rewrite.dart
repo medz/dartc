@@ -259,8 +259,31 @@ final class FunctionRewrite(
           locals[parameter] = view;
         }
       }
-      Jump edge(Jump source) =>
-          Jump(copiedBlocks[source.target]!, source.arguments.map(read));
+      Jump edge(Jump source) {
+        final casts = <Instruction>[];
+        final arguments = <Value>[];
+        for (final argument in source.arguments) {
+          if (argument is TestedValue && resumed.containsKey(argument.test)) {
+            final cast = UncheckedCast(
+              read(argument.test.operand),
+              argument.type.substitute(environment),
+            );
+            casts.add(cast);
+            arguments.add(cast);
+            locate(argument.test, cast, body, call);
+          } else {
+            arguments.add(read(argument));
+          }
+        }
+        final next = Jump(copiedBlocks[source.target]!, arguments);
+        if (casts.isEmpty) return next;
+        // The invoked test's boolean crosses a block; narrow only on its selected edge.
+        final narrowed = Block();
+        instructions[narrowed] = casts;
+        ends[narrowed] = next;
+        return Jump(narrowed);
+      }
+
       late Block exit;
       late Value result;
       for (final source in body.blocks) {
