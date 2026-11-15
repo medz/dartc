@@ -133,7 +133,7 @@ final class NumericNormalization(
           (integer, ValueType.integer),
           (floating, ValueType.floating),
         ]) {
-          final narrowed = block.emit(TypeCast(value, type));
+          final narrowed = block.emit(UncheckedCast(value, type));
           block.finish(
             Return(
               block.emit(
@@ -197,7 +197,7 @@ final class NumericNormalization(
         );
         return IrFunction(target, [entry]);
       }
-      // Narrow boxed operands before selecting integer or floating arithmetic.
+      // A num is either int or double; each edge proves the operand representation.
       final index = leftType == .number ? 0 : 1;
       final operand = entry.parameters[index];
       final integer = Block(), floating = Block();
@@ -213,7 +213,7 @@ final class NumericNormalization(
         (floating, ValueType.floating),
       ]) {
         final arguments = <Value>[...entry.parameters];
-        arguments[index] = block.emit(TypeCast(operand, type));
+        arguments[index] = block.emit(UncheckedCast(operand, type));
         block.finish(
           Return(
             block.emit(
@@ -394,12 +394,12 @@ final class NumericNormalization(
           Jump(other),
         ),
       );
-      integer.finish(Return(integer.emit(TypeCast(value, .integer))));
+      integer.finish(Return(integer.emit(UncheckedCast(value, .integer))));
       other.finish(
         Return(
           other.emit(
             DirectCall(_conversion(rounding, true).target, [
-              other.emit(TypeCast(value, .floating)),
+              other.emit(UncheckedCast(value, .floating)),
             ]),
           ),
         ),
@@ -605,7 +605,7 @@ final class NumericNormalization(
           integer.finish(
             Return(
               integer.emit(
-                NumericToDouble(integer.emit(TypeCast(value, .integer))),
+                NumericToDouble(integer.emit(UncheckedCast(value, .integer))),
               ),
             ),
           );
@@ -613,7 +613,7 @@ final class NumericNormalization(
             Return(
               other.emit(
                 DirectCall(_doubleRounding(rounding, true).target, [
-                  other.emit(TypeCast(value, .floating)),
+                  other.emit(UncheckedCast(value, .floating)),
                 ]),
               ),
             ),

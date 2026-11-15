@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:dartc/ir.dart';
+import 'package:dartc/codegen.dart' show ProgramNormalization;
 import 'package:dartc/abi.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/suspension_normalization.dart';
@@ -150,26 +151,30 @@ void main() {
             '/codegen/fixtures/suspensions.dart',
           ) ||
           target.enclosing != null && belongs(target.enclosing!);
-      final functions = program.functions
+      final normalized = ProgramNormalization(
+        program,
+        runtime: heapRuntime,
+      ).run();
+      final functions = normalized.functions
           .where((body) => belongs(body.target))
           .toList();
       final closures = ClosureStorage(functions);
       final layouts = ProgramLayout(
-        [...program.classes, ...closures.classes],
+        [...normalized.classes, ...closures.classes],
         nativeLayout: NativeLayout(Target.host()),
         functions: functions,
         closureStorage: closures,
         typeRuntime: heapRuntime.types,
       );
       final members = MemberCalls(
-        program,
+        normalized,
         functions.map((f) => f.target).toSet(),
       );
       for (final function in functions) {
         final selected = FunctionRepresentation(
           function,
           layouts,
-          CheckedCasts(),
+          CheckedCasts(failure: heapRuntime.typeCheckFailure),
           members,
           HeapPlan(runtime: heapRuntime),
         );
