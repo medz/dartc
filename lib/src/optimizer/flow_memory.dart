@@ -7,6 +7,7 @@ import 'package:dartc/layout.dart';
 import 'package:dartc/interop.dart';
 
 import 'flow_value.dart';
+import 'integer_range.dart';
 import 'state_map.dart';
 
 /// Byte facts for one allocation, without materializing its unused zeroes.
@@ -32,6 +33,41 @@ final class FlowMemory {
       length != null &&
       offset - start <= length! &&
       size <= length! - (offset - start);
+
+  bool containsRange(FlowIntegerRange offsets, int size) =>
+      contains(offsets.lower, size) && contains(offsets.upper, size);
+
+  /// Joins possible reads in work proportional to sparse facts, not allocation size.
+  FlowValue readRange(
+    FlowIntegerRange offsets,
+    NativeTypeRef storage,
+    NativeLayout layout,
+  ) {
+    if (offsets.constant case final offset?) {
+      return read(offset, storage, layout);
+    }
+    final size = layout.of(storage).size;
+    if (!containsRange(offsets, size)) {
+      return FlowValue.unknown(FfiTypes.valueType(storage))
+          .withReferences([references]);
+    }
+    final starts = {offsets.lower, offsets.upper};
+    for (final boundary in {
+      for (final (begin, end) in _zeroes) ...[begin, end],
+      for (final byte in _bytes.keys) ...[byte, byte + 1],
+    }) {
+      // A scalar window changes only when it crosses a byte-fact boundary.
+      for (var index = 0; index < size; index++) {
+        final start = boundary - index;
+        if (offsets.contains(start)) starts.add(start);
+      }
+    }
+    var result = const FlowValue.bottom();
+    for (final offset in starts) {
+      result = result.join(read(offset, storage, layout));
+    }
+    return result;
+  }
 
   FlowValue get references {
     var value = _retained;

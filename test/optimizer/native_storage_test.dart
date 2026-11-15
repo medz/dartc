@@ -84,6 +84,122 @@ void main() {
     },
   );
 
+  test(
+    'bounded reads inspect sparse interior changes without enumerating memory',
+    () {
+      const length = 1 << 30;
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), length);
+      final start = a.address.addresses.single.offset!;
+      final offsets = FlowValue.integerRange(
+        FlowIntegerRange(start, start + length - 8),
+      );
+      final load = LoadObjectData(
+        ObjectConstant(_type, {}),
+        _placeholder,
+        _i64,
+      );
+      expect(
+        _number(_step(a.state, load, operands: [a.object, offsets]).value),
+        0,
+      );
+      final middle = _store(
+        a.state,
+        _offset(a.address, length ~/ 2),
+        _u8,
+        _integer(1),
+      );
+      final changed = _step(middle, load, operands: [a.object, offsets]).value;
+      expect(changed.constant, isNull);
+      expect(changed.integers!.contains(1), isTrue);
+      expect(changed.integers!.contains(1 << 56), isTrue);
+      expect(
+        _number(_step(a.state, load, operands: [a.object, offsets]).value),
+        0,
+      );
+    },
+  );
+
+  test('bounded reads agree with every concrete byte window', () {
+    final a = _allocate(FlowState(_program, memoryLayout: _layout), 12);
+    final start = a.address.addresses.single.offset!;
+    final bytes = [0, 0, 7, 7, 7, 0, 2, 9, 0, 0, 0, 0];
+    var state = a.state;
+    for (final (index, byte) in bytes.indexed) {
+      state = _store(state, _offset(a.address, index), _u8, _integer(byte));
+    }
+    final load = LoadObjectData(ObjectConstant(_type, {}), _placeholder, _u32);
+    for (var lower = 0; lower <= bytes.length - 4; lower++) {
+      for (var upper = lower; upper <= bytes.length - 4; upper++) {
+        final result = _step(
+          state,
+          load,
+          operands: [
+            a.object,
+            FlowValue.integerRange(
+              FlowIntegerRange(start + lower, start + upper),
+            ),
+          ],
+        ).value;
+        final actual = [
+          for (var offset = lower; offset <= upper; offset++)
+            bytes[offset] |
+                bytes[offset + 1] << 8 |
+                bytes[offset + 2] << 16 |
+                bytes[offset + 3] << 24,
+        ]..sort();
+        expect(
+          result.integers,
+          FlowIntegerRange(actual.first, actual.last),
+          reason: 'byte starts $lower..$upper',
+        );
+      }
+    }
+  });
+
+  test(
+    'bounded writes preserve outside bytes, other allocations and snapshots',
+    () {
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
+      final b = _allocate(a.state, 8);
+      final start = a.address.addresses.single.offset!;
+      final store = StoreObjectData(
+        ObjectConstant(_type, {}),
+        _placeholder,
+        _u32,
+        _placeholder,
+      );
+      final written = _step(
+        b.state,
+        store,
+        operands: [
+          a.object,
+          FlowValue.integerRange(FlowIntegerRange(start + 4, start + 7)),
+          _integer(42),
+        ],
+      ).normal!;
+      for (var index = 0; index < 16; index++) {
+        expect(
+          _number(_load(written, _offset(a.address, index), _u8)),
+          4 <= index && index < 11 ? isNull : 0,
+          reason: 'byte $index',
+        );
+        expect(_number(_load(b.state, _offset(a.address, index), _u8)), 0);
+      }
+      expect(_number(_load(written, b.address, _i64)), 0);
+      for (final offsets in [
+        FlowIntegerRange(start - 1, start + 1),
+        FlowIntegerRange(start + 12, start + 13),
+      ]) {
+        final escaped = _step(
+          b.state,
+          store,
+          operands: [a.object, FlowValue.integerRange(offsets), _integer(42)],
+        ).normal!;
+        expect(_load(escaped, b.address, _i64).constant, isNull);
+      }
+    },
+  );
+
   test('native aliases observe truncated, signed and overlapping writes', () {
     final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
     final first = _store(a.state, a.address, _u32, _integer(0x12345678));

@@ -453,10 +453,10 @@ final class FlowState {
           value = value.join(
             layout != null &&
                     size != null &&
-                    address.offset != null &&
+                    address.offsets != null &&
                     memory != null &&
-                    memory.contains(address.offset!, size)
-                ? memory.read(address.offset!, nativeType, layout)
+                    memory.containsRange(address.offsets!, size)
+                ? memory.readRange(address.offsets!, nativeType, layout)
                 : FlowValue.unknown(resultType)
                       .withReferences([address.reference]),
           );
@@ -628,13 +628,11 @@ final class FlowState {
   }
 
   FlowValue _objectAddress(FlowValue owner, FlowValue offset) {
-    final constant = offset.constant;
-    final amount = constant is ScalarConstant && constant.value is int
-        ? constant.value as int
-        : null;
     var value = const FlowValue.bottom();
     for (final base in <Object>[...owner.objects, ...owner.constants]) {
-      value = value.join(FlowValue.address(FlowAddress(base, amount)));
+      value = value.join(
+        FlowValue.address(FlowAddress.ranged(base, offset.integers)),
+      );
     }
     if (owner.unknownTypes.isNotEmpty || value.isBottom) {
       value = value.join(FlowValue.unknown(.integer).withReferences([owner]));
@@ -715,9 +713,9 @@ final class FlowState {
         address.addresses.every(
           (a) =>
               a.base is FlowObject &&
-              a.offset != null &&
-              (_objects[a.base as FlowObject]?.memory?.contains(
-                    a.offset!,
+              a.offsets != null &&
+              (_objects[a.base as FlowObject]?.memory?.containsRange(
+                    a.offsets!,
                     size,
                   ) ??
                   false),
@@ -732,7 +730,14 @@ final class FlowState {
     for (final pointer in address.addresses) {
       final object = pointer.base as FlowObject;
       final state = _objects[object]!;
-      final memory = write(state.memory!, pointer.offset!);
+      final offsets = pointer.offsets!;
+      final memory = offsets.constant != null
+          ? write(state.memory!, offsets.constant!)
+          : state.memory!.forget(
+              offsets.lower,
+              offsets.upper - offsets.lower + size,
+              retained: stored,
+            );
       next._objects = next._objects.withEntry(
         object,
         next._objects[object]!.withMemory(

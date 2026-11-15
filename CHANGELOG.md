@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Read bounded native byte ranges from sparse storage facts and limit uncertain writes to their proven region. Remove private lifetime markers when no weak registration, external observer or native access can observe them, allowing guarded zero-filled typed lists to disappear while preserving finalizer attachments.
+
 - Promote caught exception fields using their actual exceptional edge values, preserving runtime inputs and preventing compiler failures in ordinary SDK range checks.
 
 - Join changing invocation inputs within their call site so factories in loops converge without merging independent callers. Reuse exclusive invocation state when inputs grow, keeping nested call chains from multiplying while preserving facts shared by other callers. Expire stored SSA equalities when control flow rebinds their definitions, preserving values saved by earlier loop iterations and recursive calls.

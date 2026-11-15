@@ -21,6 +21,8 @@ final class const ProgramStorageElimination() extends ProgramPass {
     var payloads = const FlowValue.bottom();
     var visible = const FlowValue.bottom();
     var lifetimes = const FlowValue.bottom();
+    var observations = const FlowValue.bottom();
+    final markers = <KeepAlive, FlowValue>{};
     final points = <Instruction, List<FlowState>>{};
     final bodies = <IrFunction>[];
     final conditional = <InstanceField, Set<InstanceField>>{
@@ -59,7 +61,26 @@ final class const ProgramStorageElimination() extends ProgramPass {
           ];
           for (final state in states) {
             visible = visible.join(state.exposedValues);
+            observations = observations.join(state.escapedValues);
           }
+          // Weak registrations can be observed later by the collector.
+          observations = observations.join(switch (operation) {
+            LoadField(:final field) || StoreField(:final field)
+                when weak.contains(field) || conditional.containsKey(field) =>
+              operation.inputs.fold<FlowValue>(
+                facts.valueOf(operation),
+                (value, input) => value.join(facts.valueOf(input)),
+              ),
+            LoadNative(:final address) ||
+            StoreNative(:final address) => facts.valueOf(address).references,
+            CopyNative() => operation.inputs.fold<FlowValue>(
+              const .bottom(),
+              (value, input) => value.join(facts.valueOf(input).references),
+            ),
+            LoadObjectData(:final object) ||
+            StoreObjectData(:final object) => facts.valueOf(object),
+            _ => const .bottom(),
+          });
           switch (operation) {
             case LoadGlobal(:final global):
               globals.add(global);
@@ -109,16 +130,14 @@ final class const ProgramStorageElimination() extends ProgramPass {
               readField(field, facts.valueOf(receiver));
             case KeepAlive(:final value):
               for (final state in states) {
-                lifetimes = lifetimes.join(
-                  state.reachableValues([facts.valueOf(value)]),
-                );
+                markers[operation] = (markers[operation] ?? const .bottom())
+                    .join(state.reachableValues([facts.valueOf(value)]));
               }
             case LoadObjectReference(:final object) ||
                 LoadObjectData(:final object):
               payloads = payloads.join(facts.valueOf(object));
-            case ReferenceAddress(:final object):
+            case ReferenceAddress():
               visible = visible.join(facts.valueOf(operation));
-              lifetimes = lifetimes.join(facts.valueOf(object));
             default:
               break;
           }
@@ -131,13 +150,38 @@ final class const ProgramStorageElimination() extends ProgramPass {
           YieldStream(:final stream) => stream,
           _ => null,
         };
-        if (boundary != null) visible = visible.join(facts.valueOf(boundary));
+        if (boundary != null) {
+          visible = visible.join(facts.valueOf(boundary));
+          observations = observations.join(facts.valueOf(boundary));
+        }
       }
     }
 
     for (final states in points.values) {
       for (final state in states) {
         visible = visible.join(state.exposedFrom([visible]));
+      }
+    }
+    while (true) {
+      final before = observations;
+      for (final states in points.values) {
+        for (final state in states) {
+          observations = observations.join(
+            state.reachableValues([observations]),
+          );
+        }
+      }
+      if (observations == before) break;
+    }
+    lifetimes = lifetimes.join(observations);
+    final unusedMarkers = <KeepAlive>{};
+    for (final MapEntry(key: marker, value: references) in markers.entries) {
+      final mortal = _mortal(references);
+      if (mortal.unknownTypes.isEmpty &&
+          !_overlaps(facts, mortal, observations)) {
+        unusedMarkers.add(marker);
+      } else {
+        lifetimes = lifetimes.join(references);
       }
     }
 
@@ -152,6 +196,10 @@ final class const ProgramStorageElimination() extends ProgramPass {
         ]) {
           final states = points[operation];
           if (states == null) continue;
+          if (unusedMarkers.contains(operation)) {
+            discardable.add(operation);
+            continue;
+          }
           final exits = facts.exitsOf(operation);
           if (!exits.normal || exits.exceptional) continue;
           final (
@@ -255,7 +303,9 @@ bool _retains(
   ProgramFlowFacts facts,
   FlowValue references,
   FlowValue lifetimes,
-) {
+) => _overlaps(facts, _mortal(references), lifetimes);
+
+FlowValue _mortal(FlowValue references) {
   var mortal = const FlowValue.bottom();
   for (final object in references.objects) {
     mortal = mortal.join(.object(object));
@@ -270,5 +320,5 @@ bool _retains(
     }
     mortal = mortal.join(.unknown(type));
   }
-  return _overlaps(facts, mortal, lifetimes);
+  return mortal;
 }

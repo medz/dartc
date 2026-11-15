@@ -1,3 +1,6 @@
+import 'dart:ffi' show Uint8;
+
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_value.dart';
 import 'package:dartc/src/optimizer/program_flow.dart';
@@ -322,107 +325,202 @@ void main() {
     );
   });
 
-  test('weak observations preserve a target that remains accessible', () {
-    final targetType = ClassType(_uri, 'Target');
-    final targetCtor = FunctionTarget(
-      _uri,
-      '',
-      .voidType,
-      [],
-      owner: targetType,
-      kind: .initializer,
-    );
-    final weakType = ClassType(_uri, 'Weak');
-    final weakField = InstanceField(weakType, 'target', targetType.nullable);
-    final weakCtor = FunctionTarget(
-      _uri,
-      '',
-      .voidType,
-      [targetType],
-      owner: weakType,
-      kind: .initializer,
-    );
-    final initializing = Block(weakCtor.parameterTypes);
-    initializing.emit(
-      StoreField(
-        weakField,
-        initializing.parameters[0],
-        initializing.parameters[1],
-      ),
-    );
-    initializing.finish(const Return());
-    final global = GlobalVariable(_uri, 'root', targetType.nullable);
-    final target = FunctionTarget(_uri, 'run', .boolean, []);
-    final block = Block();
-    final value = block.emit(Construct(targetCtor, []));
-    block.emit(StoreGlobal(global, value));
-    final weak = block.emit(Construct(weakCtor, [value]));
-    final observed = block.emit(LoadField(weakField, weak));
-    final retained = block.emit(LoadGlobal(global));
-    block.finish(Return(block.emit(Identical(observed, retained))));
-    final program = IrProgram(
-      [
-        IrClass(targetType, [], constructors: [targetCtor]),
-        IrClass(
+  for (final read in [false, true]) {
+    test(
+      'weak registration retains its target before collector observation (read=$read)',
+      () {
+        final targetType = ClassType(_uri, 'Target');
+        final targetCtor = FunctionTarget(
+          _uri,
+          '',
+          .voidType,
+          [],
+          owner: targetType,
+          kind: .initializer,
+        );
+        final weakType = ClassType(_uri, 'Weak');
+        final weakField = InstanceField(
           weakType,
-          [weakField],
-          constructors: [weakCtor],
-          weakFields: [weakField],
-        ),
-      ],
-      [
-        _empty(targetCtor),
-        IrFunction(weakCtor, [initializing]),
-        IrFunction(target, [block]),
-      ],
-      globals: [global],
+          'target',
+          targetType.nullable,
+        );
+        final weakCtor = FunctionTarget(
+          _uri,
+          '',
+          .voidType,
+          [targetType],
+          owner: weakType,
+          kind: .initializer,
+        );
+        final initializing = Block(weakCtor.parameterTypes);
+        initializing.emit(
+          StoreField(
+            weakField,
+            initializing.parameters[0],
+            initializing.parameters[1],
+          ),
+        );
+        initializing.finish(const Return());
+        final global = GlobalVariable(_uri, 'root', targetType.nullable);
+        final target = FunctionTarget(_uri, 'run', .boolean, []);
+        final block = Block();
+        final value = block.emit(Construct(targetCtor, []));
+        block.emit(StoreGlobal(global, value));
+        final weak = block.emit(Construct(weakCtor, [value]));
+        final result = read
+            ? block.emit(
+                Identical(
+                  block.emit(LoadField(weakField, weak)),
+                  block.emit(LoadGlobal(global)),
+                ),
+              )
+            : const Constant.boolean(true);
+        block.emit(KeepAlive(value));
+        block.finish(Return(result));
+        final program = IrProgram(
+          [
+            IrClass(targetType, [], constructors: [targetCtor]),
+            IrClass(
+              weakType,
+              [weakField],
+              constructors: [weakCtor],
+              weakFields: [weakField],
+            ),
+          ],
+          [
+            _empty(targetCtor),
+            IrFunction(weakCtor, [initializing]),
+            IrFunction(target, [block]),
+          ],
+          globals: [global],
+        );
+        final optimized = _optimize(program, target);
+        expect(
+          _operations(optimized, target).whereType<KeepAlive>(),
+          hasLength(1),
+        );
+        for (final input in [program, optimized]) {
+          expect(
+            IrInterpreter(
+              input,
+              {},
+            ).run(input.implementationOf(target) as IrFunction, []),
+            isTrue,
+          );
+        }
+      },
     );
-    final optimized = _optimize(program, target);
-    for (final input in [program, optimized]) {
-      expect(
-        IrInterpreter(
-          input,
-          {},
-        ).run(input.implementationOf(target) as IrFunction, []),
-        isTrue,
-      );
-    }
-  });
+  }
 
-  test('explicit lifetime operations survive storage rewriting', () {
-    final box = _box();
-    final target = FunctionTarget(_uri, 'run', .voidType, []);
-    final closure = FunctionTarget(
-      _uri,
-      'keep',
-      .integer,
-      [],
-      kind: .closure,
-      enclosing: target,
-      sourceOffset: 0,
-      captures: [box.type],
-    );
-    final closureBody = Block(closure.parameterTypes)
-      ..finish(const Return(_one));
-    final block = Block();
-    final value = block.emit(Construct(box.constructor.target, [_one]));
-    final captured = block.emit(MakeClosure(closure, [value]));
-    final global = GlobalVariable(_uri, 'root', box.type.nullable);
-    block.emit(StoreGlobal(global, value));
-    block.emit(KeepAlive(captured));
+  for (final use in ['unused', 'read', 'escape']) {
+    test('address lifetime follows its actual $use use', () {
+      final box = _box();
+      final target = FunctionTarget(_uri, 'run', .voidType, []);
+      final block = Block();
+      final object = block.emit(Construct(box.constructor.target, [_one]));
+      final address = block.emit(ReferenceAddress(object));
+      if (use == 'read') {
+        block.emit(LoadNative(address, NativeScalarType(Uint8)));
+      } else if (use == 'escape') {
+        block.emit(
+          DirectCall(
+            FunctionTarget(_uri, 'saveAddress', .voidType, [.integer]),
+            [address],
+          ),
+        );
+      }
+      block.emit(KeepAlive(object));
+      block.finish(const Return());
+      final program = IrProgram(
+        [box.declaration],
+        [
+          box.constructor,
+          IrFunction(target, [block]),
+        ],
+      );
+      expect(
+        _operations(_optimize(program, target), target).whereType<KeepAlive>(),
+        use == 'unused' ? isEmpty : hasLength(1),
+      );
+    });
+  }
+
+  test('unknown input lifetimes can be observed by the caller', () {
+    final target = FunctionTarget(_uri, 'run', .voidType, [.object]);
+    final block = Block(target.parameterTypes);
+    block.emit(KeepAlive(block.parameters.single));
     block.finish(const Return());
-    final program = IrProgram(
-      [box.declaration],
-      [
-        box.constructor,
-        IrFunction(closure, [closureBody]),
-        IrFunction(target, [block]),
-      ],
-      globals: [global],
-    );
-    final optimized = _optimize(program, target);
+    final program = IrProgram([], [
+      IrFunction(target, [block]),
+    ]);
+    final facts = ProgramFlow(program, [
+      (target: target, arguments: [FlowValue.unknown(.object)]),
+    ]).facts;
+    final optimized = const ProgramStorageElimination().run(facts);
     expect(_operations(optimized, target).whereType<KeepAlive>(), hasLength(1));
   });
+
+  for (final exposed in [false, true]) {
+    test('lifetime markers follow actual observations (exposed=$exposed)', () {
+      final box = _box();
+      final target = FunctionTarget(_uri, 'run', .voidType, [.integer]);
+      final closure = FunctionTarget(
+        _uri,
+        'keep',
+        .integer,
+        [],
+        kind: .closure,
+        enclosing: target,
+        sourceOffset: 0,
+        captures: [box.type],
+      );
+      final closureBody = Block(closure.parameterTypes)
+        ..finish(const Return(_one));
+      final block = Block(target.parameterTypes);
+      final value = block.emit(
+        Construct(box.constructor.target, block.parameters),
+      );
+      final captured = block.emit(MakeClosure(closure, [value]));
+      final global = GlobalVariable(_uri, 'root', box.type.nullable);
+      block.emit(StoreGlobal(global, value));
+      if (exposed) {
+        block.emit(
+          DirectCall(FunctionTarget(_uri, 'observe', .voidType, [box.type]), [
+            value,
+          ]),
+        );
+      }
+      block.emit(KeepAlive(captured));
+      block.finish(const Return());
+      final program = IrProgram(
+        [box.declaration],
+        [
+          box.constructor,
+          IrFunction(closure, [closureBody]),
+          IrFunction(target, [block]),
+        ],
+        globals: [global],
+      );
+      final optimized = _optimize(program, target);
+      expect(
+        _operations(optimized, target).whereType<KeepAlive>(),
+        exposed ? hasLength(1) : isEmpty,
+      );
+      if (!exposed) {
+        for (final graph in [program, optimized]) {
+          for (final input in [-4, 0, 41]) {
+            expect(
+              IrInterpreter(
+                graph,
+                {},
+              ).run(graph.implementationOf(target) as IrFunction, [input]),
+              isNull,
+            );
+          }
+        }
+      }
+    });
+  }
 
   test('an isolated nullable late-final binding can be removed', () {
     final global = GlobalVariable(
@@ -456,7 +554,10 @@ IrProgram _optimize(
   Iterable<FunctionTarget> escapingReturns = const [],
 }) => const ProgramStorageElimination().run(
   ProgramFlow(program, [
-    (target: target, arguments: <FlowValue>[]),
+    (
+      target: target,
+      arguments: target.parameterTypes.map(FlowValue.unknown).toList(),
+    ),
   ], escapingReturns: escapingReturns).facts,
 );
 
