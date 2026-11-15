@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/target.dart';
 import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
@@ -7,6 +9,44 @@ import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('emitted descriptors preserve weak slots and scalar box extents', () {
+    final type = ClassType(null, 'Edges');
+    final fields = [
+      for (var i = 0; i < 4; i++)
+        InstanceField(type, 'edge$i', .object.nullable),
+    ];
+    final layouts = ProgramLayout([
+      IrClass(
+        type,
+        fields,
+        weakFields: [fields[0]],
+        ephemerons: {fields[1]: fields[2]},
+      ),
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
+    final data = ConstantData(layouts, 0);
+    final descriptor = data.typeAddress(type);
+    final integer = data.typeAddress(ValueType.integer);
+    final floating = data.typeAddress(ValueType.floating);
+    final bytes = ByteData.sublistView(data.finish().bytes);
+    List<int> words(int symbol) {
+      final start = data.symbols[symbol].offset;
+      final end = symbol + 1 < data.symbols.length
+          ? data.symbols[symbol + 1].offset
+          : bytes.lengthInBytes;
+      return [
+        for (var i = start; i < end; i += 8) bytes.getInt64(i, Endian.little),
+      ];
+    }
+
+    expect(words(descriptor), [72, 2, 8, 64, 0, 0, 1, 1, 40, 48, 56]);
+    expect(words(integer), [48, 1, 8, 0, 0, 0, 0]);
+    expect(words(floating), [48, 1, 8, 0, 0, 0, 0]);
+    expect(layouts.objectLayout(ValueType.integer).size, 48);
+    expect(layouts.objectLayout(ValueType.floating).fields, [
+      ValueRepresentation.floating,
+    ]);
+  });
+
   test('Type constants preserve canonical identity without merging distinct top types', () {
     final data = ConstantData(
       ProgramLayout(

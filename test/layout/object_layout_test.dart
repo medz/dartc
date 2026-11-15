@@ -2,6 +2,33 @@ import 'package:dartc/layout.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test(
+    'descriptors encode storage while leaving linked metadata unresolved',
+    () {
+      final layout = ObjectLayout(
+        [.reference, .reference, .reference, .reference],
+        weakFields: [0],
+        ephemerons: {1: 2},
+        tracesPayload: true,
+      );
+      expect(layout.descriptorWords, [
+        72,
+        2,
+        8,
+        64,
+        72,
+        null,
+        1,
+        1,
+        40,
+        48,
+        56,
+      ]);
+      expect(ObjectLayout([]).descriptorWords, [40, 1, 8, 0, null, 0, 0]);
+      expect(() => layout.descriptorWords.clear(), throwsUnsupportedError);
+    },
+  );
+
   test('weak and conditional references are excluded from strong tracing', () {
     final layout = ObjectLayout(
       [.reference, .reference, .reference, .reference],

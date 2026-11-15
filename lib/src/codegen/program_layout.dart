@@ -150,7 +150,9 @@ final class ProgramLayout(
   bool isReference(ValueType type) => representation(type) == .reference;
 
   @override
-  ObjectLayout objectLayout(ClassType type) => storageOf(type).layout;
+  ObjectLayout objectLayout(ClassType type) => isBoxable(type)
+      ? ObjectLayout([representation(type)])
+      : storageOf(type).layout;
 
   ClassStorage storageOf(ClassType type) {
     final declaration = type.declaration;

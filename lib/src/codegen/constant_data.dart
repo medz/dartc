@@ -65,12 +65,7 @@ final class ConstantData(
     return caller;
   }
 
-  int typeAddress(ClassType type) => _type(
-    type,
-    layouts.isBoxable(type)
-        ? ObjectLayout([layouts.representation(type)])
-        : layouts.storageOf(type).layout,
-  );
+  int typeAddress(ClassType type) => _type(type, layouts.objectLayout(type));
 
   int addressOf(Constant value) {
     if (value is TypeConstant) {
@@ -228,35 +223,15 @@ final class ConstantData(
 
   int _type(ClassType type, ObjectLayout layout) {
     if (_types[type] case final symbol?) return symbol;
-    final references = layout.referenceOffsets.toList();
-    final weak = layout.weakFields.map(layout.offsetOf).toList();
-    final conditional = [
-      for (final pair in layout.ephemerons.entries) ...[
-        layout.offsetOf(pair.key),
-        layout.offsetOf(pair.value),
-      ],
-    ];
+    final words = layout.descriptorWords;
+    final references = words[ObjectDescriptor.referenceCount]!;
     final start = _words.length;
-    final symbol = _types[type] = _reserve(
-      'type',
-      ObjectDescriptor.baseWords +
-          references.length +
-          weak.length +
-          conditional.length,
-    );
-    _words[start + ObjectDescriptor.size] = layout.size;
-    _words[start + ObjectDescriptor.referenceCount] = references.length;
+    final symbol = _types[type] = _reserve('type', words.length);
     _words.setRange(
-      start + ObjectDescriptor.references,
-      start + ObjectDescriptor.references + references.length,
-      references,
+      start,
+      start + words.length,
+      words.map((word) => word ?? 0),
     );
-    _words[start + ObjectDescriptor.payloadBase + references.length] =
-        layout.tracesPayload ? layout.size : 0;
-    _words[start + ObjectDescriptor.weakCountBase + references.length] =
-        weak.length;
-    _words[start + ObjectDescriptor.ephemeronCountBase + references.length] =
-        layout.ephemerons.length;
     if (stackTraces) {
       final closure = layouts.closures.all
           .where((shape) => shape.type == type)
@@ -270,7 +245,7 @@ final class ConstantData(
         relocations.add(
           .address(
             1,
-            (start + ObjectDescriptor.asyncBase + references.length) * 8,
+            (start + ObjectDescriptor.asyncBase + references) * 8,
             metadata,
           ),
         );
@@ -320,13 +295,6 @@ final class ConstantData(
         }
       }
     }
-    final extra = start + ObjectDescriptor.baseWords + references.length;
-    _words.setRange(extra, extra + weak.length, weak);
-    _words.setRange(
-      extra + weak.length,
-      extra + weak.length + conditional.length,
-      conditional,
-    );
     return symbol;
   }
 

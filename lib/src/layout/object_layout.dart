@@ -61,6 +61,28 @@ final class ObjectLayout(
     return ObjectHeader.fieldsOffset + field * ObjectHeader.alignment;
   }
 
+  /// Descriptor words shared by allocation, tracing and target analysis.
+  ///
+  /// The async metadata address is unresolved here. Its null word must not be
+  /// interpreted as zero until emission decides whether it needs a relocation.
+  List<int?> get descriptorWords {
+    final references = referenceOffsets.toList();
+    return List.unmodifiable([
+      size,
+      references.length,
+      ...references,
+      tracesPayload ? size : 0,
+      null,
+      weakFields.length,
+      ephemerons.length,
+      for (final field in weakFields) offsetOf(field),
+      for (final pair in ephemerons.entries) ...[
+        offsetOf(pair.key),
+        offsetOf(pair.value),
+      ],
+    ]);
+  }
+
   /// The runtime type and fields traced by the collector, excluding other headers.
   Iterable<int> get referenceOffsets sync* {
     yield ObjectHeader.typeOffset;
