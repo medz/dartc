@@ -1,10 +1,13 @@
 tags:
   assets:
   native:
+  slow:
 
 presets:
   unit:
-    exclude_tags: assets
+    exclude_tags: assets || slow
+  slow:
+    include_tags: slow
   native:
     paths:
       - test/abi
