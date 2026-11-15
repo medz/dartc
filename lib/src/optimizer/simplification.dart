@@ -8,6 +8,49 @@ import 'program_pass.dart';
 /// Replaces proven values and removes computations without execution obligations.
 final class const ProgramSimplification() extends ProgramPass {
   @override
+  ProgramTransform bind() => ProgramTransform(
+    run,
+    normalize: (program) {
+      final functions = <IrFunction>[];
+      var changed = false;
+      for (final function in program.functions) {
+        final replacements = <Value, Value>{};
+        final removed = <Instruction>{};
+        for (final block in function.blocks) {
+          for (final operation in [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ]) {
+            if (operation case PointerAddress(
+              pointer: final PointerFromAddress pointer,
+            )) {
+              replacements[operation] = pointer.address;
+              removed.add(pointer);
+            }
+          }
+        }
+        final rewritten = replacements.isEmpty
+            ? function
+            : FunctionRewrite(
+                function,
+                replacements: replacements,
+                discardable: removed,
+              ).run();
+        changed |= !identical(function, rewritten);
+        functions.add(rewritten);
+      }
+      return changed
+          ? IrProgram(
+              program.classes,
+              functions,
+              globals: program.globals,
+              externals: program.externals,
+            )
+          : program;
+    },
+  );
+
+  @override
   IrProgram run(ProgramFlowFacts facts) {
     final program = facts.program;
     facts.checkProgram(program);

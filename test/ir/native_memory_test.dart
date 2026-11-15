@@ -8,6 +8,28 @@ import '../support/ir_interpreter.dart';
 
 void main() {
   test(
+    'native allocation contracts require integer size and address slots',
+    () {
+      final mapping = FunctionTarget(null, 'mapping', .integer, [.integer]);
+      expect(
+        () => IrExternal(mapping, zeroedMemorySizeParameter: 0),
+        returnsNormally,
+      );
+      for (final (target, index) in [
+        (mapping, -1),
+        (mapping, 1),
+        (FunctionTarget(null, 'wrongSize', .integer, [.object]), 0),
+        (FunctionTarget(null, 'wrongResult', .object, [.integer]), 0),
+      ]) {
+        expect(
+          () => IrExternal(target, zeroedMemorySizeParameter: index),
+          throwsArgumentError,
+        );
+      }
+    },
+  );
+
+  test(
     'call-frame operands are confined to the direct call that binds them',
     () {
       final callee = FunctionTarget(null, 'scan', .integer, [
@@ -214,7 +236,10 @@ void main() {
     );
     final replacement = Block([.integer, .integer]);
     final copied = object.mapInputs(
-      (input) => replacement.parameters[entry.parameters.indexOf(input as BlockParameter)],
+      (input) =>
+          replacement.parameters[entry.parameters.indexOf(
+            input as BlockParameter,
+          )],
     ) as AllocatedObject;
     expect(copied.address, same(replacement.parameters.first));
     expect(copied.payloadBytes, same(replacement.parameters.last));

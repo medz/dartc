@@ -126,6 +126,10 @@ void main() {
       final ranges = [
         for (final point in points) FlowIntegerRange(point, point),
         FlowIntegerRange(-17, 17, zeroBits: 3),
+        FlowIntegerRange(-17, 17, zeroBits: 3, excludesZero: true),
+        FlowIntegerRange(-1, 1, excludesZero: true),
+        FlowIntegerRange(0, 16, zeroBits: 3, excludesZero: true),
+        FlowIntegerRange(-16, 0, zeroBits: 3, excludesZero: true),
         for (final bits in [0, 1, 3, 63, 64])
           FlowIntegerRange(
             FlowIntegerRange.minimum,

@@ -4,6 +4,25 @@ import 'package:dartc/src/optimizer/integer_range.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('bulk alternatives agree with incremental joins and shared aliases', () {
+    final parameter = Block([.integer]).parameters.single;
+    final activation = Object();
+    final values = [
+      const FlowValue.bottom(),
+      for (final number in [2, 5, 9])
+        FlowValue.constant(Constant.integer(number))
+            .withSource(parameter, activation),
+    ];
+    final joined = FlowValue.joined(values);
+    expect(joined, values.reduce((left, right) => left.join(right)));
+    expect(joined.integers, FlowIntegerRange(2, 9));
+    expect(joined.sources, {FlowSource(parameter, activation)});
+    expect(
+      FlowValue.joined([...values, FlowValue.unknown(.integer)]).sources,
+      isEmpty,
+    );
+  });
+
   test('an absent path contributes no value or unknown bound', () {
     final known = FlowValue.constant(const Constant.integer(7));
     expect(const FlowValue.bottom().join(known), same(known));

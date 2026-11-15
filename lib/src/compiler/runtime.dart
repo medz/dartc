@@ -202,6 +202,12 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
               terminates:
                   primitives[external.target]?.terminates ??
                   external.terminates,
+              writesMemory:
+                  primitives[external.target]?.writesMemory ??
+                  external.writesMemory,
+              zeroedMemorySizeParameter: primitives[external.target] == .map
+                  ? 0
+                  : external.zeroedMemorySizeParameter,
             ),
     );
   }

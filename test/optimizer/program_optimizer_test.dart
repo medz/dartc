@@ -26,26 +26,26 @@ void main() {
         _Phase(.lowering, () {
           lowerings++;
           var changed = false;
-          return (facts) {
+          return ProgramTransform((facts) {
             observations.add(
               (facts.returnedBy(root).constant as ScalarConstant).value as int,
             );
             if (changed) return facts.program;
             changed = true;
             return returning(20);
-          };
+          });
         }),
         _Phase(.expansion, () {
           expansions++;
           var remaining = 2;
-          return (facts) {
+          return ProgramTransform((facts) {
             if (remaining == 0) return facts.program;
             remaining--;
             final value =
                 (facts.returnedBy(root).constant as ScalarConstant).value
                     as int;
             return returning(value - 1);
-          };
+          });
         }),
       ]);
       for (var compilation = 1; compilation <= 2; compilation++) {
@@ -143,51 +143,52 @@ void main() {
     expect(() => original.checkProgram(changed.program), throwsArgumentError);
   });
 
-  test(
-    'expansion rounds share a budget and independent compilations do not',
-    () {
-      final step = FunctionTarget(_uri, 'step', .integer, [.integer]);
-      final body = Block(step.parameterTypes);
-      body.finish(
-        Return(
-          body.emit(
-            IntBinary(.add, body.parameters.single, const Constant.integer(1)),
-          ),
+  test('shrinking calls frees space within a compilation size limit', () {
+    final step = FunctionTarget(_uri, 'step', .integer, [.integer]);
+    final body = Block(step.parameterTypes);
+    body.finish(
+      Return(
+        body.emit(
+          IntBinary(.add, body.parameters.single, const Constant.integer(1)),
         ),
+      ),
+    );
+    final root = FunctionTarget(_uri, 'root', .integer, [.integer]);
+    final entry = Block(root.parameterTypes);
+    Value value = entry.parameters.single;
+    for (var i = 0; i < 3; i++) {
+      value = entry.emit(DirectCall(step, [value]));
+    }
+    entry.finish(Return(value));
+    final program = IrProgram([], [
+      IrFunction(step, [body]),
+      IrFunction(root, [entry]),
+    ]);
+    final optimizer = ProgramOptimizer(const [
+      ProgramSimplification(),
+      DirectCallInlining(maxCallerGrowth: 1),
+    ]);
+    for (var compilation = 0; compilation < 2; compilation++) {
+      final result = optimizer.run(program, const [], openEntries: [root]);
+      final rewritten = result.program.implementationOf(root) as IrFunction;
+      expect(
+        rewritten.blocks
+            .expand((block) => block.instructions)
+            .whereType<DirectCall>(),
+        isEmpty,
       );
-      final root = FunctionTarget(_uri, 'root', .integer, [.integer]);
-      final entry = Block(root.parameterTypes);
-      Value value = entry.parameters.single;
-      for (var i = 0; i < 3; i++) {
-        value = entry.emit(DirectCall(step, [value]));
-      }
-      entry.finish(Return(value));
-      final program = IrProgram([], [
-        IrFunction(step, [body]),
-        IrFunction(root, [entry]),
-      ]);
-      final optimizer = ProgramOptimizer(const [
-        ProgramSimplification(),
-        DirectCallInlining(maxCallerGrowth: 1),
-      ]);
-      for (var compilation = 0; compilation < 2; compilation++) {
-        final result = optimizer.run(program, const [], openEntries: [root]);
-        final rewritten = result.program.implementationOf(root) as IrFunction;
+      expect(
+        rewritten.blocks.expand((block) => block.instructions),
+        hasLength(3),
+      );
+      for (final input in [-2, 0, 41]) {
         expect(
-          rewritten.blocks
-              .expand((block) => block.instructions)
-              .whereType<DirectCall>(),
-          hasLength(2),
+          IrInterpreter(result.program, {}).run(rewritten, [input]),
+          input + 3,
         );
-        for (final input in [-2, 0, 41]) {
-          expect(
-            IrInterpreter(result.program, {}).run(rewritten, [input]),
-            input + 3,
-          );
-        }
       }
-    },
-  );
+    }
+  });
 
   test('actual call arguments remove dead dependencies without inlining', () {
     final equals = FunctionTarget(_uri, 'equals', .boolean, [

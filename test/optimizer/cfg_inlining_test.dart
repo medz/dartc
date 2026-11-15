@@ -14,6 +14,42 @@ void main() {
     ]).use((input) async => (await Lowering().lower(input)).program);
   });
 
+  test('local closures normalize before global state analysis', () {
+    var normalized = const DirectCallInlining(
+      maxCalleeCost: 200,
+      maxCallerGrowth: 2000,
+    ).bind().normalize(program);
+    normalized = const ProgramStoragePromotion().bind().normalize(normalized);
+    for (final (name, invoke) in [
+      ('closureCells', source.closureCells),
+      ('closureInsideTry', source.closureInsideTry),
+    ]) {
+      final body = normalized.functions.singleWhere(
+        (function) => function.target.name == name,
+      );
+      expect(
+        body.blocks
+            .expand(
+              (block) => [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ],
+            )
+            .where(
+              (operation) =>
+                  operation is FunctionCall ||
+                  operation is NewCell ||
+                  operation is ReadCell ||
+                  operation is WriteCell,
+            ),
+        isEmpty,
+      );
+      for (final value in [-3, -1, 0, 9]) {
+        expect(IrInterpreter(normalized, {}).run(body, [value]), invoke(value));
+      }
+    }
+  });
+
   for (final (name, helper, invoke) in [
     ('branch', 'choose', source.branch),
     ('loop', 'sum', source.loop),
@@ -62,6 +98,7 @@ void main() {
     ('closureGeneric', source.closureGeneric),
     ('closureWidened', source.closureWidened),
     ('closureCells', source.closureCells),
+    ('closureInsideTry', source.closureInsideTry),
   ]) {
     test('$name expands captures without retaining closure environments', () {
       final entry = program.functions.singleWhere((f) => f.target.name == name);

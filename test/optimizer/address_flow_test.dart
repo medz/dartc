@@ -38,6 +38,37 @@ ProgramFlowFacts _analyze(
 
 void main() {
   test(
+    'address round trips normalize without materializing pointer objects',
+    () {
+      final block = Block([.integer]);
+      final pointer = block.emit(
+        PointerFromAddress(block.parameters.single, FfiTypes.int64Pointer),
+      );
+      block.finish(Return(block.emit(PointerAddress(pointer))));
+      final target = FunctionTarget(_uri, 'roundTrip', .integer, [.integer]);
+      final program = IrProgram([], [
+        IrFunction(target, [block]),
+      ]);
+      final normalized = const ProgramSimplification().bind().normalize(
+        program,
+      );
+      final body = normalized.implementationOf(target) as IrFunction;
+      expect(body.entry.instructions, isEmpty);
+      for (final value in [0, 123, -1, FlowIntegerRange.minimum]) {
+        for (final graph in [program, normalized]) {
+          expect(
+            IrInterpreter(
+              graph,
+              {},
+            ).run(graph.implementationOf(target) as IrFunction, [value]),
+            value,
+          );
+        }
+      }
+    },
+  );
+
+  test(
     'source guards constrain scaled addresses and preserve runtime results',
     () async {
       final program = await AnalysisSession([

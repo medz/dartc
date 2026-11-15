@@ -78,6 +78,7 @@ final class FlowState {
   final Map<Object, FlowMemory> _constantMemory;
   StateMap<GlobalVariable, _Slot> _globals;
   StateMap<FlowObject, _ObjectState> _objects;
+  StateMap<FlowObject, _ObjectState> _regions;
   StateMap<FlowSource, FlowValue> _addresses;
   FlowValue _escaped;
 
@@ -87,6 +88,7 @@ final class FlowState {
       _constantMemory = {},
       _globals = const .empty(),
       _objects = const .empty(),
+      _regions = const .empty(),
       _addresses = const .empty(),
       _escaped = const .bottom();
 
@@ -98,6 +100,7 @@ final class FlowState {
     this._constantMemory,
     this._globals,
     this._objects,
+    this._regions,
     this._addresses,
     this._escaped,
   );
@@ -111,6 +114,7 @@ final class FlowState {
     _constantMemory,
     _globals,
     _objects,
+    _regions,
     _addresses,
     _escaped,
   );
@@ -154,11 +158,18 @@ final class FlowState {
       }
       return value;
     });
+    _addresses = _addresses.mapValues(
+      (source, value) => switch (ranges[source]) {
+        final range? => value.restrictIntegers(range),
+        null => value,
+      },
+    );
   }
 
   void _mapValues(FlowValue Function(FlowValue) transform) {
     _globals = _globals.mapValues((_, slot) => slot.map(transform));
     _objects = _objects.mapValues((_, object) => object.map(transform));
+    _regions = _regions.mapValues((_, region) => region.map(transform));
     _escaped = transform(_escaped);
   }
 
@@ -191,6 +202,14 @@ final class FlowState {
                 : left.join(right, widen: widen),
           );
     final escaped = _escaped.join(incoming._escaped, widen: widen);
+    final regions = _regions.merge(
+      incoming._regions,
+      (_, left, right) => left == null
+          ? right
+          : right == null
+          ? left
+          : left.join(right, widen: widen),
+    );
     final addresses = _addresses.merge(
       incoming._addresses,
       (_, left, right) =>
@@ -199,10 +218,12 @@ final class FlowState {
     final changed =
         !identical(globals, _globals) ||
         !identical(objects, _objects) ||
+        !identical(regions, _regions) ||
         !identical(addresses, _addresses) ||
         escaped != _escaped;
     _globals = globals;
     _objects = objects;
+    _regions = regions;
     _addresses = addresses;
     _escaped = escaped;
     return changed;
@@ -214,8 +235,15 @@ final class FlowState {
       : const _Slot.unbound();
 
   /// An immutable key for the current version, safe after this wrapper changes.
-  Object get structuralKey =>
-      (program, memoryLayout, _globals, _objects, _addresses, _escaped);
+  Object get structuralKey => (
+    program,
+    memoryLayout,
+    _globals,
+    _objects,
+    _regions,
+    _addresses,
+    _escaped,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -270,12 +298,19 @@ final class FlowState {
       _constantMemory,
       globals,
       objects,
+      StateMap.fromEntries([
+        for (final address in reachable.addresses)
+          if (address.base case FlowRegion(:final allocation))
+            if (_regions[allocation] case final region?)
+              MapEntry(allocation, region),
+      ]),
       StateMap.fromEntries(
         _addresses.entries.where(
           (entry) => entry.value.addresses.every(
             (address) =>
+                address.base is FlowRegion ||
                 address.base is FlowObject &&
-                objects[address.base as FlowObject] != null,
+                    objects[address.base as FlowObject] != null,
           ),
         ),
       ),
@@ -370,6 +405,14 @@ final class FlowState {
     if (!preservesInputSources && after._escaped != before._escaped) {
       result._escaped = result._escaped.join(mapValue(after._escaped));
     }
+    for (final change in after._regions.differences(before._regions)) {
+      if (change.after case final region?) {
+        result._regions = result._regions.withEntry(
+          mapObject(change.key),
+          region.map(mapValue),
+        );
+      }
+    }
     for (final change in after._addresses.differences(before._addresses)) {
       if (change.after case final address?) {
         final sources = mapValue(
@@ -393,10 +436,45 @@ final class FlowState {
   }
 
   /// Whether this state contains storage for the analysis allocation.
-  bool containsObject(FlowObject object) => _objects[object] != null;
+  bool containsObject(FlowObject object) =>
+      _objects[object] != null || _regions[object] != null;
 
   /// Allocation identities whose state can be changed by an invocation.
   Iterable<FlowObject> get objects => _objects.keys;
+
+  /// Storage held by an incoming caller, including native mappings.
+  Iterable<FlowValue> get allocations => [
+    ..._objects.keys.map(FlowValue.object),
+    for (final region in _regions.keys)
+      FlowValue.address(FlowAddress(FlowRegion(region), 0)),
+  ];
+
+  /// Records a native mapping without treating its address as a managed root.
+  FlowResult allocateMemory(
+    FlowObject region,
+    FlowValue byteLength, {
+    required bool repeated,
+  }) {
+    final next = copy();
+    final size = byteLength.integers?.constant;
+    final storage = _ObjectState(
+      {},
+      memory: FlowMemory(0, size != null && size > 0 ? size : null),
+      summary: repeated,
+    );
+    final previous = next._regions[region];
+    next._regions = next._regions.withEntry(
+      region,
+      previous == null
+          ? storage
+          : previous.join(storage).withFlags(summary: true),
+    );
+    return _normal(
+      FlowValue.address(FlowAddress(FlowRegion(region), 0))
+          .join(FlowValue.constant(const Constant.integer(0))),
+      next,
+    );
+  }
 
   /// Captures of this allocation, preserving shared cell identities.
   List<FlowValue>? capturesOf(FlowObject object) => _objects[object]?.captures;
@@ -458,6 +536,17 @@ final class FlowState {
       }
       next = next.withMemory(state.memory?.invalidate());
       _objects = _objects.withEntry(object, next);
+    }
+    for (final address in reachable.addresses) {
+      if (address.base case FlowRegion(:final allocation)) {
+        final region = _regions[allocation];
+        if (region != null) {
+          _regions = _regions.withEntry(
+            allocation,
+            region.withMemory(region.memory!.invalidate()),
+          );
+        }
+      }
     }
     if (globals) {
       for (final global in _declaredGlobals) {
@@ -840,6 +929,7 @@ final class FlowState {
 
   FlowMemory? _memoryOf(Object base) {
     if (base is FlowObject) return _objects[base]?.memory;
+    if (base is FlowRegion) return _regions[base.allocation]?.memory;
     if (base is ClassType && memoryLayout != null) {
       return _constantMemory.putIfAbsent(base, () {
         final words = memoryLayout!.objectLayout(base).descriptorWords;
@@ -1022,7 +1112,10 @@ final class FlowState {
   ) {
     final next = copy();
     if (!_containsNative(address, size) ||
-        address.addresses.any((pointer) => pointer.base is! FlowObject)) {
+        address.addresses.any(
+          (pointer) =>
+              pointer.base is! FlowObject && pointer.base is! FlowRegion,
+        )) {
       // An unbounded offset can reach other allocations, not just its base.
       next._invalidateRaw();
       next.escape([stored]);
@@ -1030,8 +1123,11 @@ final class FlowState {
     }
     final strong = address.addresses.length == 1;
     for (final pointer in address.addresses) {
-      final object = pointer.base as FlowObject;
-      final state = _objects[object]!;
+      final native = pointer.base is FlowRegion;
+      final object = native
+          ? (pointer.base as FlowRegion).allocation
+          : pointer.base as FlowObject;
+      final state = (native ? _regions : _objects)[object]!;
       final offsets = pointer.offsets!;
       final memory = offsets.constant != null
           ? write(state.memory!, offsets.constant!)
@@ -1040,11 +1136,17 @@ final class FlowState {
               offsets.upper - offsets.lower + size!,
               retained: stored,
             );
-      var updated = next._objects[object]!.withMemory(
-        strong && !state.summary
-            ? memory
-            : next._objects[object]!.memory!.join(memory),
-      );
+      var updated = (native ? next._regions : next._objects)[object]!
+          .withMemory(
+            strong && !state.summary
+                ? memory
+                : (native ? next._regions : next._objects)[object]!.memory!
+                      .join(memory),
+          );
+      if (native) {
+        next._regions = next._regions.withEntry(object, updated);
+        continue;
+      }
       if (offsets.upper + size! > ObjectHeader.fieldsOffset &&
           offsets.lower <
               (memoryLayout?.objectLayout(object.type as ClassType).size ??
@@ -1068,6 +1170,9 @@ final class FlowState {
   }
 
   void _invalidateRaw() {
+    _regions = _regions.mapValues(
+      (_, region) => region.withMemory(region.memory!.invalidate()),
+    );
     for (final global in _declaredGlobals) {
       _setGlobal(
         global,
@@ -1610,15 +1715,24 @@ final class FlowState {
     FlowReadSet? reads,
     bool constants = true,
   }) {
-    var result = const FlowValue.bottom();
+    final values = <FlowValue>[];
     final pending = [for (final value in roots) (value, !expose)];
     final objects = <(FlowObject, bool)>{};
+    final regions = <FlowObject>{};
     final visitedConstants = <(Object, bool)>{};
     while (pending.isNotEmpty) {
       final (input, raw) = pending.removeLast();
       final value = resolveValue(input);
-      result = result.join(value);
+      values.add(value);
       if (!value.references.isBottom) pending.add((value.references, true));
+      for (final address in value.addresses) {
+        if (address.base case FlowRegion(:final allocation)
+            when regions.add(allocation)) {
+          if (_regions[allocation]?.memory case final memory?) {
+            pending.add((memory.references, true));
+          }
+        }
+      }
       for (final object in value.objects) {
         if (!objects.add((object, raw))) continue;
         final state = _objects[object];
@@ -1655,7 +1769,7 @@ final class FlowState {
         ]);
       }
     }
-    return result;
+    return FlowValue.joined(values);
   }
 }
 

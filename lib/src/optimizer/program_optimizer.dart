@@ -52,16 +52,29 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       memoryLayout: memoryLayoutFor?.call(input),
       allocationFailure: allocationFailure,
     ).facts;
-    var facts = analyze(program);
     final stages = [
       for (final pass in passes) (kind: pass.kind, run: pass.bind()),
     ];
+    IrProgram normalize(IrProgram input) {
+      bool changed;
+      do {
+        changed = false;
+        for (final stage in stages) {
+          final next = stage.run.normalize(input);
+          changed |= !identical(next, input);
+          input = next;
+        }
+      } while (changed);
+      return input;
+    }
+
+    var facts = analyze(normalize(program));
     bool apply(ProgramTransform transform) {
       final before = facts.program;
       final after = transform(facts);
       facts.checkProgram(before);
       if (identical(before, after)) return false;
-      facts = analyze(after);
+      facts = analyze(normalize(after));
       return true;
     }
 

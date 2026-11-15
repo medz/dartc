@@ -19,6 +19,75 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('native mappings preserve private cells and caller byte contents', () {
+    final factory = FunctionTarget(null, 'map', .integer, [.integer]);
+    final primitive = FunctionTarget(null, 'reserve', .integer, [.integer]);
+    final body = Block(factory.parameterTypes);
+    body.finish(
+      Return(body.emit(DirectCall(primitive, [const Constant.integer(16)]))),
+    );
+    final target = FunctionTarget(null, 'use', .integer, [.integer]);
+    final entry = Block(target.parameterTypes);
+    final address = entry.emit(DirectCall(factory, entry.parameters));
+    final success = Block(),
+        failure = Block()..finish(const Return(Constant.integer(-1)));
+    entry.finish(
+      Branch(
+        entry.emit(Equals(address, const Constant.integer(0))),
+        Jump(failure),
+        Jump(success),
+      ),
+    );
+    final cell = success.emit(
+      NewCell(CellType(.integer), const Constant.integer(41)),
+    );
+    success.emit(StoreNative(address, _u8, const Constant.integer(9)));
+    final output = FunctionTarget(null, 'output', .voidType, [.integer]);
+    final write = success.emit(DirectCall(output, [address]));
+    final byte = success.emit(LoadNative(address, _u8));
+    final local = success.emit(ReadCell(cell));
+    success.finish(Return(success.emit(IntBinary(.add, byte, local))));
+    final facts = ProgramFlow(
+      IrProgram(
+        [],
+        [
+          IrFunction(factory, [body]),
+          IrFunction(target, [entry, success, failure]),
+        ],
+        externals: [
+          IrExternal(
+            primitive,
+            effects: const {Effect.writesStorage},
+            writesMemory: false,
+            zeroedMemorySizeParameter: 0,
+          ),
+          IrExternal(
+            output,
+            effects: const {Effect.writesStorage},
+            writesMemory: false,
+            terminates: true,
+          ),
+        ],
+      ),
+      [
+        (target: target, arguments: [FlowValue.unknown(.integer)]),
+      ],
+      memoryLayout: _layout,
+    ).facts;
+    expect(_number(facts.valueOf(byte)), 9);
+    expect(_number(facts.valueOf(local)), 41);
+    expect(facts.valueOf(address).references.objects, isEmpty);
+    expect(
+      (
+        facts.returnedBy(target).integers?.lower,
+        facts.returnedBy(target).integers?.upper,
+      ),
+      (-1, 50),
+    );
+    expect(facts.exitsOf(local).exceptional, isFalse);
+    expect(facts.canDiscard(write), isFalse);
+  });
+
   test(
     'a pure allocation view retains fresh state through its call summary',
     () {

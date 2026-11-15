@@ -731,17 +731,26 @@ void main() {
       final recursive = FunctionTarget(_uri, 'recursive', .integer, [.integer]);
       final loop = Block(recursive.parameterTypes);
       loop.finish(Return(loop.emit(DirectCall(recursive, loop.parameters))));
+      final caller = FunctionTarget(_uri, 'caller', .integer, [.integer]);
+      final call = Block(caller.parameterTypes);
+      call.finish(Return(call.emit(DirectCall(recursive, call.parameters))));
       final program = IrProgram([], [
         IrFunction(identity, [generic]),
         IrFunction(root, [entry]),
         IrFunction(recursive, [loop]),
+        IrFunction(caller, [call]),
       ]);
-      final result = _inline(program, [root, recursive]);
+      final result = _inline(program, [root, caller]);
       expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
       expect((result.implementationOf(recursive) as IrFunction).callees, {
         recursive,
       });
       expect(_run(result, root, []), 8);
+      expect(
+        result.implementationOf(caller),
+        same(program.implementationOf(caller)),
+      );
+      expect(_inline(result, [root, caller]), same(result));
     },
   );
 

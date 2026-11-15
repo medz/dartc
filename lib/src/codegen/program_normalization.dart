@@ -63,6 +63,8 @@ final class ProgramNormalization(
                 defaults: defaults,
                 effects: external.effects,
                 terminates: external.terminates,
+                writesMemory: external.writesMemory,
+                zeroedMemorySizeParameter: external.zeroedMemorySizeParameter,
               )
             : external,
       );

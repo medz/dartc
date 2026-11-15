@@ -88,6 +88,14 @@ final class IrExternal(
   /// Whether every invocation finishes, rather than diverging or suspending forever.
   /// This trusted promise is independent of effects and does not exclude throws.
   final bool terminates = false,
+
+  /// Whether the implementation may mutate arguments or previously escaped storage.
+  /// Observable effects such as output remain in [effects] even when this is false.
+  final bool writesMemory = true,
+
+  /// Parameter containing the size of fresh, zero-filled native storage returned
+  /// as an integer address, or zero on failure. The result is not a GC reference.
+  final int? zeroedMemorySizeParameter,
 }) extends IrCallable {
   /// Effects promised by the external implementation, conservative by default.
   ///
@@ -98,6 +106,13 @@ final class IrExternal(
   this {
     if (target.kind == .closure || target.kind == .fieldInitializer) {
       throw ArgumentError('Invalid external declaration ${target.name}.');
+    }
+    if (zeroedMemorySizeParameter case final index?
+        when target.returnType != ValueType.integer ||
+            index < 0 ||
+            index >= target.parameterTypes.length ||
+            target.parameterTypes[index] != ValueType.integer) {
+      throw ArgumentError('Invalid native allocation contract.');
     }
     _references = verifyCallable(target, defaults.values);
   }

@@ -12,6 +12,26 @@ import 'program_pass.dart';
 /// joins; writes, lazy reads and opaque effects remain explicit proof boundaries.
 final class const ProgramStoragePromotion() extends ProgramPass {
   @override
+  ProgramTransform bind() => ProgramTransform(
+    run,
+    normalize: (program) {
+      final functions = [
+        for (final function in program.functions) _LocalCells(function).run(),
+      ];
+      return functions.indexed.any(
+            (entry) => !identical(entry.$2, program.functions[entry.$1]),
+          )
+          ? IrProgram(
+              program.classes,
+              functions,
+              globals: program.globals,
+              externals: program.externals,
+            )
+          : program;
+    },
+  );
+
+  @override
   IrProgram run(ProgramFlowFacts facts) {
     facts.checkProgram(facts.program);
     var changed = false;
@@ -31,6 +51,137 @@ final class const ProgramStoragePromotion() extends ProgramPass {
             externals: facts.program.externals,
           )
         : facts.program;
+  }
+}
+
+/// Promotes private cells whose complete set of uses is local reads and writes.
+final class _LocalCells(final IrFunction function) {
+  final incoming = <Block, List<Jump>>{};
+  final owners = <Jump, Block>{};
+  final aliases = <Value, NewCell>{};
+  final cells = <NewCell>{};
+  final entries = <(Block, NewCell), Value>{};
+  final phis = <BlockParameter, ({Block block, Map<Jump, Value> incoming})>{};
+
+  IrFunction run() {
+    if (function.bodyKind != .synchronous) return function;
+    final operations = [
+      for (final block in function.blocks) ...[
+        ...block.instructions,
+        if (block.end case Invoke(:final operation)) operation,
+      ],
+    ];
+    for (final operation in operations) {
+      if (operation case NewCell(
+        type: CellType(isLate: false, isFinal: false),
+        initial: Value(),
+      )) {
+        cells.add(operation);
+        aliases[operation] = operation;
+      }
+    }
+    if (cells.isEmpty) return function;
+    for (final block in function.blocks) {
+      for (final edge in block.successors) {
+        if (owners[edge] case final owner? when owner != block) return function;
+        owners[edge] = block;
+        (incoming[edge.target] ??= []).add(edge);
+      }
+    }
+    bool changed;
+    do {
+      changed = false;
+      for (final block in function.blocks) {
+        final edges = incoming[block];
+        if (edges == null || edges.length != 1) continue;
+        for (final (index, parameter) in block.parameters.indexed) {
+          final cell = aliases[edges.single.arguments[index]];
+          if (cell != null && aliases[parameter] != cell) {
+            aliases[parameter] = cell;
+            changed = true;
+          }
+        }
+      }
+    } while (changed);
+    for (final operation in operations) {
+      for (final input in operation.inputs) {
+        final cell = aliases[input];
+        if (cell != null && operation is! ReadCell && operation is! WriteCell) {
+          cells.remove(cell);
+        }
+      }
+    }
+    for (final block in function.blocks) {
+      final end = block.end;
+      for (final input in switch (end) {
+        Return(:final value) => [?value],
+        Throw(:final exception, :final stackTrace) => [exception, ?stackTrace],
+        _ => const <Value>[],
+      }) {
+        cells.remove(aliases[input]);
+      }
+      for (final edge in block.successors) {
+        for (final (index, argument) in edge.arguments.indexed) {
+          final cell = aliases[argument];
+          if (cell != null && aliases[edge.target.parameters[index]] != cell) {
+            cells.remove(cell);
+          }
+        }
+      }
+    }
+    if (cells.isEmpty) return function;
+    final replacements = <Value, Value>{};
+    final removed = <Instruction>{...cells};
+    for (final block in function.blocks) {
+      final current = <NewCell, Value>{};
+      for (final operation in [
+        ...block.instructions,
+        if (block.end case Invoke(:final operation)) operation,
+      ]) {
+        if (operation is NewCell && cells.contains(operation)) {
+          current[operation] = operation.initial!;
+        } else if (operation is ReadCell || operation is WriteCell) {
+          final cell = aliases[operation.inputs.first];
+          if (!cells.contains(cell)) continue;
+          removed.add(operation);
+          if (operation is WriteCell) {
+            current[cell!] = operation.value;
+          } else {
+            replacements[operation] = current[cell] ?? atEntry(block, cell!);
+          }
+        }
+      }
+    }
+    return FunctionRewrite(
+      function,
+      replacements: replacements,
+      phis: phis,
+      discardable: removed,
+    ).run();
+  }
+
+  Value atEntry(Block block, NewCell cell) {
+    final key = (block, cell);
+    if (entries[key] case final value?) return value;
+    final parameter = blockParameters([(cell.type as CellType).content]).single;
+    entries[key] = parameter;
+    final values = <Jump, Value>{};
+    phis[parameter] = (block: block, incoming: values);
+    for (final edge in incoming[block] ?? const <Jump>[]) {
+      final owner = owners[edge]!;
+      Value? value;
+      for (final operation in [
+        ...owner.instructions,
+        if (owner.end case Invoke(:final operation)) operation,
+      ]) {
+        if (identical(operation, cell)) value = cell.initial!;
+        if (operation is WriteCell && aliases[operation.cell] == cell) {
+          value = operation.value;
+        }
+      }
+      values[edge] = value ?? atEntry(owner, cell);
+    }
+    return parameter;
   }
 }
 

@@ -330,6 +330,10 @@ final class ProgramFlow(
         input,
         target.returnType.substitute(environment),
         effects: effects,
+        writesMemory: body is! IrExternal || body.writesMemory,
+        zeroedMemorySizeParameter: body is IrExternal
+            ? body.zeroedMemorySizeParameter
+            : null,
       );
     }
     final path = _recursivePath(caller, target, arguments);
@@ -494,7 +498,7 @@ final class ProgramFlow(
             projected,
             after.project([
               ...supplied,
-              ...projected.objects.map(FlowValue.object),
+              ...projected.allocations,
               callee.returned,
               callee.exception,
             ]),
@@ -603,7 +607,9 @@ final class ProgramFlow(
         ...block.instructions,
         if (block.end case Invoke(:final operation)) operation,
       ]) {
-        if (operation is AllocatedObject) return null;
+        if (operation is AllocatedObject) {
+          return null;
+        }
         List<FunctionTarget>? targets;
         if (operation case DirectCall(:final target)) {
           targets = [target];
@@ -1113,7 +1119,7 @@ final class ProgramFlow(
       });
       state = state.project([
         // A caller can retain old aliases even after this body detaches them.
-        ...activation.input!.objects.map(FlowValue.object),
+        ...activation.input!.allocations,
         ...liveness.acrossCalls[operation]!.map(read),
         ...inputs,
       ]);
@@ -2264,12 +2270,14 @@ final class ProgramFlow(
     FlowState state,
     ValueType resultType, {
     Set<Effect>? effects,
+    bool writesMemory = true,
+    int? zeroedMemorySizeParameter,
   }) {
     effects ??= operation.effects;
     activation.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
     final next = state.copy();
     next.escape(inputs);
-    if (effects.contains(Effect.writesStorage)) {
+    if (writesMemory && effects.contains(Effect.writesStorage)) {
       next.invalidate([next.exposedValues]);
     }
     if (effects.contains(Effect.callsUserCode)) {
@@ -2289,14 +2297,25 @@ final class ProgramFlow(
         }
       }
     }
+    final mapping = zeroedMemorySizeParameter == null
+        ? null
+        : next.allocateMemory(
+            FlowObject(operation, activation, type: resultType),
+            inputs[zeroedMemorySizeParameter],
+            repeated:
+                activation.repeated ||
+                _loopBlocks(activation.body).contains(block),
+          );
     return FlowResult(
-      value: resultType == .never
-          ? const FlowValue.bottom()
-          : FlowValue.unknown(resultType)
-                .join(next.exposedValues.check(resultType).value)
-                .withSources(const [])
-                .withReferences(inputs.map((value) => value.references)),
-      normal: resultType == .never ? null : next,
+      value:
+          mapping?.value ??
+          (resultType == .never
+              ? const FlowValue.bottom()
+              : FlowValue.unknown(resultType)
+                    .join(next.exposedValues.check(resultType).value)
+                    .withSources(const [])
+                    .withReferences(inputs.map((value) => value.references))),
+      normal: resultType == .never ? null : mapping?.normal ?? next,
       exceptional:
           effects.contains(Effect.mayThrow) ||
               effects.contains(Effect.allocates)
@@ -3332,6 +3351,21 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
     return a == null || b == null ? null : {leftValue: a, rightValue: b};
   }
   if (condition case Equals(:final left, :final right, :final negated)) {
+    for (final (value, constant) in [(left, right), (right, left)]) {
+      if (read(constant).constant case ScalarConstant(value: 0)
+          when read(value).addresses.isNotEmpty &&
+              read(value).types.every((type) => type == ValueType.integer)) {
+        return {
+          value: outcome != negated
+              ? FlowIntegerRange(0, 0)
+              : FlowIntegerRange(
+                  FlowIntegerRange.minimum,
+                  FlowIntegerRange.maximum,
+                  excludesZero: true,
+                ),
+        };
+      }
+    }
     final a = read(left).integers, b = read(right).integers;
     if (a == null || b == null) return {};
     if (outcome != negated) {
@@ -3349,6 +3383,13 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         result[value] = FlowIntegerRange(excluded + 1, range.upper);
       } else if (range.upper == excluded) {
         result[value] = FlowIntegerRange(range.lower, excluded - 1);
+      } else if (excluded == 0) {
+        result[value] = FlowIntegerRange(
+          range.lower,
+          range.upper,
+          zeroBits: range.zeroBits,
+          excludesZero: true,
+        );
       }
     }
     return result;

@@ -42,6 +42,16 @@ final class FlowObject(
   );
 }
 
+/// Native allocation identity, kept separate from managed Dart references.
+final class FlowRegion(final FlowObject allocation) {
+  @override
+  bool operator ==(Object other) =>
+      other is FlowRegion && allocation == other.allocation;
+
+  @override
+  int get hashCode => allocation.hashCode;
+}
+
 /// An address in managed storage, a constant, a layout descriptor or a callback.
 ///
 /// Unknown offsets do not establish that access stays in bounds.
@@ -69,6 +79,7 @@ final class FlowAddress.ranged(
     if (base is! FlowObject &&
             base is! Constant &&
             base is! ClassType &&
+            base is! FlowRegion &&
             base is! NativeCallbackTarget ||
         type != ValueType.integer && !FfiTypes.isPointer(type)) {
       throw ArgumentError(
@@ -88,6 +99,7 @@ final class FlowAddress.ranged(
     final FlowObject object => FlowValue.object(object),
     final Constant constant => FlowValue.constant(constant),
     ClassType() => const FlowValue.bottom(),
+    FlowRegion() => const FlowValue.bottom(),
     final NativeCallbackTarget target => FlowValue._(
       const {},
       const {},
@@ -262,6 +274,38 @@ final class FlowValue {
   /// Intersects a numeric path condition without changing SSA equivalence.
   FlowValue restrictIntegers(FlowIntegerRange range) {
     final existing = integers;
+    if (existing == null &&
+        addresses.isNotEmpty &&
+        (range.constant == 0 || !range.contains(0))) {
+      final zero = range.constant == 0;
+      final constants = {
+        for (final entry in _constants.entries)
+          if (entry.value is! ScalarConstant ||
+              (entry.value as ScalarConstant).value != 0 ||
+              zero)
+            entry.key: entry.value,
+      };
+      final retained = addresses
+          .where((address) => !zero || address.offset != 0)
+          .toSet();
+      if (zero) {
+        constants.removeWhere(
+          (_, value) => value is! ScalarConstant || value.value != 0,
+        );
+        if (unknownTypes.contains(ValueType.integer) || retained.isNotEmpty) {
+          const value = Constant.integer(0);
+          constants[value.structuralKey] = value;
+        }
+      }
+      return FlowValue._(
+        constants,
+        objects,
+        zero ? const {} : unknownTypes,
+        sources,
+        _references,
+        zero ? const {} : retained,
+      );
+    }
     if (existing == null) return this;
     final narrowed = existing.intersect(range);
     if (narrowed == null) return const FlowValue.bottom();
@@ -315,9 +359,11 @@ final class FlowValue {
     final mappedAddresses = {
       for (final address in addresses)
         FlowAddress.ranged(
-          address.base is FlowObject
-              ? transform(address.base as FlowObject)
-              : address.base,
+          switch (address.base) {
+            final FlowObject object => transform(object),
+            FlowRegion(:final allocation) => FlowRegion(transform(allocation)),
+            final base => base,
+          },
           address.offsets,
           type: address.type,
         ),
@@ -467,52 +513,71 @@ final class FlowValue {
   FlowValue join(FlowValue other, {bool widen = false}) {
     if (isBottom) return other;
     if (other.isBottom || this == other) return this;
-    final constants = {..._constants, ...other._constants};
-    final leftIntegers = integers, rightIntegers = other.integers;
-    final joinedIntegers = leftIntegers != null && rightIntegers != null
-        ? leftIntegers.join(rightIntegers, widen: widen)
-        : null;
-    final objects = {...this.objects, ...other.objects};
-    final unknown = {...unknownTypes, ...other.unknownTypes};
+    return FlowValue.joined([this, other], widen: widen);
+  }
+
+  /// Collects alternatives without repeatedly copying a growing object graph.
+  factory joined(Iterable<FlowValue> inputs, {bool widen = false}) {
+    final values = inputs.where((value) => !value.isBottom).toList();
+    if (values.isEmpty) return const FlowValue.bottom();
+    if (values.length == 1) return values.single;
+    final constants = <Object, Constant>{};
+    final objects = <FlowObject>{};
+    final unknown = <ValueType>{};
+    final sources = values.first.sources.toSet();
     final scalars = <ValueType, Object>{};
-    for (final entry in constants.entries) {
-      if (entry.value is! ScalarConstant) continue;
-      final type = entry.value.type;
-      if (scalars.containsKey(type) && scalars[type] != entry.key) {
-        unknown.add(type);
-      } else {
-        scalars[type] = entry.key;
+    final addresses = <(Object, ValueType), FlowAddress>{};
+    var integers = values.first.integers;
+    for (final (index, value) in values.indexed) {
+      if (index != 0) {
+        final other = value.integers;
+        integers = integers != null && other != null
+            ? integers.join(other, widen: widen)
+            : null;
+      }
+      objects.addAll(value.objects);
+      unknown.addAll(value.unknownTypes);
+      sources.removeWhere((source) => !value.sources.contains(source));
+      for (final entry in value._constants.entries) {
+        constants[entry.key] = entry.value;
+        if (entry.value is! ScalarConstant) continue;
+        final type = entry.value.type;
+        if (scalars.containsKey(type) && scalars[type] != entry.key) {
+          unknown.add(type);
+        } else {
+          scalars[type] = entry.key;
+        }
+      }
+      for (final address in value.addresses) {
+        final key = (address.identity, address.type);
+        final previous = addresses[key];
+        addresses[key] = previous == null || previous == address
+            ? address
+            : FlowAddress.ranged(
+                address.base,
+                previous.offsets == null || address.offsets == null
+                    ? null
+                    : previous.offsets!.join(address.offsets!, widen: widen),
+                type: address.type,
+              );
       }
     }
     constants.removeWhere(
       (_, value) => value is ScalarConstant && unknown.contains(value.type),
     );
-    final addresses = <(Object, ValueType), FlowAddress>{};
-    for (final address in [...this.addresses, ...other.addresses]) {
-      final key = (address.identity, address.type);
-      final previous = addresses[key];
-      addresses[key] = previous == null || previous == address
-          ? address
-          : FlowAddress.ranged(
-              address.base,
-              previous.offsets == null || address.offsets == null
-                  ? null
-                  : previous.offsets!.join(address.offsets!, widen: widen),
-              type: address.type,
-            );
-    }
+    final references = FlowValue.joined(
+      values.map((value) => value.references),
+      widen: widen,
+    );
     return FlowValue._(
       constants,
       objects,
       unknown,
-      sources.intersection(other.sources),
-      references.isBottom && other.references.isBottom
-          ? null
-          : references.join(other.references, widen: widen),
+      sources,
+      references.isBottom ? null : references,
       addresses.values.toSet(),
-      joinedIntegers?.constant == null &&
-              joinedIntegers != FlowIntegerRange.full
-          ? joinedIntegers
+      integers?.constant == null && integers != FlowIntegerRange.full
+          ? integers
           : null,
     );
   }

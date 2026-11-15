@@ -23,7 +23,7 @@ final class const ProgramLoopSpecialization({final int maxCodeGrowth = 64})
   ProgramTransform bind() {
     RangeError.checkNotNegative(maxCodeGrowth, 'maxCodeGrowth');
     final remaining = <FunctionTarget, int>{};
-    return (facts) {
+    return ProgramTransform((facts) {
       facts.checkProgram(facts.program);
       var changed = false;
       final functions = <IrFunction>[];
@@ -98,7 +98,7 @@ final class const ProgramLoopSpecialization({final int maxCodeGrowth = 64})
               externals: facts.program.externals,
             )
           : facts.program;
-    };
+    });
   }
 }
 

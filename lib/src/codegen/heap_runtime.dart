@@ -25,6 +25,9 @@ enum MemoryPrimitive(final Set<Effect> effects) {
     .context || .currentThread || .callbackTemplate => true,
     _ => false,
   };
+
+  /// Services that can change or release memory visible to their caller.
+  bool get writesMemory => this == .unmap || this == .entropy;
 }
 
 /// Source program and entry contracts used by managed code generation.

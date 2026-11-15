@@ -82,6 +82,21 @@ int closureCells(int value) {
   }
 }
 
+int closureInsideTry(int value) {
+  try {
+    var current = value;
+    int next() {
+      current++;
+      if (current < 0) throw current;
+      return current;
+    }
+
+    return next() + next();
+  } on int catch (error) {
+    return error * 2;
+  }
+}
+
 T forward<T>(
   T Function() action, {
   bool first = false,

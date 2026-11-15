@@ -14,8 +14,8 @@ import 'storage_elimination.dart';
 /// synchronous bodies that can be copied with their parameter and type bindings.
 /// Arguments retain evaluation order, effects and exceptional continuations.
 ///
-/// Each compilation retains per-function budgets while fresh facts expose more
-/// candidates after shrinking passes; repeated rounds never reset spent growth.
+/// Each compilation retains a per-function size limit. Shrinking a graph frees
+/// space for later expansion without raising that limit.
 final class const DirectCallInlining({
   final int maxCalleeCost = 12,
   final int maxCallerGrowth = 64,
@@ -30,32 +30,38 @@ final class const DirectCallInlining({
   ProgramTransform bind() {
     RangeError.checkNotNegative(maxCalleeCost, 'maxCalleeCost');
     RangeError.checkNotNegative(maxCallerGrowth, 'maxCallerGrowth');
-    final remaining = <FunctionTarget, int>{};
-    return (facts) {
-      facts.checkProgram(facts.program);
-      if (maxCalleeCost == 0 || maxCallerGrowth == 0) return facts.program;
+    final limits = <FunctionTarget, int>{};
+    IrProgram inline(IrProgram program, ProgramFlowFacts? facts) {
+      facts?.checkProgram(program);
+      if (maxCalleeCost == 0 || maxCallerGrowth == 0) return program;
       return _inlineSelected(
-        facts.program,
+        program,
         facts,
         maxCalleeCost,
         maxCallerGrowth,
-        remaining,
+        limits,
       );
-    };
+    }
+
+    return ProgramTransform(
+      (facts) => inline(facts.program, facts),
+      normalize: (program) => inline(program, null),
+    );
   }
 }
 
 IrProgram _inlineSelected(
   IrProgram program,
-  ProgramFlowFacts facts,
+  ProgramFlowFacts? facts,
   int maxCalleeCost,
   int maxCallerGrowth,
-  Map<FunctionTarget, int> remaining,
+  Map<FunctionTarget, int> limits,
 ) {
-  final discardableStorage = storageDiscardable(facts);
+  final discardableStorage = facts == null ? null : storageDiscardable(facts);
   final expanded =
       <FunctionTarget, ({IrFunction body, int copies, int allocations})>{};
-  final visiting = <FunctionTarget>{};
+  final visiting = <FunctionTarget>[];
+  final recursive = <FunctionTarget>{};
   int copies(IrFunction function) => function.blocks.fold(
     0,
     (count, block) =>
@@ -65,13 +71,21 @@ IrProgram _inlineSelected(
         (function.blocks.length == 1 && block.end is Return ? 0 : 1),
   );
   bool allocates(Instruction operation) =>
-      facts.effectsOf(operation).contains(Effect.allocates);
+      (facts?.effectsOf(operation) ?? operation.effects).contains(
+        Effect.allocates,
+      );
 
   ({IrFunction body, int copies, int allocations}) expand(IrFunction function) {
     if (expanded[function.target] case final result?) return result;
     visiting.add(function.target);
-    var budget = remaining[function.target] ?? maxCallerGrowth, allocations = 0;
-    final executable = facts.definitions.contains(function.target);
+    final size = copies(function);
+    final limit = limits.putIfAbsent(
+      function.target,
+      () => size + maxCallerGrowth,
+    );
+    var budget = limit > size ? limit - size : 0, allocations = 0;
+    final executable =
+        facts == null || facts.definitions.contains(function.target);
     if (executable) {
       for (final block in function.blocks) {
         for (final operation in [
@@ -95,6 +109,18 @@ IrProgram _inlineSelected(
             })
           >{};
       final dominance = ValueDominance(input);
+      final incoming = <Block, List<Jump>>{};
+      for (final block in input.blocks) {
+        for (final edge in block.successors) {
+          (incoming[edge.target] ??= []).add(edge);
+        }
+      }
+      final aliases = <Value, Value>{
+        for (final block in input.blocks)
+          if (incoming[block]?.singleOrNull case final edge?)
+            for (final (index, parameter) in block.parameters.indexed)
+              parameter: edge.arguments[index],
+      };
       final owned = {
         for (final block in input.blocks) ...[
           ...block.instructions,
@@ -102,23 +128,36 @@ IrProgram _inlineSelected(
         ],
       };
       ({MakeClosure closure, Value receiver})? closureOf(FunctionCall call) {
+        final receiverValues = <Value>[];
         Value unwrap(Value value) {
-          while (true) {
+          final visited = <Value>{};
+          while (visited.add(value)) {
+            receiverValues.add(value);
             switch (value) {
               case TypeView(:final operand) || UncheckedCast(:final operand):
                 value = operand;
               default:
-                return value;
+                final origin = aliases[value];
+                if (origin == null) return value;
+                value = origin;
             }
           }
+          return value;
         }
 
         final literal = unwrap(call.function);
         if (literal is MakeClosure) {
-          return (closure: literal, receiver: literal);
+          final receiver = receiverValues
+              .where(
+                (value) =>
+                    literal.type.accepts(value.type) &&
+                    dominance.before(value, call),
+              )
+              .firstOrNull;
+          if (receiver != null) return (closure: literal, receiver: receiver);
         }
         if (!sourceFacts) return null;
-        for (final equivalent in facts.equivalentsOf(call.function)) {
+        for (final equivalent in facts!.equivalentsOf(call.function)) {
           final literal = unwrap(equivalent);
           if (literal is MakeClosure && dominance.before(literal, call)) {
             return (closure: literal, receiver: literal);
@@ -168,12 +207,12 @@ IrProgram _inlineSelected(
           if (block.end case Invoke(:final operation, :final onThrow))
             (operation, onThrow),
         ]) {
-          if (sourceFacts && !facts.reachesOperation(operation)) continue;
+          if (sourceFacts && !facts!.reachesOperation(operation)) continue;
           final FunctionTarget target;
           final List<Value> arguments;
           final Map<TypeParameterType, ValueType> environment;
           if (operation is DirectCall && sourceFacts) {
-            if (!_entryChecksProved(operation, facts)) continue;
+            if (!_entryChecksProved(operation, facts!)) continue;
             target = operation.target;
             arguments = operation.inputs;
             environment = {
@@ -207,7 +246,11 @@ IrProgram _inlineSelected(
           } else {
             continue;
           }
-          if (visiting.contains(target)) continue;
+          final cycle = visiting.indexOf(target);
+          if (cycle >= 0) {
+            recursive.addAll(visiting.skip(cycle));
+            continue;
+          }
           final source = program.implementationOf(target);
           if (source is! IrFunction ||
               source.bodyKind != .synchronous ||
@@ -217,8 +260,9 @@ IrProgram _inlineSelected(
             continue;
           }
           var candidate = expand(source);
+          if (recursive.contains(target)) continue;
           if (sourceFacts) {
-            final activations = facts
+            final activations = facts!
                 .callActivationsOf(operation)
                 .intersection(facts.activationsOf(target).toSet());
             if (activations.isNotEmpty) {
@@ -227,7 +271,7 @@ IrProgram _inlineSelected(
                 facts,
                 source,
                 activations: activations,
-                discardable: discardableStorage(
+                discardable: discardableStorage!(
                   source,
                   activations: activations,
                 ),
@@ -322,14 +366,14 @@ IrProgram _inlineSelected(
                       ...block.instructions,
                       if (block.end case Invoke(:final operation)) operation,
                     ])
-                      if (facts.canDiscard(operation)) operation,
+                      if (facts!.canDiscard(operation)) operation,
               },
             ).run();
     }
 
     var body = function;
     if (executable && function.bodyKind == .synchronous) {
-      body = rewrite(body, sourceFacts: true);
+      body = rewrite(body, sourceFacts: facts != null);
       // Copied callees can expose the caller's closure literal and its shared cells.
       while (!identical(body, function) && budget > 0) {
         final next = rewrite(body, sourceFacts: false);
@@ -339,19 +383,25 @@ IrProgram _inlineSelected(
       if (!identical(body, function)) {
         final closures = {
           for (final block in body.blocks)
-            ...block.instructions.whereType<MakeClosure>(),
+            ...[
+              ...block.instructions,
+              if (block.end case Invoke(:final operation)) operation,
+            ].whereType<MakeClosure>(),
         };
         body = FunctionRewrite(body, discardable: closures).run();
         final retained = body.blocks.fold(
           0,
           (count, block) =>
-              count + block.instructions.whereType<MakeClosure>().length,
+              count +
+              [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ].whereType<MakeClosure>().length,
         );
         allocations -= closures.length - retained;
       }
     }
     visiting.remove(function.target);
-    remaining[function.target] = budget;
     return expanded[function.target] = (
       body: body,
       copies: copies(body),
