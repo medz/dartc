@@ -77,6 +77,43 @@ void main() {
       expect(optimize(unknown).returnedBy(unknown.target).constant, isNull);
     },
   );
+  test(
+    'views of one unknown value retain identity without conflating inputs',
+    () {
+      for (final name in ['sameInput', 'sameViews']) {
+        final function = body(name);
+        final facts = optimize(function);
+        expect(
+          facts.returnedBy(function.target).constant?.structuralKey,
+          const Constant.boolean(true).structuralKey,
+        );
+        final rewritten =
+            facts.program.implementationOf(function.target) as IrFunction;
+        expect(
+          rewritten.blocks
+              .expand((block) => block.instructions)
+              .whereType<Identical>(),
+          isEmpty,
+        );
+      }
+      final distinct = body('unknownPair');
+      final facts = optimize(distinct);
+      expect(facts.returnedBy(distinct.target).constant, isNull);
+      final rewritten =
+          facts.program.implementationOf(distinct.target) as IrFunction;
+      final object = Object();
+      for (final args in [
+        [object, object],
+        [object, Object()],
+        [null, null],
+      ]) {
+        expect(
+          IrInterpreter(facts.program, {}).run(rewritten, args),
+          source.unknownPair(args.first, args.last),
+        );
+      }
+    },
+  );
   test('borrowed and published return aliases keep the same identity', () {
     for (final (name, evaluate) in [
       ('borrowedIdentity', source.borrowedIdentity),

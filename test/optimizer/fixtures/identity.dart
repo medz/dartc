@@ -13,6 +13,16 @@ bool selectedIdentity(bool selected) =>
 
 bool unknownIdentity(Object value) => identical(const Token(1), value);
 
+bool sameInput(Object? value) => identical(value, value);
+
+bool sameViews(Token? value) {
+  final Object? left = value;
+  final Object? right = value;
+  return identical(left, right);
+}
+
+bool unknownPair(Object? left, Object? right) => identical(left, right);
+
 Token makeToken() => Token(1);
 
 bool freshAndFresh() => identical(Token(1), Token(1));

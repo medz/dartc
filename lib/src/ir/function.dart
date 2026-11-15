@@ -84,6 +84,10 @@ final class IrExternal(
   super.target, {
   super.defaults,
   Iterable<Effect> effects = Effect.values,
+
+  /// Whether every invocation finishes, rather than diverging or suspending forever.
+  /// This trusted promise is independent of effects and does not exclude throws.
+  final bool terminates = false,
 }) extends IrCallable {
   /// Effects promised by the external implementation, conservative by default.
   ///

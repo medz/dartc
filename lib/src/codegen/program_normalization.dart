@@ -62,6 +62,7 @@ final class ProgramNormalization(
                 external.target,
                 defaults: defaults,
                 effects: external.effects,
+                terminates: external.terminates,
               )
             : external,
       );

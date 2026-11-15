@@ -18,7 +18,13 @@ enum MemoryPrimitive(final Set<Effect> effects) {
   sleep({.readsStorage}),
   currentThread({.readsStorage}),
   callbackTemplate({.readsStorage}),
-  flushInstructions({.writesStorage}),
+  flushInstructions({.writesStorage});
+
+  /// Whether the service completes without waiting on an external event.
+  bool get terminates => switch (this) {
+    .context || .currentThread || .callbackTemplate => true,
+    _ => false,
+  };
 }
 
 /// Source program and entry contracts used by managed code generation.

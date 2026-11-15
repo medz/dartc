@@ -73,7 +73,13 @@ final class NativeBoundaries(
       if (_needsBridge(binding)) {
         final raw = _bridge(target, intoDart: false);
         externals.removeWhere((declaration) => declaration.target == target);
-        externals.add(IrExternal(raw, effects: declaration.effects));
+        externals.add(
+          IrExternal(
+            raw,
+            effects: declaration.effects,
+            terminates: declaration.terminates,
+          ),
+        );
         nativeImports[raw] = (source: target, signature: binding);
       } else {
         nativeImports[target] = (source: target, signature: binding);

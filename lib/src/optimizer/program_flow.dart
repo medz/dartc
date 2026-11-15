@@ -2882,9 +2882,18 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     Set<_Activation> visiting, {
     bool ignoreFailure = false,
   }) {
-    if (activation.unknownCalls.contains(operation) ||
-        activation.externalCalls.contains(operation)) {
-      return false;
+    if (activation.unknownCalls.contains(operation)) return false;
+    if (activation.externalCalls.contains(operation)) {
+      final targets = activation.targets[operation] ?? const {};
+      if (targets.isEmpty ||
+          targets.any(
+            (target) => switch (_flow.program.implementationOf(target)) {
+              IrExternal(terminates: true) || IrFunction() => false,
+              _ => true,
+            },
+          )) {
+        return false;
+      }
     }
     final callees = activation.calls[operation] ?? const <_Activation>{};
     // Pure initialization may wait until a later read, even for writable storage.
@@ -2940,8 +2949,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     final body = activation.body as IrFunction;
     if (body.bodyKind != .synchronous ||
         _cyclicBlocks(body.blocks, edges: activation.edges).isNotEmpty ||
-        activation.unknownCalls.isNotEmpty ||
-        activation.externalCalls.isNotEmpty) {
+        activation.unknownCalls.isNotEmpty) {
       return false;
     }
     for (final operation in {
@@ -3575,6 +3583,9 @@ Constant? _fold(
   IrProgram program,
 ) {
   if (operation is Identical) {
+    if (_equivalent(inputs.first, inputs.last)) {
+      return const Constant.boolean(true);
+    }
     if (inputs.every(
           (value) =>
               value.objects.isNotEmpty &&

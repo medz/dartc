@@ -877,7 +877,7 @@ sealed class Instruction(super.type) extends Value {
   Set<Effect> get effects => switch (this) {
     NativeCallbackAddress() => const {.readsStorage, .writesStorage},
     KeepAlive() => const {.keepsAlive},
-    ObjectHashCode(direct: true) => _bindOnce,
+    ObjectHashCode(direct: true) => const {.readsStorage},
     ObjectRuntimeType(direct: true) => const {.readsStorage},
     ObjectClassName() => const {.readsStorage},
     ObjectRuntimeType() ||

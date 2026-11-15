@@ -64,6 +64,8 @@ void main() {
     expect(IntBinary(.add, n, n).effects, isEmpty);
     expect(ObjectRuntimeType(n).effects, Effect.values.toSet());
     expect(ObjectRuntimeType(n, direct: true).effects, {Effect.readsStorage});
+    expect(ObjectHashCode(n, direct: true).effects, {Effect.readsStorage});
+    expect(ObjectHashCode(receiver).effects, Effect.values.toSet());
     expect(
       () => ObjectRuntimeType(NewCell(CellType(.integer), n)),
       throwsArgumentError,

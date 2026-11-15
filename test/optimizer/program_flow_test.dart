@@ -1265,39 +1265,74 @@ void main() {
     expect(interpreter.run(function, []), 1);
   });
 
-  test('an explicit leaf contract does not invent callback execution or termination', () {
-    final global = GlobalVariable(_uri, 'private', .integer, isLate: true);
-    final callback = FunctionTarget(_uri, 'callback', .voidType, []);
-    final callbackBody = Block();
-    callbackBody.emit(StoreGlobal(global, const Constant.integer(99)));
-    callbackBody.finish(const Return());
-    final leaf = FunctionTarget(_uri, 'leaf', .voidType, [callback.signature]);
-    final entry = Block();
-    entry.emit(StoreGlobal(global, const Constant.integer(3)));
-    final call = entry.emit(DirectCall(leaf, [FunctionConstant(callback)]));
-    final load = entry.emit(LoadGlobal(global));
-    entry.finish(Return(load));
-    final main = IrFunction(FunctionTarget(_uri, 'main', .integer, []), [
-      entry,
-    ]);
-    final program = IrProgram(
-      [],
-      [
-        main,
-        IrFunction(callback, [callbackBody]),
-      ],
-      globals: [global],
-      externals: [IrExternal(leaf, effects: const {})],
+  for (final terminates in [false, true]) {
+    test(
+      'a leaf contract keeps effects and termination independent ($terminates)',
+      () {
+        final global = GlobalVariable(_uri, 'private', .integer, isLate: true);
+        final callback = FunctionTarget(_uri, 'callback', .voidType, []);
+        final callbackBody = Block();
+        callbackBody.emit(StoreGlobal(global, const Constant.integer(99)));
+        callbackBody.finish(const Return());
+        final leaf = FunctionTarget(_uri, 'leaf', .voidType, [
+          callback.signature,
+        ]);
+        final entry = Block();
+        entry.emit(StoreGlobal(global, const Constant.integer(3)));
+        final call = entry.emit(DirectCall(leaf, [FunctionConstant(callback)]));
+        final load = entry.emit(LoadGlobal(global));
+        entry.finish(Return(load));
+        final main = IrFunction(FunctionTarget(_uri, 'main', .integer, []), [
+          entry,
+        ]);
+        final program = IrProgram(
+          [],
+          [
+            main,
+            IrFunction(callback, [callbackBody]),
+          ],
+          globals: [global],
+          externals: [
+            IrExternal(leaf, effects: const {}, terminates: terminates),
+          ],
+        );
+        final facts = _flow(program, main).facts;
+        expect(
+          facts.valueOf(load).constant?.structuralKey,
+          const Constant.integer(3).structuralKey,
+        );
+        expect(facts.definitions, isNot(contains(callback)));
+        expect(facts.effectsOf(call), isEmpty);
+        expect(facts.exitsOf(call), (normal: true, exceptional: false));
+        expect(facts.canDiscard(call), terminates);
+      },
     );
-    final facts = _flow(program, main).facts;
-    expect(
-      facts.valueOf(load).constant?.structuralKey,
-      const Constant.integer(3).structuralKey,
-    );
-    expect(facts.definitions, isNot(contains(callback)));
-    expect(facts.effectsOf(call), isEmpty);
-    expect(facts.exitsOf(call), (normal: true, exceptional: false));
-    expect(facts.canDiscard(call), isFalse);
+  }
+
+  test('termination does not erase writes, throws or lifetime obligations', () {
+    for (final effect in [
+      Effect.writesStorage,
+      Effect.mayThrow,
+      Effect.keepsAlive,
+    ]) {
+      final leaf = FunctionTarget(_uri, 'leaf', .integer, []);
+      final root = FunctionTarget(_uri, 'root', .integer, []);
+      final entry = Block();
+      final call = entry.emit(DirectCall(leaf, []));
+      entry.finish(const Return(Constant.integer(42)));
+      final function = IrFunction(root, [entry]);
+      final facts = _flow(
+        IrProgram(
+          [],
+          [function],
+          externals: [
+            IrExternal(leaf, effects: {effect}, terminates: true),
+          ],
+        ),
+        function,
+      ).facts;
+      expect(facts.canDiscard(call), isFalse, reason: effect.name);
+    }
   });
 
   test(

@@ -199,6 +199,9 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
               external.target,
               defaults: external.defaults,
               effects: effects,
+              terminates:
+                  primitives[external.target]?.terminates ??
+                  external.terminates,
             ),
     );
   }
