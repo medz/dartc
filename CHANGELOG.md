@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Remove unread exception fields when callers catch and ignore them, while preserving payloads read or rethrown across calls. Keep type guards valid for unchanged storage and distinguish implicit language errors from arbitrary exceptions thrown by user code.
+
 - Remove private object storage that foreign memory reads cannot observe, preserving address aliases, external writes and weak-reference lifetimes. Eliminate unused finite loops with runtime bounds while retaining overflow, nontermination, exit values and effects; nested-loop reentry refreshes its range proofs.
 
 - Remove unobserved exception traces across calls and expose constructor bodies to object elimination, preserving initialization effects and failure state. Caught exceptions alone no longer retain the heap and event-loop runtime. Native `Void` exports discard Dart return values while ordinary Dart calls retain them.

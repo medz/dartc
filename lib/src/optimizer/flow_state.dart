@@ -194,6 +194,20 @@ final class FlowState {
     );
   }
 
+  /// Narrows storage still equal to a value tested on this execution path.
+  void refineType(
+    Set<FlowSource> sources,
+    ValueType type, {
+    required bool negated,
+  }) {
+    if (sources.isEmpty) return;
+    _mapValues(
+      (value) => value.sources.any(sources.contains)
+          ? value.check(type, negated: negated).value
+          : value,
+    );
+  }
+
   void _mapValues(FlowValue Function(FlowValue) transform) {
     _globals = _globals.mapValues((_, slot) => slot.map(transform));
     _objects = _objects.mapValues((_, object) => object.map(transform));
@@ -854,6 +868,7 @@ final class FlowState {
             value: const .bottom(),
             normal: null,
             exceptional: copy(),
+            exception: _typeError,
           );
         }
         final slot = initial != null
@@ -869,6 +884,7 @@ final class FlowState {
           value: .object(object),
           normal: next,
           exceptional: checked.mayFail ? copy() : null,
+          exception: _typeError,
           effects: const {Effect.allocates},
         );
       case CopyCell():
@@ -1400,6 +1416,7 @@ final class FlowState {
           value: const .bottom(),
           normal: null,
           exceptional: _joinStates(this, initialized.normal),
+          exception: _bindingError,
         ),
       );
     } else if (field?.requiresReadCheck ?? false) {
@@ -1407,6 +1424,7 @@ final class FlowState {
         value: result.value,
         normal: result.normal,
         exceptional: copy(),
+        exception: _typeError,
       );
     }
     return _withEffects(result, const {Effect.readsStorage});
@@ -1476,6 +1494,7 @@ final class FlowState {
           value: _null,
           normal: next,
           exceptional: copy(),
+          exception: _bindingError,
           effects: {
             Effect.writesStorage,
             if (key is InstanceField
@@ -1511,6 +1530,7 @@ final class FlowState {
             value: const .bottom(),
             normal: null,
             exceptional: unbound,
+            exception: _bindingError,
           ),
         );
       } else {
@@ -1543,11 +1563,13 @@ final class FlowState {
   }) {
     final checked = value.check(type);
     FlowState? exceptional = checked.mayFail ? copy() : null;
+    var exception = checked.mayFail ? _typeError : const FlowValue.bottom();
     if (checked.value.isBottom) {
       return FlowResult(
         value: const .bottom(),
         normal: null,
         exceptional: exceptional,
+        exception: exception,
         effects: const {Effect.readsStorage},
       );
     }
@@ -1555,12 +1577,14 @@ final class FlowState {
     if (isFinal && !slot.value.isBottom) {
       final bound = copy().._refine(location, _Slot.bound(slot.value));
       exceptional = _joinStates(exceptional, bound);
+      exception = exception.join(_bindingError);
     }
     if (isFinal && !slot.unbound) {
       return FlowResult(
         value: const .bottom(),
         normal: null,
         exceptional: exceptional,
+        exception: exception,
         effects: const {Effect.readsStorage},
       );
     }
@@ -1573,6 +1597,7 @@ final class FlowState {
       value: checked.value,
       normal: next,
       exceptional: exceptional,
+      exception: exception,
       effects: {Effect.writesStorage, if (isFinal) Effect.readsStorage},
     );
   }
@@ -1836,6 +1861,8 @@ Iterable<MapEntry<Object, _Slot>> _readSlots(
 
 final _cell = Object();
 final _null = FlowValue.constant(const Constant.nullValue());
+final _typeError = FlowValue.unknown(ValueType.typeError);
+final _bindingError = FlowValue.unknown(ValueType.error);
 const FlowResult _unreachable = FlowResult(
   value: FlowValue.bottom(),
   normal: null,
@@ -1884,7 +1911,9 @@ FlowResult _checkedRead(FlowResult result, ValueType type) {
       stackTrace: result.stackTrace,
       effects: result.effects,
     ),
-    checked.mayFail ? FlowResult(exceptional: result.normal) : _unreachable,
+    checked.mayFail
+        ? FlowResult(exceptional: result.normal, exception: _typeError)
+        : _unreachable,
   );
 }
 

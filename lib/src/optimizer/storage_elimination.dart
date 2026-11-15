@@ -6,6 +6,7 @@ import 'flow_value.dart';
 import 'function_rewrite.dart';
 import 'program_flow.dart';
 import 'program_pass.dart';
+import 'trace_demand.dart';
 
 /// Removes storage writes whose values, binding checks and lifetimes are unused.
 ///
@@ -92,6 +93,17 @@ storageDiscardable(ProgramFlowFacts facts) {
 
   for (final target in facts.escapingReturns) {
     visible = visible.join(facts.returnedBy(target));
+  }
+  for (final throwing in escapingExceptions(facts)) {
+    final values = facts
+        .valueOf(throwing.exception)
+        .join(
+          throwing.stackTrace == null
+              ? const FlowValue.bottom()
+              : facts.valueOf(throwing.stackTrace!),
+        );
+    visible = visible.join(values);
+    observations = observations.join(values);
   }
   for (final body in program.functions) {
     if (!facts.definitions.contains(body.target)) continue;
@@ -223,9 +235,8 @@ storageDiscardable(ProgramFlowFacts facts) {
             break;
         }
       }
-      // Uncaught payloads and suspended protocols can expose their objects.
+      // Suspended protocols can expose their objects.
       final boundary = switch (block.end) {
-        Throw(:final exception, onThrow: null) => exception,
         Await(:final operand) => operand,
         Yield(:final value) => value,
         YieldStream(:final stream) => stream,

@@ -2,6 +2,29 @@ import 'package:dartc/ir.dart';
 
 import 'program_flow.dart';
 
+/// Source throws reaching an external caller through unhandled call edges.
+/// Implicit allocation failure does not expose unrelated private storage.
+Iterable<Throw> escapingExceptions(ProgramFlowFacts facts) sync* {
+  final pending = facts.escapingThrows.toList(), visited = <FunctionTarget>{};
+  while (pending.isNotEmpty) {
+    final target = pending.removeLast();
+    if (!visited.add(target)) continue;
+    final body = facts.program.implementationOf(target);
+    if (body is! IrFunction) continue;
+    for (final block in body.blocks) {
+      if (!facts.reachesBlock(block)) continue;
+      if (block.end case final Throw throwing when throwing.onThrow == null) {
+        yield throwing;
+      }
+      for (final operation in block.instructions) {
+        if (facts.reachesOperation(operation)) {
+          pending.addAll(facts.unwindingTargetsOf(operation));
+        }
+      }
+    }
+  }
+}
+
 /// Follows exception-channel uses back through handlers and callable bodies.
 /// Recording a trace on an Error is an ordinary storage effect, not this output.
 Set<Throw> demandedTraces(ProgramFlowFacts facts) {

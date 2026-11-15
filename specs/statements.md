@@ -32,6 +32,8 @@
 
 无人读取的异常轨迹可跨函数调用和重抛路径删除；开放入口、逃逸回调及读取轨迹的处理器仍保留原轨迹。向 Error 对象记录首次轨迹是独立的可观察状态，不能因 catch 忽略轨迹而删除。内部异常被完全捕获且没有分配、轨迹或上下文需求时，异常状态传递不要求托管堆；未捕获异常仍遵守原生边界的失败协议。见[跨调用轨迹需求验证](../test/optimizer/trace_demand_test.dart)及[源码递归与构造对照](../test/compiler/constructor_effects_test.dart)。
 
+异常对象的字段按实际观察保留：调用者捕获并忽略异常时，被调用函数的 throw 不构成对外暴露；读取字段、重抛及未捕获的跨函数传播仍保留对象内容。类型检查失败只进入 TypeError 路径，绑定失败与分配失败保留 Error 范围，初始化器自身抛出的值不受此限制。存储值通过类型判断后，再次读取同一未修改的位置沿用该判断；写入会使旧判断失效。见[异常字段需求](../test/optimizer/storage_elimination_test.dart)、[类型判断与覆盖写](../test/optimizer/program_flow_test.dart)及[绑定状态验证](../test/optimizer/flow_state_test.dart)。
+
 dynamic 抛出值先检查为非空 Object；null 产生 TypeError，其他已支持的值保持原异常身份。见[动态抛出对照](../test/compiler/type_checks_test.dart)。穷尽 switch 意外落空时抛出 Error，沿正常异常边展开。对象分配、装箱和类型物化的内存不足可捕获为 `OutOfMemoryError`，生成的参数和结果准备调用沿源操作的异常边展开；报告 OOM 使用预先物化的错误与空轨迹。标量写入捕获的引用变量时，装箱失败进入当前位置的 catch，原绑定保持不变；模式缓存复用已存储的值。见[真实内存限制与恢复验证](../test/compiler/managed_objects_test.dart)。跨暂停点的异步父调用链、源码位置及重抛轨迹见[异步父栈验证](../test/compiler/async_stack_traces_test.dart)。依赖运行时类型参数的 `on T` 及断言仍是缺口。异常不能越过原生入口展开外部栈；未捕获异常释放入口资源、输出错误提示并以 255 退出，尚不格式化异常对象和栈轨迹。
 
 ## 规范依据

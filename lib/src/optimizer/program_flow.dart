@@ -346,7 +346,7 @@ final class ProgramFlow(
           ...?caller.operationEffects[operation],
           Effect.mayThrow,
         };
-        return FlowResult(exceptional: input.copy());
+        return FlowResult(exceptional: input.copy(), exception: _typeError);
       }
     }
     caller.targets.putIfAbsent(operation, () => {}).add(target);
@@ -565,7 +565,10 @@ final class ProgramFlow(
       stackTrace: mapValue(callee.stackTrace),
     );
     return failedCheck
-        ? _joinResult(invoked, FlowResult(exceptional: input.copy()))
+        ? _joinResult(
+            invoked,
+            FlowResult(exceptional: input.copy(), exception: _typeError),
+          )
         : invoked;
   }
 
@@ -1059,7 +1062,10 @@ final class ProgramFlow(
             false) {
           final target = allocationFailure;
           final failed = target == null
-              ? FlowResult(exceptional: state.copy())
+              ? FlowResult(
+                  exceptional: state.copy(),
+                  exception: FlowValue.unknown(ValueType.error),
+                )
               : _invoke(
                   activation,
                   block,
@@ -1185,8 +1191,17 @@ final class ProgramFlow(
           } else {
             final yes = _integerRefinements(condition, true, read);
             final no = _integerRefinements(condition, false, read);
-            if (yes != null) edge(ifTrue, state, refinements: yes);
-            if (no != null) edge(ifFalse, state, refinements: no);
+            FlowState branch(bool outcome) {
+              if (condition is! TypeTest) return state!;
+              return state!.copy()..refineType(
+                read(condition.operand).sources,
+                condition.testedType.substitute(activation.environment),
+                negated: outcome == condition.negated,
+              );
+            }
+
+            if (yes != null) edge(ifTrue, branch(true), refinements: yes);
+            if (no != null) edge(ifFalse, branch(false), refinements: no);
           }
         case Invoke(:final operation, :final onReturn, :final onThrow):
           final result = evaluate(operation);
@@ -1683,6 +1698,7 @@ final class ProgramFlow(
           value: checked.value,
           normal: checked.value.isBottom ? null : state.copy(),
           exceptional: checked.mayFail ? state.copy() : null,
+          exception: _typeError,
         );
       case TypeView() || UncheckedCast():
         final value = inputs.single.check(resultType).value;
@@ -3477,6 +3493,7 @@ const FlowResult _unreachable = FlowResult(
   exceptional: null,
 );
 final _null = FlowValue.constant(const Constant.nullValue());
+final _typeError = FlowValue.unknown(ValueType.typeError);
 
 FlowState? _joinState(FlowState? a, FlowState? b) =>
     a == null ? b?.copy() : (a.copy()..join(b ?? a));

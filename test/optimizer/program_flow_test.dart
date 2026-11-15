@@ -9,6 +9,60 @@ import '../support/numeric_order.dart';
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  for (final negated in [false, true]) {
+    for (final overwritten in [false, true]) {
+      test(
+        'a type guard follows storage equality until a write ($negated, $overwritten)',
+        () {
+          final type = ValueType.integer.nullable;
+          final global = GlobalVariable(_uri, 'guarded', type);
+          final target = FunctionTarget(_uri, 'readGuarded', .integer, [type]);
+          final entry = Block(target.parameterTypes);
+          entry.emit(StoreGlobal(global, entry.parameters.single));
+          final tested = entry.emit(LoadGlobal(global));
+          final condition = entry.emit(
+            TypeTest(tested, .integer, negated: negated),
+          );
+          final present = Block(), absent = Block();
+          entry.finish(
+            Branch(
+              condition,
+              Jump(negated ? absent : present, []),
+              Jump(negated ? present : absent, []),
+            ),
+          );
+          if (overwritten) {
+            present.emit(StoreGlobal(global, const Constant.nullValue()));
+          }
+          final checked = present.emit(
+            TypeCast(present.emit(LoadGlobal(global)), .integer),
+          );
+          present.finish(Return(checked));
+          absent.finish(const Return(Constant.integer(0)));
+          final body = IrFunction(target, [entry, present, absent]);
+          final program = IrProgram([], [body], globals: [global]);
+          final facts = _flow(program, body, [FlowValue.unknown(type)]).facts;
+          expect(facts.exitsOf(checked).exceptional, overwritten);
+          expect(facts.exitsOf(checked).normal, !overwritten);
+          expect(
+            facts.failureOf(checked).exception.unknownTypes,
+            overwritten ? {ValueType.typeError} : isEmpty,
+          );
+          expect(facts.failureOf(condition).exception.unknownTypes, {
+            ValueType.error,
+          });
+          final runner = IrInterpreter(program, {});
+          expect(runner.run(body, [null]), 0);
+          if (overwritten) {
+            expect(() => runner.run(body, [7]), throwsA(isA<TypeError>()));
+          } else {
+            expect(runner.run(body, [7]), 7);
+          }
+        },
+      );
+    }
+  }
+
   test('receiver bounds use the declarations in each actual program', () {
     final base = ClassType(_uri, 'Base', isAbstract: true);
     final member = FunctionTarget(

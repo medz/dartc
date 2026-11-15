@@ -216,91 +216,116 @@ void main() {
     },
   );
 
-  for (final use in ['ignore', 'read', 'rethrow']) {
-    test('a caught exception retains only $use storage observations', () {
-      final box = _box();
-      final target = FunctionTarget(_uri, 'catchBox', .integer, [.integer]);
-      final entry = Block(target.parameterTypes);
-      final handler = Block([.object, .stackTrace]);
-      final value = entry.emit(
-        Construct(box.constructor.target, [entry.parameters.single]),
-      );
-      entry.finish(
-        Throw(
-          value,
-          onThrow: Jump(handler, [
+  for (final use in ['ignore', 'read', 'rethrow', 'uncaught']) {
+    for (final indirect in [false, true]) {
+      if (use == 'uncaught' && !indirect) continue;
+      test(
+        'a caught exception retains only $use storage observations (indirect: $indirect)',
+        () {
+          final box = _box();
+          final target = FunctionTarget(_uri, 'catchBox', .integer, [.integer]);
+          final entry = Block(target.parameterTypes);
+          final handler = Block([.object, .stackTrace]);
+          final helper = FunctionTarget(_uri, 'raiseBox', .never, [.integer]);
+          final throwing = indirect ? Block(helper.parameterTypes) : entry;
+          final value = throwing.emit(
+            Construct(box.constructor.target, [throwing.parameters.single]),
+          );
+          final catchEdge = Jump(handler, [
             UnwindValue.exception,
             UnwindValue.stackTrace,
-          ]),
-        ),
-      );
-      final getter = FunctionTarget(_uri, 'readBox', .integer, [box.type]);
-      final reading = Block(getter.parameterTypes);
-      reading.finish(
-        Return(reading.emit(LoadField(box.field, reading.parameters.single))),
-      );
-      switch (use) {
-        case 'ignore':
-          handler.finish(Return(entry.parameters.single));
-        case 'read':
-          handler.finish(
-            Return(
-              handler.emit(
-                LoadField(
-                  box.field,
-                  handler.emit(
-                    UncheckedCast(handler.parameters.first, box.type),
-                  ),
-                ),
+          ]);
+          throwing.finish(Throw(value, onThrow: indirect ? null : catchEdge));
+          if (use == 'uncaught') {
+            entry.finish(
+              Unreachable(entry.emit(DirectCall(helper, entry.parameters))),
+            );
+          } else if (indirect) {
+            entry.finish(
+              Invoke(
+                DirectCall(helper, entry.parameters),
+                onReturn: null,
+                onThrow: catchEdge,
               ),
-            ),
-          );
-        case 'rethrow':
-          handler.finish(
-            Throw(
-              handler.parameters.first,
-              stackTrace: handler.parameters.last,
-            ),
-          );
-      }
-      final program = IrProgram(
-        [box.declaration],
-        [
-          box.constructor,
-          IrFunction(target, [entry, handler]),
-          IrFunction(getter, [reading]),
-        ],
-      );
-      final facts = ProgramFlow(program, [
-        (target: target, arguments: [FlowValue.unknown(.integer)]),
-      ]).facts;
-      final optimized = const ProgramStorageElimination().run(facts);
-      for (final graph in [program, optimized]) {
-        final runner = IrInterpreter(graph, {});
-        final body = graph.implementationOf(target) as IrFunction;
-        for (final input in [-4, 0, 41]) {
-          if (use != 'rethrow') {
-            expect(runner.run(body, [input]), input);
-          } else {
-            Object? error;
-            try {
-              runner.run(body, [input]);
-            } catch (value) {
-              error = value;
-            }
-            expect(error, isNotNull);
-            expect(
-              runner.run(graph.implementationOf(getter) as IrFunction, [error]),
-              input,
             );
           }
-        }
-      }
-      expect(
-        _operations(optimized, box.constructor.target).whereType<StoreField>(),
-        use == 'ignore' ? isEmpty : hasLength(1),
+          final getter = FunctionTarget(_uri, 'readBox', .integer, [box.type]);
+          final reading = Block(getter.parameterTypes);
+          reading.finish(
+            Return(
+              reading.emit(LoadField(box.field, reading.parameters.single)),
+            ),
+          );
+          switch (use) {
+            case 'ignore' || 'uncaught':
+              handler.finish(Return(entry.parameters.single));
+            case 'read':
+              handler.finish(
+                Return(
+                  handler.emit(
+                    LoadField(
+                      box.field,
+                      handler.emit(
+                        UncheckedCast(handler.parameters.first, box.type),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            case 'rethrow':
+              handler.finish(
+                Throw(
+                  handler.parameters.first,
+                  stackTrace: handler.parameters.last,
+                ),
+              );
+          }
+          final program = IrProgram(
+            [box.declaration],
+            [
+              box.constructor,
+              IrFunction(target, [entry, if (use != 'uncaught') handler]),
+              if (indirect) IrFunction(helper, [throwing]),
+              IrFunction(getter, [reading]),
+            ],
+          );
+          final facts = ProgramFlow(program, [
+            (target: target, arguments: [FlowValue.unknown(.integer)]),
+          ]).facts;
+          final optimized = const ProgramStorageElimination().run(facts);
+          for (final graph in [program, optimized]) {
+            final runner = IrInterpreter(graph, {});
+            final body = graph.implementationOf(target) as IrFunction;
+            for (final input in [-4, 0, 41]) {
+              if (use != 'rethrow' && use != 'uncaught') {
+                expect(runner.run(body, [input]), input);
+              } else {
+                Object? error;
+                try {
+                  runner.run(body, [input]);
+                } catch (value) {
+                  error = value;
+                }
+                expect(error, isNotNull);
+                expect(
+                  runner.run(graph.implementationOf(getter) as IrFunction, [
+                    error,
+                  ]),
+                  input,
+                );
+              }
+            }
+          }
+          expect(
+            _operations(
+              optimized,
+              box.constructor.target,
+            ).whereType<StoreField>(),
+            use == 'ignore' ? isEmpty : hasLength(1),
+          );
+        },
       );
-    });
+    }
   }
 
   test('a value passed to unknown code keeps its observable fields', () {

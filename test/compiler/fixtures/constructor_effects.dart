@@ -28,8 +28,12 @@ void remember(int value) => Box<int>(value, false);
 @Export<Int64 Function()>()
 int count() => _count;
 
+class Failure(final int value) {
+  final StackTrace trace = StackTrace.current;
+}
+
 int _recurse(int depth) {
-  if (depth == 0) throw 7;
+  if (depth == 0) throw Failure(7);
   if (depth == 1) return 11;
   return _recurse(depth - 2);
 }

@@ -279,6 +279,7 @@ void main() {
     final state = FlowState(IrProgram([], [], globals: [global]));
     final read = LoadGlobal(global);
     expect(_step(state, read).normal, isNull);
+    expect(_step(state, read).exception.unknownTypes, {ValueType.error});
     final write = StoreGlobal(global, const Constant.nullValue());
     final bound = _step(state, write).normal!;
     expect(
@@ -288,6 +289,7 @@ void main() {
     final again = _step(bound, write);
     expect(again.normal, isNull);
     expect(again.exceptional, isNotNull);
+    expect(again.exception.unknownTypes, {ValueType.error});
     final merged = state.copy()..join(bound);
     final uncertain = _step(merged, read);
     expect(uncertain.normal, isNotNull);
