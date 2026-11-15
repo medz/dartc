@@ -167,6 +167,9 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
     final framed =
         _stacks.isNotEmpty ||
         selection.calls.isNotEmpty ||
+        selection.body.instructions.values.any(
+          (values) => values.any((value) => value is FrameValue),
+        ) ||
         selection.body.ends.values.any((end) => end is Throw);
     final frame = framed
         ? selection.convention.frameLayout(
@@ -531,7 +534,8 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         selection.body.inputsOf(operation).isEmpty) {
       emptyResult();
     } else if (selection.constantTests.containsKey(operation) ||
-        operation is NativeSymbolAddress) {
+        operation is NativeSymbolAddress ||
+        operation is FrameValue) {
       result = output(.general);
     } else if (operation case NewCell(:final initial)
         when selection.cells.contains(operation)) {

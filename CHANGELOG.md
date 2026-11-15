@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Remove unobserved stack snapshots before selecting runtime support. Retained snapshots use ordinary Dart calls with explicit caller-frame inputs; inlining preserves their call boundaries and the existing stack-map and GC contracts.
+
 - Store an Error's first trace in its ordinary SDK field, preserving inherited state, explicit traces, public getter overrides and implements-only classes. Async error propagation binds to the same checked Dart implementation; remove the duplicate hidden trace slot and descriptor metadata.
 
 - Keep invocation-private objects out of external entry and callback state. Preserve reachable globals and escaped captures across calls, widening their bounds at external reentry so repeated public updates converge.

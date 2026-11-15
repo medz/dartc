@@ -10,13 +10,11 @@ import 'instance_storage.dart';
 import 'member_calls.dart';
 import 'native_invocation.dart';
 import 'program_layout.dart';
-import 'stack_traces.dart';
 
 /// Selects function bodies and closes generated call dependencies before emission.
 final class ProgramSelection(
   final ProgramLayout layouts,
   final HeapPlan heap,
-  final StackTraces traces,
   final CheckedCasts casts,
   final MemberCalls members,
   final GlobalStorage globals,
@@ -110,7 +108,7 @@ final class ProgramSelection(
       casts,
       members,
       heap,
-      captureTrace: traces.capture,
+      captureTrace: heap.runtime?.captureTrace,
     );
     _bind(body);
     functions[function.target] = body;
@@ -215,7 +213,9 @@ final class ProgramSelection(
           (end) => end is Throw || end is Invoke,
         );
       }
-      final needsTrace = calls.contains(traces.capture);
+      final needsTrace =
+          calls.contains(heap.runtime?.captureTrace) ||
+          calls.contains(heap.runtime?.captureStackTrace);
       final needsHeap =
           needsTrace ||
           managed ||
@@ -279,7 +279,6 @@ final class ProgramSelection(
         heap.runEvents,
       ]);
     }
-    if (capture) implicitCalls.add(heap.runtime!.captureStackTrace);
     calls.addAll(implicitCalls);
     heap.retain(calls);
     primitives = heap.primitives.intersection({
@@ -292,7 +291,6 @@ final class ProgramSelection(
       ...primitives,
       ...layouts.nativeCalls.signatures.keys,
       ...members.definitions,
-      if (capture) traces.capture,
       if (!globals.isEmpty) globals.address,
     });
     if (missing.isNotEmpty) return missing;

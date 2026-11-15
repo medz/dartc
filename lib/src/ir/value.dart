@@ -493,6 +493,8 @@ sealed class Instruction(super.type) extends Value {
 
     Value? optional(Value? value) => value == null ? null : map(value);
     return switch (this) {
+      CaptureStackTrace() => CaptureStackTrace(),
+      FrameValue(:final kind) => FrameValue(kind),
       final ReifyType v => ReifyType(type(v.template)),
       final ObjectRuntimeType v => ObjectRuntimeType(
         map(v.operand),
@@ -854,6 +856,7 @@ sealed class Instruction(super.type) extends Value {
     Construct() ||
     BindMethod(direct: false) ||
     Equals(mayCallUserCode: true) => _call,
+    CaptureStackTrace() => const {.allocates},
     NewCollection() ||
     ListFilled() ||
     MakeInvocation() ||
@@ -925,6 +928,7 @@ sealed class Instruction(super.type) extends Value {
     PointerOffset() ||
     NewPayload() ||
     NativeView() => _allocate,
+    FrameValue() ||
     Identical() ||
     Equals() ||
     IntBinary() ||
@@ -948,6 +952,37 @@ sealed class Instruction(super.type) extends Value {
 
   /// Whether evaluation can transfer control to a Dart exception handler.
   bool get mayThrow => effects.contains(Effect.mayThrow);
+}
+
+/// Captures the caller's logical stack, excluding this implementation frame.
+///
+/// Unobserved snapshots may be removed before runtime storage is selected.
+/// The containing function must retain its own physical frame boundary.
+final class CaptureStackTrace() extends Instruction {
+  this : super(.stackTrace);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Machine values belonging to the containing function's preserved caller frame.
+enum FrameValueKind() {
+  /// The caller's stack pointer at entry, before the current prologue.
+  callerStackPointer,
+
+  /// The caller's return PC saved by the current prologue.
+  returnAddress,
+}
+
+/// Reads an immutable value from this activation's frame.
+///
+/// The value is valid only while this frame is active. Moving this instruction
+/// into another function changes its meaning; the owner cannot be inlined.
+final class FrameValue(final FrameValueKind kind) extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
 }
 
 /// The link-resolved address of a native declaration, without reading it.

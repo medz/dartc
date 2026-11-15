@@ -165,7 +165,8 @@ IrProgram _inlineSelected(
           if (source is! IrFunction ||
               source.bodyKind != .synchronous ||
               target.kind == .initializer ||
-              target.awaiterCapture != null) {
+              target.awaiterCapture != null ||
+              source.observesCallerFrame) {
             continue;
           }
           final candidate = expand(source);

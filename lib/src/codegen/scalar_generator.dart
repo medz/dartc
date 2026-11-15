@@ -43,7 +43,7 @@ base class ScalarCodeGenerator<R extends Object>(
     final entryPoint = prepared.entryPoint, runtime = prepared.runtime;
     final persistent = prepared.persistent, cleanup = prepared.cleanup;
     final layouts = selection.layouts, heap = selection.heap;
-    final globals = selection.globals, traces = selection.traces;
+    final globals = selection.globals;
     final relocations = <Relocation>[];
     final symbolNames = <String, int>{};
     int nativeSymbol(String name) {
@@ -179,8 +179,6 @@ base class ScalarCodeGenerator<R extends Object>(
               emitter,
               (fixup) => globalAddresses.add((code.length, fixup)),
             )
-          : declaration == traces.capture
-          ? traces.emit(emitter, call, safepoint)
           : layouts.nativeCalls.signatures.containsKey(declaration)
           ? NativeAdapter(emitter).generate(
               layouts.nativeCalls.signatures[declaration]!,

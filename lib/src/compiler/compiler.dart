@@ -90,6 +90,9 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       );
     }
     program = ProgramNormalization(program, runtime: runtime).run();
+    if (runtime != null) {
+      program = StackTraceLowering(runtime.captureStackTrace).lower(program);
+    }
     final boundaries = NativeBoundaries(
       program,
       roots: {...roots, if (entryPoint != null) entryPoint.function},
@@ -281,12 +284,13 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     program = boundaries.program;
     final roots = boundaries.roots;
     program =
-        ProgramOptimizer(const [
-              ProgramSimplification(),
-              ProgramCallSpecialization(),
-              ProgramStoragePromotion(),
-              ProgramStorageElimination(),
-              DirectCallInlining(),
+        ProgramOptimizer([
+              const ProgramSimplification(),
+              const ProgramCallSpecialization(),
+              const ProgramStoragePromotion(),
+              const ProgramStorageElimination(),
+              const DirectCallInlining(),
+              StackTraceLowering(runtime.captureStackTrace),
             ])
             .run(
               program,

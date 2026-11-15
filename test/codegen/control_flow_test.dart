@@ -36,10 +36,7 @@ void main() {
       expect(
         module.symbols.map((s) => s.name),
         containsAll([
-          heapRuntime.primitives.entries
-              .singleWhere((entry) => entry.value == .captureStackTrace)
-              .key
-              .name,
+          heapRuntime.captureTrace.name,
           heapRuntime.captureStackTrace.name,
           '.dartc.roots',
         ]),

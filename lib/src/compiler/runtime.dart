@@ -122,8 +122,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
         primitives[target] = .sleep;
         continue;
       case .captureStackTrace:
-        primitives[target] = .captureStackTrace;
-        continue;
+        value = block.emit(CaptureStackTrace());
       case .allocatePayload:
         value = block.emit(
           NewPayload(target.returnType as ClassType, args.single),
@@ -262,6 +261,9 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     processExitCode: annotations.entries[RuntimeRole.processExitCode],
     copyBytes: copyBytes,
     captureStackTrace: captureStackTrace,
+    captureTrace: annotations.primitives.entries
+        .singleWhere((entry) => entry.value == .captureStackTrace)
+        .key,
     stackContext: annotations.stackContext,
     recordError: recordError,
     primitives: primitives,

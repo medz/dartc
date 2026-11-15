@@ -159,6 +159,7 @@ final class FunctionSelection<R>(
             );
           case KeepAlive():
           case NativeSymbolAddress():
+          case FrameValue():
           case ReifyType():
           case DoubleBits():
             break;

@@ -79,6 +79,8 @@ void writeFunction(
   }
 
   String operation(Instruction op) => switch (op) {
+    CaptureStackTrace() => 'captureStackTrace',
+    FrameValue(:final kind) => 'frame.${kind.name}',
     LoadLibrary(:final reference) =>
       'loadLibrary ${reference.unit}::${reference.prefix} -> ${reference.library}',
     CheckLibraryLoaded(:final reference) =>

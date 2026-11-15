@@ -9,7 +9,6 @@ import 'program_selection.dart';
 import 'program_layout.dart';
 import 'heap_plan.dart';
 import 'heap_runtime.dart';
-import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
 import 'global_storage.dart';
@@ -136,7 +135,6 @@ final class ProgramPreparation(
     final sourceDefinitions = facts.definitions;
     final selected = sourceDefinitions.toSet();
     final heap = HeapPlan(runtime: runtime);
-    final traces = StackTraces(runtime);
     final casts = CheckedCasts();
     IrCallable? constructor(ValueType? type, [String name = 'new']) {
       final target = program.classes
@@ -229,7 +227,6 @@ final class ProgramPreparation(
     final selection = ProgramSelection(
       layouts,
       heap,
-      traces,
       casts,
       members,
       globals,
@@ -345,7 +342,6 @@ final class PreparedProgram._(
       ..._selection.functions.keys,
       ..._selection.primitives,
       ..._selection.layouts.nativeCalls.signatures.keys,
-      if (_selection.capture) _selection.traces.capture,
       ?_cleanup,
     });
     final names = <String>{};

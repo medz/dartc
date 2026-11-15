@@ -137,6 +137,19 @@ final class IrFunction(
   /// The block whose parameters receive the function arguments.
   Block get entry => blocks.first;
 
+  /// Whether moving this body across a call boundary changes its frame reads.
+  bool get observesCallerFrame => blocks.any(
+    (block) =>
+        block.instructions.any(
+          (operation) =>
+              operation is CaptureStackTrace || operation is FrameValue,
+        ) ||
+        switch (block.end) {
+          Invoke(operation: CaptureStackTrace() || FrameValue()) => true,
+          _ => false,
+        },
+  );
+
   /// Verifies the graph rooted at the first of [blocks].
   ///
   /// Throws [ArgumentError] when the entry parameters differ from the signature.

@@ -9,7 +9,6 @@ import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/codegen.dart' show ProgramNormalization;
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/program_selection.dart';
-import 'package:dartc/src/codegen/stack_traces.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -59,7 +58,6 @@ void main() {
       final selection = ProgramSelection(
         layout,
         HeapPlan(),
-        StackTraces(null),
         casts,
         MemberCalls(
           IrProgram(
@@ -105,7 +103,6 @@ void main() {
       final selection = ProgramSelection(
         layout,
         HeapPlan(),
-        StackTraces(null),
         CheckedCasts(),
         MemberCalls(
           program,
@@ -175,7 +172,6 @@ void main() {
     final selection = ProgramSelection(
       layout,
       HeapPlan(runtime: heapRuntime),
-      StackTraces(heapRuntime),
       CheckedCasts(),
       MemberCalls(program, functions.map((body) => body.target).toSet()),
       GlobalStorage([]),
@@ -190,7 +186,6 @@ void main() {
 
   test('normalized numeric calls retain heap and exception dependencies', () {
     final casts = CheckedCasts();
-    final traces = StackTraces(heapRuntime);
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
@@ -233,7 +228,6 @@ void main() {
     final selection = ProgramSelection(
       layouts,
       heap,
-      traces,
       casts,
       MemberCalls(program, {}),
       GlobalStorage([]),
@@ -245,7 +239,7 @@ void main() {
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
       heapRuntime.runEvents,
-      heapRuntime.captureStackTrace,
+      heapRuntime.captureTrace,
       heapRuntime.recordError,
     });
     expect(
@@ -259,9 +253,8 @@ void main() {
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
       heapRuntime.runEvents,
-      heapRuntime.captureStackTrace,
+      heapRuntime.captureTrace,
       heapRuntime.recordError,
-      if (selection.capture) traces.capture,
     };
     for (final body in selection.functions.values) {
       expect(
@@ -293,7 +286,6 @@ void main() {
       [init],
     );
     final casts = CheckedCasts();
-    final traces = StackTraces(heapRuntime);
     final layouts = ProgramLayout([
       ...casts.classes,
       ...program.classes,
@@ -327,7 +319,6 @@ void main() {
     final selection = ProgramSelection(
       layouts,
       heap,
-      traces,
       casts,
       MemberCalls(normalized, {}),
       GlobalStorage([]),
@@ -342,7 +333,7 @@ void main() {
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
       heapRuntime.runEvents,
-      heapRuntime.captureStackTrace,
+      heapRuntime.captureTrace,
       heapRuntime.recordError,
     });
   });

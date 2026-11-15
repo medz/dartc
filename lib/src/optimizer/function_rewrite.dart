@@ -26,6 +26,7 @@ final class FunctionRewrite(
   final Set<Throw> directThrows = const {},
 
   /// Checked entry values and type bindings for each expanded invocation.
+  /// Bodies observing their caller frame cannot cross this boundary.
   final Map<
         Instruction,
         ({
@@ -814,6 +815,11 @@ final class FunctionRewrite(
     if (inlined.isNotEmpty) {
       final dominance = ValueDominance(function);
       for (final MapEntry(key: call, value: site) in inlined.entries) {
+        if (site.body.observesCallerFrame) {
+          throw ArgumentError(
+            'Inlined bodies cannot observe their caller frame.',
+          );
+        }
         if ((call is! DirectCall && call is! FunctionCall) ||
             !owns(call) ||
             site.arguments.any(

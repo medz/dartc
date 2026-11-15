@@ -1885,6 +1885,12 @@ final class IrInterpreter(
 
     void execute(Instruction op) {
       switch (op) {
+        case CaptureStackTrace():
+          values[op] = StackTrace.current;
+        case FrameValue():
+          throw UnsupportedError(
+            'Machine frame values require target execution.',
+          );
         case NewPayload(:final bytes):
           final type = resolve(op.type) as ClassType;
           final declaration = program.classes.singleWhere(

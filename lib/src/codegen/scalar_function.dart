@@ -131,6 +131,14 @@ final class ScalarFunction<R extends Object>(
           // The zero result below is the only selected work.
         } else if (selection.constantTests[instruction] case final value?) {
           emitter.loadImmediate(result!, value ? 1 : 0);
+        } else if (instruction case FrameValue(:final kind)) {
+          final frame = allocation.frame!;
+          switch (kind) {
+            case .callerStackPointer:
+              emitter.stackAddress(result!, frame.incomingStackOffset);
+            case .returnAddress:
+              emitter.loadStack(result!, frame.returnAddressOffset);
+          }
         } else if (instruction case NativeSymbolAddress(:final reference)) {
           emitter.address(
             result!,

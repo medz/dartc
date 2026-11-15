@@ -16,7 +16,6 @@ enum MemoryPrimitive(final Set<Effect> effects) {
   entropy({.writesStorage}),
   clock({.readsStorage}),
   sleep({.readsStorage}),
-  captureStackTrace({.allocates, .mayThrow}),
   currentThread({.readsStorage}),
   callbackTemplate({.readsStorage}),
   flushInstructions({.writesStorage}),
@@ -36,6 +35,7 @@ final class HeapRuntime(
   final FunctionTarget? processExitCode,
   required final FunctionTarget copyBytes,
   required final FunctionTarget captureStackTrace,
+  required final FunctionTarget captureTrace,
   required final FunctionTarget recordError,
   final ClassType? stackContext,
   final FunctionTarget? invocation,
@@ -77,12 +77,6 @@ final class HeapRuntime(
         'Native effect contracts require a function signature.',
       );
     }
-    if (primitives.values
-            .where((service) => service == .captureStackTrace)
-            .length !=
-        1) {
-      throw ArgumentError('Expected one stack capture machine entry.');
-    }
     for (final (target, signature) in [
       (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
       (isOutOfMemory, FunctionType(.boolean, [.object])),
@@ -99,6 +93,7 @@ final class HeapRuntime(
         ]),
       ),
       (captureStackTrace, FunctionType(.stackTrace, [.integer, .integer])),
+      (captureTrace, FunctionType(.stackTrace, [])),
       (recordError, FunctionType(.voidType, [.object, .stackTrace])),
       if (invocation case final target?)
         (
@@ -146,7 +141,6 @@ final class HeapRuntime(
         .entropy => FunctionType(.integer, [.integer, .integer]),
         .clock => FunctionType(.integer, []),
         .sleep => FunctionType(.voidType, [.integer, .integer]),
-        .captureStackTrace => FunctionType(.stackTrace, []),
         .currentThread || .callbackTemplate => FunctionType(.integer, []),
         .flushInstructions => FunctionType(.voidType, [.integer, .integer]),
       };

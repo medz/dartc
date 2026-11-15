@@ -42,6 +42,7 @@ void main() {
     processExitCode: processStatus?.target,
     copyBytes: heapRuntime.copyBytes,
     captureStackTrace: heapRuntime.captureStackTrace,
+    captureTrace: heapRuntime.captureTrace,
     recordError: heapRuntime.recordError,
     primitives: heapRuntime.primitives,
     nonAllocating: [...heapRuntime.nonAllocating, function],
@@ -122,6 +123,7 @@ void main() {
         runEvents: heapRuntime.runEvents,
         copyBytes: heapRuntime.copyBytes,
         captureStackTrace: heapRuntime.captureStackTrace,
+        captureTrace: heapRuntime.captureTrace,
         recordError: heapRuntime.recordError,
         primitives: heapRuntime.primitives,
         nonAllocating: [],
@@ -137,6 +139,7 @@ void main() {
         runEvents: heapRuntime.runEvents,
         copyBytes: heapRuntime.copyBytes,
         captureStackTrace: heapRuntime.captureStackTrace,
+        captureTrace: heapRuntime.captureTrace,
         recordError: heapRuntime.recordError,
         primitives: {
           ...heapRuntime.primitives,
@@ -158,11 +161,9 @@ void main() {
         runEvents: heapRuntime.runEvents,
         copyBytes: heapRuntime.copyBytes,
         captureStackTrace: heapRuntime.captureStackTrace,
+        captureTrace: heapRuntime.captureStackTrace,
         recordError: heapRuntime.recordError,
-        primitives: {
-          for (final entry in heapRuntime.primitives.entries)
-            if (entry.value != .captureStackTrace) entry.key: entry.value,
-        },
+        primitives: heapRuntime.primitives,
         nonAllocating: [],
       ),
       throwsArgumentError,
@@ -601,11 +602,7 @@ void main() {
     },
   );
   test('critical closures follow the allocating stack capture bridge', () {
-    final capture = heapRuntime.primitives.entries
-        .singleWhere(
-          (entry) => entry.value == MemoryPrimitive.captureStackTrace,
-        )
-        .key;
+    final capture = heapRuntime.captureTrace;
     final critical = FunctionTarget(uri, 'critical', .stackTrace, []);
     final block = Block();
     block.finish(Return(block.emit(DirectCall(capture, []))));

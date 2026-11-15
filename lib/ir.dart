@@ -70,6 +70,9 @@ export 'src/ir/type.dart'
 export 'src/ir/value.dart'
     show
         blockParameters,
+        CaptureStackTrace,
+        FrameValue,
+        FrameValueKind,
         NativeCallbackTarget,
         StaticCallbackTarget,
         ClosureCallbackTarget,
