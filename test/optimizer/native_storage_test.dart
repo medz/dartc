@@ -58,6 +58,10 @@ void main() {
       );
       expect(_number(_load(created.normal!, fixed, _i64)), 0);
       expect(created.normal!.containsNative(fixed, _i64), isTrue);
+      final mixed = fixed.join(object);
+      expect(created.normal!.containsNative(mixed, _i64), isFalse);
+      expect(created.normal!.nativeReferences(mixed).unknownTypes, isNotEmpty);
+      expect(_load(created.normal!, mixed, _i64).constant, isNull);
       expect(created.normal!.containsNative(_offset(fixed, -1), _i64), isFalse);
       expect(
         created.normal!.containsNative(_offset(payload, 1), _i64),

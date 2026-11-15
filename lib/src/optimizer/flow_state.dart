@@ -852,6 +852,7 @@ final class FlowState {
       );
     }
     if (input.addresses.isEmpty ||
+        input.objects.isNotEmpty ||
         input.unknownTypes.isNotEmpty ||
         input.constants.isNotEmpty) {
       value = value.join(
@@ -872,6 +873,7 @@ final class FlowState {
     final unknown = FlowValue.unknown(.object.nullable);
     var value =
         address.addresses.isEmpty ||
+            address.objects.isNotEmpty ||
             address.constants.isNotEmpty ||
             address.unknownTypes.isNotEmpty
         ? unknown
@@ -885,6 +887,7 @@ final class FlowState {
   bool _containsNative(FlowValue address, int? size) =>
       size != null &&
       address.addresses.isNotEmpty &&
+      address.objects.isEmpty &&
       address.constants.isEmpty &&
       address.unknownTypes.isEmpty &&
       address.addresses.every(
