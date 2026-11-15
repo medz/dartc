@@ -54,6 +54,13 @@ typedef FlowCall = FlowResult Function(
   FlowState input,
 );
 
+/// Storage observed by a body and its known read-only callees.
+typedef FlowReadSet = ({
+  Set<InstanceField> fields,
+  Set<GlobalVariable> globals,
+  bool cells,
+});
+
 /// Storage facts at one executable program point.
 ///
 /// Transfers return independent exit snapshots. Allocation identities and call
@@ -182,17 +189,40 @@ final class FlowState {
   @override
   int get hashCode => structuralKey.hashCode;
 
-  /// Projects a call input while preserving globals and external reachability.
-  FlowState project(Iterable<FlowValue> roots) {
-    final reachable = reachableValues([
-      ...roots,
-      _escaped,
-      for (final slot in _globals.values) ...[slot.value, slot.initializer],
-    ]);
+  /// Projects a call input, or only storage proven observable by [reads].
+  /// Ordinary calls retain globals and external reachability.
+  FlowState project(Iterable<FlowValue> roots, {FlowReadSet? reads}) {
+    final globals = reads == null
+        ? _globals
+        : StateMap<GlobalVariable, _Slot>.fromEntries(
+            _globals.entries.where(
+              (entry) => reads.globals.contains(entry.key),
+            ),
+          );
+    final escaped = reads == null ? _escaped : const FlowValue.bottom();
+    final reachable = _reachable(
+      [
+        ...roots,
+        escaped,
+        for (final slot in globals.values) ...[slot.value, slot.initializer],
+      ],
+      expose: false,
+      reads: reads,
+    );
     var objects = const StateMap<FlowObject, _ObjectState>.empty();
     for (final object in reachable.objects) {
       if (_objects[object] case final state?) {
-        objects = objects.withEntry(object, state);
+        objects = objects.withEntry(
+          object,
+          reads == null
+              ? state
+              : _ObjectState._(
+                  StateMap.fromEntries(_readSlots(state, reads)),
+                  null,
+                  state.summary,
+                  null,
+                ),
+        );
       }
     }
     return FlowState._(
@@ -201,9 +231,9 @@ final class FlowState {
       _declaredGlobals,
       _classes,
       _constantMemory,
-      _globals,
+      globals,
       objects,
-      _escaped,
+      escaped,
     );
   }
 
@@ -1309,7 +1339,11 @@ final class FlowState {
   FlowValue exposedFrom(Iterable<FlowValue> roots) =>
       _reachable(roots, expose: true);
 
-  FlowValue _reachable(Iterable<FlowValue> roots, {required bool expose}) {
+  FlowValue _reachable(
+    Iterable<FlowValue> roots, {
+    required bool expose,
+    FlowReadSet? reads,
+  }) {
     var result = const FlowValue.bottom();
     final pending = [for (final value in roots) (value, !expose)];
     final objects = <(FlowObject, bool)>{};
@@ -1322,16 +1356,17 @@ final class FlowState {
         if (!objects.add((object, raw))) continue;
         final state = _objects[object];
         if (state == null) continue;
-        if (state.memory case final memory?) {
+        if (state.memory case final memory? when reads == null) {
           pending.add((memory.references, true));
         }
-        if (raw) {
+        if (raw && reads == null) {
           pending.addAll([
             for (final capture in state.captures ?? const <FlowValue>[])
               (capture, raw),
           ]);
         }
-        for (final slot in state.slots.values) {
+        for (final entry in _readSlots(state, reads)) {
+          final slot = entry.value;
           pending.add((slot.value, raw));
           if (raw && slot.unbound) pending.add((slot.initializer, raw));
         }
@@ -1354,6 +1389,16 @@ final class FlowState {
     return result;
   }
 }
+
+Iterable<MapEntry<Object, _Slot>> _readSlots(
+  _ObjectState state,
+  FlowReadSet? reads,
+) => reads == null
+    ? state.slots.entries
+    : state.slots.entries.where(
+        (entry) =>
+            entry.key == _cell ? reads.cells : reads.fields.contains(entry.key),
+      );
 
 final _cell = Object();
 final _null = FlowValue.constant(const Constant.nullValue());

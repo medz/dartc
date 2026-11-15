@@ -40,6 +40,7 @@ final class ProgramFlow(
   final _pending = <_Activation>{};
   final _owners = <Object, FunctionTarget>{};
   final _cyclic = <FunctionTarget, Set<Block>>{};
+  final _readSets = <FunctionTarget, FlowReadSet?>{};
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
   final _escapingActivations = <_Activation>{};
@@ -337,7 +338,7 @@ final class ProgramFlow(
         path.isNotEmpty ||
         caller.repeated ||
         _loopBlocks(caller.body).contains(block);
-    final projected = input.project(arguments);
+    final projected = input.project(arguments, reads: _readsFor(body));
     final aliases = <(int, int)>[
       for (var i = 0; i < arguments.length; i++)
         for (var j = 0; j < i; j++)
@@ -532,6 +533,76 @@ final class ProgramFlow(
       }
     }
     return const [];
+  }
+
+  FlowReadSet? _readsFor(IrFunction body) {
+    if (_readSets.containsKey(body.target)) return _readSets[body.target];
+    _readSets[body.target] = null;
+    if (body.bodyKind != .synchronous) return null;
+    final fields = <InstanceField>{}, globals = <GlobalVariable>{};
+    var cells = false;
+    for (final block in body.blocks) {
+      for (final operation in [
+        ...block.instructions,
+        if (block.end case Invoke(:final operation)) operation,
+      ]) {
+        List<FunctionTarget>? targets;
+        if (operation case DirectCall(:final target)) {
+          targets = [target];
+        } else if (operation case InstanceCall(
+          :final receiver,
+          :final member,
+          :final positional,
+          :final named,
+        )) {
+          targets = [];
+          for (final type in _receiverTypes(FlowValue.unknown(receiver.type))) {
+            final lookup = program.lookupMember(type, member.selector);
+            final target = lookup.target;
+            if (target == null ||
+                lookup.unmodeledBoundary != null ||
+                lookup.unsupportedForwarder ||
+                !target.signature.acceptsShape(positional.length, named.keys)) {
+              return null;
+            }
+            targets.add(target);
+          }
+          if (targets.isEmpty) return null;
+        }
+        if (targets != null) {
+          for (final target in targets) {
+            final callee = program.implementationOf(target);
+            final reads = callee is IrFunction ? _readsFor(callee) : null;
+            if (reads == null) return null;
+            fields.addAll(reads.fields);
+            globals.addAll(reads.globals);
+            cells |= reads.cells;
+          }
+          continue;
+        }
+        if (operation.effects.any(
+          (effect) => effect != .readsStorage && effect != .mayThrow,
+        )) {
+          return null;
+        }
+        if (!operation.effects.contains(Effect.readsStorage)) continue;
+        switch (operation) {
+          case LoadField(:final field):
+            fields.add(field);
+          case LoadGlobal(:final global):
+            globals.add(global);
+          case ReadCell():
+            cells = true;
+          default:
+            return null;
+        }
+      }
+    }
+    return _readSets[body.target] = (
+      fields: fields,
+      globals: globals,
+      cells: cells,
+    );
   }
 
   void _evaluate(_Activation activation) {
