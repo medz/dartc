@@ -19,7 +19,7 @@ final class const DirectCallInlining({
   final int maxCallerGrowth = 64,
 }) extends ProgramPass {
   @override
-  bool get expandsCode => true;
+  ProgramPassKind get kind => .expansion;
 
   @override
   IrProgram run(ProgramFlowFacts facts) => bind()(facts);

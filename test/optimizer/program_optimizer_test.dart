@@ -14,6 +14,54 @@ final _uri = Uri.parse('memory:program-optimizer');
 
 void main() {
   test(
+    'lowering waits for semantic convergence without renewing pass budgets',
+    () {
+      final root = FunctionTarget(_uri, 'phase', .integer, []);
+      IrProgram returning(int value) => IrProgram([], [
+        IrFunction(root, [Block()..finish(Return(Constant.integer(value)))]),
+      ]);
+      var expansions = 0, lowerings = 0;
+      final observations = <int>[];
+      final optimizer = ProgramOptimizer([
+        _Phase(.lowering, () {
+          lowerings++;
+          var changed = false;
+          return (facts) {
+            observations.add(
+              (facts.returnedBy(root).constant as ScalarConstant).value as int,
+            );
+            if (changed) return facts.program;
+            changed = true;
+            return returning(20);
+          };
+        }),
+        _Phase(.expansion, () {
+          expansions++;
+          var remaining = 2;
+          return (facts) {
+            if (remaining == 0) return facts.program;
+            remaining--;
+            final value =
+                (facts.returnedBy(root).constant as ScalarConstant).value
+                    as int;
+            return returning(value - 1);
+          };
+        }),
+      ]);
+      for (var compilation = 1; compilation <= 2; compilation++) {
+        observations.clear();
+        final result = optimizer.run(returning(2), [
+          (target: root, arguments: []),
+        ]);
+        expect(observations, [0, 20]);
+        expect(expansions, compilation);
+        expect(lowerings, compilation);
+        expect((result.returnedBy(root).constant as ScalarConstant).value, 20);
+      }
+    },
+  );
+
+  test(
     'native layout facts follow the output ABI before program rewriting',
     () {
       final word = NativeAbiIntegerType(_uri, 'Word', {
@@ -368,4 +416,15 @@ final class _AddField() extends ProgramPass {
       IrClass(type, [InstanceField(type, 'prefix', .integer)]),
     ], program.functions);
   }
+}
+
+final class _Phase(
+  @override final ProgramPassKind kind,
+  final ProgramTransform Function() binding,
+) extends ProgramPass {
+  @override
+  ProgramTransform bind() => binding();
+
+  @override
+  IrProgram run(ProgramFlowFacts facts) => bind()(facts);
 }

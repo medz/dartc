@@ -15,7 +15,8 @@ export 'src/optimizer/flow_value.dart' show FlowValue, FlowObject, FlowAddress;
 export 'src/optimizer/integer_range.dart' show FlowIntegerRange;
 export 'src/optimizer/program_flow.dart'
     show ProgramFlow, ProgramFlowFacts, FlowEntry;
-export 'src/optimizer/program_pass.dart' show ProgramPass, ProgramTransform;
+export 'src/optimizer/program_pass.dart'
+    show ProgramPass, ProgramPassKind, ProgramTransform;
 export 'src/optimizer/program_optimizer.dart' show ProgramOptimizer;
 export 'src/optimizer/simplification.dart' show ProgramSimplification;
 export 'src/optimizer/inlining.dart' show DirectCallInlining;

@@ -3,12 +3,12 @@ import 'package:dartc/optimizer.dart';
 
 /// Expands retained stack snapshots into ordinary runtime calls.
 ///
-/// Shrinking passes first remove snapshots with no observer. Frame values are
+/// Semantic optimization converges before snapshots acquire runtime dependencies. Frame values are
 /// bound to this function's allocated frame during emission, never to host PCs.
 final class StackTraceLowering(final FunctionTarget capture)
     extends ProgramPass {
   @override
-  bool get expandsCode => true;
+  ProgramPassKind get kind => .lowering;
 
   @override
   IrProgram run(ProgramFlowFacts facts) {

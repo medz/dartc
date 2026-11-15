@@ -9,7 +9,7 @@ import 'region_specialization.dart';
 final class const ProgramBranchSpecialization({final int maxCodeGrowth = 64})
     extends ProgramPass {
   @override
-  bool get expandsCode => true;
+  ProgramPassKind get kind => .expansion;
 
   @override
   IrProgram run(ProgramFlowFacts facts) => bind()(facts);

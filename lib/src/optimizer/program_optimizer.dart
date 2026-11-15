@@ -6,9 +6,9 @@ import 'program_pass.dart';
 
 /// Runs semantic passes with fresh facts after every program change.
 ///
-/// The caller supplies the pipeline order. Shrinking passes converge together
-/// before and after each expansion. Pass state belongs to one compilation, so
-/// later rounds use new facts while retaining spent expansion budgets.
+/// Semantic passes retain their supplied order and converge before lowerings.
+/// Each lowering reenters semantic optimization with the same pass instances and
+/// budgets. New implementation dependencies receive fresh facts before emission.
 /// Retained definitions never become new entry points.
 final class ProgramOptimizer(Iterable<ProgramPass> passes) {
   /// The execution order, including each pass's convergence policy.
@@ -54,7 +54,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     ).facts;
     var facts = analyze(program);
     final stages = [
-      for (final pass in passes) (expands: pass.expandsCode, run: pass.bind()),
+      for (final pass in passes) (kind: pass.kind, run: pass.bind()),
     ];
     bool apply(ProgramTransform transform) {
       final before = facts.program;
@@ -78,20 +78,37 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       return progress;
     }
 
-    bool changed;
+    void optimize() {
+      bool changed;
+      do {
+        changed = false;
+        final reductions = <ProgramTransform>[];
+        for (final stage in stages) {
+          switch (stage.kind) {
+            case .expansion:
+              changed |= converge(reductions);
+              changed |= apply(stage.run);
+            case .reduction:
+              reductions.add(stage.run);
+            case .lowering:
+              break;
+          }
+        }
+        changed |= converge(reductions);
+      } while (changed);
+    }
+
+    optimize();
+    bool lowered;
     do {
-      changed = false;
-      final reductions = <ProgramTransform>[];
+      lowered = false;
       for (final stage in stages) {
-        if (stage.expands) {
-          changed |= converge(reductions);
-          changed |= apply(stage.run);
-        } else {
-          reductions.add(stage.run);
+        if (stage.kind == .lowering && apply(stage.run)) {
+          lowered = true;
+          optimize();
         }
       }
-      changed |= converge(reductions);
-    } while (changed);
+    } while (lowered);
     return facts;
   }
 }
