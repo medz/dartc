@@ -61,32 +61,10 @@ sealed class const Constant(super.type) extends Value {
           : value,
     ),
     final FunctionConstant value => _functionConstantKey(value),
-    RecordConstant(:final type, :final fields) => (
-      type.normalize(),
-      fields.fold<Object?>(null, (tail, field) => (tail, field.structuralKey)),
-    ),
-    SequenceConstant(:final type, :final elements) => (
-      type.normalize(),
-      elements.fold<Object?>(
-        null,
-        (tail, element) => (tail, element.structuralKey),
-      ),
-    ),
-    MapConstant(:final type, :final entries) => (
-      type.normalize(),
-      entries.fold<Object?>(
-        null,
-        (tail, entry) => (tail, entry.$1.structuralKey, entry.$2.structuralKey),
-      ),
-    ),
-    ObjectConstant(:final type, :final fields, :final payload) => (
-      type.normalize(),
-      _orderedFields(fields).fold<Object?>(
-        null,
-        (tail, field) => (tail, field, (fields[field]!).structuralKey),
-      ),
-      payload.fold<Object?>(null, (tail, value) => (tail, value.structuralKey)),
-    ),
+    RecordConstant(:final _key) ||
+    SequenceConstant(:final _key) ||
+    MapConstant(:final _key) ||
+    ObjectConstant(:final _key) => _key,
   };
 
   /// Creates an integer literal with the value [value].
@@ -326,6 +304,10 @@ final class RecordConstant(RecordType type, Iterable<Constant> fields)
     extends Constant {
   /// The constant fields in slot order.
   final List<Constant> fields = .unmodifiable(fields);
+  late final Object _key = _ConstantKey(
+    type.normalize(),
+    fields.map((field) => field.structuralKey),
+  );
 
   this : super(type) {
     checkArguments(type.fields, this.fields);
@@ -336,6 +318,10 @@ final class RecordConstant(RecordType type, Iterable<Constant> fields)
 final class SequenceConstant(ClassType type, Iterable<Constant> elements)
     extends Constant {
   final List<Constant> elements = .unmodifiable(elements);
+  late final Object _key = _ConstantKey(
+    type.normalize(),
+    elements.map((element) => element.structuralKey),
+  );
 
   this : super(type) {
     if (type.declaration != CoreTypes.list &&
@@ -355,6 +341,10 @@ final class SequenceConstant(ClassType type, Iterable<Constant> elements)
 final class MapConstant(ClassType type, Iterable<(Constant, Constant)> entries)
     extends Constant {
   final List<(Constant, Constant)> entries = .unmodifiable(entries);
+  late final Object _key = _ConstantKey(
+    type.normalize(),
+    entries.map((entry) => (entry.$1.structuralKey, entry.$2.structuralKey)),
+  );
 
   this : super(type) {
     if (type.declaration != CoreTypes.map) {
@@ -382,6 +372,14 @@ final class ObjectConstant(
   ///
   /// Nonempty payloads require a declared reference-payload class in the program.
   final List<Constant> payload = .unmodifiable(payload);
+  late final Object _key = _ConstantKey(type.normalize(), [
+    fields.length,
+    for (final field in _orderedFields(fields)) ...[
+      field,
+      fields[field]!.structuralKey,
+    ],
+    for (final value in payload) value.structuralKey,
+  ]);
 
   this : super(type) {
     type.validateTypeArguments();
@@ -394,6 +392,25 @@ final class ObjectConstant(
       }
     }
   }
+}
+
+// Flat keys avoid rebuilding and recursively hashing immutable payload chains.
+final class _ConstantKey(final ValueType type, Iterable<Object> entries) {
+  final List<Object> _entries = .unmodifiable(entries);
+
+  @override
+  late final int hashCode = Object.hash(type, Object.hashAll(_entries));
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _ConstantKey &&
+          type == other.type &&
+          hashCode == other.hashCode &&
+          _entries.length == other._entries.length &&
+          _entries.indexed.every(
+            (entry) => entry.$2 == other._entries[entry.$1],
+          );
 }
 
 Object _functionConstantKey(FunctionConstant value) {

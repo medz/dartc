@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Avoid compiler stack overflow when hashing wide immutable constants. Cache flat structural keys while preserving declared types, field identity and element order.
+
 - Preserve handlers and pre-failure storage for retained allocations and stack captures. Unused allocations can still disappear; explicit throws remain observable. Allocation failures share the ordinary target reporting body, and known incoming type tests keep their value and trace relationships through bounded control-flow specialization.
 
 - Expose first-error trace recording as ordinary calls before source-program analysis. Rethrows and cleanup forward the already recorded trace; unobserved local Error objects and captures disappear while finally effects and observed traces remain. Generated support shares this normalization; machine representation rejects missing exception state instead of adding hidden capture and recording calls. Checked conversions expose their tests before analysis and share the SDK TypeError implementation, including its first-trace storage.

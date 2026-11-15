@@ -4,6 +4,28 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('wide constant payloads remain usable as structural map keys', () {
+    final type = ClassType(Uri.parse('memory:wide-constant'), 'References');
+    final values = [for (var i = 0; i < 32768; i++) Constant.string('$i')];
+    final original = ObjectConstant(type, {}, payload: values);
+    final equivalent = ObjectConstant(type, {}, payload: values);
+    final changed = ObjectConstant(
+      type,
+      {},
+      payload: [...values.take(values.length - 1), const Constant.string('x')],
+    );
+    final keys = {original.structuralKey: 42};
+    expect(keys[equivalent.structuralKey], 42);
+    expect(keys[changed.structuralKey], isNull);
+    expect(
+      keys[ObjectConstant(type, {}, payload: values.reversed).structuralKey],
+      isNull,
+    );
+    for (var i = 0; i < 8; i++) {
+      expect(Map<Object, int>.unmodifiable(keys)[equivalent.structuralKey], 42);
+    }
+  });
+
   test(
     'reference payloads retain identity, dependencies and storage validation',
     () {
