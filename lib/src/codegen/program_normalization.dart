@@ -2,8 +2,10 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 
 import 'heap_runtime.dart';
+import 'checked_casts.dart';
 import 'list_storage.dart';
 import 'numeric_normalization.dart';
+import 'non_null_values.dart';
 import 'suspension_normalization.dart';
 
 /// Resolves semantic operations to their checked implementation before analysis.
@@ -16,6 +18,10 @@ final class ProgramNormalization(
 }) {
   final _helpers = <Object, IrFunction>{};
   late final _lists = ListStorage(program.classes);
+  late final _casts = CheckedCasts(
+    failure: runtime?.typeCheckFailure,
+    functions: _helpers,
+  );
   late final _numeric = NumericNormalization(
     _helpers,
     argumentError: _constructor(ValueType.argumentError),
@@ -32,12 +38,12 @@ final class ProgramNormalization(
     var changed = false;
     final functions = <IrFunction>[];
     for (final source in program.functions) {
-      final result = _function(source);
+      final result = normalizeBody(source);
       changed |= !identical(result, source);
       functions.add(result);
     }
-    for (var index = 0; index < _helpers.length; index++) {
-      functions.add(_function(_helpers.values.elementAt(index)));
+    for (final helper in supportFunctions) {
+      functions.add(helper);
       changed = true;
     }
     final externals = <IrExternal>[];
@@ -90,9 +96,21 @@ final class ProgramNormalization(
     return target == null ? null : program.implementationOf(target);
   }
 
-  IrFunction _function(IrFunction source) {
+  /// Generated callable bodies, normalized with their transitive support.
+  Iterable<IrFunction> get supportFunctions sync* {
+    for (var index = 0; index < _helpers.length; index++) {
+      yield normalizeBody(_helpers.values.elementAt(index));
+    }
+  }
+
+  /// Normalizes a body against this program's declarations and runtime.
+  ///
+  /// Calls introduced here retain the body's actual values and exception edges.
+  /// Suspendable control flow is expanded by [run] after its bodies are complete.
+  IrFunction normalizeBody(IrFunction source) {
     final operations = <Instruction, Instruction>{};
     final terminators = <Block, Terminator>{};
+    late final nonNull = NonNullValues(source);
     for (final block in source.blocks) {
       if (block.end case final Throw throwing
           when runtime != null && !throwing.isRecorded) {
@@ -103,6 +121,7 @@ final class ProgramNormalization(
         if (block.end case Invoke(:final operation)) operation,
       ]) {
         final replacement = switch (operation) {
+          TypeCast() || NullCheck() => _checked(operation, nonNull),
           MakeInvocation(
             :final selector,
             :final positional,
@@ -182,6 +201,21 @@ final class ProgramNormalization(
             terminators: terminators,
             constants: _constant,
           ).run();
+  }
+
+  Instruction _checked(Instruction instruction, NonNullValues nonNull) {
+    final operand = instruction.inputs.single;
+    if (instruction.type.accepts(operand.type) ||
+        nonNull.contains(operand) &&
+            instruction.type.accepts(operand.type.nonNullable)) {
+      return UncheckedCast(operand, instruction.type);
+    }
+    final check = _casts.targetFor(instruction);
+    return DirectCall(
+      check.target,
+      instruction.inputs,
+      typeArguments: check.parameters,
+    );
   }
 
   Terminator _recordThrow(Throw source) {

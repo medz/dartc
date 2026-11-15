@@ -64,6 +64,9 @@ class Error {
 void _recordError(Object error, StackTrace trace) =>
     error._recordStackTrace(trace);
 
+@runtime.RuntimeEntry(.typeCheckFailure)
+Never _typeCheckFailure() => throw TypeError();
+
 @patch
 class StackTrace {
   @patch

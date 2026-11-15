@@ -21,6 +21,7 @@ enum RuntimeRole() {
   floatingModulo,
   captureStackTrace,
   recordError,
+  typeCheckFailure,
   asyncCreate,
   asyncStart,
   asyncAwait,

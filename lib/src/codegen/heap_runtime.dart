@@ -43,6 +43,7 @@ final class HeapRuntime(
   final FunctionTarget? exhaustivenessFailure,
   final FunctionTarget? patternMatchFailure,
   final FunctionTarget? assertionFailure,
+  final FunctionTarget? typeCheckFailure,
   final FunctionTarget? floatingRemainder,
   final FunctionTarget? floatingModulo,
   final AsyncRuntime? async,
@@ -119,6 +120,7 @@ final class HeapRuntime(
       for (final target in [
         exhaustivenessFailure,
         patternMatchFailure,
+        typeCheckFailure,
       ].nonNulls)
         (target, FunctionType(.never, [])),
       for (final target in [floatingRemainder, floatingModulo].nonNulls)

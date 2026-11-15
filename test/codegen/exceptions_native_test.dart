@@ -16,6 +16,12 @@ void main() {
     expect(native.local(), 321);
   });
 
+  test('generated type errors record the trace delivered to their handler', () {
+    final native = ExceptionCalls();
+    addTearDown(native.close);
+    expect(native.checkedTrace(), isTrue);
+  });
+
   test('exception identity, traces and Error storage survive rethrow and collection', () {
     const payload = ObjectHeader.fieldsOffset ~/ ObjectHeader.alignment;
     final native = ExceptionCalls();

@@ -127,9 +127,7 @@ void main() {
         ),
       );
       normal.finish(Return(normal.parameters.single));
-      caught.finish(
-        Throw(caught.parameters[0], stackTrace: caught.parameters[1]),
-      );
+      caught.finish(Throw.recorded(caught.parameters[0], caught.parameters[1]));
       final source = IrProgram(
         [],
         [

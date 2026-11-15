@@ -10,6 +10,7 @@ import 'instance_storage.dart';
 import 'member_calls.dart';
 import 'native_invocation.dart';
 import 'program_layout.dart';
+import 'program_normalization.dart';
 
 /// Selects function bodies and closes generated call dependencies before emission.
 final class ProgramSelection(
@@ -23,6 +24,10 @@ final class ProgramSelection(
   final Map<NativeCallbackTarget, FunctionTarget> callbacks = const {},
 }) {
   final functions = <FunctionTarget, SelectedFunction>{};
+  late final _normalization = ProgramNormalization(
+    members.program,
+    runtime: heap.runtime,
+  );
   var capture = false, managed = false;
   Set<FunctionTarget> primitives = {};
 
@@ -103,12 +108,13 @@ final class ProgramSelection(
   void include(IrFunction function) {
     if (functions.containsKey(function.target)) return;
     final body = FunctionRepresentation(
-      function,
+      identical(members.program.implementationOf(function.target), function)
+          ? function
+          : _normalization.normalizeBody(function),
       layouts,
       casts,
       members,
       heap,
-      captureTrace: heap.runtime?.captureTrace,
     );
     _bind(body);
     functions[function.target] = body;
@@ -155,7 +161,7 @@ final class ProgramSelection(
                   NativeCallbackAddress(:final target) => callbacks[target],
                   DirectCall(:final target) => target,
                   TypeCast() ||
-                  NullCheck() => casts.targetFor(instruction, layouts).target,
+                  NullCheck() => casts.targetFor(instruction).target,
                   Construct(:final initializer) => heap.constructorFor(
                     initializer,
                     layouts,
@@ -180,6 +186,7 @@ final class ProgramSelection(
       for (final body in functions.values) ...body.invocations.values,
     };
     Iterable<IrFunction> supportFunctions() => [
+      ..._normalization.supportFunctions,
       ...layouts.native.functions,
       ...members.functions,
       ...layouts.closures.functions,
@@ -297,7 +304,6 @@ final class ProgramSelection(
     IrProgram(
       [
         ...layouts.native.classes,
-        if (casts.functions.isNotEmpty) ...casts.classes,
         if (!globals.isEmpty) globals.declaration,
         ...layouts.closures.classes,
         ?layouts.records.generatedClass,

@@ -151,7 +151,12 @@ void main() {
     List<Block> blocks, {
     Iterable<IrExternal> externals = const [],
   }) {
-    final target = FunctionTarget(uri, 'test', result, []);
+    final target = FunctionTarget(
+      uri,
+      'test',
+      result,
+      blocks.first.parameters.map((value) => value.type),
+    );
     final function = IrFunction(target, blocks);
     final program = IrProgram([], [function], externals: externals);
     return FunctionRepresentation(
@@ -200,7 +205,7 @@ void main() {
 
   for (final use in ['return', 'throw', 'edge', 'identity', 'call']) {
     test('$use retains pointer identity and traced storage', () {
-      final entry = Block();
+      final entry = Block(use == 'throw' ? [ValueType.stackTrace] : const []);
       final pointer = entry.emit(
         PointerFromAddress(const Constant.integer(0), pointerType),
       );
@@ -211,7 +216,7 @@ void main() {
         case 'return':
           entry.finish(Return(pointer));
         case 'throw':
-          entry.finish(Throw(pointer));
+          entry.finish(Throw.recorded(pointer, entry.parameters.single));
         case 'edge':
           final done = Block([pointerType]);
           entry.finish(Jump(done, [pointer]));

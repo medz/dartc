@@ -207,6 +207,37 @@ ObjectModule exceptions(Target target) {
   bodies.add(IrFunction(runLocal, [localStart, captured]));
   exports[runLocal] = NativeExport('local', NativeSignature(Int64, []));
 
+  final checkedTrace = FunctionTarget(uri, 'checkedTrace', .boolean, []);
+  final checkedEntry = Block(), accepted = Block();
+  final failed = Block([.object, .stackTrace]);
+  checkedEntry.finish(
+    Invoke(
+      TypeCast(const Constant.string('invalid'), .integer),
+      onReturn: Jump(accepted),
+      onThrow: Jump(failed, [UnwindValue.exception, UnwindValue.stackTrace]),
+    ),
+  );
+  accepted.finish(const Return(Constant.boolean(false)));
+  final traceField = classes.first.fields.singleWhere(
+    (field) => field.name == '_stackTrace',
+  );
+  final failure = failed.emit(UncheckedCast(failed.parameters.first, .error));
+  failed.finish(
+    Return(
+      failed.emit(
+        Identical(
+          failed.emit(LoadField(traceField, failure)),
+          failed.parameters.last,
+        ),
+      ),
+    ),
+  );
+  bodies.add(IrFunction(checkedTrace, [checkedEntry, accepted, failed]));
+  exports[checkedTrace] = NativeExport(
+    'checkedTrace',
+    NativeSignature(Bool, []),
+  );
+
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);

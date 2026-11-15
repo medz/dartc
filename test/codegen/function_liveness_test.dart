@@ -130,9 +130,9 @@ void main() {
       final collect = FunctionTarget(library, 'collect', .voidType, []);
       final call = entry.emit(DirectCall(collect, []));
       entry.finish(
-        Throw(
+        Throw.recorded(
           entry.parameters[0],
-          stackTrace: entry.parameters[1],
+          entry.parameters[1],
           onThrow: Jump(handler, [
             UnwindValue.exception,
             UnwindValue.stackTrace,

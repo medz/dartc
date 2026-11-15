@@ -266,6 +266,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
         .key,
     stackContext: annotations.stackContext,
     recordError: recordError,
+    typeCheckFailure: annotations.entries[RuntimeRole.typeCheckFailure],
     primitives: primitives,
     nonAllocating: annotations.nonAllocating.where(
       (target) => !lowered.imports.containsKey(target),

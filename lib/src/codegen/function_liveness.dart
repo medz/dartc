@@ -120,7 +120,7 @@ final class FunctionLiveness._(
           read(exception);
           if (stackTrace != null) read(stackTrace);
         case Unreachable(:final cause):
-          read(cause);
+          if (cause.type != .never) read(cause);
         case Jump() || Return() || Invoke() || ExhaustivenessFailure():
           break;
       }

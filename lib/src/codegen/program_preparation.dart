@@ -135,7 +135,7 @@ final class ProgramPreparation(
     final sourceDefinitions = facts.definitions;
     final selected = sourceDefinitions.toSet();
     final heap = HeapPlan(runtime: runtime);
-    final casts = CheckedCasts();
+    final casts = CheckedCasts(failure: runtime?.typeCheckFailure);
     IrCallable? constructor(ValueType? type, [String name = 'new']) {
       final target = program.classes
           .where((c) => c.type == type)
@@ -199,7 +199,6 @@ final class ProgramPreparation(
     );
     final layouts = ProgramLayout(
       [
-        ...casts.classes,
         ...program.classes,
         if (!globals.isEmpty) globals.declaration,
         ...closures.classes,
@@ -214,7 +213,6 @@ final class ProgramPreparation(
       referencedClasses: [
         ...instantiatedTypes,
         for (final declaration in [
-          ...casts.classes,
           if (!globals.isEmpty) globals.declaration,
           ...closures.classes,
           ?records.declaration,

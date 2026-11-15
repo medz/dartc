@@ -23,5 +23,8 @@ final class ExceptionCalls() {
     'local',
   );
 
+  late final checkedTrace = _library
+      .lookupFunction<Bool Function(), bool Function()>('checkedTrace');
+
   void close() => _library.close();
 }

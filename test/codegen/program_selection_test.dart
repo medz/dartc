@@ -50,7 +50,7 @@ void main() {
       no.emit(DirectCall(dead, []));
       no.finish(const Return(Constant.integer(0)));
       final function = IrFunction(root, [entry, yes, no, done, caught]);
-      final casts = CheckedCasts();
+      final casts = CheckedCasts(failure: heapRuntime.typeCheckFailure);
       final layout = ProgramLayout(
         [],
         nativeLayout: NativeLayout(const Target(.linux, .arm64)),
@@ -103,7 +103,7 @@ void main() {
       final selection = ProgramSelection(
         layout,
         HeapPlan(),
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         MemberCalls(
           program,
           {root, callee},
@@ -172,7 +172,7 @@ void main() {
     final selection = ProgramSelection(
       layout,
       HeapPlan(runtime: heapRuntime),
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       MemberCalls(program, functions.map((body) => body.target).toSet()),
       GlobalStorage([]),
       layout.instances,
@@ -185,7 +185,7 @@ void main() {
   });
 
   test('normalized numeric calls retain heap and exception dependencies', () {
-    final casts = CheckedCasts();
+    final casts = CheckedCasts(failure: heapRuntime.typeCheckFailure);
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
@@ -220,9 +220,9 @@ void main() {
         IrFunction(helper, [entry]),
         IrFunction(division, [divide]),
       ]),
+      runtime: heapRuntime,
     ).run();
     final layouts = ProgramLayout([
-      ...casts.classes,
       ...program.classes,
     ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final selection = ProgramSelection(
@@ -267,7 +267,7 @@ void main() {
     }
   });
 
-  test('allocation wrappers report source constructor dependencies', () {
+  test('generated support normalizes checks and discovers constructors', () {
     final constructor = FunctionTarget(
       Uri.parse('dart:core'),
       'new',
@@ -285,9 +285,8 @@ void main() {
       ],
       [init],
     );
-    final casts = CheckedCasts();
+    final casts = CheckedCasts(failure: heapRuntime.typeCheckFailure);
     final layouts = ProgramLayout([
-      ...casts.classes,
       ...program.classes,
     ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final heap = HeapPlan(runtime: heapRuntime);
@@ -310,23 +309,15 @@ void main() {
       ),
     );
 
-    final normalized = ProgramNormalization(
-      IrProgram(program.classes, [
-        ...program.functions,
-        IrFunction(helper, [entry]),
-      ]),
-    ).run();
     final selection = ProgramSelection(
       layouts,
       heap,
       casts,
-      MemberCalls(normalized, {}),
+      MemberCalls(program, {}),
       GlobalStorage([]),
       layouts.instances,
     );
-    normalized.functions
-        .where((body) => body.target != constructor)
-        .forEach(selection.include);
+    selection.include(IrFunction(helper, [entry]));
     expect(selection.close(persistent: true), {
       constructor,
       heapRuntime.allocate,

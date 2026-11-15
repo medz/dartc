@@ -43,7 +43,7 @@ void main() {
       final body = FunctionRepresentation(
         function,
         layouts,
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         MemberCalls(IrProgram([], []), {}),
         HeapPlan(),
       );
@@ -162,7 +162,7 @@ void main() {
       final body = FunctionRepresentation(
         function,
         layouts,
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         MemberCalls(IrProgram([], []), {}),
         HeapPlan(),
       );

@@ -87,7 +87,7 @@ void main() {
       final body = FunctionRepresentation(
         source,
         layout,
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         MemberCalls(IrProgram([], bodies), {}),
         HeapPlan(),
       )..prune();
@@ -149,7 +149,7 @@ void main() {
     final representation = FunctionRepresentation(
       IrFunction(target, [entry]),
       layout,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -191,7 +191,7 @@ void main() {
       final body = FunctionRepresentation(
         IrFunction(target, [entry]),
         layouts,
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
@@ -217,7 +217,7 @@ void main() {
       final cast = entry.emit(UncheckedCast(entry.parameters.single, result));
       entry.finish(Return(cast));
       final function = IrFunction(target, [entry]);
-      final checks = CheckedCasts();
+      final checks = CheckedCasts(failure: heapRuntime.typeCheckFailure);
       final body = FunctionRepresentation(
         function,
         layouts,
@@ -290,7 +290,7 @@ void main() {
           closureStorage: closures,
           nativeLayout: NativeLayout(const Target(.linux, .arm64)),
         ),
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
@@ -321,7 +321,7 @@ void main() {
       final body = FunctionRepresentation(
         IrFunction(target, [entry]),
         layouts,
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
@@ -419,7 +419,7 @@ void main() {
           program.classes,
           nativeLayout: NativeLayout(const Target(.linux, .arm64)),
         ),
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         MemberCalls(program, reachableDefinitions(program, [function.target])),
         HeapPlan(),
       );
@@ -471,7 +471,7 @@ void main() {
         ProgramLayout([
           IrClass(owner, [field], members: [target]),
         ], nativeLayout: NativeLayout(const Target(.linux, .arm64))),
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
@@ -537,7 +537,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, [entry, yes, no]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -581,7 +581,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, [entry]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -618,7 +618,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(caller, [entry]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -651,7 +651,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, [entry, taken, other]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -677,7 +677,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, [entry, done]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -722,7 +722,7 @@ void main() {
       final body = FunctionRepresentation(
         IrFunction(target, [entry, success, failure]),
         layouts,
-        CheckedCasts(),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
@@ -778,7 +778,7 @@ void main() {
     final body = FunctionRepresentation(
       IrFunction(target, [entry, done, failed]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );
@@ -792,19 +792,33 @@ void main() {
     );
   });
 
+  test('unrecorded exceptions cannot bypass semantic normalization', () {
+    final target = FunctionTarget(uri, 'unrecorded', .voidType, [.object]);
+    final source = Block(target.parameterTypes);
+    source.finish(Throw(source.parameters.single));
+    expect(
+      () => FunctionRepresentation(
+        IrFunction(target, [source]),
+        layouts,
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
+        members,
+        HeapPlan(),
+      ),
+      throwsStateError,
+    );
+  });
+
   test('boxing a thrown scalar keeps an existing trace alive', () {
     final target = FunctionTarget(uri, 'rethrow', .voidType, [
       .integer,
       .stackTrace,
     ]);
     final entry = Block(target.parameterTypes);
-    entry.finish(
-      Throw(entry.parameters.first, stackTrace: entry.parameters.last),
-    );
+    entry.finish(Throw.recorded(entry.parameters.first, entry.parameters.last));
     final body = FunctionRepresentation(
       IrFunction(target, [entry]),
       layouts,
-      CheckedCasts(),
+      CheckedCasts(failure: heapRuntime.typeCheckFailure),
       members,
       HeapPlan(),
     );

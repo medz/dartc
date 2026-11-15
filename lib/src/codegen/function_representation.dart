@@ -24,9 +24,8 @@ final class FunctionRepresentation(
   ProgramLayout layouts,
   CheckedCasts casts,
   MemberCalls members,
-  HeapPlan heap, {
-  FunctionTarget? captureTrace,
-}) extends SelectedFunction {
+  HeapPlan heap,
+) extends SelectedFunction {
   final _prologue = <Value>[];
   bool get _factoryEnvironment =>
       function.target.kind == .factory &&
@@ -198,18 +197,11 @@ final class FunctionRepresentation(
       return box;
     }
 
-    Value? traceFor(Value? trace, List<Value> into) {
-      if (trace != null || captureTrace == null) return trace;
-      final capture = DirectCall(captureTrace, []);
-      into.add(capture);
-      return capture;
-    }
-
     Value checkResult(Value value, ValueType type, List<Value> into) {
       final raw = TypeView(value, .object.nullable);
       final check = TypeCast(raw, type);
       into.add(raw);
-      final signature = casts.targetFor(check, layouts);
+      final signature = casts.targetFor(check);
       operands[check] = [
         raw,
         for (final parameter in signature.parameters) _reify(parameter, into),
@@ -1435,7 +1427,7 @@ final class FunctionRepresentation(
                   receiver,
                   type == ValueType.nullClass ? ValueType.nullType : ownerView,
                 );
-                final checked = casts.targetFor(cast, layouts);
+                final checked = casts.targetFor(cast);
                 operands[cast] = [
                   receiver,
                   for (final parameter in checked.parameters)
@@ -1482,8 +1474,7 @@ final class FunctionRepresentation(
               final checkTypes = <Value>[];
               operands[check] = [
                 widened,
-                for (final parameter
-                    in casts.targetFor(check, layouts).parameters)
+                for (final parameter in casts.targetFor(check).parameters)
                   _reify(parameter, checkTypes),
               ];
               checkTypes.forEach(append);
@@ -1604,7 +1595,7 @@ final class FunctionRepresentation(
               pending.forEach(append);
               if (widened is TypeView) append(widened);
               final check = TypeCast(widened, destination);
-              final signature = casts.targetFor(check, layouts);
+              final signature = casts.targetFor(check);
               operands[check] = [
                 widened,
                 for (final parameter in signature.parameters)
@@ -1855,7 +1846,7 @@ final class FunctionRepresentation(
               );
               pending.forEach(append);
               final check = TypeCast(widened, field.type);
-              final signature = casts.targetFor(check, layouts);
+              final signature = casts.targetFor(check);
               operands[check] = [
                 widened,
                 for (final parameter in signature.parameters)
@@ -1932,7 +1923,7 @@ final class FunctionRepresentation(
             body,
           );
           final check = TypeCast(widened, field.type);
-          final signature = casts.targetFor(check, layouts);
+          final signature = casts.targetFor(check);
           operands[check] = [
             widened,
             for (final parameter in signature.parameters)
@@ -1992,7 +1983,7 @@ final class FunctionRepresentation(
             body.add(instruction);
             continue;
           }
-          final check = casts.targetFor(instruction, layouts);
+          final check = casts.targetFor(instruction);
           operands[instruction] = [
             operand,
             for (final parameter in check.parameters) _reify(parameter, body),
@@ -2095,16 +2086,16 @@ final class FunctionRepresentation(
         :final onThrow,
         :final isRecorded,
       )) {
-        final value = convert(exception, .object, body);
-        final trace = traceFor(stackTrace, body);
-        if (heap.runtime case final runtime?
-            when trace != null && !isRecorded) {
-          body.add(DirectCall(runtime.recordError, [value, trace]));
+        if (!isRecorded) {
+          throw StateError(
+            'Exception state must be normalized before representation.',
+          );
         }
-        final handler = onThrow == null ? null : edge(onThrow);
-        ends[block] = isRecorded
-            ? Throw.recorded(value, trace!, onThrow: handler)
-            : Throw(value, stackTrace: trace, onThrow: handler);
+        ends[block] = Throw.recorded(
+          convert(exception, .object, body),
+          stackTrace!,
+          onThrow: onThrow == null ? null : edge(onThrow),
+        );
       }
       ends[block] ??= switch (sourceBlock.end) {
         Return(:final value) => Return(
@@ -2134,7 +2125,7 @@ final class FunctionRepresentation(
     }
     finishOperation();
     instructions[function.entry]!.insertAll(0, _prologue);
-    // Generated boxing, type preparation and stack capture share their source handler.
+    // Generated boxing and type preparation share their source handler.
     for (final block in blocks.toList()) {
       final values = instructions[block]!;
       if (!values.any(handlers.containsKey)) continue;
