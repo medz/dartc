@@ -2006,19 +2006,18 @@ final class ProgramFlow(
     if (effects.contains(Effect.callsUserCode)) {
       // Re-entry follows values that crossed this boundary or declared exports.
       _admitEscaped(next);
-      for (final target in _openEntries) {
-        final callback = _roots[target]!;
-        callback.readers.add(activation);
-        _supply(callback, callback.arguments, next);
-      }
       for (final callback in {
         ..._escapingActivations,
         for (final target in _openEntries) _roots[target]!,
       }) {
         callback.readers.add(activation);
-        _supply(callback, callback.arguments, next);
-        if (callback.normal != null) next.join(callback.normal!);
-        if (callback.exceptional != null) next.join(callback.exceptional!);
+        _supply(callback, callback.arguments, next.project(callback.arguments));
+        if (callback.normal != null) {
+          next.join(callback.normal!.project(const []));
+        }
+        if (callback.exceptional != null) {
+          next.join(callback.exceptional!.project(const []));
+        }
       }
     }
     return FlowResult(
@@ -2034,8 +2033,11 @@ final class ProgramFlow(
   }
 
   void _publishExternal(FlowState state) {
-    final changed = _externalState == null ? true : _externalState!.join(state);
-    _externalState ??= state.copy();
+    final exposed = state.project(const []);
+    final changed = _externalState == null
+        ? true
+        : _externalState!.join(exposed, widen: true);
+    _externalState ??= exposed;
     if (!changed) return;
     for (final callback in {
       ..._escapingActivations,
@@ -2074,7 +2076,7 @@ final class ProgramFlow(
       final activation = prepare(key, target, environment);
       if (activation != null) {
         if (native) _nativeActivations.add(activation);
-        _supply(activation, arguments, state);
+        _supply(activation, arguments, state.project(arguments));
       }
     }
 
@@ -2136,9 +2138,11 @@ final class ProgramFlow(
             );
             if (lookup == null) continue;
             _nativeLookups.add(lookup);
-            _supply(lookup, [FlowValue.unknown(.integer)], state);
+            _supply(lookup, [
+              FlowValue.unknown(.integer),
+            ], state.project(const []));
             if (lookup.normal case final normal?) {
-              state.join(normal);
+              state.join(normal.project([lookup.returned]));
               visit(
                 lookup.returned,
                 identity: definition,
@@ -2195,7 +2199,7 @@ final class ProgramFlow(
           arguments,
           repeated: true,
           invoke: (_, arguments, input) {
-            _supply(activation, arguments, input);
+            _supply(activation, arguments, input.project(arguments));
             return _unreachable;
           },
         );

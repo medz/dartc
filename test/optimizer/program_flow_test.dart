@@ -976,6 +976,47 @@ void main() {
     );
   });
 
+  test('external reentry cannot import another invocation private cell', () {
+    final external = FunctionTarget(_uri, 'external', .voidType, []);
+    final target = FunctionTarget(_uri, 'entry', .integer, []);
+    final entry = Block();
+    final cell = entry.emit(
+      NewCell(CellType(.integer), const Constant.integer(0)),
+    );
+    entry.emit(DirectCall(external, []));
+    final value = entry.emit(ReadCell(cell));
+    final next = entry.emit(IntBinary(.add, value, const Constant.integer(1)));
+    entry.emit(WriteCell(cell, next));
+    entry.finish(Return(entry.emit(ReadCell(cell))));
+    final function = IrFunction(target, [entry]);
+    final program = IrProgram(
+      [],
+      [function],
+      externals: [IrExternal(external)],
+    );
+    final facts = ProgramFlow(program, [], openEntries: [target]).facts;
+    final before = facts.pointStateOf(cell)!.before;
+    for (final object in facts.valueOf(cell).objects) {
+      expect(before.containsObject(object), isFalse);
+    }
+    late IrInterpreter interpreter;
+    var entered = false;
+    interpreter = IrInterpreter(
+      program,
+      {},
+      externalCalls: {
+        external: (_) {
+          if (!entered) {
+            entered = true;
+            expect(interpreter.run(function, []), 1);
+          }
+          return null;
+        },
+      },
+    );
+    expect(interpreter.run(function, []), 1);
+  });
+
   test('an explicit leaf contract does not invent callback execution or termination', () {
     final global = GlobalVariable(_uri, 'private', .integer, isLate: true);
     final callback = FunctionTarget(_uri, 'callback', .voidType, []);
