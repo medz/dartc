@@ -348,13 +348,15 @@ final class ProgramFlow(
         _loopBlocks(caller.body).contains(block);
     final reads = _readsFor(body);
     final projected = input.project(arguments, reads: reads);
+    var suppliedState = projected;
     final aliases = <(int, int)>[
       for (var i = 0; i < arguments.length; i++)
         for (var j = 0; j < i; j++)
           if (_equivalent(arguments[i], arguments[j])) (i, j),
     ];
-    final plain = [for (final value in arguments) value.withSources(const [])];
+    var plain = [for (final value in arguments) value.withSources(const [])];
     late final _Activation callee;
+    _Activation? retired;
     if (path.isNotEmpty) {
       callee = path.last;
     } else {
@@ -367,11 +369,18 @@ final class ProgramFlow(
         repeated,
         aliasKey,
       );
-      final previous = site.contexts[local];
+      final invocation = site.contexts.putIfAbsent(
+        local,
+        () => _CallInput(plain, projected.copy()),
+      );
+      invocation.join(plain, projected);
+      plain = invocation.arguments;
+      suppliedState = invocation.state;
+      final previous = invocation.activation;
       if (site.joined.contains(local)) {
         callee = previous!;
       } else {
-        final keyState = projected.copy()..retainSources((_) => false);
+        final keyState = suppliedState.copy()..retainSources((_) => false);
         final precise = _ContextKey(
           target,
           plain,
@@ -396,11 +405,16 @@ final class ProgramFlow(
         }
       }
       _calls.add(callee);
-      site.contexts[local] = callee;
+      invocation.activation = callee;
       if (previous != null &&
           previous != callee &&
-          !site.contexts.values.contains(previous)) {
+          !site.contexts.values.any((input) => input.activation == previous)) {
         previous.callSites.remove(site);
+        caller.calls[operation]?.remove(previous);
+        if (!caller.calls.values.any((calls) => calls.contains(previous))) {
+          previous.readers.remove(caller);
+        }
+        retired = previous;
       }
     }
     if (repeated && !callee.repeated) {
@@ -432,6 +446,7 @@ final class ProgramFlow(
     caller.calls.putIfAbsent(operation, () => {}).add(callee);
     callee.readers.add(caller);
     callee.callSites.add(site);
+    if (retired != null) _release(retired);
     final parameters = body.entry.parameters;
     final supplied = [
       for (final (i, value) in plain.indexed)
@@ -444,7 +459,7 @@ final class ProgramFlow(
               FlowSource(parameters[a], callee),
         ]),
     ];
-    final inputChanged = _supply(callee, supplied, projected);
+    final inputChanged = _supply(callee, supplied, suppliedState);
     if (inputChanged ||
         environmentChanged ||
         callee.inputKey?.repeated != callee.repeated) {
@@ -594,6 +609,40 @@ final class ProgramFlow(
     }
     if (key != null) _inputs.putIfAbsent(key, () => {}).add(activation);
     activation.inputKey = key;
+  }
+
+  void _release(_Activation activation) {
+    final pending = [activation];
+    while (pending.isNotEmpty) {
+      final old = pending.removeLast();
+      if (old.readers.isNotEmpty ||
+          _roots.containsValue(old) ||
+          _escapedCalls.containsValue(old) ||
+          !_calls.remove(old)) {
+        continue;
+      }
+      _pending.remove(old);
+      if (old.inputKey case final key?) {
+        final bucket = _inputs[key]!;
+        bucket.remove(old);
+        if (bucket.isEmpty) _inputs.remove(key);
+        old.inputKey = null;
+      }
+      for (final entry in old.calls.entries) {
+        for (final target
+            in entry.value.map((call) => call.body.target).toSet()) {
+          final site = _callSites.remove((old, entry.key, target));
+          if (site == null) continue;
+          for (final called in {
+            for (final input in site.contexts.values) ?input.activation,
+          }) {
+            called.callSites.remove(site);
+            called.readers.remove(old);
+            pending.add(called);
+          }
+        }
+      }
+    }
   }
 
   FlowReadSet? _readsFor(IrFunction body) {
@@ -3055,12 +3104,13 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
 
 final class _ContextKey(
   final FunctionTarget target,
-  final List<FlowValue> arguments,
+  List<FlowValue> arguments,
   Map<TypeParameterType, ValueType> environment,
   final Object state,
   final bool repeated,
   final Object? aliases,
 ) {
+  final List<FlowValue> arguments = .unmodifiable(arguments);
   final Map<TypeParameterType, ValueType> environment = Map.unmodifiable(
     _completeEnvironment(target, environment),
   );
@@ -3094,10 +3144,23 @@ final class _CallSite(
   final Instruction operation,
   final FunctionTarget target,
 ) {
-  final contexts = <_ContextKey, _Activation>{};
+  final contexts = <_ContextKey, _CallInput>{};
   final joined = <_ContextKey>{};
   final allocations = <FlowObject, FlowObject>{};
   bool recursive = false;
+}
+
+/// A call site's joined input, independent of other users of a shared summary.
+final class _CallInput(List<FlowValue> arguments, final FlowState state) {
+  final List<FlowValue> arguments = List.of(arguments);
+  _Activation? activation;
+
+  void join(List<FlowValue> incoming, FlowState input) {
+    for (final (index, value) in incoming.indexed) {
+      arguments[index] = arguments[index].join(value);
+    }
+    state.join(input);
+  }
 }
 
 final class _AllocationContext(final FlowObject original, final _CallSite site);

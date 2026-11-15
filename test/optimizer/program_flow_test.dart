@@ -487,8 +487,8 @@ void main() {
     }
     for (final function in functions) {
       expect(
-        flow.facts.activationsOf(function.target).length,
-        lessThanOrEqualTo(4),
+        flow.facts.activationsOf(function.target),
+        hasLength(1),
         reason: function.target.name,
       );
     }
