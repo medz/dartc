@@ -34,6 +34,9 @@ void main() {
     ('freshAndConstant', source.freshAndConstant()),
     ('sameConstant', source.sameConstant()),
     ('differentConstants', source.differentConstants()),
+    ('freshAndFresh', source.freshAndFresh()),
+    ('factoryFresh', source.factoryFresh()),
+    ('nestedFactory', source.nestedFactory()),
   ]) {
     test(
       'source $name has its determined identity without residual comparison',
@@ -72,6 +75,48 @@ void main() {
       }
       final unknown = body('unknownIdentity');
       expect(optimize(unknown).returnedBy(unknown.target).constant, isNull);
+    },
+  );
+  test('borrowed and published return aliases keep the same identity', () {
+    for (final (name, evaluate) in [
+      ('borrowedIdentity', source.borrowedIdentity),
+      ('publishedIdentity', source.publishedIdentity),
+    ]) {
+      final function = body(name);
+      final facts = optimize(function);
+      final rewritten =
+          facts.program.implementationOf(function.target) as IrFunction;
+      expect(evaluate(), isTrue);
+      expect(IrInterpreter(program, {}).run(function, []), isTrue);
+      expect(IrInterpreter(facts.program, {}).run(rewritten, []), isTrue);
+    }
+  });
+  test(
+    'possible aliases and repeated allocation generations stay conditional',
+    () {
+      for (final name in ['selectedFresh', 'repeatedFresh']) {
+        final function = body(name);
+        final facts = optimize(function);
+        expect(facts.returnedBy(function.target).constant, isNull);
+        final rewritten =
+            facts.program.implementationOf(function.target) as IrFunction;
+        for (final alias in [false, true]) {
+          for (final count in name == 'repeatedFresh' ? [0, 1, 4] : [0]) {
+            final arguments = [if (name == 'repeatedFresh') count, alias];
+            final expected = name == 'repeatedFresh'
+                ? source.repeatedFresh(count, alias)
+                : source.selectedFresh(alias);
+            expect(
+              IrInterpreter(program, {}).run(function, arguments),
+              expected,
+            );
+            expect(
+              IrInterpreter(facts.program, {}).run(rewritten, arguments),
+              expected,
+            );
+          }
+        }
+      }
     },
   );
 }

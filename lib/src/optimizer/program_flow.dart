@@ -2592,18 +2592,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
   /// Sibling call instances stay distinct; this relation only serves cross-body demand.
   bool mayAliasAcrossSummaries(FlowObject left, FlowObject right) {
     _check();
-    bool descendsFrom(FlowObject value, FlowObject ancestor) {
-      while (value != ancestor) {
-        if (value.activation case _AllocationContext(:final original)) {
-          value = original;
-        } else {
-          return false;
-        }
-      }
-      return true;
-    }
-
-    return descendsFrom(left, right) || descendsFrom(right, left);
+    return _mayAliasAcrossSummaries(left, right);
   }
 
   /// Whether a value is queryable in this graph, including graph-independent constants.
@@ -2967,6 +2956,21 @@ FlowObject _original(FlowObject object) {
 
 _Activation _creator(FlowObject object) =>
     _original(object).activation as _Activation;
+
+bool _mayAliasAcrossSummaries(FlowObject left, FlowObject right) {
+  bool descendsFrom(FlowObject value, FlowObject ancestor) {
+    while (value != ancestor) {
+      if (value.activation case _AllocationContext(:final original)) {
+        value = original;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return descendsFrom(left, right) || descendsFrom(right, left);
+}
 
 bool _equivalent(FlowValue left, FlowValue right) =>
     left.sources.any(right.sources.contains) ||
@@ -3469,6 +3473,21 @@ Constant? _fold(
   IrProgram program,
 ) {
   if (operation is Identical) {
+    if (inputs.every(
+          (value) =>
+              value.objects.isNotEmpty &&
+              value.constants.isEmpty &&
+              value.unknownTypes.isEmpty &&
+              value.addresses.isEmpty &&
+              value.objects.every((object) => object.site is Construct),
+        ) &&
+        !inputs.first.objects.any(
+          (left) => inputs.last.objects.any(
+            (right) => _mayAliasAcrossSummaries(left, right),
+          ),
+        )) {
+      return const Constant.boolean(false);
+    }
     if (inputs.first.constant case final ObjectConstant left) {
       if (inputs.last.constant case final ObjectConstant right) {
         return Constant.boolean(left.structuralKey == right.structuralKey);
