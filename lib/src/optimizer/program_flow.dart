@@ -556,6 +556,16 @@ final class ProgramFlow(
     }
     var summaryChanged = false;
 
+    FlowValue constrained(FlowValue value) {
+      for (final source in value.sources) {
+        if (!identical(source.activation, activation)) continue;
+        if (ranges[source.value] case final range?) {
+          value = value.restrictIntegers(range);
+        }
+      }
+      return value;
+    }
+
     FlowValue read(Value value) {
       switch (value) {
         case Constant():
@@ -571,7 +581,9 @@ final class ProgramFlow(
           return FlowValue.unknown(value.type);
         default:
           (readers[value] ??= {}).add(readingBlock);
-          final known = activation.values[value] ?? const FlowValue.bottom();
+          final known = constrained(
+            activation.values[value] ?? const FlowValue.bottom(),
+          );
           return switch (ranges[value]) {
             final range? => known.restrictIntegers(range),
             null => known,
@@ -587,6 +599,19 @@ final class ProgramFlow(
       Map<Value, FlowIntegerRange>? refinements,
     }) {
       final nextRanges = {...ranges, ...?refinements};
+      for (final entry
+          in refinements?.entries ??
+              const <MapEntry<Value, FlowIntegerRange>>[]) {
+        for (final source in read(entry.key).sources) {
+          if (!identical(source.activation, activation)) continue;
+          final previous = nextRanges[source.value];
+          final range = previous == null
+              ? entry.value
+              : previous.intersect(entry.value);
+          if (range == null) return;
+          nextRanges[source.value] = range;
+        }
+      }
       final widen = activation.backEdges.contains(jump);
       for (final operation in [
         ...jump.target.instructions,
@@ -695,9 +720,13 @@ final class ProgramFlow(
           read,
         );
         final type = operation.type.substitute(activation.environment);
-        if (result.value.types.any((actual) => !type.accepts(actual))) {
+        var bounded = result.value;
+        if (bounded.types.any((actual) => !type.accepts(actual))) {
           // Caller bounds also constrain unresolved receiver type arguments.
-          final bounded = result.value.check(type).value;
+          bounded = bounded.check(type).value;
+        }
+        bounded = constrained(bounded);
+        if (bounded != result.value) {
           result = FlowResult(
             value: bounded,
             normal: bounded.isBottom ? null : result.normal,

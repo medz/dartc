@@ -21,6 +21,8 @@ void main() {
     ('checkedShift', source.checkedShift),
     ('joinedBranches', source.joinedBranches),
     ('wrapping', source.wrapping),
+    ('guardedAliases', source.guardedAliases),
+    ('overwrittenAlias', source.overwrittenAlias),
   ]) {
     test('source integer paths preserve $name for runtime input', () {
       final function = body(name);
@@ -57,10 +59,35 @@ void main() {
           )
           .whereType<IntBinary>()
           .where((operation) => operation.operator == .shiftLeft);
-      if (name == 'guardedShift') expect(shifts, isEmpty);
+      if (name == 'guardedShift' || name == 'guardedAliases') {
+        expect(shifts, isEmpty);
+      }
       if (name == 'checkedShift') expect(shifts, isNotEmpty);
     });
   }
+
+  test('checked aliases constrain later reads of the same stored value', () {
+    final function = body('guardedAliases');
+    final facts = ProgramFlow(program, [
+      (target: function.target, arguments: [FlowValue.unknown(.integer)]),
+    ]).facts;
+    final operations = function.blocks
+        .expand(
+          (block) => [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ],
+        )
+        .whereType<IntBinary>();
+    final offset = operations.singleWhere(
+      (operation) => operation.operator == .multiply,
+    );
+    expect(facts.valueOf(offset).integers, FlowIntegerRange(0, 24));
+    final shift = operations.singleWhere(
+      (operation) => operation.operator == .shiftLeft,
+    );
+    expect(facts.exitsOf(shift), (normal: true, exceptional: false));
+  });
 
   test(
     'bounded source loops carry branch ranges through parameterless edges',

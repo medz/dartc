@@ -36,3 +36,26 @@ int wrapping(int value) {
 }
 
 int unsignedShift(int value, int count) => value >>> count;
+
+class IntegerBox(var int value);
+
+int forwardedInteger(int value) => value;
+
+int guardedAliases(int value) {
+  final box = IntegerBox(value);
+  final checked = forwardedInteger(box.value);
+  if (checked < 0) return 3;
+  if (checked >= 4) return 5;
+  return (0 << (box.value * 8)) + 7;
+}
+
+int overwrittenAlias(int value) {
+  final box = IntegerBox(value);
+  if (box.value < 0) return 3;
+  box.value = -value - 1;
+  try {
+    return (0 << box.value) + 7;
+  } on ArgumentError {
+    return 13;
+  }
+}
