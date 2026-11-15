@@ -9,6 +9,79 @@ import 'fixtures/finite_loops.dart' as source;
 
 void main() {
   test(
+    'known loop computation disappears before a large runtime continuation',
+    () {
+      final target = FunctionTarget(
+        Uri.parse('memory:loop-continuation'),
+        'compute',
+        .integer,
+        [.integer],
+      );
+      final entry = Block(target.parameterTypes),
+          header = Block([ValueType.integer, ValueType.integer]),
+          step = Block(),
+          done = Block();
+      entry.finish(
+        Jump(header, const [Constant.integer(0), Constant.integer(0)]),
+      );
+      final index = header.parameters.first, sum = header.parameters.last;
+      header.finish(
+        Branch(
+          header.emit(IntBinary(.lessThan, index, const Constant.integer(4))),
+          Jump(step),
+          Jump(done),
+        ),
+      );
+      final digit = step.emit(
+        IntBinary(
+          .add,
+          step.emit(IntBinary(.multiply, sum, const Constant.integer(10))),
+          index,
+        ),
+      );
+      step.finish(
+        Jump(header, [
+          step.emit(IntBinary(.add, index, const Constant.integer(1))),
+          digit,
+        ]),
+      );
+      Value result = done.emit(IntBinary(.add, entry.parameters.single, sum));
+      for (var value = 1; value <= 80; value++) {
+        result = done.emit(IntBinary(.add, result, Constant.integer(value)));
+      }
+      done.finish(Return(result));
+      final original = IrFunction(target, [entry, header, step, done]);
+      final graph = IrProgram([], [original]);
+      final facts =
+          ProgramOptimizer(const [
+            ProgramSimplification(),
+            ProgramLoopSpecialization(),
+          ]).run(graph, [
+            (target: target, arguments: [FlowValue.unknown(.integer)]),
+          ]);
+      final rewritten = facts.program.implementationOf(target) as IrFunction;
+      for (final input in [
+        FlowIntegerRange.minimum,
+        -5,
+        0,
+        17,
+        FlowIntegerRange.maximum,
+      ]) {
+        expect(
+          IrInterpreter(facts.program, {}).run(rewritten, [input]),
+          input + 123 + 3240,
+        );
+        expect(
+          IrInterpreter(graph, {}).run(original, [input]),
+          input + 123 + 3240,
+        );
+      }
+      expect(rewritten.blocks, hasLength(1));
+      expect(rewritten.entry.instructions, hasLength(81));
+    },
+  );
+
+  test(
     'new graph origins preserve source sites and reject foreign metadata',
     () {
       final uri = Uri.parse('memory:loop-source');
@@ -188,15 +261,30 @@ void main() {
   for (final (name, evaluate) in <(String, int Function(int))>[
     ('continued', source.continued),
     ('outerCatch', source.outerCatch),
+    ('continuationLoop', source.continuationLoop),
   ]) {
     test('source $name retains its runtime edge values after peeling', () {
       final function = body(name), facts = optimize(body(name));
       final rewritten =
           facts.program.implementationOf(function.target) as IrFunction;
-      for (final value in [-1, 0, 1, 3, 5]) {
+      for (final value in [
+        FlowIntegerRange.minimum,
+        -1,
+        0,
+        1,
+        3,
+        5,
+        FlowIntegerRange.maximum,
+      ]) {
         expect(
           IrInterpreter(facts.program, {}).run(rewritten, [value]),
           evaluate(value),
+        );
+      }
+      if (name == 'continuationLoop') {
+        expect(
+          rewritten.blocks.where((block) => block.end is Branch),
+          hasLength(1),
         );
       }
     });

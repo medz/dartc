@@ -59,6 +59,19 @@ int nested() {
   return result;
 }
 
+int continuationLoop(int input) {
+  var digits = 0;
+  for (var index = 0; index < 4; index++) {
+    digits = digits * 10 + index;
+  }
+  var count = input & 3, result = digits;
+  while (count > 0) {
+    result += digits;
+    count--;
+  }
+  return result;
+}
+
 class Box(final int value);
 
 int objects() {

@@ -10,6 +10,7 @@ import 'integer_range.dart';
 /// Each peel retains the original loop as its continuation. Fresh shared facts
 /// then remove known computation before another execution is exposed. The code
 /// growth budget bounds expansion, never the solver or the program's execution.
+/// Exit values become block parameters, keeping code after the loop shared.
 final class const ProgramLoopSpecialization({final int maxCodeGrowth = 64})
     extends ProgramPass {
   @override
@@ -39,7 +40,8 @@ final class const ProgramLoopSpecialization({final int maxCodeGrowth = 64})
             }
           }
           final dominance = ValueDominance(function);
-          ({Block header, Set<Block> region, int cost})? selected;
+          final originalSize = _size(function);
+          ({IrFunction body, int cost})? selected;
           for (final header in function.blocks) {
             if (header == function.entry || header.parameters.isEmpty) continue;
             final region = {
@@ -67,28 +69,21 @@ final class const ProgramLoopSpecialization({final int maxCodeGrowth = 64})
               pending.addAll(incoming[block]!.map((entry) => entry.$1));
             }
             if (!_finiteCounter(header, loop, entries, backs, facts)) continue;
-            final cost = region.fold(
-              0,
-              (sum, block) =>
-                  sum + block.instructions.length + block.parameters.length + 1,
+            final peeled = specializeRegion(
+              function,
+              header,
+              loop,
+              entries.toSet(),
             );
+            final growth = _size(peeled) - originalSize;
+            final cost = growth < 0 ? 0 : growth;
             if (cost > budget) continue;
             if (selected == null || cost < selected.cost) {
-              selected = (header: header, region: region, cost: cost);
+              selected = (body: peeled, cost: cost);
             }
           }
           if (selected != null) {
-            rewritten = specializeRegion(
-              function,
-              selected.header,
-              selected.region,
-              {
-                for (final block in function.blocks)
-                  if (!selected.region.contains(block))
-                    for (final edge in block.successors)
-                      if (edge.target == selected.header) edge,
-              },
-            );
+            rewritten = selected.body;
             remaining[function.target] = budget - selected.cost;
             changed = true;
           }
@@ -106,6 +101,12 @@ final class const ProgramLoopSpecialization({final int maxCodeGrowth = 64})
     };
   }
 }
+
+int _size(IrFunction function) => function.blocks.fold(
+  0,
+  (size, block) =>
+      size + block.parameters.length + block.instructions.length + 1,
+);
 
 enum _Comparison() {
   lessThan,
