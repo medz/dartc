@@ -2900,6 +2900,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     Instruction operation,
     Set<_Activation> visiting, {
     bool ignoreFailure = false,
+    bool stableInitialization = false,
   }) {
     if (activation.unknownCalls.contains(operation)) return false;
     if (activation.externalCalls.contains(operation)) {
@@ -2915,6 +2916,20 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
       }
     }
     final callees = activation.calls[operation] ?? const <_Activation>{};
+    var localAddress = false;
+    if (stableInitialization && operation is ReferenceAddress) {
+      final value = operation.object is Constant
+          ? FlowValue.constant(operation.object as Constant)
+          : activation.values[operation.object];
+      localAddress =
+          value != null &&
+          !value.isBottom &&
+          value.unknownTypes.isEmpty &&
+          value.addresses.isEmpty &&
+          value.objects.every(
+            (object) => !activation.input!.containsObject(object),
+          );
+    }
     // Pure initialization may wait until a later read, even for writable storage.
     final binding =
         operation is LoadGlobal &&
@@ -2924,12 +2939,18 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
           (callee) =>
               callee.body.target ==
                   operation.global.initializer!.implementation &&
-              callee.effects.every((effect) => effect == .allocates),
+              _discardableBody(callee, visiting, stableInitialization: true),
         );
     for (final effect in {
       ...?activation.operationEffects[operation],
       ...?activation.externalEffects[operation],
     }) {
+      if (stableInitialization &&
+          effect == .readsStorage &&
+          !(operation is LoadGlobal && operation.global.isFinal) &&
+          !localAddress) {
+        return false;
+      }
       if (effect != .readsStorage &&
           effect != .allocates &&
           effect != .mayThrow &&
@@ -2938,7 +2959,12 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
       }
     }
     for (final callee in callees) {
-      if (!_discardableBody(callee, visiting, ignoreFailure: ignoreFailure)) {
+      if (!_discardableBody(
+        callee,
+        visiting,
+        ignoreFailure: ignoreFailure,
+        stableInitialization: stableInitialization,
+      )) {
         return false;
       }
     }
@@ -2949,6 +2975,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
           failure,
           visiting,
           ignoreFailure: true,
+          stableInitialization: stableInitialization,
         );
   }
 
@@ -2956,6 +2983,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     _Activation activation,
     Set<_Activation> visiting, {
     bool ignoreFailure = false,
+    bool stableInitialization = false,
   }) {
     if (!visiting.add(activation) ||
         activation.recursive ||
@@ -2982,6 +3010,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
         operation,
         visiting,
         ignoreFailure: ignoreFailure,
+        stableInitialization: stableInitialization,
       )) {
         return false;
       }

@@ -13,6 +13,67 @@ void main() {
       _contracts(isFinal: isFinal);
     });
   }
+  test('unused initialization follows a chain of final lazy bindings', () {
+    final value = FunctionTarget(_uri, 'value', .integer, []);
+    final inner = GlobalVariable(
+      _uri,
+      'inner',
+      .integer,
+      isFinal: true,
+      initializer: value,
+    );
+    final initialize = FunctionTarget(_uri, 'outer', .integer, []);
+    final initializing = Block();
+    initializing.finish(Return(initializing.emit(LoadGlobal(inner))));
+    final outer = _binding(initialize, isFinal: true);
+    final root = FunctionTarget(_uri, 'run', .integer, []);
+    final entry = Block()
+      ..emit(LoadGlobal(outer.global))
+      ..finish(const Return(_one));
+    final program = IrProgram(
+      [],
+      [
+        IrFunction(value, [Block()..finish(const Return(_one))]),
+        IrFunction(initialize, [initializing]),
+        IrFunction(root, [entry]),
+      ],
+      globals: [inner, outer.global],
+    );
+    final optimized = _optimize(program, root);
+    expect(optimized.definitions, {root});
+    for (final graph in [program, optimized.program]) {
+      final runner = IrInterpreter(graph, {});
+      expect(runner.run(graph.implementationOf(root) as IrFunction, []), 1);
+    }
+  });
+
+  test('an unused initializer can bind the address of its own allocation', () {
+    final storage = ClassType(_uri, 'Storage');
+    final initialize = FunctionTarget(_uri, 'initialize', .integer, []);
+    final body = Block();
+    final object = body.emit(NewPayload(storage, const Constant.integer(16)));
+    body.finish(Return(body.emit(ReferenceAddress(object))));
+    final binding = _binding(initialize, isFinal: true);
+    final root = FunctionTarget(_uri, 'run', .integer, []);
+    final entry = Block()
+      ..emit(LoadGlobal(binding.global))
+      ..finish(const Return(_one));
+    final optimized = _optimize(
+      IrProgram(
+        [IrClass(storage, [])],
+        [
+          IrFunction(initialize, [body]),
+          IrFunction(root, [entry]),
+        ],
+        globals: [binding.global],
+      ),
+      root,
+    );
+    expect(optimized.definitions, {root});
+    final function = optimized.program.implementationOf(root) as IrFunction;
+    expect(IrInterpreter(optimized.program, {}).run(function, []), 1);
+  });
+
   test('a later assignment replaces a deferred pure initializer', () {
     final initializer = FunctionTarget(_uri, 'initialize', .integer, []);
     final binding = _binding(initializer, isFinal: false);
