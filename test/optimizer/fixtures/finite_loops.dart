@@ -91,6 +91,65 @@ int runtimeCount(int count) {
   return result;
 }
 
+int unusedIncreasing(int bound) {
+  for (var index = 0; index < bound; index++) {}
+  return bound;
+}
+
+int unusedDecreasing(int bound) {
+  for (var index = 0; index > bound; index--) {}
+  return bound;
+}
+
+int unusedNested(int bound) {
+  for (var row = 0; row < bound; row++) {
+    for (var column = 0; column < bound; column++) {}
+  }
+  return bound;
+}
+
+int nestedRuntime(int bound) {
+  var result = 0;
+  for (var row = 0; row < bound; row++) {
+    for (var column = 0; column < row; column++) {
+      result += row * 10 + column;
+    }
+  }
+  return result;
+}
+
+int unusedBreaking(int bound) {
+  for (var index = 0; index < bound; index++) {
+    if (index == 4) break;
+  }
+  return bound;
+}
+
+int unusedWrapping(int bound) {
+  for (var index = 0; index <= bound; index++) {}
+  return bound;
+}
+
+int stalledInner(int bound) {
+  for (var index = 0; index < bound; index++) {
+    while (bound > 0) {}
+  }
+  return bound;
+}
+
+int runtimeExitValue(int bound) {
+  var index = 0;
+  for (; index < bound; index++) {}
+  return index;
+}
+
+int retainedCheck(int bound, int divisor) {
+  for (var index = 0; index < bound; index++) {
+    index ~/ divisor;
+  }
+  return bound;
+}
+
 int earlyExit(int stop) {
   var result = 0;
   for (var index = 0; index < 4; index++) {

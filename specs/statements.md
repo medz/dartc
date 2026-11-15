@@ -20,6 +20,8 @@
 
 [循环样本](../test/frontend/lowering/fixtures/loops.dart)与[SDK 行为对照](../test/frontend/lowering/lowering_test.dart)。发布版的行为、已知差异和逐项验证记录见[原条目](https://github.com/medz/dartc/blob/4b44afb1de207415f31379118c2f736afce5e276/specs/statements.md)。
 
+无用循环仅在终止性、无可观察副作用和出口值均已证明时消除；运行期上界不妨碍证明，但整数回绕、可能不终止的内部路径、算术异常及被使用的迭代结果必须保留。嵌套循环重新进入时重新判断起始值和上界，不能沿用上一轮的范围。见[循环行为验证](../test/optimizer/loop_specialization_test.dart)。
+
 ## 原生异常与清理
 
 支持同步 `throw`、`on T`/`catch`、`rethrow` 与 `finally`，包括跨函数传播和构造器失败。`on T` 按[原生类型判断范围](types.md#原生类型判断与空安全)读取实际异常类型，依次选择首个匹配子句；不匹配的子句不执行。正常调用结果只在成功后读取；异常保留同一个对象和关联的栈轨迹。`rethrow` 沿用原轨迹，新的 `throw` 捕获当时的调用链。异常与轨迹在处理器分配和回收期间仍然存活。

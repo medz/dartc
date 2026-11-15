@@ -159,6 +159,77 @@ void main() {
         ),
       ]);
 
+  for (final name in [
+    'unusedIncreasing',
+    'unusedDecreasing',
+    'unusedNested',
+    'unusedBreaking',
+  ]) {
+    test('$name removes finite unused work for runtime bounds', () {
+      final function = body(name), facts = optimize(body(name));
+      final result =
+          facts.program.implementationOf(function.target) as IrFunction;
+      expect(result.blocks, hasLength(1));
+      expect(result.entry.instructions, isEmpty);
+      for (final bound in [
+        FlowIntegerRange.minimum,
+        -5,
+        0,
+        5,
+        FlowIntegerRange.maximum,
+      ]) {
+        expect(IrInterpreter(facts.program, {}).run(result, [bound]), bound);
+      }
+    });
+  }
+
+  for (final name in ['unusedWrapping', 'stalledInner']) {
+    test('$name preserves possible nontermination', () {
+      final function = body(name), facts = optimize(body(name));
+      final result =
+          facts.program.implementationOf(function.target) as IrFunction;
+      expect(result.blocks.length, greaterThan(1));
+      expect(IrInterpreter(facts.program, {}).run(result, [-1]), -1);
+    });
+  }
+
+  test('loop elimination preserves exit values and arithmetic failures', () {
+    final function = body('runtimeExitValue'),
+        facts = optimize(body('runtimeExitValue'));
+    final result =
+        facts.program.implementationOf(function.target) as IrFunction;
+    for (final bound in [-5, 0, 1, 8]) {
+      expect(
+        IrInterpreter(facts.program, {}).run(result, [bound]),
+        source.runtimeExitValue(bound),
+      );
+    }
+    final checked = body('retainedCheck'),
+        checkedFacts = optimize(body('retainedCheck'));
+    final checkedResult =
+        checkedFacts.program.implementationOf(checked.target) as IrFunction;
+    final interpreter = IrInterpreter(checkedFacts.program, {});
+    expect(interpreter.run(checkedResult, [0, 0]), 0);
+    expect(interpreter.run(checkedResult, [3, 2]), 3);
+    expect(
+      () => interpreter.run(checkedResult, [3, 0]),
+      throwsA(isA<UnsupportedError>()),
+    );
+  });
+
+  test('nested loop re-entry invalidates previous bounds', () {
+    final function = body('nestedRuntime'),
+        facts = optimize(body('nestedRuntime'));
+    final result =
+        facts.program.implementationOf(function.target) as IrFunction;
+    for (final bound in [-2, 0, 1, 4, 9]) {
+      expect(
+        IrInterpreter(facts.program, {}).run(result, [bound]),
+        source.nestedRuntime(bound),
+      );
+    }
+  });
+
   for (final (name, evaluate) in <(String, int Function())>[
     ('digits', source.digits),
     ('countdown', source.countdown),

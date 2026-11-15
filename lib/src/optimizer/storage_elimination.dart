@@ -45,6 +45,8 @@ storageDiscardable(ProgramFlowFacts facts) {
   final globals = <GlobalVariable>{};
   var cells = const FlowValue.bottom();
   var payloads = const FlowValue.bottom();
+  var addressable = const FlowValue.bottom();
+  var unknownReads = false;
   var visible = const FlowValue.bottom();
   var lifetimes = const FlowValue.bottom();
   var observations = const FlowValue.bottom();
@@ -83,11 +85,9 @@ storageDiscardable(ProgramFlowFacts facts) {
   }
 
   void readNative(FlowValue address, NativeTypeRef storage, FlowState state) {
-    payloads = payloads.join(
-      state.containsNative(address, storage)
-          ? address.references
-          : FlowValue.unknown(.object),
-    );
+    address = state.resolveValue(address);
+    payloads = payloads.join(address.references);
+    unknownReads |= !state.containsNative(address, storage);
   }
 
   for (final target in facts.escapingReturns) {
@@ -120,17 +120,29 @@ storageDiscardable(ProgramFlowFacts facts) {
               facts.valueOf(operation),
               (value, input) => value.join(facts.valueOf(input)),
             ),
-          LoadNative(:final address) ||
-          StoreNative(:final address) => facts.valueOf(address).references,
+          LoadNative(:final address) || StoreNative(:final address) =>
+            point.before.resolveValue(facts.valueOf(address)).references,
           CopyNative() => operation.inputs.fold<FlowValue>(
             const .bottom(),
-            (value, input) => value.join(facts.valueOf(input).references),
+            (value, input) => value.join(
+              point.before.resolveValue(facts.valueOf(input)).references,
+            ),
           ),
           LoadObjectData(:final object) ||
           StoreObjectData(:final object) => facts.valueOf(object),
           _ => const .bottom(),
         });
         switch (operation) {
+          case ReferenceAddress(:final object):
+            addressable = addressable.join(facts.valueOf(object));
+          case NativeAddress(:final view):
+            addressable = addressable.join(facts.valueOf(view));
+          case ReferenceFromAddress() || AllocatedObject():
+            addressable = addressable.join(facts.valueOf(operation));
+          case NativeView(address: final address?, copy: false):
+            addressable = addressable
+                .join(facts.valueOf(operation))
+                .join(facts.valueOf(address).references);
           case LoadGlobal(:final global):
             globals.add(global);
           case StoreGlobal(:final global)
@@ -226,6 +238,8 @@ storageDiscardable(ProgramFlowFacts facts) {
     }
   }
 
+  // Foreign addresses can alias exposed storage, not private Dart objects.
+  if (unknownReads) payloads = payloads.join(addressable);
   for (final states in points.values) {
     for (final state in states) {
       visible = visible.join(state.exposedFrom([visible]));
@@ -240,7 +254,8 @@ storageDiscardable(ProgramFlowFacts facts) {
     }
     if (observations == before) break;
   }
-  lifetimes = lifetimes.join(observations);
+  observations = _mortal(observations);
+  lifetimes = _mortal(lifetimes.join(observations));
   final unusedMarkers = <KeepAlive>{};
   for (final MapEntry(key: marker, value: references) in markers.entries) {
     final mortal = _mortal(references);
@@ -260,6 +275,8 @@ storageDiscardable(ProgramFlowFacts facts) {
     FlowValue? source,
   }) {
     final state = points[operation]!.first;
+    address = state.resolveValue(address);
+    if (source != null) source = state.resolveValue(source);
     if (!state.containsNative(address, storage) ||
         address.addresses.any((pointer) => pointer.base is! FlowObject) ||
         source != null && !state.containsNative(source, storage)) {

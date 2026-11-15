@@ -31,6 +31,8 @@
 
 `CodeGenerator` 支持已检查 IR 中的不可变 `ObjectConstant`、`Construct`、直接 `LoadField`/`StoreField`、`TypeView`，以及对象引用的直接调用、参数、返回、分支和循环传递。字段可以存储 int、bool、double、null 或对象引用；继承字段及不同声明库的同名私有字段分别保留。构造器先分配实例，再执行初始化；嵌套分配保留接收者、参数和可达对象。普通 getter 和方法仍保留虚派发语义，不能用直接读取字段代替。
 
+外部内存读取不会使未暴露地址的私有 Dart 对象变得可观察；已暴露、恢复或借用的地址仍须保留别名访问。标量结果不建立弱引用或 finalizer 身份。对象及存储消除保留外部写入、实际引用寿命和构造副作用，见[原生存储需求验证](../test/optimizer/raw_storage_elimination_test.dart)与[源码构造对照](../test/compiler/managed_objects_test.dart)。
+
 单个生成模块中的同类型、同字段值常量共用存储；负零与正零、不同 NaN 位模式及不同具体类型保持各自身份。double 身份保留二进制表示，见 [identical 契约](https://api.dart.dev/dart-core/identical.html)与[常量身份验证](../test/ir/constants_test.dart)。
 
 `super.hashCode` 选择 Object 默认实现时，原生对象返回稳定的身份哈希，不调用自身的重写 getter。常量重复引用、移动回收及同模块跨入口保留的对象保持该值，见[原生行为验证](../test/compiler/object_members_test.dart)与[身份哈希契约](https://api.dart.dev/dart-core/identityHashCode.html)。虚 `hashCode` 派发保留用户重写；函数值和内建 Type 使用与相等关系一致的哈希，见[函数值](functions.md)与[类型](types.md)。

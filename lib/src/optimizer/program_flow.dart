@@ -917,6 +917,10 @@ final class ProgramFlow(
       FlowValue? stackTrace,
       Map<Value, FlowIntegerRange>? refinements,
     }) {
+      // Re-entry can change a nested loop's starting values and invariant bound.
+      loopProofs.removeWhere(
+        (loop, _) => loop.header == jump.target && !loop.backs.contains(jump),
+      );
       point = state;
       final nextRanges = {...ranges, ...?refinements};
       for (final entry
@@ -2791,7 +2795,7 @@ final class ProgramFlow(
 
   Set<Block> _loopBlocks(IrCallable body) => body is! IrFunction
       ? const {}
-      : _cyclic.putIfAbsent(body.target, () => _cyclicBlocks(body.blocks));
+      : _cyclic.putIfAbsent(body.target, () => cyclicBlocks(body.blocks));
 }
 
 /// Immutable queries over the converged activations of one graph.
@@ -3193,7 +3197,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     }
     final body = activation.body as IrFunction;
     if (body.bodyKind != .synchronous ||
-        _cyclicBlocks(body.blocks, edges: activation.edges).isNotEmpty ||
+        cyclicBlocks(body.blocks, edges: activation.edges).isNotEmpty ||
         activation.unknownCalls.isNotEmpty) {
       return false;
     }
@@ -3495,51 +3499,6 @@ Object? _typeKey(Iterable<ValueType> types) =>
 
 bool _sameValues(List<FlowValue> a, List<FlowValue> b) =>
     a.length == b.length && a.indexed.every((e) => e.$2 == b[e.$1]);
-
-Set<Block> _cyclicBlocks(Iterable<Block> blocks, {Set<Jump>? edges}) {
-  final indices = <Block, int>{};
-  final low = <Block, int>{};
-  final active = <Block>{};
-  final stack = <Block>[];
-  final cyclic = <Block>{};
-  var index = 0;
-  void visit(Block block) {
-    indices[block] = low[block] = index++;
-    stack.add(block);
-    active.add(block);
-    for (final edge in block.successors) {
-      if (edges != null && !edges.contains(edge)) continue;
-      final next = edge.target;
-      if (!indices.containsKey(next)) {
-        visit(next);
-        if (low[next]! < low[block]!) low[block] = low[next]!;
-      } else if (active.contains(next) && indices[next]! < low[block]!) {
-        low[block] = indices[next]!;
-      }
-    }
-    if (indices[block] != low[block]) return;
-    final component = <Block>[];
-    Block item;
-    do {
-      item = stack.removeLast();
-      active.remove(item);
-      component.add(item);
-    } while (!identical(item, block));
-    if (component.length > 1 ||
-        block.successors.any(
-          (edge) =>
-              identical(edge.target, block) &&
-              (edges == null || edges.contains(edge)),
-        )) {
-      cyclic.addAll(component);
-    }
-  }
-
-  for (final block in blocks) {
-    if (!indices.containsKey(block)) visit(block);
-  }
-  return cyclic;
-}
 
 Set<Jump> _backEdges(Block entry) {
   final visited = <Block>{}, active = <Block>{};

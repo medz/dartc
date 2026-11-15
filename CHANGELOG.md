@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Remove private object storage that foreign memory reads cannot observe, preserving address aliases, external writes and weak-reference lifetimes. Eliminate unused finite loops with runtime bounds while retaining overflow, nontermination, exit values and effects; nested-loop reentry refreshes its range proofs.
+
 - Remove unobserved exception traces across calls and expose constructor bodies to object elimination, preserving initialization effects and failure state. Caught exceptions alone no longer retain the heap and event-loop runtime. Native `Void` exports discard Dart return values while ordinary Dart calls retain them.
 
 - Preserve branch-proven types across control-flow joins. Read-only native-memory calls retain observed payloads without depending on unrelated global writes.

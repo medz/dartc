@@ -3,6 +3,7 @@ import 'package:dartc/ir.dart';
 import 'flow_value.dart';
 import 'trace_demand.dart';
 import 'function_rewrite.dart';
+import 'loop_ranges.dart';
 import 'program_flow.dart';
 import 'program_pass.dart';
 
@@ -289,6 +290,19 @@ IrFunction simplifyFunction(
         if (exits.every((exit) => !exit.exceptional)) nonThrowing.add(value);
       }
     }
+  }
+  late final liveness = ValueLiveness.source(function);
+  for (final loop in LoopRanges(function).loops) {
+    final proof = loop.prove(
+      (value) => valueOf(value, selected).integers,
+      (operation) => selected.every(
+        (activation) => facts
+            .effectsOf(operation, activation: activation)
+            .every((effect) => effect == .mayThrow),
+      ),
+    );
+    final exit = proof?.discardedExit(liveness, removable.contains);
+    if (exit != null) terminators[loop.header] = exit;
   }
   return FunctionRewrite(
     function,

@@ -51,6 +51,84 @@ ProgramFlowFacts _analyze(
 ], memoryLayout: _layout(program)).facts;
 
 void main() {
+  for (final origin in ['private', 'exposed', 'allocated']) {
+    test('foreign reads retain only addressable object fields ($origin)', () {
+      final field = InstanceField(_type, 'value', .integer);
+      final declaration = IrClass(_type, [field]);
+      final size = _layout(IrProgram([declaration], []))
+          .objectLayout(_type)
+          .size;
+      final root = FunctionTarget(_uri, 'foreignRead', .integer, [
+        .integer,
+        .integer,
+      ]);
+      final block = Block(root.parameterTypes);
+      final object = block.emit(
+        origin == 'allocated'
+            ? AllocatedObject(block.parameters.first, _type, _zero)
+            : NewPayload(_type, _zero),
+      );
+      block.emit(StoreField(field, object, _answer));
+      if (origin == 'exposed') block.emit(ReferenceAddress(object));
+      block.emit(
+        CopyNative(
+          block.parameters.last,
+          block.parameters.first,
+          NativeArrayType(_u8, size),
+        ),
+      );
+      block.finish(const Return(_answer));
+      final program = IrProgram(
+        [declaration],
+        [
+          IrFunction(root, [block]),
+        ],
+      );
+      final after = const ProgramStorageElimination().run(
+        _analyze(program, root),
+      );
+      expect(
+        _operations(after, root).whereType<StoreField>(),
+        origin == 'private' ? isEmpty : hasLength(1),
+      );
+      expect(_operations(after, root).whereType<CopyNative>(), hasLength(1));
+    });
+  }
+
+  test('scalar outputs do not observe private object lifetimes', () {
+    final field = InstanceField(_type, 'previous', _type.nullable);
+    final source = InstanceField(_type, 'source', _type.nullable);
+    final root = FunctionTarget(_uri, 'privateLink', .integer, [.integer]);
+    final block = Block(root.parameterTypes);
+    final object = block.emit(NewPayload(_type, _zero));
+    final previous = block.emit(NewPayload(_type, _zero));
+    block.emit(StoreField(source, object, previous));
+    block.emit(StoreNative(block.parameters.single, _i64, _answer));
+    final unknown = block.emit(LoadField(source, object));
+    block.emit(StoreField(field, object, unknown));
+    block.finish(Return(block.parameters.single));
+    final program = IrProgram(
+      [
+        IrClass(_type, [field, source]),
+      ],
+      [
+        IrFunction(root, [block]),
+      ],
+    );
+    final facts =
+        ProgramOptimizer(const [
+          ProgramSimplification(),
+          ProgramStorageElimination(),
+        ]).run(program, [
+          (target: root, arguments: [FlowValue.unknown(.integer)]),
+        ], memoryLayoutFor: _layout);
+    expect(_operations(facts.program, root).whereType<NewPayload>(), isEmpty);
+    expect(
+      _operations(facts.program, root).whereType<StoreNative>(),
+      hasLength(1),
+    );
+  });
+
   for (final kind in ['native', 'object', 'copy']) {
     test(
       'private $kind writes disappear while their operand effects remain',

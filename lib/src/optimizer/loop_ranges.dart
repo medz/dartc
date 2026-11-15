@@ -194,7 +194,12 @@ final class LoopRange(
       if (taken == blocks.contains(end.ifFalse.target)) continue;
       if (!taken) operator = _negate(operator);
       if (!fixed(limitValue)) continue;
-      final limit = read(limitValue)?.constant;
+      final limits = read(limitValue);
+      final limit = switch (operator) {
+        .lessThan || .lessOrEqual => limits?.upper,
+        .greaterThan || .greaterOrEqual => limits?.lower,
+        .equal || .notEqual => limits?.constant,
+      };
       if (limit == null) continue;
       final continuation = taken ? end.ifTrue : end.ifFalse;
       final beforeGuard = <Block>{};
@@ -315,6 +320,48 @@ final class LoopRangeProof(
   final Set<Block> iteration,
   final Map<BlockParameter, Map<Value, FlowIntegerRange?>> offsets,
 ) {
+  /// Bypasses finite computation only when every exit has the same live values.
+  Jump? discardedExit(
+    ValueLiveness liveness,
+    bool Function(Instruction) canDiscard,
+  ) {
+    final blocks = loop.blocks;
+    Jump? exit;
+    final edges = <Jump>{};
+    for (final block in blocks) {
+      if (block.end is! Jump && block.end is! Branch ||
+          !block.instructions.every(canDiscard)) {
+        return null;
+      }
+      for (final edge in block.successors) {
+        if (blocks.contains(edge.target)) {
+          if (!loop.backs.contains(edge)) edges.add(edge);
+        } else {
+          if (exit != null &&
+              (exit.target != edge.target ||
+                  exit.arguments.indexed.any(
+                    (entry) => entry.$2 != edge.arguments[entry.$1],
+                  ))) {
+            return null;
+          }
+          exit = edge;
+        }
+      }
+    }
+    if (exit == null ||
+        exit.arguments.any(
+          (value) =>
+              value is TestedValue || blocks.contains(loop.graph.owners[value]),
+        ) ||
+        liveness.liveIn[exit.target]!.any(
+          (value) => blocks.contains(loop.graph.owners[value]),
+        ) ||
+        cyclicBlocks(blocks, edges: edges).isNotEmpty) {
+      return null;
+    }
+    return exit;
+  }
+
   FlowIntegerRange? range(Value value, Block block) {
     for (final parameter in all.keys) {
       final delta = value == parameter
@@ -368,3 +415,49 @@ _Comparison _negate(_Comparison operator) => switch (operator) {
   .equal => .notEqual,
   .notEqual => .equal,
 };
+
+/// Blocks in cycles of the selected control-flow graph.
+Set<Block> cyclicBlocks(Iterable<Block> blocks, {Set<Jump>? edges}) {
+  final indices = <Block, int>{};
+  final low = <Block, int>{};
+  final active = <Block>{};
+  final stack = <Block>[];
+  final cyclic = <Block>{};
+  var index = 0;
+  void visit(Block block) {
+    indices[block] = low[block] = index++;
+    stack.add(block);
+    active.add(block);
+    for (final edge in block.successors) {
+      if (edges != null && !edges.contains(edge)) continue;
+      final next = edge.target;
+      if (!indices.containsKey(next)) {
+        visit(next);
+        if (low[next]! < low[block]!) low[block] = low[next]!;
+      } else if (active.contains(next) && indices[next]! < low[block]!) {
+        low[block] = indices[next]!;
+      }
+    }
+    if (indices[block] != low[block]) return;
+    final component = <Block>[];
+    Block item;
+    do {
+      item = stack.removeLast();
+      active.remove(item);
+      component.add(item);
+    } while (!identical(item, block));
+    if (component.length > 1 ||
+        block.successors.any(
+          (edge) =>
+              identical(edge.target, block) &&
+              (edges == null || edges.contains(edge)),
+        )) {
+      cyclic.addAll(component);
+    }
+  }
+
+  for (final block in blocks) {
+    if (!indices.containsKey(block)) visit(block);
+  }
+  return cyclic;
+}
