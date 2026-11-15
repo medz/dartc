@@ -8,6 +8,149 @@ final _uri = Uri.parse('memory:rewrite');
 final _tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
 
 void main() {
+  test(
+    'replacement terminators preserve operand effects, handlers and origins',
+    () {
+      final target = FunctionTarget(_uri, 'recorded', .stackTrace, [
+        .integer,
+        .stackTrace,
+      ]);
+      final guard = FunctionTarget(_uri, 'guard', .voidType, [
+        .object,
+        .stackTrace,
+      ]);
+      final entry = Block(target.parameterTypes),
+          caught = Block([.object, .stackTrace]);
+      final operand = entry.emit(DirectCall(_tick, [entry.parameters.first]));
+      final trace = entry.parameters.last;
+      final handler = Jump(caught, [
+        UnwindValue.exception,
+        UnwindValue.stackTrace,
+      ]);
+      entry.finish(Throw(operand, stackTrace: trace, onThrow: handler));
+      caught.finish(Return(caught.parameters.last));
+      final location = SourceLocation((uri: _uri, line: 7, column: 3));
+      final original = IrFunction(
+        target,
+        [entry, caught],
+        sourceLocations: {entry: location},
+      );
+      final done = Block()
+        ..finish(Throw.recorded(operand, trace, onThrow: handler));
+      final call = DirectCall(guard, [operand, trace]);
+      final rewritten = FunctionRewrite(
+        original,
+        terminators: {
+          entry: Invoke(call, onReturn: Jump(done), onThrow: handler),
+        },
+      ).run();
+      final supplied = StackTrace.fromString('supplied');
+      final failed = StackTrace.fromString('guard failed');
+      final effects = <Object>[];
+      final runner = IrInterpreter(
+        IrProgram([], [rewritten]),
+        {
+          (_uri, 'tick'): (int value) {
+            effects.add(value);
+            return value + 1;
+          },
+        },
+        externalCalls: {
+          guard: (arguments) {
+            final value = arguments.first as int;
+            effects.add(('guard', value));
+            if (value < 0) Error.throwWithStackTrace('failed', failed);
+            return null;
+          },
+        },
+      );
+      for (final value in [-7, 0, 23]) {
+        expect(
+          runner.run(rewritten, [value, supplied]),
+          same(value < -1 ? failed : supplied),
+        );
+        expect(effects, [value, ('guard', value + 1)]);
+        effects.clear();
+      }
+      final normalized = rewritten.blocks.singleWhere(
+        (block) => block.end is Throw,
+      );
+      expect((normalized.end as Throw).isRecorded, isTrue);
+      expect(rewritten.sourceLocations[normalized], location);
+      final invocation = rewritten.blocks
+          .map((block) => block.end)
+          .whereType<Invoke>()
+          .single;
+      expect(rewritten.sourceLocations[invocation.operation], location);
+      final text = StringBuffer();
+      rewritten.writeTo(text);
+      expect(text.toString(), contains('throw.recorded'));
+      expect(
+        () => FunctionRewrite(
+          original,
+          terminators: {Block(): const Return()},
+        ).run(),
+        throwsArgumentError,
+      );
+      expect(
+        () => FunctionRewrite(
+          original,
+          terminators: {
+            entry: Return(Block([.stackTrace]).parameters.single),
+          },
+        ).run(),
+        throwsStateError,
+      );
+      expect(
+        () => Throw.recorded(operand, const Constant.nullValue()),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test('inlining retains recorded throws and the caller handler', () {
+    final helper = FunctionTarget(_uri, 'raise', .never, [
+      .object,
+      .stackTrace,
+    ]);
+    final body = Block(helper.parameterTypes);
+    body.finish(Throw.recorded(body.parameters.first, body.parameters.last));
+    final callee = IrFunction(helper, [body]);
+    final target = FunctionTarget(
+      _uri,
+      'catchRecorded',
+      .object,
+      helper.parameterTypes,
+    );
+    final entry = Block(target.parameterTypes), caught = Block([.object]);
+    final call = DirectCall(helper, entry.parameters);
+    final handler = Jump(caught, [UnwindValue.exception]);
+    entry.finish(Invoke(call, onReturn: null, onThrow: handler));
+    caught.finish(Return(caught.parameters.single));
+    final source = IrFunction(target, [entry, caught]);
+    final rewritten = FunctionRewrite(
+      source,
+      inlined: {
+        call: (
+          body: callee,
+          arguments: entry.parameters,
+          environment: <TypeParameterType, ValueType>{},
+          handler: handler,
+        ),
+      },
+    ).run();
+    final throwing = rewritten.blocks
+        .map((block) => block.end)
+        .whereType<Throw>()
+        .single;
+    expect(throwing.isRecorded, isTrue);
+    expect(throwing.onThrow, isNotNull);
+    final runner = IrInterpreter(IrProgram([], [rewritten]), {});
+    for (final error in [7, 'error', Object()]) {
+      expect(runner.run(rewritten, [error, StackTrace.empty]), same(error));
+    }
+  });
+
   test('constant incoming branches preserve parallel parameter swaps', () {
     final target = FunctionTarget(_uri, 'swapped', .integer, [
       .integer,

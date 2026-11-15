@@ -250,6 +250,13 @@ void writeFunction(
         :final onThrow,
       ) =>
         '  yield* ${value(stream)} resume ${edge(onResume)} cancel ${edge(onCancel)}${unwind(onThrow)}',
+      Throw(
+        isRecorded: true,
+        :final exception,
+        stackTrace: final trace!,
+        :final onThrow,
+      ) =>
+        '  throw.recorded ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
       Throw(:final exception, stackTrace: final trace?, :final onThrow) =>
         '  rethrow ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
       Throw(:final exception, :final onThrow) =>

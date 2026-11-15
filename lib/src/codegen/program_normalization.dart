@@ -75,10 +75,13 @@ final class ProgramNormalization(
     if (normalized.functions.every((body) => body.bodyKind == .synchronous)) {
       return normalized;
     }
-    return SuspensionNormalization(
-      normalized,
-      runtime ??
-          (throw StateError('Suspension normalization requires runtime.')),
+    return ProgramNormalization(
+      SuspensionNormalization(
+        normalized,
+        runtime ??
+            (throw StateError('Suspension normalization requires runtime.')),
+      ).run(),
+      runtime: runtime,
     ).run();
   }
 
@@ -89,7 +92,12 @@ final class ProgramNormalization(
 
   IrFunction _function(IrFunction source) {
     final operations = <Instruction, Instruction>{};
+    final terminators = <Block, Terminator>{};
     for (final block in source.blocks) {
+      if (block.end case final Throw throwing
+          when runtime != null && !throwing.isRecorded) {
+        terminators[block] = _recordThrow(throwing);
+      }
       for (final operation in [
         ...block.instructions,
         if (block.end case Invoke(:final operation)) operation,
@@ -164,13 +172,44 @@ final class ProgramNormalization(
         if (replacement != null) operations[operation] = replacement;
       }
     }
-    return operations.isEmpty && source.sequenceConstants.isEmpty
+    return operations.isEmpty &&
+            terminators.isEmpty &&
+            source.sequenceConstants.isEmpty
         ? source
         : FunctionRewrite(
             source,
             operations: operations,
+            terminators: terminators,
             constants: _constant,
           ).run();
+  }
+
+  Terminator _recordThrow(Throw source) {
+    final first = Block();
+    var current = first;
+    Value call(DirectCall operation) {
+      final handler = source.onThrow;
+      if (handler == null) return current.emit(operation);
+      final returns = operation.type != ValueType.voidType;
+      final next = Block(returns ? [operation.type] : const []);
+      current.finish(
+        Invoke(
+          operation,
+          onReturn: Jump(next, returns ? [operation] : const []),
+          onThrow: handler,
+        ),
+      );
+      current = next;
+      return returns ? next.parameters.single : operation;
+    }
+
+    final trace =
+        source.stackTrace ?? call(DirectCall(runtime!.captureTrace, []));
+    call(DirectCall(runtime!.recordError, [source.exception, trace]));
+    current.finish(
+      Throw.recorded(source.exception, trace, onThrow: source.onThrow),
+    );
+    return Jump(first);
   }
 
   Constant _constant(Constant value) {

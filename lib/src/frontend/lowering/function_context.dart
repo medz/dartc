@@ -494,9 +494,9 @@ final class FunctionContext(
       cleanup.emit(KeepAlive(value));
     }
     cleanup.finish(
-      Throw(
+      Throw.recorded(
         cleanup.parameters[0],
-        stackTrace: cleanup.parameters[1],
+        cleanup.parameters[1],
         onThrow: _unwind,
       ),
     );
@@ -540,14 +540,13 @@ final class FunctionContext(
     return next?.parameters.single;
   }
 
-  /// Throws to the active handler or caller, preserving [stackTrace] for a rethrow.
+  /// Throws to the active handler or caller; [stackTrace] resumes a recorded throw.
   void raise(Value exception, [Value? stackTrace]) {
+    final handler = _retainingUnwind(_finalizables());
     finish(
-      Throw(
-        exception,
-        stackTrace: stackTrace,
-        onThrow: _retainingUnwind(_finalizables()),
-      ),
+      stackTrace == null
+          ? Throw(exception, onThrow: handler)
+          : Throw.recorded(exception, stackTrace, onThrow: handler),
     );
     current = null;
   }

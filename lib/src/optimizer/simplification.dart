@@ -37,15 +37,16 @@ final class const ProgramSimplification() extends ProgramPass {
         if (block.end case final Throw throwing when throwing.onThrow != null) {
           final exception = facts.valueOf(throwing.exception);
           // Unknown class bounds can admit Error subclasses through interfaces.
-          if (!exception.isBottom &&
-              exception.unknownTypes.every(
-                (bound) => [
-                  ValueType.number,
-                  ValueType.boolean,
-                  ValueType.string,
-                ].any((scalar) => scalar.accepts(bound)),
-              ) &&
-              !exception.types.any(ValueType.error.accepts)) {
+          if (throwing.isRecorded ||
+              !exception.isBottom &&
+                  exception.unknownTypes.every(
+                    (bound) => [
+                      ValueType.number,
+                      ValueType.boolean,
+                      ValueType.string,
+                    ].any((scalar) => scalar.accepts(bound)),
+                  ) &&
+                  !exception.types.any(ValueType.error.accepts)) {
             directThrows.add(throwing);
           }
         }

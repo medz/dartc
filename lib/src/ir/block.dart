@@ -107,16 +107,27 @@ final class Unreachable(
 }
 
 /// Throws [exception] to [onThrow], or unwinds to the caller.
-final class Throw(
+final class Throw._(
   /// The exception object from the Dart `throw` expression.
-  final Value exception, {
+  final Value exception,
 
-  /// The original trace for a rethrow, or `null` to start a new throw.
+  /// The explicit trace to propagate, or `null` to capture at a new throw.
   final Value? stackTrace,
 
   /// The exceptional edge to the innermost local handler, if any.
   final Jump? onThrow,
-}) extends Terminator {
+
+  /// Whether the exception's first-trace recording has already occurred.
+  final bool isRecorded,
+) extends Terminator {
+  /// Throws with Dart's implicit first-trace recording.
+  new(Value exception, {Value? stackTrace, Jump? onThrow})
+    : this._(exception, stackTrace, onThrow, false);
+
+  /// Unwinds an already-recorded exception with an explicit trace.
+  new recorded(Value exception, Value stackTrace, {Jump? onThrow})
+    : this._(exception, stackTrace, onThrow, true);
+
   this {
     if (!ValueType.object.accepts(exception.type)) {
       throw ArgumentError('Expected a non-null exception object.');

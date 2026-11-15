@@ -15,6 +15,10 @@ final class FunctionRewrite(
   /// Fresh inputs are evaluated at each replacement's original program point.
   final Map<Instruction, Instruction> operations = const {},
 
+  /// Replaces an owned block's final transfer, admitting new successor blocks.
+  /// New operations use source SSA values and inherit the replaced source origin.
+  final Map<Block, Terminator> terminators = const {},
+
   /// New block parameters, with a value supplied by each retained incoming edge.
   final Map<BlockParameter, ({Block block, Map<Jump, Value> incoming})> phis =
       const {},
@@ -39,6 +43,37 @@ final class FunctionRewrite(
       inlined =
       const {},
 }) {
+  final _origins = <Object, Block>{};
+  late final _blocks = _sourceBlocks();
+
+  Terminator _end(Block block) => terminators[block] ?? block.end;
+
+  List<Block> _sourceBlocks() {
+    final owned = function.blocks.toSet();
+    if (terminators.keys.any((block) => !owned.contains(block))) {
+      throw ArgumentError('A replacement terminator requires an owned block.');
+    }
+    final blocks = [...function.blocks];
+    for (final MapEntry(key: origin, value: end) in terminators.entries) {
+      if (end case Invoke(:final operation)) _origins[operation] = origin;
+      final pending = end.successors.map((edge) => edge.target).toList();
+      while (pending.isNotEmpty) {
+        final block = pending.removeLast();
+        if (!owned.add(block)) continue;
+        blocks.add(block);
+        _origins[block] = origin;
+        for (final operation in block.instructions) {
+          _origins[operation] = origin;
+        }
+        if (block.end case Invoke(:final operation)) {
+          _origins[operation] = origin;
+        }
+        pending.addAll(block.successors.map((edge) => edge.target));
+      }
+    }
+    return blocks;
+  }
+
   /// Applies the replacements, removes dead paths and preserves source origins.
   IrFunction run() {
     final (blocks: liveBlocks, :needed, :parameterSlots, :templates) =
@@ -52,9 +87,11 @@ final class FunctionRewrite(
         ],
     };
     var changed =
-        inlined.isNotEmpty || added.values.any((values) => values.isNotEmpty);
+        inlined.isNotEmpty ||
+        terminators.isNotEmpty ||
+        added.values.any((values) => values.isNotEmpty);
     final blocks = <Block, Block>{
-      for (final block in function.blocks)
+      for (final block in _blocks)
         if (liveBlocks.contains(block))
           block: Block([
             for (final i in parameterSlots[block]!) block.parameters[i].type,
@@ -90,7 +127,11 @@ final class FunctionRewrite(
       IrFunction owner, [
       Object? callSite,
     ]) {
-      final location = owner.sourceLocations[source];
+      final location =
+          owner.sourceLocations[source] ??
+          (identical(owner, function)
+              ? owner.sourceLocations[_origins[source]]
+              : null);
       if (identical(owner, function)) {
         if (location != null) locations[copy] = location;
       } else {
@@ -247,12 +288,18 @@ final class FunctionRewrite(
               onReturn: onReturn == null ? null : edge(onReturn),
               onThrow: edge(onThrow),
             );
-          case Throw(:final exception, :final stackTrace, :final onThrow):
-            ends[cursor] = Throw(
-              read(exception),
-              stackTrace: stackTrace == null ? null : read(stackTrace),
-              onThrow: onThrow == null ? handler : edge(onThrow),
-            );
+          case Throw(
+            :final exception,
+            :final stackTrace,
+            :final onThrow,
+            :final isRecorded,
+          ):
+            final error = read(exception);
+            final trace = stackTrace == null ? null : read(stackTrace);
+            final caught = onThrow == null ? handler : edge(onThrow);
+            ends[cursor] = isRecorded
+                ? Throw.recorded(error, trace!, onThrow: caught)
+                : Throw(error, stackTrace: trace, onThrow: caught);
           case ExhaustivenessFailure(:final onThrow):
             ends[cursor] = ExhaustivenessFailure(
               onThrow == null ? handler : edge(onThrow),
@@ -444,13 +491,13 @@ final class FunctionRewrite(
             },
         ]);
       }
-      return Throw(
-        value(original.exception),
-        stackTrace: original.stackTrace == null
-            ? null
-            : value(original.stackTrace!),
-        onThrow: handler,
-      );
+      final exception = value(original.exception);
+      final trace = original.stackTrace == null
+          ? null
+          : value(original.stackTrace!);
+      return original.isRecorded
+          ? Throw.recorded(exception, trace!, onThrow: handler)
+          : Throw(exception, stackTrace: trace, onThrow: handler);
     }
 
     Terminator end(Terminator original) => switch (original) {
@@ -492,11 +539,11 @@ final class FunctionRewrite(
     };
 
     changed |=
-        liveBlocks.length != function.blocks.length ||
+        liveBlocks.length != _blocks.length ||
         parameterSlots.entries.any(
           (entry) => entry.value.length != entry.key.parameters.length,
         );
-    for (final original in function.blocks) {
+    for (final original in _blocks) {
       if (!liveBlocks.contains(original)) continue;
       current = blocks[original]!;
       instructions[current] = [];
@@ -532,13 +579,13 @@ final class FunctionRewrite(
       }
       if (last != null) {
         changed |=
-            original.end is! Unreachable ||
-            (original.end as Unreachable).cause != last;
+            _end(original) is! Unreachable ||
+            (_end(original) as Unreachable).cause != last;
         ends[current] = impossible(value(last), current);
         locate(original, current, function);
         continue;
       }
-      final terminal = original.end;
+      final terminal = _end(original);
       if (terminal is Invoke && inlined.containsKey(terminal.operation)) {
         emit(terminal.operation);
         ends[current] = terminal.onReturn == null
@@ -624,6 +671,17 @@ final class FunctionRewrite(
           onReturn: onReturn == null ? null : thread(onReturn),
           onThrow: thread(onThrow),
         ),
+        Throw(
+          isRecorded: true,
+          :final exception,
+          stackTrace: final trace!,
+          :final onThrow,
+        ) =>
+          Throw.recorded(
+            exception,
+            trace,
+            onThrow: onThrow == null ? null : thread(onThrow),
+          ),
         Throw(:final exception, :final stackTrace, :final onThrow) => Throw(
           exception,
           stackTrace: stackTrace,
@@ -774,11 +832,11 @@ final class FunctionRewrite(
   })
   _demand() {
     final sourceValues = <Value>{
-      for (final block in function.blocks) ...[
+      for (final block in _blocks) ...[
         ...block.parameters,
         ...block.instructions,
-        if (block.end case Invoke(:final operation)) operation,
-        if (block.end case Await(:final result)) result,
+        if (_end(block) case Invoke(:final operation)) operation,
+        if (_end(block) case Await(:final result)) result,
       ],
     };
     bool owns(Value value) =>
@@ -848,11 +906,11 @@ final class FunctionRewrite(
         }
       }
     }
-    final edges = {for (final block in function.blocks) ...block.successors};
+    final edges = {for (final block in _blocks) ..._end(block).successors};
     for (final MapEntry(key: parameter, value: phi) in phis.entries) {
       if (sourceValues.contains(parameter) ||
           phi.block == function.entry ||
-          !function.blocks.contains(phi.block)) {
+          !_blocks.contains(phi.block)) {
         throw ArgumentError(
           'A new phi must define a fresh parameter in a non-entry block.',
         );
@@ -893,13 +951,13 @@ final class FunctionRewrite(
     if (directThrows.any(
       (throwing) =>
           throwing.onThrow == null ||
-          !function.blocks.any((block) => identical(block.end, throwing)),
+          !_blocks.any((block) => identical(_end(block), throwing)),
     )) {
       throw ArgumentError('A direct throw requires an owned local handler.');
     }
     Iterable<Jump> outgoing(Block block) {
       if (block.instructions.any(_never)) return const [];
-      final end = block.end;
+      final end = _end(block);
       if (end is Branch) {
         if (_replacement(end.condition) case ScalarConstant(
           value: final bool test,
@@ -954,7 +1012,7 @@ final class FunctionRewrite(
         }
       }
       if (stop != null) continue;
-      final end = block.end;
+      final end = _end(block);
       switch (end) {
         case Return(:final value?):
           uses.add(value);

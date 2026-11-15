@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Expose first-error trace recording as ordinary calls before source-program analysis. Rethrows and cleanup forward the already recorded trace; unobserved local Error objects and captures disappear while finally effects and observed traces remain.
+
 - Remove unobserved stack snapshots before selecting runtime support. Retained snapshots use ordinary Dart calls with explicit caller-frame inputs; inlining preserves their call boundaries and the existing stack-map and GC contracts.
 
 - Store an Error's first trace in its ordinary SDK field, preserving inherited state, explicit traces, public getter overrides and implements-only classes. Async error propagation binds to the same checked Dart implementation; remove the duplicate hidden trace slot and descriptor metadata.

@@ -1,9 +1,11 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/codegen.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
 import '../support/runtime.dart';
+import 'fixtures/error_storage.dart' as source;
 
 void main() {
   late IrProgram program;
@@ -22,7 +24,116 @@ void main() {
     asyncRecord = result.runtime.aliases.entries
         .singleWhere((entry) => entry.value == heapRuntime.recordError)
         .key;
-    program = heapRuntime.program;
+    program = ProgramNormalization(
+      heapRuntime.program,
+      runtime: heapRuntime,
+    ).run();
+  });
+
+  test('source throws and rethrows expose the first explicit trace before storage selection', () {
+    final target = function('repeatTrace').target;
+    final facts =
+        ProgramOptimizer(const [
+          ProgramSimplification(),
+          ProgramCallSpecialization(),
+          ProgramStoragePromotion(),
+          ProgramStorageElimination(),
+          DirectCallInlining(),
+        ]).run(program, [
+          (
+            target: target,
+            arguments: target.parameterTypes.map(FlowValue.unknown).toList(),
+          ),
+        ]);
+    expect(facts.definitions, {target});
+    final body = facts.program.implementationOf(target) as IrFunction;
+    expect(
+      body.blocks
+          .expand((block) => block.instructions)
+          .where((operation) => operation.effects.isNotEmpty),
+      isEmpty,
+    );
+    for (final label in ['first', '', 'with\nframes']) {
+      final first = StackTrace.fromString(label),
+          second = StackTrace.fromString('second');
+      expect(source.repeatTrace(first, second), same(first));
+      for (final graph in [program, facts.program]) {
+        expect(
+          IrInterpreter(
+            graph,
+            {},
+          ).run(graph.implementationOf(target) as IrFunction, [first, second]),
+          same(first),
+        );
+      }
+    }
+  });
+
+  test(
+    'ignored source Error and trace disappear while finally keeps its result',
+    () {
+      final target = function('ignoredError').target;
+      final facts =
+          ProgramOptimizer(const [
+            ProgramSimplification(),
+            ProgramCallSpecialization(),
+            ProgramStoragePromotion(),
+            ProgramStorageElimination(),
+            DirectCallInlining(),
+          ]).run(program, [
+            (target: target, arguments: [FlowValue.unknown(.integer)]),
+          ]);
+      expect(facts.definitions, {target});
+      final body = facts.program.implementationOf(target) as IrFunction;
+      expect(
+        body.blocks
+            .map((block) => block.end)
+            .where((end) => end is Throw || end is Invoke),
+        isEmpty,
+      );
+      expect(
+        body.blocks
+            .expand((block) => block.instructions)
+            .where((op) => op.effects.isNotEmpty),
+        isEmpty,
+      );
+      for (final value in [
+        FlowIntegerRange.minimum,
+        -7,
+        0,
+        23,
+        FlowIntegerRange.maximum,
+      ]) {
+        for (final graph in [program, facts.program]) {
+          expect(
+            IrInterpreter(
+              graph,
+              {},
+            ).run(graph.implementationOf(target) as IrFunction, [value]),
+            source.ignoredError(value),
+          );
+        }
+      }
+    },
+  );
+
+  test('an observed source trace retains its capture', () {
+    final target = function('observedTrace').target;
+    final facts = ProgramOptimizer(const [
+      ProgramSimplification(),
+      ProgramCallSpecialization(),
+      ProgramStoragePromotion(),
+      ProgramStorageElimination(),
+      DirectCallInlining(),
+    ]).run(program, [(target: target, arguments: const <FlowValue>[])]);
+    expect(facts.definitions, contains(heapRuntime.captureTrace));
+    for (final graph in [program, facts.program]) {
+      final trace = IrInterpreter(
+        graph,
+        {},
+      ).run(graph.implementationOf(target) as IrFunction, []) as StackTrace;
+      expect(trace.toString(), isNotEmpty);
+    }
   });
 
   for (final async in [false, true]) {

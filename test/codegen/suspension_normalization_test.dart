@@ -87,6 +87,40 @@ void main() {
     );
   });
 
+  test('suspension normalization preserves recorded throws', () {
+    final target = FunctionTarget(
+      null,
+      'recordedAsync',
+      CoreTypes.futureOf(.voidType),
+      [.object, .stackTrace],
+    );
+    final entry = Block(target.parameterTypes);
+    entry.finish(Throw.recorded(entry.parameters.first, entry.parameters.last));
+    final source = IrProgram(
+      program.classes,
+      [
+        ...program.functions,
+        IrFunction(
+          target,
+          [entry],
+          bodyKind: .asynchronous,
+          completionType: .voidType,
+        ),
+      ],
+      globals: program.globals,
+      externals: program.externals,
+    );
+    final normalized = SuspensionNormalization(source, heapRuntime).run();
+    final throwing = normalized.functions
+        .where((body) => body.target.enclosing == target)
+        .expand((body) => body.blocks)
+        .map((block) => block.end)
+        .whereType<Throw>()
+        .single;
+    expect(throwing.isRecorded, isTrue);
+    expect(throwing.stackTrace, isNotNull);
+  });
+
   test(
     'all suspension bodies expose ordinary calls before program analysis',
     () {

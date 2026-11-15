@@ -2093,17 +2093,18 @@ final class FunctionRepresentation(
         :final exception,
         :final stackTrace,
         :final onThrow,
+        :final isRecorded,
       )) {
         final value = convert(exception, .object, body);
         final trace = traceFor(stackTrace, body);
-        if (heap.runtime case final runtime? when trace != null) {
+        if (heap.runtime case final runtime?
+            when trace != null && !isRecorded) {
           body.add(DirectCall(runtime.recordError, [value, trace]));
         }
-        ends[block] = Throw(
-          value,
-          stackTrace: trace,
-          onThrow: onThrow == null ? null : edge(onThrow),
-        );
+        final handler = onThrow == null ? null : edge(onThrow);
+        ends[block] = isRecorded
+            ? Throw.recorded(value, trace!, onThrow: handler)
+            : Throw(value, stackTrace: trace, onThrow: handler);
       }
       ends[block] ??= switch (sourceBlock.end) {
         Return(:final value) => Return(

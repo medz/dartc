@@ -404,13 +404,19 @@ final class _Region(
             onThrow: jump(onThrow),
           ),
         );
-      case Throw(:final exception, :final stackTrace, :final onThrow):
+      case Throw(
+        :final exception,
+        :final stackTrace,
+        :final onThrow,
+        :final isRecorded,
+      ):
+        final error = value(exception);
+        final trace = stackTrace == null ? null : value(stackTrace);
+        final handler = onThrow == null ? null : jump(onThrow);
         into.finish(
-          Throw(
-            value(exception),
-            stackTrace: stackTrace == null ? null : value(stackTrace),
-            onThrow: onThrow == null ? null : jump(onThrow),
-          ),
+          isRecorded
+              ? Throw.recorded(error, trace!, onThrow: handler)
+              : Throw(error, stackTrace: trace, onThrow: handler),
         );
       case ExhaustivenessFailure(:final onThrow):
         into.finish(
