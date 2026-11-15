@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/sdk.dart';
 import 'package:test/test.dart';
 
 import 'fixture_comparison.dart';
@@ -7,7 +8,10 @@ import 'fixtures/covariance_wrappers.dart' as sdk;
 void main() {
   late FixtureComparison fixture;
   setUpAll(() async {
-    fixture = await FixtureComparison.load('covariance_wrappers');
+    fixture = await FixtureComparison.load(
+      'covariance_wrappers',
+      sources: await SdkSources.load(),
+    );
   });
   test('own wrappers preserve defaults, constructor dispatch, lexical super and real bodies', () {
     for (var form = 0; form < 11; form++) {
