@@ -22,6 +22,12 @@ void main() {
     expect(native.checkedTrace(), isTrue);
   });
 
+  test('allocation failure reuses its preallocated error and trace', () {
+    final native = ExceptionCalls();
+    addTearDown(native.close);
+    expect(native.exhaustion(), isTrue);
+  });
+
   test('exception identity, traces and Error storage survive rethrow and collection', () {
     const payload = ObjectHeader.fieldsOffset ~/ ObjectHeader.alignment;
     final native = ExceptionCalls();

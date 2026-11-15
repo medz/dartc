@@ -238,6 +238,53 @@ ObjectModule exceptions(Target target) {
     NativeSignature(Bool, []),
   );
 
+  final exhaustion = FunctionTarget(uri, 'exhaustion', .boolean, []);
+  final report = Block(), first = Block([.object, .stackTrace]);
+  final second = Block([.object, .stackTrace]);
+  final classified = Block(), traced = Block(), incorrect = Block();
+  for (final (from, handler) in [(report, first), (first, second)]) {
+    from.finish(
+      Invoke(
+        DirectCall(heapRuntime.allocationFailure!, []),
+        onReturn: null,
+        onThrow: Jump(handler, [UnwindValue.exception, UnwindValue.stackTrace]),
+      ),
+    );
+  }
+  second.finish(
+    Branch(
+      second.emit(Identical(first.parameters.first, second.parameters.first)),
+      Jump(classified),
+      Jump(incorrect),
+    ),
+  );
+  classified.finish(
+    Branch(
+      classified.emit(
+        DirectCall(heapRuntime.isOutOfMemory, [second.parameters.first]),
+      ),
+      Jump(traced),
+      Jump(incorrect),
+    ),
+  );
+  traced.finish(
+    Return(
+      traced.emit(Identical(first.parameters.last, second.parameters.last)),
+    ),
+  );
+  incorrect.finish(const Return(Constant.boolean(false)));
+  bodies.add(
+    IrFunction(exhaustion, [
+      report,
+      first,
+      second,
+      classified,
+      traced,
+      incorrect,
+    ]),
+  );
+  exports[exhaustion] = NativeExport('exhaustion', NativeSignature(Bool, []));
+
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
       : X64CodeGenerator(target);

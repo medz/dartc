@@ -26,5 +26,8 @@ final class ExceptionCalls() {
   late final checkedTrace = _library
       .lookupFunction<Bool Function(), bool Function()>('checkedTrace');
 
+  late final exhaustion = _library
+      .lookupFunction<Bool Function(), bool Function()>('exhaustion');
+
   void close() => _library.close();
 }

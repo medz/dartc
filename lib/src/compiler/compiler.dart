@@ -289,6 +289,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
               const ProgramCallSpecialization(),
               const ProgramStoragePromotion(),
               const ProgramStorageElimination(),
+              const ProgramBranchSpecialization(),
               const ProgramLoopSpecialization(),
               const DirectCallInlining(),
               StackTraceLowering(runtime.captureStackTrace),
@@ -313,6 +314,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
                 for (final entry in boundaries.callbacks.entries)
                   entry.key: entry.value.target,
               },
+              allocationFailure: runtime.allocationFailure,
               memoryLayoutFor: (program) => ProgramLayout(
                 program.classes,
                 functions: program.functions,
