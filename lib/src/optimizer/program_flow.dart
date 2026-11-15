@@ -1244,17 +1244,12 @@ final class ProgramFlow(
         );
       case TypeTest(:final testedType, :final negated):
         final expected = testedType.substitute(activation.environment);
-        final value = inputs.single;
-        bool? matches;
-        if (expected.freeTypeParameters.isEmpty &&
-            value.types.every((type) => type.freeTypeParameters.isEmpty)) {
-          if (value.types.every(expected.accepts)) {
-            matches = true;
-          } else if (value.unknownTypes.isEmpty &&
-              value.types.every((type) => !expected.accepts(type))) {
-            matches = false;
-          }
-        }
+        final checked = inputs.single.check(expected);
+        final matches = !checked.mayFail
+            ? true
+            : checked.value.isBottom
+            ? false
+            : null;
         if (matches != null) {
           activation.operationEffects[operation] = const {};
           return FlowResult(

@@ -48,3 +48,13 @@ int readCount(Reader reader, bool selected) =>
 class Bag<T>(final T item);
 
 int readBag(Bag<Receiver> bag) => bag.item.read();
+
+// Exercise a type test whose result depends on the generic caller.
+// ignore: type_check_with_null
+int nullResult<T>(T value) => value is Null ? 3 : 7;
+
+int nonNullableInput(Object value) => nullResult<Object>(value);
+int nullableInput(Object? value) => nullResult<Object?>(value);
+
+abstract class Marker();
+bool possibleInterface(Reader value) => value is Marker;

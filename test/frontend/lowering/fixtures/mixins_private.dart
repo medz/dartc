@@ -13,7 +13,7 @@ class ForeignBase() {
   int inherited(int value) => _inherited(value);
 }
 
-abstract class ForeignRequired {
+abstract class ForeignRequired() {
   int _required(int value);
 }
 

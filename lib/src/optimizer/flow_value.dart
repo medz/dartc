@@ -421,7 +421,8 @@ final class FlowValue {
         if (!negated) checked = checked.join(.unknown(bound));
         continue;
       }
-      if (type == ValueType.never) {
+      if (type == ValueType.never ||
+          type == ValueType.nullType && !bound.mayBeNull) {
         mayFail |= !negated;
         if (negated) checked = checked.join(.unknown(bound));
         continue;

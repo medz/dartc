@@ -331,6 +331,71 @@ void main() {
     });
   }
 
+  test('source generic null checks disappear only for non-null inputs', () {
+    for (final (name, evaluate, samples)
+        in <(String, int Function(Object?), List<Object?>)>[
+          (
+            'nonNullableInput',
+            (value) => source.nonNullableInput(value!),
+            [-3, 0, 'value', true],
+          ),
+          ('nullableInput', source.nullableInput, [null, -3, 0, 'value', true]),
+        ]) {
+      final body = sourceProgram.functions.singleWhere(
+        (body) => body.target.name == name,
+      );
+      final facts =
+          ProgramOptimizer(const [
+            ProgramSimplification(),
+            ProgramCallSpecialization(),
+            ProgramStoragePromotion(),
+            ProgramStorageElimination(),
+            DirectCallInlining(),
+          ]).run(sourceProgram, [
+            (
+              target: body.target,
+              arguments: body.target.parameterTypes
+                  .map(FlowValue.unknown)
+                  .toList(),
+            ),
+          ]);
+      final rewritten =
+          facts.program.implementationOf(body.target) as IrFunction;
+      for (final value in samples) {
+        expect(
+          IrInterpreter(facts.program, {}).run(rewritten, [value]),
+          evaluate(value),
+        );
+      }
+      if (name == 'nonNullableInput') {
+        expect(
+          facts.returnedBy(body.target).constant?.structuralKey,
+          const Constant.integer(7).structuralKey,
+        );
+        expect(facts.definitions, {body.target});
+        expect(
+          rewritten.blocks
+              .expand((block) => block.instructions)
+              .whereType<TypeTest>(),
+          isEmpty,
+        );
+      } else {
+        expect(facts.returnedBy(body.target).constant, isNull);
+      }
+    }
+    final open = sourceProgram.functions.singleWhere(
+      (body) => body.target.name == 'possibleInterface',
+    );
+    final facts = ProgramFlow(sourceProgram, [
+      (
+        target: open.target,
+        arguments: open.target.parameterTypes.map(FlowValue.unknown).toList(),
+      ),
+    ]).facts;
+    expect(facts.returnedBy(open.target).constant, isNull);
+    expect(facts.returnedBy(open.target).unknownTypes, {ValueType.boolean});
+  });
+
   test(
     'null assertions refine normal values without losing exceptional paths',
     () {

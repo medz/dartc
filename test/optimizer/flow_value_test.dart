@@ -98,6 +98,42 @@ void main() {
     );
   });
 
+  test('non-null bounds reject Null without closing unrelated interfaces', () {
+    final parameter = TypeParameterType('T')..initializeBound(.object);
+    final left = ClassType(null, 'Left'), right = ClassType(null, 'Right');
+    for (final bound in <ValueType>[
+      .object,
+      .integer,
+      .stackTrace,
+      left,
+      parameter,
+    ]) {
+      final input = FlowValue.unknown(bound);
+      final yes = input.check(.nullType),
+          no = input.check(.nullType, negated: true);
+      expect(yes.value.isBottom, isTrue);
+      expect(yes.mayFail, isTrue);
+      expect(no.value, input);
+      expect(no.mayFail, isFalse);
+    }
+    for (final bound in <ValueType>[
+      .object.nullable,
+      .dynamicType,
+      left.nullable,
+    ]) {
+      final input = FlowValue.unknown(bound);
+      expect(input.check(.nullType).value.isBottom, isFalse);
+      expect(input.check(.nullType).mayFail, isTrue);
+      expect(input.check(.nullType, negated: true).value.isBottom, isFalse);
+      expect(input.check(.nullType, negated: true).mayFail, isTrue);
+    }
+    for (final negated in [false, true]) {
+      final check = FlowValue.unknown(left).check(right, negated: negated);
+      expect(check.value.isBottom, isFalse);
+      expect(check.mayFail, isTrue);
+    }
+  });
+
   test('unknown bounds do not discard known function provenance', () {
     final target = FunctionTarget(null, 'f', ValueType.integer, []);
     final function = FunctionConstant(target);
