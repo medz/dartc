@@ -28,6 +28,8 @@ final class ControlFlow() {
       .lookupFunction<Int64 Function(Int64), int Function(int)>('doLoop');
   late final forLoop = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('forLoop');
+  late final finiteLoop = _library
+      .lookupFunction<Int64 Function(), int Function()>('finiteLoop');
   late final recursive = _library
       .lookupFunction<Int64 Function(Int64), int Function(int)>('recursive');
   late final rotate = _library

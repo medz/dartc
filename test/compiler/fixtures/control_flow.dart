@@ -58,6 +58,15 @@ int forLoop(int limit) {
   return total;
 }
 
+@Export<Int64 Function()>()
+int finiteLoop() {
+  var result = 0;
+  for (var index = 0; index < 4; index++) {
+    result = result * 10 + index;
+  }
+  return result;
+}
+
 int increment(int value) => value + 1;
 
 @Export<Int64 Function(Int64)>()

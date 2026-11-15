@@ -55,6 +55,7 @@ void main() {
   );
 
   test('loop entries, backedges, break, continue and simultaneous assignments match the SDK', () {
+    expect(native.finiteLoop(), sdk.finiteLoop());
     for (var limit = -2; limit <= 20; limit++) {
       expect(
         native.nestedTransfers(limit),

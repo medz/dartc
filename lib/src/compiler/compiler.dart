@@ -289,6 +289,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
               const ProgramCallSpecialization(),
               const ProgramStoragePromotion(),
               const ProgramStorageElimination(),
+              const ProgramLoopSpecialization(),
               const DirectCallInlining(),
               StackTraceLowering(runtime.captureStackTrace),
             ])
