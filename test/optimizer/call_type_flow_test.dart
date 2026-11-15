@@ -1,10 +1,58 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/frontend.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 final _uri = Uri.parse('memory:call-types');
 
 void main() {
+  test('concrete this receivers preserve super and mixin dispatch without interface implementations', () async {
+    final program = await AnalysisSession([
+      'test/optimizer/fixtures/method_receivers.dart',
+    ]).use((input) async => (await Lowering().lower(input)).program);
+    ClassType type(String name) => program.classes
+        .singleWhere((declaration) => declaration.type.name == name)
+        .type;
+    FunctionTarget member(String owner, String name) => program.lookupMember(
+      type(owner),
+      (kind: FunctionKind.method, name: name, privateScope: null),
+    ).target!;
+    final instances = [
+      'Base',
+      'Child',
+      'Implementation',
+      'Mixed',
+    ].map(type).toList();
+    final concrete = CallTypeFlow(program, [
+      member('Base', 'read'),
+      member('Child', 'readSuper'),
+      member('Mixed', 'readMixed'),
+    ], instantiatedTypes: instances).facts;
+    expect(
+      concrete.definitions,
+      containsAll(
+        ['Base', 'Child', 'Mixed'].map((owner) => member(owner, 'value')),
+      ),
+    );
+    expect(
+      concrete.definitions,
+      isNot(contains(member('Implementation', 'value'))),
+    );
+    final entry = program.functions.singleWhere(
+      (body) => body.target.name == 'readInterface',
+    );
+    final contract = CallTypeFlow(program, [
+      entry.target,
+    ], instantiatedTypes: instances).facts;
+    expect(
+      contract.definitions,
+      containsAll([
+        member('Implementation', 'read'),
+        member('Implementation', 'value'),
+      ]),
+    );
+  });
+
   test('unions multiple callers through parameters and returned values', () {
     final model = _dispatch();
     final identity = FunctionTarget(_uri, 'identity', model.face, [model.face]);

@@ -92,7 +92,7 @@ void main() {
     },
   );
 
-  test('only Error subclasses retain a traced first-throw slot', () {
+  test('inherited Error traces use ordinary declared reference storage', () {
     final uri = Uri.parse('memory:error-layout');
     final base = ClassType(uri, 'Base', superclass: ValueType.error);
     final child = ClassType(uri, 'Child', superclass: base);
@@ -101,6 +101,11 @@ void main() {
       'Implementation',
       interfaces: [ValueType.error],
     );
+    final trace = InstanceField(
+      ValueType.error,
+      '_stackTrace',
+      ValueType.stackTrace.nullable,
+    );
     final number = InstanceField(base, 'number', .integer);
     final reference = InstanceField(
       child,
@@ -108,37 +113,32 @@ void main() {
       ValueType.object.nullable,
     );
     final layouts = ProgramLayout([
-      IrClass(ValueType.error, []),
+      IrClass(ValueType.error, [trace]),
       IrClass(base, [number]),
       IrClass(child, [reference]),
       IrClass(implementation, []),
     ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final storage = layouts.storageOf(child);
-    expect(
-      layouts.storageOf(ValueType.error).errorTraceOffset,
-      ObjectHeader.fieldsOffset,
-    );
-    expect(
-      layouts.storageOf(base).errorTraceOffset,
-      ObjectHeader.fieldsOffset + 8,
-    );
-    expect(storage.errorTraceOffset, ObjectHeader.fieldsOffset + 16);
+    expect(layouts.storageOf(ValueType.error).fields, [trace]);
+    expect(layouts.storageOf(base).fields, [trace, number]);
+    expect(storage.fields, [trace, number, reference]);
+    expect(layouts.fieldOffset(trace), ObjectHeader.fieldsOffset);
     expect(storage.layout.size, ObjectHeader.fieldsOffset + 24);
     expect(storage.layout.referenceOffsets, [
       ObjectHeader.typeOffset,
-      ObjectHeader.fieldsOffset + 8,
+      ObjectHeader.fieldsOffset,
       ObjectHeader.fieldsOffset + 16,
     ]);
-    expect(layouts.fieldOffset(number), ObjectHeader.fieldsOffset);
-    expect(layouts.fieldOffset(reference), ObjectHeader.fieldsOffset + 8);
-    expect(layouts.storageOf(implementation).errorTraceOffset, isNull);
+    expect(layouts.fieldOffset(number), ObjectHeader.fieldsOffset + 8);
+    expect(layouts.fieldOffset(reference), ObjectHeader.fieldsOffset + 16);
+    expect(layouts.storageOf(implementation).fields, isEmpty);
     expect(layouts.storageOf(implementation).layout.referenceOffsets, [8]);
     expect(
       () => ConstantData(
         layouts,
         0,
       ).addressOf(ObjectConstant(ValueType.error, {})),
-      throwsUnsupportedError,
+      throwsArgumentError,
     );
   });
 }

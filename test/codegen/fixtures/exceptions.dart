@@ -15,7 +15,11 @@ ObjectModule exceptions(Target target) {
   final node = ClassType(uri, 'Payload');
   final box = ClassType(uri, 'Box');
   final error = ClassType(uri, 'Failure', superclass: ValueType.error);
-  final classes = <IrClass>[IrClass(ValueType.error, [])];
+  final classes = <IrClass>[
+    heapRuntime.program.classes.singleWhere(
+      (declaration) => declaration.type == ValueType.error,
+    ),
+  ];
   final bodies = <IrFunction>[];
   final constructors = <ClassType, FunctionTarget>{};
   final fields = <ClassType, InstanceField>{};

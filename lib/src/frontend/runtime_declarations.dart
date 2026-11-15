@@ -14,9 +14,13 @@ final class RuntimeDeclarations(
   Map<FunctionTarget, MemoryOperation> primitives,
   Iterable<FunctionTarget> nonAllocating,
   Map<FunctionTarget, SystemLibrary> systemFunctions, {
+  Map<FunctionTarget, FunctionTarget> aliases = const {},
   final ClassType? stackContext,
 }) {
   final Map<RuntimeRole, FunctionTarget> entries = .unmodifiable(entries);
+
+  /// Trusted external declarations resolved to their ordinary runtime body.
+  final Map<FunctionTarget, FunctionTarget> aliases = .unmodifiable(aliases);
   final Map<FunctionTarget, MemoryOperation> primitives = .unmodifiable(
     primitives,
   );
@@ -34,11 +38,25 @@ final class RuntimeDeclarations(
     classFor,
   ) {
     final visitor = _RuntimeDeclarations(input, libraries, targetFor, classFor);
+    final aliases = <FunctionTarget, FunctionTarget>{};
+    for (final MapEntry(key: source, value: role) in visitor.aliases.entries) {
+      final target = visitor.entries[role];
+      if (target == null ||
+          source.kind != .function ||
+          target.kind != .function ||
+          source.typeParameters.isNotEmpty ||
+          target.typeParameters.isNotEmpty ||
+          source.signature != target.signature) {
+        throw ArgumentError('Incompatible runtime entry declaration: $role');
+      }
+      aliases[source] = target;
+    }
     return .new(
       visitor.entries,
       visitor.primitives,
       visitor.nonAllocating,
       visitor.systemFunctions,
+      aliases: aliases,
       stackContext: visitor.stackContext,
     );
   }
@@ -63,6 +81,7 @@ final class _RuntimeDeclarations(
   }
 
   final entries = <RuntimeRole, FunctionTarget>{};
+  final aliases = <FunctionTarget, RuntimeRole>{};
   final primitives = <FunctionTarget, MemoryOperation>{};
   final nonAllocating = <FunctionTarget>[];
   final systemFunctions = <FunctionTarget, SystemLibrary>{};
@@ -134,10 +153,17 @@ final class _RuntimeDeclarations(
       systemFunctions[target] = SystemLibrary.values[index];
     } else if (isEntry) {
       final role = RuntimeRole.values[index];
-      if (entries.containsKey(role)) {
-        throw ArgumentError('Repeated runtime entry: $role');
+      if (element.isExternal) {
+        if (aliases.containsKey(target)) {
+          throw ArgumentError('Repeated runtime declaration: ${target.name}');
+        }
+        aliases[target] = role;
+      } else {
+        if (entries.containsKey(role)) {
+          throw ArgumentError('Repeated runtime entry: $role');
+        }
+        entries[role] = target;
       }
-      entries[role] = target;
     } else {
       if (!element.isExternal || primitives.containsKey(target)) {
         throw ArgumentError('Invalid primitive declaration: ${target.name}');

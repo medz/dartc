@@ -194,12 +194,6 @@ final class ProgramLayout(
           ...storageOf(parent).ephemerons,
         ...definition.ephemerons,
       },
-      storesErrorTrace:
-          declaration == ValueType.error ||
-          switch (declaration.superclass) {
-            null => false,
-            final parent => storageOf(parent).errorTraceOffset != null,
-          },
     );
   }
 
@@ -212,25 +206,16 @@ final class ProgramLayout(
 final class ClassStorage(
   Iterable<InstanceField> fields,
   ProgramLayout program, {
-  bool storesErrorTrace = false,
   bool tracesPayload = false,
   final Set<InstanceField> weakFields = const {},
   final Map<InstanceField, InstanceField> ephemerons = const {},
 }) {
   final List<InstanceField> fields = .unmodifiable(fields);
   late final ObjectLayout layout;
-  late final int? errorTraceOffset;
 
   this {
-    errorTraceOffset = storesErrorTrace
-        ? ObjectHeader.fieldsOffset +
-              this.fields.length * ObjectHeader.alignment
-        : null;
     layout = .new(
-      [
-        ...this.fields.map((f) => program.representation(f.type)),
-        if (storesErrorTrace) ValueRepresentation.reference,
-      ],
+      this.fields.map((f) => program.representation(f.type)),
       tracesPayload: tracesPayload,
       weakFields: weakFields.map(this.fields.indexOf),
       ephemerons: {

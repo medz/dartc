@@ -91,11 +91,6 @@ final class ConstantData(
       layout = storage.layout;
     } else if (value is ObjectConstant) {
       storage = layouts.storageOf(value.type as ClassType);
-      if (storage.errorTraceOffset != null) {
-        throw UnsupportedError(
-          'An Error instance cannot use immutable constant storage.',
-        );
-      }
       layout = storage.layout;
       if (storage.fields.length != value.fields.length ||
           storage.fields.any((f) => !value.fields.containsKey(f))) {
@@ -256,11 +251,6 @@ final class ConstantData(
       start + ObjectDescriptor.references + references.length,
       references,
     );
-    _words[start +
-        ObjectDescriptor.traceBase +
-        references.length] = layouts.isBoxable(type)
-        ? 0
-        : layouts.storageOf(type).errorTraceOffset ?? 0;
     _words[start + ObjectDescriptor.payloadBase + references.length] =
         layout.tracesPayload ? layout.size : 0;
     _words[start + ObjectDescriptor.weakCountBase + references.length] =

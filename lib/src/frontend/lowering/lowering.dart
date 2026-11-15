@@ -182,6 +182,24 @@ final class Lowering({final bool enableAssertions = false}) {
       );
     }
 
+    final runtime = RuntimeDeclarations.resolve(
+      input,
+      bindings.libraries,
+      bindings.boundTarget,
+      bindings.classType,
+    );
+    for (final MapEntry(key: source, value: target)
+        in runtime.aliases.entries) {
+      final entry = Block(source.parameterTypes);
+      final call = entry.emit(DirectCall(target, entry.parameters));
+      entry.finish(
+        source.returnType == ValueType.voidType ? const Return() : Return(call),
+      );
+      functions.removeWhere((body) => body.target == source);
+      functions.add(
+        IrFunction(source, [entry], defaults: bindings.defaults(source)),
+      );
+    }
     final intrinsics = [...bindings.lowerIntrinsics(), ...native.accessors];
     final intrinsicTargets = {for (final body in intrinsics) body.target};
     final intrinsicClasses = bindings.intrinsicClasses.where(
@@ -241,12 +259,7 @@ final class Lowering({final bool enableAssertions = false}) {
       imports: Map<FunctionTarget, NativeReference>.unmodifiable(
         native.imports,
       ),
-      runtime: RuntimeDeclarations.resolve(
-        input,
-        bindings.libraries,
-        bindings.boundTarget,
-        bindings.classType,
-      ),
+      runtime: runtime,
     );
   }
 }

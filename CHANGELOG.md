@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Store an Error's first trace in its ordinary SDK field, preserving inherited state, explicit traces, public getter overrides and implements-only classes. Async error propagation binds to the same checked Dart implementation; remove the duplicate hidden trace slot and descriptor metadata.
+
 - Keep invocation-private objects out of external entry and callback state. Preserve reachable globals and escaped captures across calls, widening their bounds at external reentry so repeated public updates converge.
 
 - Read bounded native byte ranges from sparse storage facts and limit uncertain writes to their proven region. Remove private lifetime markers when no weak registration, external observer or native access can observe them, allowing guarded zero-filled typed lists to disappear while preserving finalizer attachments.

@@ -33,23 +33,20 @@ abstract final class ObjectDescriptor() {
   /// The first traced field's byte offset.
   static const references = 2;
 
-  /// Add the reference count to locate the exception trace field offset.
-  static const traceBase = references;
-
   /// Add the reference count to locate the traced payload offset.
-  static const payloadBase = references + 1;
+  static const payloadBase = references;
 
   /// Add the strong reference count to locate optional closure metadata.
-  static const asyncBase = references + 2;
+  static const asyncBase = references + 1;
 
   /// Add the strong reference count to locate the weak slot count.
-  static const weakCountBase = references + 3;
+  static const weakCountBase = references + 2;
 
   /// Add the strong reference count to locate the conditional pair count.
-  static const ephemeronCountBase = references + 4;
+  static const ephemeronCountBase = references + 3;
 
   /// Strong offsets precede weak offsets and then key/value offset pairs.
-  static const baseWords = references + 5;
+  static const baseWords = references + 4;
 }
 
 /// Machine entry records shared by native boundaries and the Dart runtime.

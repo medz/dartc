@@ -31,6 +31,7 @@ final class CallTypeFlow(
       >{};
   final _instances = <ClassType>{};
   final _parameters = <BlockParameter, Set<ValueType>>{};
+  final _receiverOwners = <BlockParameter, ClassType>{};
   final _returns = <FunctionTarget, Set<ValueType>>{};
   final _callers = <FunctionTarget, Set<FunctionTarget>>{};
   final _targets = <InstanceCall, Set<FunctionTarget>>{};
@@ -77,11 +78,45 @@ final class CallTypeFlow(
     return changed;
   }
 
-  bool _allows(Value receiver, ClassType actual) {
+  bool _allows(
+    Value receiver,
+    ClassType actual, {
+    FunctionTarget? reader,
+    bool bound = false,
+  }) {
     final declared = receiver.unviewedType;
-    return _types(receiver)
-            .any((type) => type == declared || type.mayHaveInstance(actual)) &&
-        declared.mayHaveInstance(actual);
+    if (!declared.mayHaveInstance(actual)) return false;
+    var source = receiver;
+    unwrap:
+    while (true) {
+      switch (source) {
+        case TypeView(:final operand) ||
+            TypeCast(:final operand) ||
+            UncheckedCast(:final operand) ||
+            NullCheck(:final operand):
+          source = operand;
+        case TestedValue(:final test):
+          source = test.operand;
+        default:
+          break unwrap;
+      }
+    }
+    if (_receiverOwners[source] case final owner?) {
+      // A concrete body's this inherits its owner; implementing its interface is insufficient.
+      var inherits = false;
+      for (ClassType? type = actual; type != null; type = type.superclass) {
+        if (type.declaration == owner.declaration) {
+          inherits = true;
+          break;
+        }
+      }
+      if (!inherits) return false;
+    }
+    return bound ||
+        _types(
+          receiver,
+          reader,
+        ).any((type) => type == declared || type.mayHaveInstance(actual));
   }
 
   Iterable<ValueType> _types(Value value, [FunctionTarget? reader]) =>
@@ -141,9 +176,7 @@ final class CallTypeFlow(
       for (final MapEntry(:key, :value) in _subscribers.entries) {
         if (program.lookupMember(type, key).target == null) continue;
         for (final (:caller, :receiver, :bound) in value) {
-          if (bound
-              ? receiver.unviewedType.mayHaveInstance(type)
-              : _allows(receiver, type)) {
+          if (_allows(receiver, type, reader: caller, bound: bound)) {
             _pending.add(caller);
           }
         }
@@ -159,6 +192,9 @@ final class CallTypeFlow(
       _pending.add(target);
       _unscanned.add(target);
       if (body is IrFunction) {
+        if (target.kind.hasReceiver) {
+          _receiverOwners[body.entry.parameters.first] = target.owner!;
+        }
         for (final block in body.blocks) {
           for (final parameter in block.parameters) {
             _parameters[parameter] = {};
@@ -220,10 +256,6 @@ final class CallTypeFlow(
         bound: bound,
       ));
     }
-    final declared = receiver.unviewedType;
-    var observed = bound ? null : _types(receiver, caller).toList();
-    if (observed != null && observed.isEmpty) return;
-    if (observed?.contains(declared) ?? false) observed = null;
     // Selecting a member can discover more instances while this loop is active.
     for (final type in _instances.toList()) {
       final targets = [
@@ -231,11 +263,7 @@ final class CallTypeFlow(
           ?program.lookupMember(type, selector).target,
       ];
       if (targets.isEmpty) continue;
-      if (observed != null &&
-              !observed.any((bound) => bound.mayHaveInstance(type)) ||
-          !declared.mayHaveInstance(type)) {
-        continue;
-      }
+      if (!_allows(receiver, type, reader: caller, bound: bound)) continue;
       yield* targets;
     }
   }

@@ -34,6 +34,8 @@ final class _Finalizer<T>(void Function(T) callback)
 
 @patch
 class Object {
+  void _recordStackTrace(StackTrace trace) {}
+
   external int get _identityHashCode;
 
   @patch
@@ -52,13 +54,15 @@ class Object {
 
 @patch
 class Error {
-  @patch
-  @pragma(
-    'dartc:patch',
-    'storage: error traces are recorded by the target unwinder',
-  )
-  StackTrace? get stackTrace => traces.errorTrace(this);
+  void _recordStackTrace(StackTrace trace) {
+    _stackTrace ??= trace;
+  }
 }
+
+@runtime.RuntimeEntry(.recordError)
+@runtime.NonAllocating()
+void _recordError(Object error, StackTrace trace) =>
+    error._recordStackTrace(trace);
 
 @patch
 class StackTrace {

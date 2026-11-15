@@ -138,33 +138,3 @@ String? _describeFrame(int address) {
   }
   return frames.join('\n');
 }
-
-int _traceOffset(Object error) {
-  final descriptor = Pointer<Int64>.fromAddress(
-    Memory.addressOf(error) + ObjectHeader.descriptorOffset,
-  ).value;
-  final references = Pointer<Int64>.fromAddress(
-    descriptor + ObjectDescriptor.referenceCount * 8,
-  ).value;
-  return Pointer<Int64>.fromAddress(
-    descriptor + (ObjectDescriptor.traceBase + references) * 8,
-  ).value;
-}
-
-/// Reads runtime trace storage without invoking an override of Error.stackTrace.
-StackTrace? errorTrace(Object error) {
-  final offset = _traceOffset(error);
-  return offset == 0
-      ? null
-      : Memory.readReference(error, offset) as StackTrace?;
-}
-
-/// Records only the first throw on Error subclasses, including explicit traces.
-@RuntimeEntry(.recordError)
-@NonAllocating()
-void recordError(Object error, StackTrace trace) {
-  final offset = _traceOffset(error);
-  if (offset != 0 && Memory.readReference(error, offset) == null) {
-    Memory.writeReference(error, offset, trace);
-  }
-}

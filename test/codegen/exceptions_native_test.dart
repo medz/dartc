@@ -35,13 +35,6 @@ void main() {
         ],
       );
     }
-    int errorTraceSlot(Pointer<Uint64> object) {
-      final descriptor = Pointer<Uint64>.fromAddress(object.value);
-      return descriptor[ObjectDescriptor.traceBase +
-              descriptor[ObjectDescriptor.referenceCount]] ~/
-          ObjectHeader.alignment;
-    }
-
     List<int> trace(int address) {
       final result = <int>[], seen = <int>{};
       while (address != 0) {
@@ -85,7 +78,7 @@ void main() {
             final payloads = roots.where((address) {
               if (address == 0) return false;
               final object = Pointer<Uint64>.fromAddress(address);
-              final slot = isError ? errorTraceSlot(object) - 1 : payload;
+              final slot = isError ? payload + 1 : payload;
               return slot >= payload && object[slot] == 123;
             }).toList();
             final traces = roots
@@ -106,7 +99,7 @@ void main() {
             if (calls < 2) expect(stack, hasLength(5));
             if (isError) {
               final object = Pointer<Uint64>.fromAddress(payloads.first);
-              final slot = errorTraceSlot(object);
+              const slot = payload;
               expect(trace(object[slot]), originalTrace);
               expect(object[slot] == traces.single, calls < 2);
             }

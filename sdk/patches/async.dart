@@ -91,8 +91,8 @@ void _asyncReturn(Object state, Object? value) {
 }
 
 @patch
-void _trySetStackTrace(Object error, StackTrace stackTrace) =>
-    traces.recordError(error, stackTrace);
+@runtime.RuntimeEntry(.recordError)
+external void _trySetStackTrace(Object error, StackTrace stackTrace);
 
 @patch
 class _AsyncRun {

@@ -2,7 +2,10 @@
 /// On a trusted native declaration, asserts that contract for its implementation.
 final class const NonAllocating();
 
-/// Identifies a compiler entry without depending on its Dart name.
+/// Defines a compiler entry, or binds an external declaration to that entry.
+/// Exactly one trusted declaration supplies a Dart body. External references
+/// require the same signature and become ordinary calls, including tear-offs.
+/// Missing or repeated definitions and incompatible signatures are rejected.
 final class const RuntimeEntry(final RuntimeRole role);
 
 enum RuntimeRole() {
