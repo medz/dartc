@@ -9,6 +9,62 @@ import '../support/numeric_order.dart';
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  test('receiver bounds use the declarations in each actual program', () {
+    final base = ClassType(_uri, 'Base', isAbstract: true);
+    final member = FunctionTarget(
+      _uri,
+      'answer',
+      .integer,
+      [],
+      owner: base,
+      kind: .method,
+      isAbstract: true,
+    );
+    final implementations = [
+      for (final name in ['First', 'Second'])
+        FunctionTarget(
+          _uri,
+          'answer',
+          .integer,
+          [],
+          owner: ClassType(_uri, name, superclass: base),
+          kind: .method,
+        ),
+    ];
+    final target = FunctionTarget(_uri, 'read', .integer, [base]);
+    final block = Block(target.parameterTypes);
+    final call = block.emit(InstanceCall(member, block.parameters.single, []));
+    block.finish(Return(call));
+    final root = IrFunction(target, [block]);
+    for (final methods in [
+      [implementations.first],
+      [implementations.last],
+      implementations,
+    ]) {
+      final program = IrProgram(
+        [
+          IrClass(base, [], members: [member]),
+          for (final method in methods)
+            IrClass(method.owner!, [], members: [method]),
+        ],
+        [
+          root,
+          for (final method in methods)
+            IrFunction(method, [
+              Block(method.parameterTypes)
+                ..finish(const Return(Constant.integer(42))),
+            ]),
+        ],
+      );
+      final facts = _flow(program, root, [FlowValue.unknown(base)]).facts;
+      expect(facts.targetsOf(call), unorderedEquals(methods));
+      expect(
+        facts.returnedBy(target).constant?.structuralKey,
+        const Constant.integer(42).structuralKey,
+      );
+    }
+  });
+
   test('numeric facts retain exact values, signed zero and unordered NaN', () {
     final comparisons = <Instruction Function(Value, Value)>[
       Equals.new,

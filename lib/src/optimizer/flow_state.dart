@@ -78,6 +78,7 @@ final class FlowState {
   final Map<Object, FlowMemory> _constantMemory;
   StateMap<GlobalVariable, _Slot> _globals;
   StateMap<FlowObject, _ObjectState> _objects;
+  StateMap<FlowSource, FlowValue> _addresses;
   FlowValue _escaped;
 
   new(this.program, {this.memoryLayout})
@@ -86,6 +87,7 @@ final class FlowState {
       _constantMemory = {},
       _globals = const .empty(),
       _objects = const .empty(),
+      _addresses = const .empty(),
       _escaped = const .bottom();
 
   new _(
@@ -96,6 +98,7 @@ final class FlowState {
     this._constantMemory,
     this._globals,
     this._objects,
+    this._addresses,
     this._escaped,
   );
 
@@ -108,12 +111,36 @@ final class FlowState {
     _constantMemory,
     _globals,
     _objects,
+    _addresses,
     _escaped,
   );
 
   /// Keeps valid SSA equalities without changing stored values or prior snapshots.
   void retainSources(bool Function(FlowSource) retain) {
-    _mapValues((value) => value.withSources(value.sources.where(retain)));
+    _mapValues(
+      (value) => resolveValue(value).withSources(value.sources.where(retain)),
+    );
+    for (final source in _addresses.keys) {
+      if (!retain(source)) _addresses = _addresses.withoutKey(source);
+    }
+  }
+
+  /// Applies address identities proven at this program point, not earlier uses.
+  FlowValue resolveValue(FlowValue value) {
+    if (_addresses.isEmpty ||
+        value.sources.isEmpty ||
+        value.types.any((type) => type != ValueType.integer)) {
+      return value;
+    }
+    FlowValue? address;
+    for (final source in value.sources) {
+      if (_addresses[source] case final known?) {
+        address = address == null ? known : address.join(known);
+      }
+    }
+    return address == null
+        ? value
+        : address.withSources(value.sources).withReferences([value.references]);
   }
 
   /// Applies path bounds to storage still equal to the checked SSA definitions.
@@ -164,12 +191,19 @@ final class FlowState {
                 : left.join(right, widen: widen),
           );
     final escaped = _escaped.join(incoming._escaped, widen: widen);
+    final addresses = _addresses.merge(
+      incoming._addresses,
+      (_, left, right) =>
+          left == null || right == null ? null : left.join(right, widen: widen),
+    );
     final changed =
         !identical(globals, _globals) ||
         !identical(objects, _objects) ||
+        !identical(addresses, _addresses) ||
         escaped != _escaped;
     _globals = globals;
     _objects = objects;
+    _addresses = addresses;
     _escaped = escaped;
     return changed;
   }
@@ -181,7 +215,7 @@ final class FlowState {
 
   /// An immutable key for the current version, safe after this wrapper changes.
   Object get structuralKey =>
-      (program, memoryLayout, _globals, _objects, _escaped);
+      (program, memoryLayout, _globals, _objects, _addresses, _escaped);
 
   @override
   bool operator ==(Object other) =>
@@ -210,6 +244,7 @@ final class FlowState {
       ],
       expose: false,
       reads: reads,
+      constants: false,
     );
     var objects = const StateMap<FlowObject, _ObjectState>.empty();
     for (final object in reachable.objects) {
@@ -235,6 +270,15 @@ final class FlowState {
       _constantMemory,
       globals,
       objects,
+      StateMap.fromEntries(
+        _addresses.entries.where(
+          (entry) => entry.value.addresses.every(
+            (address) =>
+                address.base is FlowObject &&
+                objects[address.base as FlowObject] != null,
+          ),
+        ),
+      ),
       escaped,
     );
   }
@@ -291,7 +335,6 @@ final class FlowState {
       final prior = change.before;
       var current = result._objects[object];
       if (prior == null || current == null) {
-        if (preservesInputSources) continue;
         result._allocate(object, next.map(mapValue));
         continue;
       }
@@ -326,6 +369,19 @@ final class FlowState {
     }
     if (!preservesInputSources && after._escaped != before._escaped) {
       result._escaped = result._escaped.join(mapValue(after._escaped));
+    }
+    for (final change in after._addresses.differences(before._addresses)) {
+      if (change.after case final address?) {
+        final sources = mapValue(
+          FlowValue.unknown(.integer).withSources([change.key]),
+        ).sources;
+        for (final source in sources) {
+          result._addresses = result._addresses.withEntry(
+            source,
+            mapValue(address),
+          );
+        }
+      }
     }
     return result;
   }
@@ -470,7 +526,60 @@ final class FlowState {
     if (operands.length != operation.inputs.length) {
       throw ArgumentError('Storage transfer requires every operand.');
     }
+    operands = operands.map(resolveValue).toList();
     switch (operation) {
+      case AllocatedObject():
+        if (operands.any((value) => value.isBottom)) return _unreachable;
+        final next = copy();
+        var value = const FlowValue.bottom();
+        final address = operands.first;
+        var fresh =
+            address.addresses.isEmpty ||
+            address.unknownTypes.isNotEmpty ||
+            address.constants.isNotEmpty ||
+            address.objects.isNotEmpty;
+        for (final pointer in address.addresses) {
+          if (pointer.base case final FlowObject object
+              when pointer.offset == 0 &&
+                  object.type == resultType &&
+                  containsObject(object)) {
+            value = value.join(FlowValue.object(object));
+          } else {
+            fresh = true;
+          }
+        }
+        if (fresh) {
+          final object = allocate(operation);
+          final size = operands.last.integers?.constant;
+          final fixed = memoryLayout
+              ?.objectLayout(object.type as ClassType)
+              .size;
+          final extent = fixed == null
+              ? ObjectHeader.fieldsOffset
+              : size != null && size >= 0 && size <= 0x7fffffffffffffff - fixed
+              ? fixed + size
+              : fixed;
+          next._allocate(
+            object,
+            _ObjectState(
+              _initialFields(object.type as ClassType),
+              summary: repeated,
+              memory: FlowMemory(
+                0,
+                extent,
+              ).forget(0, ObjectHeader.fieldsOffset),
+            ),
+          );
+          value = value.join(FlowValue.object(object));
+        }
+        final known = next._objectAddress(
+          value,
+          FlowValue.constant(const Constant.integer(0)),
+        );
+        for (final source in address.sources) {
+          next._addresses = next._addresses.withEntry(source, known);
+        }
+        return _normal(value, next);
       case ObjectDescriptorAddress(:final declaration):
         return _normal(FlowValue.address(FlowAddress(declaration, 0)), copy());
       case NativeSize() || NativeFieldOffset():
@@ -814,9 +923,10 @@ final class FlowState {
           final layout = type is ClassType
               ? memoryLayout?.objectLayout(type)
               : null;
-          return layout != null &&
-              layout.tracesPayload &&
-              offsets.lower >= layout.size &&
+          return (offsets.constant == ObjectHeader.typeOffset ||
+                  layout != null &&
+                      layout.tracesPayload &&
+                      offsets.lower >= layout.size) &&
               (_memoryOf(base)
                       ?.containsRange(offsets, ObjectHeader.alignment) ??
                   false);
@@ -868,11 +978,15 @@ final class FlowState {
   /// Whether every native access stays within modeled object storage.
   /// Constants may be read; callers must separately require mutable destinations.
   bool containsNative(FlowValue address, NativeTypeRef storage) =>
-      _containsNative(address, memoryLayout?.nativeLayout.of(storage).size);
+      _containsNative(
+        resolveValue(address),
+        memoryLayout?.nativeLayout.of(storage).size,
+      );
 
   /// References held anywhere in the addressed storage, excluding its owner.
   /// Unknown backing storage can contain any reference.
   FlowValue nativeReferences(FlowValue address) {
+    address = resolveValue(address);
     final unknown = FlowValue.unknown(.object.nullable);
     var value =
         address.addresses.isEmpty ||
@@ -931,8 +1045,10 @@ final class FlowState {
             ? memory
             : next._objects[object]!.memory!.join(memory),
       );
-      if (offsets.lower <
-          memoryLayout!.objectLayout(object.type as ClassType).size) {
+      if (offsets.upper + size! > ObjectHeader.fieldsOffset &&
+          offsets.lower <
+              (memoryLayout?.objectLayout(object.type as ClassType).size ??
+                  ObjectHeader.fieldsOffset)) {
         for (final entry in updated.slots.entries) {
           if (entry.key case final InstanceField field) {
             updated = updated.withSlot(
@@ -1318,7 +1434,7 @@ final class FlowState {
   void _forgetFieldBytes(FlowObject object) {
     final state = _objects[object]!;
     final memory = state.memory;
-    if (memory == null) return;
+    if (memory == null || memoryLayout == null) return;
     _objects = _objects.withEntry(
       object,
       state.withMemory(
@@ -1492,13 +1608,15 @@ final class FlowState {
     Iterable<FlowValue> roots, {
     required bool expose,
     FlowReadSet? reads,
+    bool constants = true,
   }) {
     var result = const FlowValue.bottom();
     final pending = [for (final value in roots) (value, !expose)];
     final objects = <(FlowObject, bool)>{};
-    final constants = <(Object, bool)>{};
+    final visitedConstants = <(Object, bool)>{};
     while (pending.isNotEmpty) {
-      final (value, raw) = pending.removeLast();
+      final (input, raw) = pending.removeLast();
+      final value = resolveValue(input);
       result = result.join(value);
       if (!value.references.isBottom) pending.add((value.references, true));
       for (final object in value.objects) {
@@ -1520,8 +1638,10 @@ final class FlowState {
           if (raw && slot.unbound) pending.add((slot.initializer, raw));
         }
       }
+      // Immutable constants cannot lead to mutable object identities.
+      if (!constants) continue;
       for (final constant in value.constants) {
-        if (!constants.add((constant.structuralKey, raw))) continue;
+        if (!visitedConstants.add((constant.structuralKey, raw))) continue;
         final nested = switch (constant) {
           ObjectConstant(:final fields, :final payload) =>
             fields.values.followedBy(payload),

@@ -43,6 +43,7 @@ final class ProgramFlow(
   final _cyclic = <FunctionTarget, Set<Block>>{};
   final _liveness = <FunctionTarget, ValueLiveness>{};
   final _readSets = <FunctionTarget, FlowReadSet?>{};
+  final _receiverBounds = <ValueType, List<ClassType>>{};
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
   final _escapingActivations = <_Activation>{};
@@ -492,7 +493,7 @@ final class ProgramFlow(
         : input.applySummary(
             projected,
             after.project([
-              ...arguments,
+              ...supplied,
               ...projected.objects.map(FlowValue.object),
               callee.returned,
               callee.exception,
@@ -602,6 +603,7 @@ final class ProgramFlow(
         ...block.instructions,
         if (block.end case Invoke(:final operation)) operation,
       ]) {
+        if (operation is AllocatedObject) return null;
         List<FunctionTarget>? targets;
         if (operation case DirectCall(:final target)) {
           targets = [target];
@@ -692,6 +694,7 @@ final class ProgramFlow(
     final readers = <Value, Set<Block>>{};
     late Block readingBlock;
     late Map<Value, FlowIntegerRange> ranges;
+    late FlowState point;
     bool mergeValue(Value value, FlowValue incoming, {bool widen = false}) {
       if (!activation.mergeValue(value, incoming, widen: widen)) return false;
       pending.addAll(readers[value] ?? const []);
@@ -732,7 +735,9 @@ final class ProgramFlow(
         default:
           (readers[value] ??= {}).add(readingBlock);
           final known = constrained(
-            activation.values[value] ?? const FlowValue.bottom(),
+            point.resolveValue(
+              activation.values[value] ?? const FlowValue.bottom(),
+            ),
           );
           return switch (ranges[value]) {
             final range? => known.restrictIntegers(range),
@@ -748,6 +753,7 @@ final class ProgramFlow(
       FlowValue? stackTrace,
       Map<Value, FlowIntegerRange>? refinements,
     }) {
+      point = state;
       final nextRanges = {...ranges, ...?refinements};
       for (final entry
           in refinements?.entries ??
@@ -869,7 +875,8 @@ final class ProgramFlow(
       activation.blocks.add(block);
       FlowState? state = incoming[block]!.copy();
       FlowResult evaluate(Instruction operation) {
-        activation.mergePoint(activation.before, operation, state!);
+        point = state!;
+        activation.mergePoint(activation.before, operation, state);
         var result = _operation(
           activation,
           block,
@@ -973,6 +980,7 @@ final class ProgramFlow(
         if (state == null) break;
       }
       if (state == null) continue;
+      point = state;
       switch (block.end) {
         case Return(:final value):
           final returned = value == null ? _null : read(value);
@@ -1085,7 +1093,8 @@ final class ProgramFlow(
     if (inputs.any((value) => value.isBottom)) return _unreachable;
     final resultType = operation.type.substitute(activation.environment);
     if (_loopBlocks(activation.body).contains(block) &&
-        operation.effects.contains(Effect.allocates)) {
+        (operation is AllocatedObject ||
+            operation.effects.contains(Effect.allocates))) {
       final liveness = _liveness.putIfAbsent(activation.body.target, () {
         final body = activation.body as IrFunction;
         return ValueLiveness.source(
@@ -1096,7 +1105,9 @@ final class ProgramFlow(
                 ...block.instructions,
                 if (block.end case Invoke(:final operation)) operation,
               ])
-                if (instruction.effects.contains(Effect.allocates)) instruction,
+                if (instruction is AllocatedObject ||
+                    instruction.effects.contains(Effect.allocates))
+                  instruction,
           },
         );
       });
@@ -2563,15 +2574,19 @@ final class ProgramFlow(
         ValueType.boolean,
         ValueType.string,
       ];
-      for (final type in primitiveTypes) {
-        if (value.mayHaveInstance(type) && seen.add(type)) yield type;
-      }
-      if (primitiveTypes.contains(bound.nonNullable)) continue;
-      for (final declaration in program.classes) {
-        final type = declaration.type;
-        if (!type.isAbstract && value.mayHaveInstance(type) && seen.add(type)) {
-          yield type;
-        }
+      for (final type in _receiverBounds.putIfAbsent(
+        bound,
+        () => [
+          for (final type in primitiveTypes)
+            if (bound.mayHaveInstance(type)) type,
+          if (!primitiveTypes.contains(bound.nonNullable))
+            for (final declaration in program.classes)
+              if (!declaration.type.isAbstract &&
+                  bound.mayHaveInstance(declaration.type))
+                declaration.type,
+        ],
+      )) {
+        if (seen.add(type)) yield type;
       }
     }
   }

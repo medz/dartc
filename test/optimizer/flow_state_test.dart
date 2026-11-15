@@ -982,12 +982,32 @@ void main() {
   );
 
   test('address provenance keeps referenced storage without changing address types', () {
+    final callback = FunctionTarget(_uri, 'constantCallback', .integer, []);
+    final callable = FunctionConstant(callback);
+    final constants = FlowValue.constant(
+      SequenceConstant(CoreTypes.listOf(.object), [
+        for (var i = -99; i <= 99; i++) Constant.string('$i'),
+        SequenceConstant(CoreTypes.listOf(.function), [callable]),
+      ]),
+    );
     final cell = NewCell(CellType(.integer), _one);
-    final allocated = _step(FlowState(IrProgram([], [])), cell);
+    final allocated = _step(
+      FlowState(IrProgram([], [_body(callback, const Return(_one))])),
+      cell,
+    );
     final address = FlowValue.unknown(.integer)
         .withReferences([allocated.value]);
     expect(address.types, [ValueType.integer]);
-    final projected = allocated.normal!.project([address]);
+    final projected = allocated.normal!.project([address, constants]);
+    for (final reachable in [
+      projected.reachableValues([constants]),
+      projected.exposedFrom([constants]),
+    ]) {
+      expect(
+        reachable.constants.map((value) => value.structuralKey),
+        contains(callable.structuralKey),
+      );
+    }
     expect(
       _step(
         projected,

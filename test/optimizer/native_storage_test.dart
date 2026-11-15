@@ -20,6 +20,233 @@ const _placeholder = Constant.integer(0);
 
 void main() {
   test(
+    'a pure allocation view retains fresh state through its call summary',
+    () {
+      final adopt = FunctionTarget(null, 'adopt', _type, [.integer]);
+      final body = Block(adopt.parameterTypes);
+      final object = body.emit(
+        AllocatedObject(
+          body.parameters.single,
+          _type,
+          const Constant.integer(8),
+        ),
+      );
+      body.finish(Return(object));
+      final target = FunctionTarget(null, 'entry', .integer, [.integer]);
+      final entry = Block(target.parameterTypes);
+      final result = entry.emit(DirectCall(adopt, entry.parameters));
+      final read = entry.emit(
+        LoadObjectData(
+          result,
+          const Constant.integer(ObjectHeader.fieldsOffset),
+          _i64,
+        ),
+      );
+      entry.finish(Return(read));
+      final facts = ProgramFlow(
+        IrProgram(_program.classes, [
+          IrFunction(adopt, [body]),
+          IrFunction(target, [entry]),
+        ]),
+        [
+          (target: target, arguments: [FlowValue.unknown(.integer)]),
+        ],
+        memoryLayout: _layout,
+      ).facts;
+      expect(_number(facts.returnedBy(target)), 0);
+      expect(facts.effectsOf(object), isEmpty);
+    },
+  );
+
+  test(
+    'void calls retain fresh storage reachable only by a saved raw address',
+    () {
+      final saved = GlobalVariable(
+        Uri.parse('memory:allocation-state'),
+        'saved',
+        .integer,
+        isLate: true,
+      );
+      final adopt = FunctionTarget(null, 'adopt', .voidType, [.integer]);
+      final body = Block(adopt.parameterTypes);
+      final object = body.emit(
+        AllocatedObject(
+          body.parameters.single,
+          _type,
+          const Constant.integer(8),
+        ),
+      );
+      body.emit(
+        StoreObjectData(
+          object,
+          const Constant.integer(ObjectHeader.fieldsOffset),
+          _i64,
+          const Constant.integer(93),
+        ),
+      );
+      body.finish(const Return());
+      final target = FunctionTarget(null, 'entry', .integer, [.integer]);
+      final entry = Block(target.parameterTypes);
+      entry.emit(StoreGlobal(saved, entry.parameters.single));
+      entry.emit(DirectCall(adopt, entry.parameters));
+      final address = entry.emit(
+        IntBinary(
+          .add,
+          entry.emit(LoadGlobal(saved)),
+          const Constant.integer(ObjectHeader.fieldsOffset),
+        ),
+      );
+      final read = entry.emit(LoadNative(address, _i64));
+      entry.finish(Return(read));
+      final facts = ProgramFlow(
+        IrProgram(
+          _program.classes,
+          [
+            IrFunction(adopt, [body]),
+            IrFunction(target, [entry]),
+          ],
+          globals: [saved],
+        ),
+        [
+          (target: target, arguments: [FlowValue.unknown(.integer)]),
+        ],
+        memoryLayout: _layout,
+      ).facts;
+      expect(_number(facts.returnedBy(target)), 93);
+    },
+  );
+
+  test(
+    'fresh allocation storage preserves headers and aliases its source address',
+    () {
+      final parameter = Block([.integer]).parameters.single;
+      final raw = FlowValue.unknown(.integer)
+          .withSource(parameter, _activation);
+      final operation = AllocatedObject(
+        parameter,
+        _type,
+        const Constant.integer(8),
+      );
+      final initial = FlowState(_program, memoryLayout: _layout);
+      final created = _step(initial, operation, operands: [raw, _integer(8)]);
+      expect(created.effects, isEmpty);
+      expect(created.exceptional, isNull);
+      final object = created.value.objects.single;
+      final address = FlowValue.address(FlowAddress(object, 0));
+      expect(_load(created.normal!, address, _i64).constant, isNull);
+      expect(
+        _number(
+          _load(
+            created.normal!,
+            _offset(address, ObjectHeader.fieldsOffset),
+            _i64,
+          ),
+        ),
+        0,
+      );
+      expect(
+        _number(
+          _load(
+            created.normal!,
+            _offset(address, _layout.objectLayout(_type).size),
+            _i64,
+          ),
+        ),
+        0,
+      );
+      final written = _store(created.normal!, raw, _i64, _integer(73));
+      expect(_number(_load(written, address, _i64)), 73);
+      expect(written.containsNative(raw, _i64), isTrue);
+      final joined = written.copy()..join(initial);
+      expect(joined.containsNative(raw, _i64), isFalse);
+      final rebound = written.copy()..retainSources((_) => false);
+      expect(rebound.containsNative(raw, _i64), isFalse);
+      expect(_number(_load(rebound, address, _i64)), 73);
+      final projected = written.project([raw]);
+      expect(projected.objects, contains(object));
+      expect(_number(_load(projected, raw, _i64)), 73);
+    },
+  );
+
+  test('allocation views and their original addresses agree through call summaries', () {
+    final field = InstanceField(_type, 'value', .integer);
+    final saved = GlobalVariable(
+      Uri.parse('memory:allocation-state'),
+      'saved',
+      .integer,
+      isLate: true,
+    );
+    final adopt = FunctionTarget(null, 'adopt', _type, [.integer]);
+    final create = Block(adopt.parameterTypes);
+    final allocated = create.emit(
+      AllocatedObject(
+        create.parameters.single,
+        _type,
+        const Constant.integer(8),
+      ),
+    );
+    create.emit(StoreField(field, allocated, const Constant.integer(42)));
+    create.emit(
+      StoreObjectReference(
+        allocated,
+        const Constant.integer(ObjectHeader.typeOffset),
+        TypeConstant(_type),
+      ),
+    );
+    final initialized = create.emit(LoadField(field, allocated));
+    create.finish(Return(allocated));
+    final target = FunctionTarget(null, 'entry', .integer, [.integer]);
+    final entry = Block(target.parameterTypes);
+    entry.emit(StoreGlobal(saved, const Constant.integer(7)));
+    final object = entry.emit(DirectCall(adopt, entry.parameters));
+    final raw = entry.emit(
+      IntBinary(
+        .add,
+        entry.parameters.single,
+        const Constant.integer(ObjectHeader.fieldsOffset),
+      ),
+    );
+    entry.emit(StoreNative(raw, _i64, const Constant.integer(93)));
+    final repeatedView = entry.emit(
+      AllocatedObject(
+        entry.parameters.single,
+        _type,
+        const Constant.integer(8),
+      ),
+    );
+    final read = entry.emit(
+      LoadObjectData(
+        repeatedView,
+        const Constant.integer(ObjectHeader.fieldsOffset),
+        _i64,
+      ),
+    );
+    final stale = entry.emit(LoadField(field, object));
+    entry.finish(
+      Return(entry.emit(IntBinary(.add, read, entry.emit(LoadGlobal(saved))))),
+    );
+    final graph = IrProgram(
+      [
+        IrClass(_type, [field]),
+      ],
+      [
+        IrFunction(target, [entry]),
+        IrFunction(adopt, [create]),
+      ],
+      globals: [saved],
+    );
+    final facts = ProgramFlow(graph, [
+      (target: target, arguments: [FlowValue.unknown(.integer)]),
+    ], memoryLayout: _layout).facts;
+    expect(_number(facts.returnedBy(target)), 100);
+    expect(_number(facts.valueOf(initialized)), 42);
+    expect(facts.valueOf(stale).constant, isNull);
+    expect(facts.valueOf(object).objects, facts.valueOf(repeatedView).objects);
+    expect(facts.effectsOf(allocated), isEmpty);
+    expect(facts.exitsOf(allocated).exceptional, isFalse);
+  });
+
+  test(
     'descriptor reads use emitted words without inventing relocated addresses',
     () {
       final state = FlowState(_program, memoryLayout: _layout);
