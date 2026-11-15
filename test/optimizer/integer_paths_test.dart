@@ -90,6 +90,58 @@ void main() {
   });
 
   test(
+    'checks on a stored loop result constrain its subsequent getter reads',
+    () {
+      final function = body('checkedLoopRead');
+      final facts = ProgramFlow(program, [
+        (target: function.target, arguments: [FlowValue.unknown(.integer)]),
+      ]).facts;
+      final operations = function.blocks
+          .expand(
+            (block) => [
+              ...block.instructions,
+              if (block.end case Invoke(:final operation)) operation,
+            ],
+          )
+          .whereType<IntBinary>();
+      final offset = operations.singleWhere(
+        (operation) => operation.operator == .multiply,
+      );
+      expect(facts.valueOf(offset).integers, FlowIntegerRange(0, 24));
+      final optimized =
+          ProgramOptimizer(const [
+            ProgramSimplification(),
+            ProgramCallSpecialization(),
+            ProgramStoragePromotion(),
+            ProgramStorageElimination(),
+            DirectCallInlining(),
+          ]).run(program, [
+            (target: function.target, arguments: [FlowValue.unknown(.integer)]),
+          ]);
+      final rewritten =
+          optimized.program.implementationOf(function.target) as IrFunction;
+      for (final count in [-3, 0, 1, 4, 9]) {
+        expect(
+          IrInterpreter(optimized.program, {}).run(rewritten, [count]),
+          source.checkedLoopRead(count),
+        );
+      }
+      expect(
+        rewritten.blocks
+            .expand(
+              (block) => [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ],
+            )
+            .whereType<IntBinary>()
+            .where((operation) => operation.operator == .shiftLeft),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'bounded source loops carry branch ranges through parameterless edges',
     () {
       final function = body('boundedLoop');

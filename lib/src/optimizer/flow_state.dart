@@ -4,6 +4,7 @@ import 'package:dartc/layout.dart';
 
 import 'flow_memory.dart';
 import 'flow_value.dart';
+import 'integer_range.dart';
 import 'memory_layout.dart';
 import 'state_map.dart';
 
@@ -97,11 +98,26 @@ final class FlowState {
 
   /// Keeps valid SSA equalities without changing stored values or prior snapshots.
   void retainSources(bool Function(FlowSource) retain) {
-    FlowValue filter(FlowValue value) =>
-        value.withSources(value.sources.where(retain));
-    _globals = _globals.mapValues((_, slot) => slot.map(filter));
-    _objects = _objects.mapValues((_, object) => object.map(filter));
-    _escaped = filter(_escaped);
+    _mapValues((value) => value.withSources(value.sources.where(retain)));
+  }
+
+  /// Applies path bounds to storage still equal to the checked SSA definitions.
+  void refineIntegers(Map<FlowSource, FlowIntegerRange> ranges) {
+    if (ranges.isEmpty) return;
+    _mapValues((value) {
+      for (final source in value.sources) {
+        if (ranges[source] case final range?) {
+          value = value.restrictIntegers(range);
+        }
+      }
+      return value;
+    });
+  }
+
+  void _mapValues(FlowValue Function(FlowValue) transform) {
+    _globals = _globals.mapValues((_, slot) => slot.map(transform));
+    _objects = _objects.mapValues((_, object) => object.map(transform));
+    _escaped = transform(_escaped);
   }
 
   /// Adds an executable alternative, skipping unchanged storage subtrees.
@@ -188,11 +204,14 @@ final class FlowState {
   /// Applies a callee's changes after mapping its allocation and value identities.
   ///
   /// Unrelated caller storage is preserved. The returned wrapper is independent.
+  /// [preservesInputSources] requires a callee proven not to mutate storage or
+  /// trigger collection; its reads can add aliases without expiring old ones.
   FlowState applySummary(
     FlowState before,
     FlowState after, {
     required FlowObject Function(FlowObject) mapObject,
     required FlowValue Function(FlowValue) mapValue,
+    bool preservesInputSources = false,
   }) {
     if (!identical(program, before.program) ||
         !identical(program, after.program) ||
@@ -203,10 +222,28 @@ final class FlowState {
       );
     }
     final result = copy();
+    _Slot preserve(_Slot next, _Slot? previous) {
+      if (!preservesInputSources || previous == null) return next;
+      return _Slot._(
+        next.value.withSources({
+          ...next.value.sources,
+          ...previous.value.sources,
+        }),
+        next.unbound,
+        next.initializer.withSources({
+          ...next.initializer.sources,
+          ...previous.initializer.sources,
+        }),
+      );
+    }
+
     for (final change in after._globals.differences(before._globals)) {
       result._setGlobal(
         change.key,
-        (change.after ?? _initial(change.key)).map(mapValue),
+        preserve(
+          (change.after ?? _initial(change.key)).map(mapValue),
+          result._globals[change.key] ?? result._initial(change.key),
+        ),
       );
     }
     for (final change in after._objects.differences(before._objects)) {
@@ -223,7 +260,10 @@ final class FlowState {
         if (slot.after == null) {
           throw StateError('A summary cannot remove a declared storage slot.');
         }
-        current = current!.withSlot(slot.key, slot.after!.map(mapValue));
+        current = current!.withSlot(
+          slot.key,
+          preserve(slot.after!.map(mapValue), current.slots[slot.key]),
+        );
       }
       current = current!.withFlags(summary: next.summary && !prior.summary);
       if (!_sameCaptures(next.captures, prior.captures)) {
@@ -1190,6 +1230,63 @@ final class FlowState {
   FlowValue storedValue(FlowObject object, InstanceField field) =>
       _objects[object]?.slots[field]?.value ??
       FlowValue.unknown(field.typeFor(object.type as ClassType));
+
+  /// Records a completed read of one definite, strong storage location.
+  void rememberRead(
+    Instruction read,
+    List<FlowValue> operands,
+    FlowSource source,
+  ) {
+    if (operands.length != read.inputs.length ||
+        !identical(source.value, read)) {
+      throw ArgumentError(
+        'A stored read requires its operands and SSA source.',
+      );
+    }
+    if (read case LoadGlobal(:final global)) {
+      _requireGlobal(global);
+      final slot = _globals[global] ?? _initial(global);
+      if (!slot.unbound) {
+        _setGlobal(
+          global,
+          _Slot._(
+            slot.value.withSource(read, source.activation),
+            slot.unbound,
+            slot.initializer,
+          ),
+        );
+      }
+      return;
+    }
+    final key = switch (read) {
+      LoadField(:final field) when !_weak(field) => field,
+      ReadCell() => _cell,
+      _ => null,
+    };
+    if (key == null) return;
+    final receiver = operands.single;
+    if (receiver.objects.length != 1 ||
+        receiver.constants.isNotEmpty ||
+        receiver.unknownTypes.isNotEmpty ||
+        receiver.addresses.isNotEmpty) {
+      return;
+    }
+    final object = receiver.objects.single;
+    final state = _objects[object];
+    final slot = state?.slots[key];
+    if (state == null || state.summary || slot == null || slot.unbound) return;
+    _objects = _objects.withEntry(
+      object,
+      state.withSlot(
+        key,
+        _Slot._(
+          slot.value.withSource(read, source.activation),
+          slot.unbound,
+          slot.initializer,
+        ),
+      ),
+    );
+  }
 
   /// Values accessible through current fields, cells and closure captures.
   FlowValue reachableValues(Iterable<FlowValue> roots) =>

@@ -1,5 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_state.dart';
+import 'package:dartc/src/optimizer/flow_value.dart' show FlowSource;
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
@@ -11,6 +12,62 @@ const _one = Constant.integer(1);
 const _two = Constant.integer(2);
 
 void main() {
+  for (final repeated in [false, true]) {
+    test(
+      'read equality applies only to one cell and expires on write ($repeated)',
+      () {
+        final initial = FlowState(IrProgram([], []));
+        final cell = NewCell(CellType(.integer), _one);
+        final allocated = _step(
+          initial,
+          cell,
+          operands: [FlowValue.unknown(.integer)],
+          repeated: repeated,
+        );
+        final read = ReadCell(cell);
+        final source = FlowSource(read, _activation);
+        final snapshot = allocated.normal!.copy();
+        final state = allocated.normal!
+          ..rememberRead(read, [allocated.value], source);
+        expect(
+          state.boundValueOf(read, [allocated.value])!.sources.contains(source),
+          !repeated,
+        );
+        expect(
+          snapshot.boundValueOf(read, [allocated.value])!.sources,
+          isEmpty,
+        );
+        state.refineIntegers({source: FlowIntegerRange(0, 3)});
+        expect(
+          state.boundValueOf(read, [allocated.value])!.integers,
+          repeated ? FlowIntegerRange.full : FlowIntegerRange(0, 3),
+        );
+        final written = _step(
+          state,
+          WriteCell(cell, const Constant.integer(-1)),
+          operands: [
+            allocated.value,
+            FlowValue.constant(const Constant.integer(-1)),
+          ],
+        ).normal!;
+        expect(written.boundValueOf(read, [allocated.value])!.sources, isEmpty);
+        if (!repeated) {
+          expect(
+            written.boundValueOf(read, [allocated.value])!.integers,
+            FlowIntegerRange(-1, -1),
+          );
+        }
+        final other = _step(snapshot, NewCell(CellType(.integer), _two));
+        final ambiguous = allocated.value.join(other.value);
+        other.normal!.rememberRead(read, [ambiguous], source);
+        expect(
+          other.normal!.boundValueOf(read, [allocated.value])!.sources,
+          isEmpty,
+        );
+      },
+    );
+  }
+
   test('rebinding forgets stored SSA equalities without changing snapshots or values', () {
     final parameter = Block([.integer]).parameters.single;
     final otherActivation = Object();

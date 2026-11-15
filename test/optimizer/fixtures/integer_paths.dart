@@ -59,3 +59,13 @@ int overwrittenAlias(int value) {
     return 13;
   }
 }
+
+int checkedLoopRead(int count) {
+  final box = IntegerBox(0);
+  for (var index = 0; index < count; index++) {
+    box.value = index;
+  }
+  if (box.value < 0) return 3;
+  if (box.value >= 4) return 5;
+  return (0 << (box.value * 8)) + 7;
+}

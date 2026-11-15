@@ -255,6 +255,8 @@ final class ProgramFlow(
     FlowState input, {
     Map<TypeParameterType, ValueType> environment = const {},
     bool checkAllArguments = false,
+    // Helper invocations need not return the enclosing operation's value.
+    FlowSource? resultSource,
   }) {
     if (arguments.any((value) => value.isBottom)) return _unreachable;
     final target = source.implementation;
@@ -432,12 +434,17 @@ final class ProgramFlow(
       );
     }
 
-    FlowValue mapValue(FlowValue value) {
+    FlowValue mapValue(FlowValue value, {bool normal = false}) {
       final sources = <FlowSource>{};
       for (final source in value.sources) {
         if (!identical(source.activation, callee)) {
           sources.add(source);
           continue;
+        }
+        if (normal &&
+            resultSource != null &&
+            callee.returned.sources.contains(source)) {
+          sources.add(resultSource);
         }
         final index = parameters.indexWhere(
           (parameter) => identical(parameter, source.value),
@@ -447,17 +454,20 @@ final class ProgramFlow(
       return value.mapObjects(mapObject).withSources(sources);
     }
 
-    FlowState? apply(FlowState? after) => after == null
+    FlowState? apply(FlowState? after, {bool normal = false}) => after == null
         ? null
         : input.applySummary(
             projected,
             after.project([...arguments, callee.returned, callee.exception]),
             mapObject: mapObject,
-            mapValue: mapValue,
+            mapValue: (value) => mapValue(value, normal: normal),
+            preservesInputSources: callee.effects.every(
+              (effect) => effect == .readsStorage || effect == .mayThrow,
+            ),
           );
     final invoked = FlowResult(
       value: mapValue(callee.returned),
-      normal: apply(callee.normal),
+      normal: apply(callee.normal, normal: true),
       exceptional: apply(callee.exceptional),
       exception: mapValue(callee.exception),
       stackTrace: mapValue(callee.stackTrace),
@@ -651,6 +661,10 @@ final class ProgramFlow(
             ) ||
             changed;
       }
+      nextState.refineIntegers({
+        for (final entry in nextRanges.entries)
+          FlowSource(entry.key, activation): entry.value,
+      });
       if (incomingRanges[jump.target] case final previous?) {
         for (final value in previous.keys.toList()) {
           final next = nextRanges[value];
@@ -912,6 +926,11 @@ final class ProgramFlow(
       call: call,
     );
     if (stored != null) {
+      stored.normal?.rememberRead(
+        operation,
+        inputs,
+        FlowSource(operation, activation),
+      );
       activation.operationEffects[operation] = {
         ...stored.effects,
         if (stored.exceptional != null) Effect.mayThrow,
@@ -937,6 +956,7 @@ final class ProgramFlow(
           inputs,
           state,
           environment: environment,
+          resultSource: FlowSource(operation, activation),
         );
       case FunctionCall(:final function, :final positional, :final named):
         activation.operationEffects[operation] = const {};
@@ -948,6 +968,7 @@ final class ProgramFlow(
           positional.map(read).toList(),
           named.map((key, value) => MapEntry(key, read(value))),
           state,
+          resultSource: FlowSource(operation, activation),
         );
       case InstanceCall(
         :final receiver,
@@ -966,6 +987,7 @@ final class ProgramFlow(
           named.map((name, value) => MapEntry(name, read(value))),
           operation.typeArguments,
           state,
+          resultSource: FlowSource(operation, activation),
         );
       case DynamicDispatch(
         :final receiver,
@@ -986,6 +1008,7 @@ final class ProgramFlow(
           typeArguments,
           state,
           checkAllArguments: true,
+          resultSource: FlowSource(operation, activation),
         );
       case BindMethod(:final method, :final receiver, :final direct):
         activation.operationEffects[operation] = const {};
@@ -1360,6 +1383,7 @@ final class ProgramFlow(
     List<ValueType> typeArguments,
     FlowState state, {
     bool checkAllArguments = false,
+    FlowSource? resultSource,
   }) {
     var result = _unreachable;
     var unresolved = false;
@@ -1400,6 +1424,7 @@ final class ProgramFlow(
                   state,
                   typeArguments: typeArguments,
                   checkAllArguments: checkAllArguments,
+                  resultSource: resultSource,
                 ),
         );
       }
@@ -1458,6 +1483,7 @@ final class ProgramFlow(
                 typeArguments,
                 activation,
               ),
+              resultSource: resultSource,
             ),
           );
           continue;
@@ -1474,6 +1500,7 @@ final class ProgramFlow(
           positional,
           named,
           state,
+          resultSource: resultSource,
         );
         if (missing == null) {
           unresolved = true;
@@ -1500,6 +1527,7 @@ final class ProgramFlow(
           positional,
           named,
           state,
+          resultSource: resultSource,
         );
         if (missing == null) {
           unresolved = true;
@@ -1541,6 +1569,7 @@ final class ProgramFlow(
         state,
         environment: _environment(target, type, appliedTypes, activation),
         checkAllArguments: checkAllArguments,
+        resultSource: resultSource,
       );
       if (target.requiresResultCheck && invoked.normal != null) {
         final checked = invoked.value.check(
@@ -1636,8 +1665,9 @@ final class ProgramFlow(
     FlowValue receiver,
     List<FlowValue> positional,
     Map<String, FlowValue> named,
-    FlowState state,
-  ) {
+    FlowState state, {
+    FlowSource? resultSource,
+  }) {
     if (operation case DynamicDispatch(:final failure?, :final typeArguments)) {
       return _invoke(
         activation,
@@ -1651,6 +1681,7 @@ final class ProgramFlow(
         ],
         state,
         environment: _environment(failure, null, typeArguments, activation),
+        resultSource: resultSource,
       );
     }
     final target = program.lookupMember(receiverType, (
@@ -1770,6 +1801,7 @@ final class ProgramFlow(
     FlowState state, {
     List<ValueType>? typeArguments,
     bool checkAllArguments = false,
+    FlowSource? resultSource,
   }) {
     FlowResult result = _unreachable;
     final appliedArguments = [
@@ -1795,6 +1827,7 @@ final class ProgramFlow(
             [receiver, ...positional, ...named.values],
             state,
             environment: _environment(failure, null, typeArguments, activation),
+            resultSource: resultSource,
           ),
         );
       } else {
@@ -1886,6 +1919,7 @@ final class ProgramFlow(
           state,
           environment: environment,
           checkAllArguments: checkAllArguments,
+          resultSource: resultSource,
         );
       }
       result = _joinResult(result, invoked);
@@ -1926,6 +1960,7 @@ final class ProgramFlow(
               state,
               typeArguments: creator.instantiations[_original(object)]!,
               checkAllArguments: checkAllArguments,
+              resultSource: resultSource,
             ),
           );
         case MakeClosure(:final target):
@@ -1945,6 +1980,7 @@ final class ProgramFlow(
                 ..._environment(target, null, effective, activation),
               },
               checkAllArguments: checkAllArguments,
+              resultSource: resultSource,
             ),
           );
         case BindMethod() || DynamicDispatch():
@@ -1965,6 +2001,7 @@ final class ProgramFlow(
                 state,
                 environment: _environment(target, null, effective, activation),
                 checkAllArguments: checkAllArguments,
+                resultSource: resultSource,
               ),
             );
           }
