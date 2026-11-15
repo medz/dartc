@@ -205,7 +205,7 @@ final class FlowState {
   ///
   /// Unrelated caller storage is preserved. The returned wrapper is independent.
   /// [preservesInputSources] requires a callee proven not to mutate storage or
-  /// trigger collection; its reads can add aliases without expiring old ones.
+  /// trigger collection; its reads add aliases while preserving caller values.
   FlowState applySummary(
     FlowState before,
     FlowState after, {
@@ -225,12 +225,12 @@ final class FlowState {
     _Slot preserve(_Slot next, _Slot? previous) {
       if (!preservesInputSources || previous == null) return next;
       return _Slot._(
-        next.value.withSources({
+        previous.value.withSources({
           ...next.value.sources,
           ...previous.value.sources,
         }),
-        next.unbound,
-        next.initializer.withSources({
+        previous.unbound,
+        previous.initializer.withSources({
           ...next.initializer.sources,
           ...previous.initializer.sources,
         }),
@@ -253,6 +253,7 @@ final class FlowState {
       final prior = change.before;
       var current = result._objects[object];
       if (prior == null || current == null) {
+        if (preservesInputSources) continue;
         result._allocate(object, next.map(mapValue));
         continue;
       }
@@ -264,6 +265,10 @@ final class FlowState {
           slot.key,
           preserve(slot.after!.map(mapValue), current.slots[slot.key]),
         );
+      }
+      if (preservesInputSources) {
+        result._objects = result._objects.withEntry(object, current!);
+        continue;
       }
       current = current!.withFlags(summary: next.summary && !prior.summary);
       if (!_sameCaptures(next.captures, prior.captures)) {
@@ -281,7 +286,7 @@ final class FlowState {
       }
       result._objects = result._objects.withEntry(object, current);
     }
-    if (after._escaped != before._escaped) {
+    if (!preservesInputSources && after._escaped != before._escaped) {
       result._escaped = result._escaped.join(mapValue(after._escaped));
     }
     return result;

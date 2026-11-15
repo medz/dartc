@@ -874,6 +874,33 @@ void main() {
     );
   });
 
+  test('a read-only summary retains the current caller value and its new read equality', () {
+    final cell = NewCell(CellType(.integer), _one);
+    final allocated = _step(FlowState(IrProgram([], [])), cell);
+    final receiver = allocated.value;
+    final caller = allocated.normal!;
+    final other = _step(
+      caller,
+      WriteCell(cell, _two),
+      operands: [receiver, .constant(_two)],
+    ).normal!;
+    final summarized = caller.copy()..join(other);
+    final read = ReadCell(cell);
+    final source = FlowSource(read, _activation);
+    summarized.rememberRead(read, [receiver], source);
+    final result = caller.applySummary(
+      caller.project([receiver]),
+      summarized,
+      mapObject: (object) => object,
+      mapValue: (value) => value,
+      preservesInputSources: true,
+    );
+    final retained = result.boundValueOf(read, [receiver])!;
+    expect(retained.constant?.structuralKey, _one.structuralKey);
+    expect(retained.sources, contains(source));
+    expect(caller.boundValueOf(read, [receiver])!.sources, isEmpty);
+  });
+
   test(
     'summary deltas preserve private caller storage and rename fresh objects',
     () {
