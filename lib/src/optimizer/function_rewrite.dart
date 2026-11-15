@@ -229,7 +229,11 @@ final class FunctionRewrite(
         return result;
       });
       read = (source) {
-        if (source is Constant || source is UnwindValue) return source;
+        if (source is Constant ||
+            source is UnwindValue ||
+            source is CallFrameValue) {
+          return source;
+        }
         if (locals[source] case final result?) return result;
         if (source is Instruction) {
           return resumed[source]?.parameters.single ?? clone(source);
@@ -411,7 +415,9 @@ final class FunctionRewrite(
         changed |= !identical(result, original);
         return result;
       }
-      if (original is UnwindValue) return original;
+      if (original is UnwindValue || original is CallFrameValue) {
+        return original;
+      }
       final replacement = _replacement(original);
       if (!identical(original, replacement)) {
         if (!replacing.add(original)) {
@@ -876,7 +882,10 @@ final class FunctionRewrite(
       final visiting = <Instruction>{};
       bool available(Value value) {
         if (value == entry.key) return false;
-        if (value is Constant || owns(value) || phis.containsKey(value)) {
+        if (value is Constant ||
+            value is CallFrameValue ||
+            owns(value) ||
+            phis.containsKey(value)) {
           return true;
         }
         if (value is! Instruction ||

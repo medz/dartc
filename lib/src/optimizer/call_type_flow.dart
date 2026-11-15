@@ -297,7 +297,8 @@ final class CallTypeFlow(
         if (block.end case Invoke(:final operation)) operation,
       ]) {
         switch (operation) {
-          case DirectCall(:final target, :final inputs):
+          case DirectCall(:final target, :final inputs) ||
+              InitializeObject(initializer: final target, :final inputs):
             _invoke(body.target, target, inputs);
           case Construct(:final initializer, :final inputs):
             _invoke(target, initializer, [operation, ...inputs]);

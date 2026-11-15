@@ -59,6 +59,8 @@ void writeFunction(
       'const ${type.dartName}{${fields.entries.map((e) => '${e.key.owner.library}::${e.key.owner.dartName}.${e.key.name}: ${value(e.value)}').join(', ')}}${payload.isEmpty ? '' : '[${payload.map(value).join(', ')}]'}',
     TestedValue(:final test, :final type) =>
       '${value(test.operand)} as ${type.dartName}',
+    CallFrameValue(:final isReturnAddress) =>
+      isReturnAddress ? 'call.returnAddress' : 'call.stackPointer',
     UnwindValue() => v == UnwindValue.exception ? 'exception' : 'stackTrace',
     _ => '%${ids.putIfAbsent(v, () => ids.length)}',
   };
@@ -81,6 +83,8 @@ void writeFunction(
   String operation(Instruction op) => switch (op) {
     CaptureStackTrace() => 'captureStackTrace',
     FrameValue(:final kind) => 'frame.${kind.name}',
+    ObjectDescriptorAddress(:final declaration) =>
+      'descriptor ${declaration.dartName}',
     LoadLibrary(:final reference) =>
       'loadLibrary ${reference.unit}::${reference.prefix} -> ${reference.library}',
     CheckLibraryLoaded(:final reference) =>
@@ -173,6 +177,8 @@ void writeFunction(
       'makeInvocation ${op.selector.kind.name} '
           '${op.selector.privateScope == null ? "" : "${op.selector.privateScope}::"}'
           '${op.selector.name}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})',
+    InitializeObject(:final initializer, :final inputs) =>
+      'initialize ${symbol(initializer)}(${inputs.map(value).join(', ')})',
     Construct() =>
       'new ${symbol(op.initializer, op.instantiatedType)}(${op.inputs.map(value).join(', ')})',
     StoreField() =>

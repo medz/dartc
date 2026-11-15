@@ -41,6 +41,37 @@ void main() {
   FunctionAllocation<CpuRegister> allocate(SelectedFunction body) =>
       FunctionAllocation(FunctionSelection(body, _Constraints()));
 
+  test('call-frame arguments bind ABI locations without SSA homes', () {
+    final callee = FunctionTarget(
+      uri,
+      'scan',
+      .voidType,
+      List.filled(10, ValueType.integer),
+    );
+    final target = FunctionTarget(uri, 'caller', .voidType, []);
+    final entry = Block();
+    final call = entry.emit(
+      DirectCall(callee, [
+        CallFrameValue.stackPointer,
+        CallFrameValue.returnAddress,
+        for (var i = 2; i < 8; i++) Constant.integer(i),
+        CallFrameValue.stackPointer,
+        CallFrameValue.returnAddress,
+      ]),
+    );
+    entry.finish(const Return());
+    IrFunction(target, [entry]);
+    final body = select(target, [entry])..invocations[call] = callee;
+    final allocation = allocate(body);
+    final bound = allocation.operations[call]!.arguments
+        .where((argument) => argument.frameValue != null)
+        .toList();
+    expect(bound.length, 4);
+    expect(bound.where((argument) => argument.stackOffset != null).length, 2);
+    expect(bound.every((argument) => argument.loads.isEmpty), isTrue);
+    expect(allocation.safepoints[call]!.offsets, isEmpty);
+  });
+
   test('shared Jump keeps transfers for each predecessor', () {
     final target = FunctionTarget(uri, 'sharedEdge', .integer, [
       .boolean,

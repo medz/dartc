@@ -77,7 +77,11 @@ final class FunctionLiveness._(
           value = argumentsOf(edge)[index];
         }
         if (value is TestedValue) value = value.test.operand;
-        if (value is! Constant && value is! UnwindValue) yield value;
+        if (value is! Constant &&
+            value is! UnwindValue &&
+            value is! CallFrameValue) {
+          yield value;
+        }
       }
     }
 
@@ -90,7 +94,11 @@ final class FunctionLiveness._(
         if (counts != null && !stackCells.contains(value)) {
           counts.update(value, (n) => n + 1, ifAbsent: () => 1);
         }
-        if (value is! Constant && value is! UnwindValue) live.add(value);
+        if (value is! Constant &&
+            value is! UnwindValue &&
+            value is! CallFrameValue) {
+          live.add(value);
+        }
       }
 
       for (final edge in endOf(block).successors) {

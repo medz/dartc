@@ -158,6 +158,7 @@ final class FunctionSelection<R>(
               block,
             );
           case KeepAlive():
+          case ObjectDescriptorAddress():
           case NativeSymbolAddress():
           case FrameValue():
           case ReifyType():

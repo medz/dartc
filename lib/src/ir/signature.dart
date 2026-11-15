@@ -230,6 +230,14 @@ final class FunctionTarget(
     _ => signature.parameters,
   };
 
+  /// Entry values after generic references are represented without free types.
+  ///
+  /// Actual type arguments remain in the receiver or explicit type metadata.
+  List<ValueType> get erasedParameterTypes => [
+    for (final type in parameterTypes)
+      type.freeTypeParameters.isEmpty ? type : ValueType.object.nullable,
+  ];
+
   /// The entry slot of the first explicit Dart parameter.
   int get argumentOffset => parameterTypes.length - signature.parameters.length;
 

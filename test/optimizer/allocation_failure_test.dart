@@ -9,6 +9,90 @@ void main() {
   final failure = FunctionTarget(null, 'failure', .never, []);
   final reported = const Constant.string('resource exhausted');
 
+  test(
+    'explicit initialization preserves state on normal and exceptional returns',
+    () {
+      final saved = GlobalVariable(
+        Uri.parse('memory:initialization'),
+        'saved',
+        .integer,
+        isLate: true,
+      );
+      final initialize = FunctionTarget(
+        null,
+        'new',
+        .voidType,
+        [.boolean],
+        owner: storage,
+        kind: .initializer,
+      );
+      final body = Block(initialize.parameterTypes),
+          success = Block(),
+          failed = Block();
+      body.emit(StoreGlobal(saved, const Constant.integer(42)));
+      body.finish(Branch(body.parameters.last, Jump(failed), Jump(success)));
+      success.finish(const Return());
+      failed.finish(Throw(reported));
+      final root = FunctionTarget(null, 'initialize', .integer, [
+        .integer,
+        .boolean,
+      ]);
+      final entry = Block(root.parameterTypes),
+          done = Block(),
+          handler = Block();
+      entry.emit(StoreGlobal(saved, const Constant.integer(0)));
+      final object = entry.emit(
+        ReferenceFromAddress(entry.parameters.first, storage),
+      );
+      final call = InitializeObject(initialize, object, [
+        entry.parameters.last,
+      ]);
+      entry.finish(Invoke(call, onReturn: Jump(done), onThrow: Jump(handler)));
+      done.finish(Return(done.emit(LoadGlobal(saved))));
+      handler.finish(
+        Return(
+          handler.emit(
+            IntBinary(
+              .add,
+              handler.emit(LoadGlobal(saved)),
+              const Constant.integer(100),
+            ),
+          ),
+        ),
+      );
+      final program = IrProgram(
+        [
+          IrClass(storage, [], constructors: [initialize]),
+        ],
+        [
+          IrFunction(initialize, [body, success, failed]),
+          IrFunction(root, [entry, done, handler]),
+        ],
+        globals: [saved],
+      );
+      for (final throws in [false, true]) {
+        final facts = ProgramFlow(program, [
+          (
+            target: root,
+            arguments: [
+              FlowValue.unknown(.integer),
+              FlowValue.constant(Constant.boolean(throws)),
+            ],
+          ),
+        ]).facts;
+        expect(
+          (facts.returnedBy(root).constant as ScalarConstant).value,
+          throws ? 142 : 42,
+        );
+        expect(
+          facts.failureOf(call).exception.constant,
+          throws ? reported : null,
+        );
+        expect(facts.effectsOf(call), contains(Effect.writesStorage));
+      }
+    },
+  );
+
   test('ordinary failure bodies supply actual values, effects and state', () {
     final global = GlobalVariable(
       Uri.parse('memory:allocation'),

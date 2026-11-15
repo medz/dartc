@@ -16,6 +16,8 @@ import 'function_emitter.dart';
 import 'function_allocation.dart';
 import 'function_selection.dart';
 import 'scalar_function.dart';
+import 'memory_function.dart';
+import 'heap_runtime.dart';
 import 'native_adapter.dart';
 import 'native_callback.dart';
 import 'constant_data.dart';
@@ -204,45 +206,15 @@ base class ScalarCodeGenerator<R extends Object>(
                   ),
             )
           : primitives.contains(declaration)
-          ? heap.emit(
-              declaration,
+          ? MemoryFunction(
+              declaration == heap.invalid
+                  ? MemoryPrimitive.fail
+                  : heap.runtime!.primitives[declaration]!,
               emitter,
-              layouts,
-              call,
-              (fixup, type) {
-                relocations.add(
-                  .instruction(
-                    0,
-                    code.length + fixup.offset,
-                    fixup.encoding,
-                    constants.typeAddress(type),
-                  ),
-                );
-              },
-              (fixup, value) {
-                relocations.add(
-                  .instruction(
-                    0,
-                    code.length + fixup.offset,
-                    fixup.encoding,
-                    constants.addressOf(value),
-                  ),
-                );
-              },
-              safepoint,
-              (fixup, position) {
-                maps.reference(
-                  code.length + fixup.offset,
-                  fixup.encoding,
-                  code.length + position,
-                );
-              },
-              (fixup) {
-                final symbol = nativeSymbol('.dartc.clock');
-                nativeCalls.add((code.length, fixup, symbol));
-              },
-              (fixup) => callbackTemplates.add((code.length, fixup)),
-            )
+            ).generate((fixup) {
+              final symbol = nativeSymbol('.dartc.clock');
+              nativeCalls.add((code.length, fixup, symbol));
+            }, (fixup) => callbackTemplates.add((code.length, fixup)))
           : binding != null
           ? NativeAdapter(emitter).generate(
               binding.signature,
@@ -288,6 +260,16 @@ base class ScalarCodeGenerator<R extends Object>(
               safepoint,
               failures: managed,
               persistent: persistent,
+              descriptorAddress: (fixup, type) {
+                relocations.add(
+                  .instruction(
+                    0,
+                    code.length + fixup.offset,
+                    fixup.encoding,
+                    constants.typeAddress(type),
+                  ),
+                );
+              },
               nativeAddress: (fixup, reference) {
                 final name = nativeSymbols[reference];
                 if (name == null) {

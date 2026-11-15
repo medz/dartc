@@ -30,6 +30,7 @@ final class ScalarFunction<R extends Object>(
     bool failures = false,
     bool persistent = false,
     void Function(Fixup, NativeReference)? nativeAddress,
+    void Function(Fixup, ClassType)? descriptorAddress,
     void Function(Fixup, int)? codeAddress,
   }) {
     final adapter = NativeAdapter(emitter);
@@ -66,11 +67,18 @@ final class ScalarFunction<R extends Object>(
         final result = plan.result;
         if (selection.calls[instruction] case final selected?) {
           final native = instruction is NativeInvocation ? instruction : null;
-          final parked = persistent && native != null
+          final returnAddresses = persistent && native != null
               ? HeapEntry.park(emitter, selected.parkRegister!)
-              : const <Fixup>[];
+              : <Fixup>[];
           for (final argument in plan.arguments) {
             transfers(argument.loads);
+            if (argument.frameValue case final frame?) {
+              if (frame.isReturnAddress) {
+                emitter.address(argument.register, returnAddresses.add);
+              } else {
+                emitter.stackAddress(argument.register, 0);
+              }
+            }
             if (argument.nativeType case final type?) {
               adapter.convert(argument.register, type, intoDart: false);
             }
@@ -90,7 +98,7 @@ final class ScalarFunction<R extends Object>(
             }
             emitter.callRegister(selected.addressRegister!);
           }
-          for (final fixup in parked) {
+          for (final fixup in returnAddresses) {
             codeAddress!(fixup, emitter.position);
           }
           safepoint(
@@ -139,6 +147,13 @@ final class ScalarFunction<R extends Object>(
             case .returnAddress:
               emitter.loadStack(result!, frame.returnAddressOffset);
           }
+        } else if (instruction case ObjectDescriptorAddress(
+          :final declaration,
+        )) {
+          emitter.address(
+            result!,
+            (fixup) => descriptorAddress!(fixup, declaration),
+          );
         } else if (instruction case NativeSymbolAddress(:final reference)) {
           emitter.address(
             result!,

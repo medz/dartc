@@ -296,6 +296,9 @@ FunctionReferences verifyCallable(
     void checkOperation(Instruction op, int position) {
       checkTypeScope(op.type);
       if (op case ReifyType(:final template)) checkTypeScope(template);
+      if (op case ObjectDescriptorAddress(:final declaration)) {
+        (classes ??= {}).add(declaration);
+      }
       if (op case TypeTest(:final testedType)) checkTypeScope(testedType);
       if (op
           case DirectCall(:final ownerType?) ||
@@ -375,6 +378,7 @@ FunctionReferences verifyCallable(
             target: callee,
           ));
         case DirectCall(target: final callee) ||
+            InitializeObject(initializer: final callee) ||
             BindMethod(method: final callee) ||
             Construct(initializer: final callee):
           (callees ??= {}).add(callee);
@@ -446,6 +450,7 @@ FunctionReferences verifyCallable(
             op is! MakeClosure) {
           throw StateError('Capture storage used as a Dart value.');
         }
+        if (input is CallFrameValue && op is DirectCall) continue;
         use(input, position);
       }
     }

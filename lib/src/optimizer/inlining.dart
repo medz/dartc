@@ -170,6 +170,9 @@ IrProgram _inlineSelected(
           final List<Value> arguments;
           final Map<TypeParameterType, ValueType> environment;
           if (operation is DirectCall && sourceFacts) {
+            if (operation.inputs.any((value) => value is CallFrameValue)) {
+              continue;
+            }
             if (!_entryChecksProved(operation, facts)) continue;
             target = operation.target;
             arguments = operation.inputs;

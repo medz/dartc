@@ -30,6 +30,39 @@ IrProgram _inline(
 ).run(ProgramFlow(program, const [], openEntries: roots).facts);
 
 void main() {
+  test('inlining preserves call-bound frame values at the remaining call', () {
+    final walker = FunctionTarget(_uri, 'walk', .integer, [.integer, .integer]);
+    final helper = FunctionTarget(_uri, 'helper', .integer, []);
+    final root = FunctionTarget(_uri, 'root', .integer, []);
+    final call = DirectCall(walker, [
+      CallFrameValue.stackPointer,
+      CallFrameValue.returnAddress,
+    ]);
+    final body = Block();
+    body.finish(Return(body.emit(call)));
+    final entry = Block();
+    entry.finish(Return(entry.emit(DirectCall(helper, []))));
+    final walkerBody = Block(walker.parameterTypes);
+    walkerBody.finish(Return(walkerBody.parameters.first));
+    final result = _inline(
+      IrProgram([], [
+        IrFunction(root, [entry]),
+        IrFunction(helper, [body]),
+        IrFunction(walker, [walkerBody]),
+      ]),
+      [root],
+    );
+    final retained = (result.implementationOf(root) as IrFunction).blocks
+        .expand((block) => block.instructions)
+        .whereType<DirectCall>()
+        .single;
+    expect(retained.target, walker);
+    expect(retained.inputs, [
+      CallFrameValue.stackPointer,
+      CallFrameValue.returnAddress,
+    ]);
+  });
+
   test('pure call chains expand from leaves within one caller budget', () {
     final leaf = FunctionTarget(_uri, 'leaf', .integer, [.integer]);
     final middle = FunctionTarget(_uri, 'middle', .integer, [.integer]);

@@ -526,10 +526,7 @@ final class FunctionRepresentation(
                   heap.allocatePayload(layouts.native.buffer),
                   copy: copy,
                 )
-              : heap.constructorFor(
-                  layouts.native.view(type).initializer,
-                  layouts,
-                );
+              : heap.constructorFor(layouts.native.view(type).initializer);
           operands[instruction] = [
             address ?? const Constant.integer(0),
             owner,
@@ -622,7 +619,6 @@ final class FunctionRepresentation(
           }
           invocations[instruction] = heap.constructorFor(
             layouts.pointers.initializer,
-            layouts,
           );
           operands[instruction] = [
             address,
@@ -692,7 +688,6 @@ final class FunctionRepresentation(
                 !addressOnly.contains(instruction)) {
               invocations[instruction] = heap.constructorFor(
                 layouts.pointers.initializer,
-                layouts,
               );
               operands[instruction] = [
                 call,
@@ -727,7 +722,6 @@ final class FunctionRepresentation(
               !addressOnly.contains(instruction)) {
             invocations[instruction] = heap.constructorFor(
               layouts.pointers.initializer,
-              layouts,
             );
             operands[instruction] = [
               raw,
@@ -750,10 +744,7 @@ final class FunctionRepresentation(
             arguments.add(_reify(parameter, body));
           }
           arguments.add(_reify(target.signature, body));
-          invocations[instruction] = heap.constructorFor(
-            shape.initializer!,
-            layouts,
-          );
+          invocations[instruction] = heap.constructorFor(shape.initializer!);
           operands[instruction] = arguments;
           body.add(instruction);
           continue;
@@ -778,10 +769,7 @@ final class FunctionRepresentation(
             };
             if (initial is Instruction) body.add(initial);
           }
-          invocations[instruction] = heap.constructorFor(
-            shape.initializer,
-            layouts,
-          );
+          invocations[instruction] = heap.constructorFor(shape.initializer);
           operands[instruction] = [
             initial,
             if (shape.lazy case final lazy?) ...[
@@ -1446,10 +1434,7 @@ final class FunctionRepresentation(
                   ),
                 _ => BindMethod(target, capturedReceiver, direct: true),
               };
-              invocations[bound] = heap.constructorFor(
-                shape.initializer!,
-                layouts,
-              );
+              invocations[bound] = heap.constructorFor(shape.initializer!);
               final captures = <Value>[];
               final captured = convert(
                 capturedReceiver,
@@ -1510,10 +1495,7 @@ final class FunctionRepresentation(
               Value arguments = const Constant.nullValue();
               for (final type in types.reversed) {
                 final node = layouts.types.cons(type, arguments);
-                invocations[node] = heap.constructorFor(
-                  node.initializer,
-                  layouts,
-                );
+                invocations[node] = heap.constructorFor(node.initializer);
                 operands[node] = [
                   ...node.inputs,
                   layouts.types.constant(TypeMetadata.list),
@@ -1527,10 +1509,7 @@ final class FunctionRepresentation(
                     ? (receiver.type as FunctionType).typeParameters
                     : typeArguments,
               );
-              invocations[applied] = heap.constructorFor(
-                shape.initializer!,
-                layouts,
-              );
+              invocations[applied] = heap.constructorFor(shape.initializer!);
               operands[applied] = [
                 Constant.integer(shape.tag),
                 receiver,
@@ -2002,7 +1981,10 @@ final class FunctionRepresentation(
           boxes[instruction] = operand;
         }
         final destinations = switch (instruction) {
-          DirectCall(:final target) => layouts.entryTypes(target),
+          DirectCall(:final target) ||
+          InitializeObject(
+            initializer: final target,
+          ) => layouts.entryTypes(target),
           Construct(:final initializer) => [
             ...initializer.signature.parameters,
             TypeMetadata.type,

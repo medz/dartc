@@ -159,12 +159,12 @@ final class ProgramSelection(
                 globals.callFor(instruction) ??
                 switch (instruction) {
                   NativeCallbackAddress(:final target) => callbacks[target],
-                  DirectCall(:final target) => target,
+                  DirectCall(:final target) ||
+                  InitializeObject(initializer: final target) => target,
                   TypeCast() ||
                   NullCheck() => casts.targetFor(instruction).target,
                   Construct(:final initializer) => heap.constructorFor(
                     initializer,
-                    layouts,
                   ),
                   TypeTest() when body.tests[instruction] == .subtype =>
                     layouts.relations.test,
@@ -187,6 +187,7 @@ final class ProgramSelection(
     };
     Iterable<IrFunction> supportFunctions() => [
       ..._normalization.supportFunctions,
+      ...heap.functions(layouts, calls),
       ...layouts.native.functions,
       ...members.functions,
       ...layouts.closures.functions,
@@ -237,6 +238,8 @@ final class ProgramSelection(
       managed = needsHeap;
     }
     for (final body in functions.values) {
+      // Factory inputs are accounted for at their originating construction sites.
+      if (heap.allocates([body.target])) continue;
       final source = (members.callTypes?.program ?? members.program)
           .implementationOf(body.sourceTarget);
       final observed = {

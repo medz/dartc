@@ -48,6 +48,7 @@ final class AllocatedArgument<R extends Object>(
   final R register, {
   final int? stackOffset,
   final NativeTypeRef? nativeType,
+  final CallFrameValue? frameValue,
 }) {
   final List<AllocationMove<R>> loads = List.unmodifiable(loads);
 }
@@ -535,6 +536,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       emptyResult();
     } else if (selection.constantTests.containsKey(operation) ||
         operation is NativeSymbolAddress ||
+        operation is ObjectDescriptorAddress ||
         operation is FrameValue) {
       result = output(.general);
     } else if (operation case NewCell(:final initial)
@@ -797,20 +799,23 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
     void argument(int index, R register, {int? stackOffset}) {
       final value = selected.arguments[index];
       final loads = _moves = <AllocationMove<R>>[];
-      _transfer(
-        _location(value),
-        _register(register),
-        _representation(_stored(value)),
-        selection.layouts.representation(
-          selected.parameterTypes?[index] ?? selection.body.typeOf(value),
-        ),
-      );
-      _release(value);
+      if (value is! CallFrameValue) {
+        _transfer(
+          _location(value),
+          _register(register),
+          _representation(_stored(value)),
+          selection.layouts.representation(
+            selected.parameterTypes?[index] ?? selection.body.typeOf(value),
+          ),
+        );
+        _release(value);
+      }
       arguments.add(
         AllocatedArgument(
           loads,
           register,
           stackOffset: stackOffset,
+          frameValue: value is CallFrameValue ? value : null,
           nativeType: native?.signature.parameters[index].resolveAbi(
             selection.convention.target.abi,
           ),

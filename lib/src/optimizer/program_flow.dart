@@ -721,7 +721,7 @@ final class ProgramFlow(
                 negated: outcome == test.negated,
               )
               .value;
-        case UnwindValue():
+        case UnwindValue() || CallFrameValue():
           return FlowValue.unknown(value.type);
         default:
           (readers[value] ??= {}).add(readingBlock);
@@ -1120,6 +1120,16 @@ final class ProgramFlow(
     switch (operation) {
       case MakeInvocation():
         throw StateError('Normalize Invocation before program flow.');
+      case InitializeObject(:final initializer):
+        activation.operationEffects[operation] = const {};
+        return _invoke(
+          activation,
+          block,
+          operation,
+          initializer,
+          inputs,
+          state,
+        );
       case DirectCall(:final target, :final ownerType, :final typeArguments):
         final environment = _environment(
           target,
@@ -2680,6 +2690,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
   FlowValue valueOf(Value value, {Object? activation}) {
     _check();
     if (value is Constant) return FlowValue.constant(value);
+    if (value is CallFrameValue) return FlowValue.unknown(value.type);
     if (value is TestedValue) {
       var result = const FlowValue.bottom();
       for (final item in _at(value.test, activation)) {

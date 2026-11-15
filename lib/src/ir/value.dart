@@ -15,7 +15,8 @@ import 'type.dart';
 /// A use refers to its defining instruction or block parameter by identity.
 /// A [Constant] can be used in any block.
 /// Other domains may define values for their own graphs; an [IrFunction]
-/// accepts only constants and values defined by its verified blocks.
+/// accepts constants, block-owned values and contextual operands restricted to
+/// their call or exceptional edge.
 abstract class const Value(
   /// The semantic or compiler storage type, independent of machine locations.
   final ValueType type,
@@ -441,6 +442,23 @@ final class const UnwindValue._(super.type) extends Value {
   static const stackTrace = UnwindValue._(.stackTrace);
 }
 
+/// A machine value bound to the direct call whose argument contains it.
+///
+/// These operands are not SSA definitions and cannot escape their call. Each
+/// cloned call receives its own stack pointer and return PC after allocation.
+final class const CallFrameValue._(
+  /// Whether this operand denotes the return PC rather than the stack pointer.
+  final bool isReturnAddress,
+) extends Value {
+  this : super(.integer);
+
+  /// The caller's stack pointer while the call is active.
+  static const stackPointer = CallFrameValue._(false);
+
+  /// The PC immediately after the call, matching its GC stack-map entry.
+  static const returnAddress = CallFrameValue._(true);
+}
+
 /// Allocates a distinct SSA parameter for each entry in [types].
 List<BlockParameter> blockParameters(Iterable<ValueType> types) =>
     .unmodifiable(types.map(BlockParameter._));
@@ -495,6 +513,9 @@ sealed class Instruction(super.type) extends Value {
     return switch (this) {
       CaptureStackTrace() => CaptureStackTrace(),
       FrameValue(:final kind) => FrameValue(kind),
+      ObjectDescriptorAddress(:final declaration) => ObjectDescriptorAddress(
+        declaration,
+      ),
       final ReifyType v => ReifyType(type(v.template)),
       final ObjectRuntimeType v => ObjectRuntimeType(
         map(v.operand),
@@ -620,6 +641,11 @@ sealed class Instruction(super.type) extends Value {
         v.positional.map(map),
         {for (final e in v.named.entries) e.key: map(e.value)},
         v.typeArguments.map(type),
+      ),
+      final InitializeObject v => InitializeObject(
+        v.initializer,
+        map(v.receiver) as ReferenceFromAddress,
+        v.inputs.skip(1).map(map),
       ),
       final Construct v => Construct(
         v.initializer,
@@ -849,6 +875,7 @@ sealed class Instruction(super.type) extends Value {
     IteratorMoveNext() ||
     IteratorCurrent() ||
     DirectCall() ||
+    InitializeObject() ||
     NativeCall() ||
     LoadLibrary() ||
     InstanceCall() ||
@@ -946,6 +973,7 @@ sealed class Instruction(super.type) extends Value {
     RecordGet() ||
     PointerAddress() ||
     NativeAddress() ||
+    ObjectDescriptorAddress() ||
     NativeSymbolAddress() ||
     NativeSize() ||
     NativeFieldOffset() => const {},
@@ -981,6 +1009,19 @@ enum FrameValueKind() {
 /// The value is valid only while this frame is active. Moving this instruction
 /// into another function changes its meaning; the owner cannot be inlined.
 final class FrameValue(final FrameValueKind kind) extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// The immutable layout descriptor consumed by the target allocator.
+///
+/// Its address is resolved at link time; its object layout belongs to the target.
+final class ObjectDescriptorAddress(ClassType type) extends Instruction {
+  /// The declaration whose target storage layout is described.
+  final ClassType declaration = type.declaration;
+
   this : super(.integer);
 
   @override
@@ -1934,6 +1975,28 @@ final class Construct(
   }
 }
 
+/// Runs a generative initializer on fresh, explicitly allocated storage.
+///
+/// The producer proves that [receiver] has the initializer's layout and an
+/// initialized type header. Generic arguments use the declaration's erased entry
+/// types; their actual types have already been checked at the construction site.
+/// Exceptions and writes remain ordinary call effects. This does not allocate.
+final class InitializeObject(
+  final FunctionTarget initializer,
+  final ReferenceFromAddress receiver,
+  Iterable<Value> arguments,
+) extends Instruction {
+  @override
+  final List<Value> inputs = .unmodifiable([receiver, ...arguments]);
+
+  this : super(.voidType) {
+    if (initializer.kind != .initializer || receiver.type.mayBeNull) {
+      throw ArgumentError('Initialization requires fresh non-null storage.');
+    }
+    checkArguments(initializer.erasedParameterTypes, inputs);
+  }
+}
+
 /// Stores [value] directly in [field]. Ordinary final fields are constructor-only.
 ///
 /// A late final field without an initializer rejects a second binding, after
@@ -2377,6 +2440,10 @@ final class NativeCall._(
 /// A call to a statically bound function.
 ///
 /// The call may change state or throw even when its result is unused.
+/// Invokes a bound declaration with evaluated arguments.
+///
+/// Initializers delegate on their own receiver; target allocation uses
+/// [InitializeObject] after establishing fresh storage and its type header.
 final class DirectCall._(
   /// The declaration selected during binding.
   final FunctionTarget target,
@@ -2414,6 +2481,14 @@ final class DirectCall._(
         target.parameterTypes.first.substitute(ownerEnvironment),
       ...signature.parameters,
     ], inputs);
+    for (final (i, value) in inputs.indexed) {
+      if (value is CallFrameValue &&
+          target.parameterTypes[i] != ValueType.integer) {
+        throw ArgumentError(
+          'Call-frame operands require an integer parameter.',
+        );
+      }
+    }
     return ._(
       target,
       inputs,

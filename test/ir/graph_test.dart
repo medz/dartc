@@ -244,6 +244,20 @@ void main() {
         returnsNormally,
       );
       final create = FunctionTarget(f.library, 'create', sub, []);
+      final allocated = Block();
+      final receiver = allocated.emit(ReferenceFromAddress(one, sub));
+      allocated.emit(InitializeObject(init, receiver, []));
+      allocated.finish(Return(receiver));
+      IrFunction(create, [allocated]);
+      expect(
+        () => InitializeObject(init, ReferenceFromAddress(one, other), []),
+        throwsArgumentError,
+      );
+      expect(
+        () => InitializeObject(init, receiver, [one]),
+        throwsArgumentError,
+      );
+
       for (final initializeAgain in [true, false]) {
         final entry = Block();
         final object = entry.emit(Construct(init, []));

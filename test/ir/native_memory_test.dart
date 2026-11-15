@@ -7,6 +7,69 @@ import 'package:test/test.dart';
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test(
+    'call-frame operands are confined to the direct call that binds them',
+    () {
+      final callee = FunctionTarget(null, 'scan', .integer, [
+        .integer,
+        .integer,
+      ]);
+      final target = FunctionTarget(null, 'caller', .integer, []);
+      final valid = Block();
+      valid.finish(
+        Return(
+          valid.emit(
+            DirectCall(callee, [
+              CallFrameValue.stackPointer,
+              CallFrameValue.returnAddress,
+            ]),
+          ),
+        ),
+      );
+      IrFunction(target, [valid]);
+      expect(
+        () => DirectCall(FunctionTarget(null, 'boxed', .voidType, [.object]), [
+          CallFrameValue.stackPointer,
+        ]),
+        throwsArgumentError,
+      );
+      for (final value in [
+        CallFrameValue.stackPointer,
+        CallFrameValue.returnAddress,
+      ]) {
+        expect(
+          () => IrFunction(target, [Block()..finish(Return(value))]),
+          throwsStateError,
+        );
+        final block = Block();
+        block.finish(
+          Return(block.emit(IntBinary(.add, value, const Constant.integer(1)))),
+        );
+        expect(() => IrFunction(target, [block]), throwsStateError);
+      }
+    },
+  );
+
+  test(
+    'layout descriptors share declaration identity across instantiations',
+    () {
+      final t = TypeParameterType('T')
+        ..initializeBound(ValueType.object.nullable);
+      final generic = ClassType(null, 'Box', typeParameters: [t]);
+      expect(ObjectDescriptorAddress(generic).declaration, same(generic));
+      final closed = generic.instantiate([ValueType.integer]);
+      final descriptor = ObjectDescriptorAddress(closed);
+      expect(descriptor.declaration, same(generic));
+      final function = FunctionTarget(null, 'descriptor', .integer, []);
+      final block = Block()..finish(Return(descriptor));
+      expect(() => IrFunction(function, [block]), throwsStateError);
+      final entry = Block();
+      entry.finish(Return(entry.emit(descriptor)));
+      final body = IrFunction(function, [entry]);
+      expect(body.referencedClasses, contains(generic));
+    },
+  );
+
   const address = Constant.integer(-1);
   final pointer = PointerFromAddress(address, FfiTypes.int64Pointer);
 
