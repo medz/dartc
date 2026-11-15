@@ -12,64 +12,94 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln(_usage);
     return;
   }
-  final compiler = options.compiler == null
-      ? _defaultCompiler()
-      : _Compiler(options.compiler!, const []);
-  final report = <String, Object?>{};
-  final rows = <_Row>[];
-  var failed = false;
-  for (final fixture in fixtures) {
-    if (options.only != null && !options.only!.contains(fixture.name)) {
-      continue;
+  final lock = await _benchLock();
+  if (lock == null) return;
+  try {
+    var compiler = options.compiler == null
+        ? _defaultCompiler()
+        : _Compiler(options.compiler!, const []);
+    if (options.build) {
+      final built = File('build/bench/dartc').absolute.path;
+      final build = await Process.run(Platform.resolvedExecutable, [
+        'run',
+        'tool/build.dart',
+        built,
+      ]);
+      if (build.exitCode != 0) {
+        stderr.writeln('${build.stdout}${build.stderr}');
+        exitCode = build.exitCode;
+        return;
+      }
+      compiler = _Compiler(built, const []);
     }
-    final row = await _run(fixture, compiler, options);
-    rows.add(row);
-    report[fixture.name] = row.toJson();
-    failed |= row.failed;
+    final report = <String, Object?>{};
+    final rows = <_Row>[];
+    var failed = false;
+    for (final fixture in fixtures) {
+      if (options.only != null && !options.only!.contains(fixture.name)) {
+        continue;
+      }
+      final row = await _run(fixture, compiler, options);
+      rows.add(row);
+      report[fixture.name] = row.toJson();
+      failed |= row.failed;
+    }
+    final baseline = options.baseline == null
+        ? null
+        : jsonDecode(File(options.baseline!).readAsStringSync())
+              as Map<String, dynamic>;
+    final document = <String, Object?>{
+      'created': DateTime.now().toUtc().toIso8601String(),
+      'revision': _gitRevision(),
+      'dart': Platform.version,
+      'compiler': compiler,
+      'target': options.target,
+      'fixtures': report,
+    };
+    final output = File(options.output ?? 'build/bench/latest.json');
+    await output.parent.create(recursive: true);
+    await output.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(document),
+    );
+    _print(rows, baseline, options);
+    if (baseline != null &&
+        rows.any((row) => row.regressed(baseline, options))) {
+      failed = true;
+    }
+    if (failed) exitCode = 1;
+  } finally {
+    if (lock.existsSync()) lock.deleteSync();
   }
-  final baseline = options.baseline == null
-      ? null
-      : jsonDecode(File(options.baseline!).readAsStringSync())
-            as Map<String, dynamic>;
-  final document = <String, Object?>{
-    'created': DateTime.now().toUtc().toIso8601String(),
-    'revision': _gitRevision(),
-    'dart': Platform.version,
-    'compiler': compiler,
-    'target': options.target,
-    'fixtures': report,
-  };
-  final output = File(options.output ?? 'build/bench/latest.json');
-  await output.parent.create(recursive: true);
-  await output.writeAsString(
-    const JsonEncoder.withIndent('  ').convert(document),
-  );
-  _print(rows, baseline, options);
-  if (baseline != null && rows.any((row) => row.regressed(baseline, options))) {
-    failed = true;
-  }
-  if (failed) exitCode = 1;
 }
 
 const fixtures = <_Fixture>[
-  _Fixture('hello', 'tool/bench/fixtures/hello.dart', .executable, run: true),
+  _Fixture(
+    'hello',
+    'tool/bench/fixtures/hello.dart',
+    .executable,
+    run: true,
+    expected: 'hello\n',
+  ),
   _Fixture(
     'print_integers',
     'tool/bench/fixtures/print_integers.dart',
     .executable,
     run: true,
+    expected: '42\n43\n',
   ),
   _Fixture(
     'map_sum',
     'tool/bench/fixtures/map_sum.dart',
     .executable,
     run: true,
+    expected: '59\n',
   ),
   _Fixture(
     'persistent_cell',
     'tool/bench/fixtures/persistent_cell.dart',
     .executable,
     run: true,
+    expected: '499500\n',
   ),
   _Fixture(
     'system_libraries',
@@ -83,6 +113,7 @@ final class const _Fixture(
   final String path,
   final _Kind kind, {
   final bool run = false,
+  final String? expected,
 }) {
   String output(String target) {
     final directory = 'build/bench/${_safe(target)}';
@@ -108,6 +139,7 @@ final class _Options(
   final Duration timeout,
   final double maxTimeGrowth,
   final double maxSizeGrowth,
+  final bool build,
 ) {
   factory _Options.parse(List<String> arguments) {
     var help = false;
@@ -119,6 +151,7 @@ final class _Options(
     var timeout = const Duration(seconds: 120);
     var maxTimeGrowth = 10.0;
     var maxSizeGrowth = 5.0;
+    var build = false;
     for (final argument in arguments) {
       if (argument == '--help' || argument == '-h') {
         help = true;
@@ -144,6 +177,8 @@ final class _Options(
         maxSizeGrowth = double.parse(
           argument.substring('--max-size-growth='.length),
         );
+      } else if (argument == '--build') {
+        build = true;
       } else {
         throw ArgumentError.value(argument, 'argument', 'Unknown option');
       }
@@ -158,6 +193,7 @@ final class _Options(
       timeout,
       maxTimeGrowth,
       maxSizeGrowth,
+      build,
     );
   }
 }
@@ -173,8 +209,11 @@ final class _Row(
   final String stderrTail,
   final int? runMs,
   final int? runExitCode,
+  final String runStdout,
+  final bool runMatched,
 ) {
-  bool get failed => timedOut || exitCode != 0 || (runExitCode ?? 0) != 0;
+  bool get failed =>
+      timedOut || exitCode != 0 || (runExitCode ?? 0) != 0 || !runMatched;
 
   Map<String, Object?> toJson() => {
     'exitCode': exitCode,
@@ -186,6 +225,8 @@ final class _Row(
     'stderr': stderrTail,
     'runMs': runMs,
     'runExitCode': runExitCode,
+    'runStdout': runStdout,
+    'runMatched': runMatched,
   };
 
   bool regressed(Map<String, dynamic> baseline, _Options options) {
@@ -253,12 +294,16 @@ Future<_Row> _run(
   watch.stop();
   int? runMs;
   int? runExitCode;
+  var runStdout = '';
+  var runMatched = true;
   if (fixture.run && !timedOut && exit == 0) {
     final runWatch = Stopwatch()..start();
     final run = await Process.run(File(output).absolute.path, const []);
     runWatch.stop();
     runMs = runWatch.elapsedMilliseconds;
     runExitCode = run.exitCode;
+    runStdout = '${run.stdout}';
+    runMatched = fixture.expected == null || runStdout == fixture.expected;
   }
   final bytes = File(output).existsSync() ? File(output).lengthSync() : 0;
   return _Row(
@@ -272,7 +317,40 @@ Future<_Row> _run(
     _tail(stderrBuffer),
     runMs,
     runExitCode,
+    runStdout,
+    runMatched,
   );
+}
+
+Future<File?> _benchLock() async {
+  final result = Process.runSync('git', ['rev-parse', '--git-common-dir']);
+  final raw = result.exitCode == 0 ? '${result.stdout}'.trim() : '.git';
+  final lock = File('${Directory(raw).absolute.path}/dartc-bench.lock');
+  final watch = Stopwatch()..start();
+  while (true) {
+    if (lock.existsSync()) {
+      final owner = int.tryParse(lock.readAsStringSync().trim());
+      if (owner != null && !_processAlive(owner)) {
+        lock.deleteSync();
+      }
+    }
+    try {
+      lock.createSync(exclusive: true);
+      lock.writeAsStringSync('$pid\n');
+      return lock;
+    } on FileSystemException {
+      if (watch.elapsed > const Duration(minutes: 5)) {
+        stderr.writeln('Another dartc benchmark holds $lock.');
+        return null;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+  }
+}
+
+bool _processAlive(int pid) {
+  final result = Process.runSync('kill', ['-0', '$pid']);
+  return result.exitCode == 0;
 }
 
 Future<int> _rssKiB(int pid) async {
@@ -350,8 +428,9 @@ child peak RSS, output bytes and execution status in build/bench/latest.json.
 
 Options:
   --only=a,b              Run selected fixtures only.
-  --compiler=path         Use a compiler executable (default: build/dartc,
-                          otherwise dart run bin/dartc.dart).
+  --compiler=path         Use a compiler executable (default:
+                          dart run bin/dartc.dart).
+  --build                 Build build/bench/dartc and use it.
   --target=macos-arm64    Target passed to the compiler.
   --timeout=seconds       Per-compilation limit (default: 120).
   --output=path           Report path (default: build/bench/latest.json).
