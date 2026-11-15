@@ -63,6 +63,52 @@ void main() {
     ]);
   });
 
+  test('unused call-frame arguments do not block inlining or lose effects', () {
+    final callee = FunctionTarget(_uri, 'ignoreFrames', .integer, [
+      .integer,
+      .integer,
+      .integer,
+    ]);
+    final body = Block(callee.parameterTypes);
+    body.finish(
+      Return(
+        body.emit(
+          IntBinary(.add, body.parameters.last, const Constant.integer(1)),
+        ),
+      ),
+    );
+    final root = FunctionTarget(_uri, 'entry', .integer, []);
+    final entry = Block();
+    final observed = entry.emit(DirectCall(_tick, [const Constant.integer(7)]));
+    entry.finish(
+      Return(
+        entry.emit(
+          DirectCall(callee, [
+            CallFrameValue.stackPointer,
+            CallFrameValue.returnAddress,
+            observed,
+          ]),
+        ),
+      ),
+    );
+    final program = IrProgram(
+      [],
+      [
+        IrFunction(root, [entry]),
+        IrFunction(callee, [body]),
+      ],
+      externals: [IrExternal(_tick)],
+    );
+    final result = ProgramOptimizer(const [
+      ProgramSimplification(),
+      DirectCallInlining(),
+    ]).run(program, [(target: root, arguments: [])]).program;
+    final events = <int>[];
+    expect(_run(result, root, [], events), 8);
+    expect(events, [7]);
+    expect(result.implementationOf(root)!.callees, {_tick});
+  });
+
   test('pure call chains expand from leaves within one caller budget', () {
     final leaf = FunctionTarget(_uri, 'leaf', .integer, [.integer]);
     final middle = FunctionTarget(_uri, 'middle', .integer, [.integer]);

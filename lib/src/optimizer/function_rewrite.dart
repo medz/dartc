@@ -40,6 +40,7 @@ final class FunctionRewrite(
 
   /// Checked entry values and type bindings for each expanded invocation.
   /// Bodies observing their caller frame cannot cross this boundary.
+  /// Call-bound frame arguments are allowed only for unused entry parameters.
   final Map<
         Instruction,
         ({
@@ -920,11 +921,20 @@ final class FunctionRewrite(
             'Inlined bodies cannot observe their caller frame.',
           );
         }
+        late final live = ValueLiveness.source(site.body)
+            .liveIn[site.body.entry]!;
         if ((call is! DirectCall && call is! FunctionCall) ||
             !owns(call) ||
-            site.arguments.any(
-              (value) => value is! Constant && !dominance.before(value, call),
-            )) {
+            site.arguments.indexed.any((entry) {
+              final (index, value) = entry;
+              if (value is CallFrameValue) {
+                return call is! DirectCall ||
+                    !call.inputs.contains(value) ||
+                    index >= site.body.entry.parameters.length ||
+                    live.contains(site.body.entry.parameters[index]);
+              }
+              return value is! Constant && !dominance.before(value, call);
+            })) {
           throw ArgumentError(
             'Inlined entries require dominating caller arguments.',
           );

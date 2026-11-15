@@ -173,9 +173,6 @@ IrProgram _inlineSelected(
           final List<Value> arguments;
           final Map<TypeParameterType, ValueType> environment;
           if (operation is DirectCall && sourceFacts) {
-            if (operation.inputs.any((value) => value is CallFrameValue)) {
-              continue;
-            }
             if (!_entryChecksProved(operation, facts)) continue;
             target = operation.target;
             arguments = operation.inputs;
@@ -270,6 +267,15 @@ IrProgram _inlineSelected(
             }
           }
           if (candidate.body.closures.isNotEmpty) continue;
+          late final live = ValueLiveness.source(candidate.body)
+              .liveIn[candidate.body.entry]!;
+          if (arguments.indexed.any(
+            (entry) =>
+                entry.$2 is CallFrameValue &&
+                live.contains(candidate.body.entry.parameters[entry.$1]),
+          )) {
+            continue;
+          }
           var views = 0, boxes = 0;
           for (final (i, parameter) in source.entry.parameters.indexed) {
             final type = parameter.type.substitute(environment);

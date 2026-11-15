@@ -348,6 +348,32 @@ void main() {
     },
   );
 
+  test('inlining cannot move a live call-frame argument into another call', () {
+    final observe = FunctionTarget(_uri, 'observeFrame', .integer, [.integer]);
+    final callee = FunctionTarget(_uri, 'frame', .integer, [.integer]);
+    final body = Block(callee.parameterTypes);
+    body.finish(Return(body.emit(DirectCall(observe, body.parameters))));
+    final function = IrFunction(callee, [body]);
+    final root = FunctionTarget(_uri, 'root', .integer, []);
+    final entry = Block();
+    final call = entry.emit(DirectCall(callee, [CallFrameValue.stackPointer]));
+    entry.finish(Return(call));
+    expect(
+      () => FunctionRewrite(
+        IrFunction(root, [entry]),
+        inlined: {
+          call: (
+            body: function,
+            arguments: call.inputs,
+            environment: const {},
+            handler: null,
+          ),
+        },
+      ).run(),
+      throwsArgumentError,
+    );
+  });
+
   test('fresh pure call inputs keep their evaluation and exception point', () {
     final target = FunctionTarget(_uri, 'templated', .integer, [.object]);
     final entry = Block(target.parameterTypes);
