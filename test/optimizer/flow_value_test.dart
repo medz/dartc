@@ -90,6 +90,35 @@ void main() {
     expect(value.check(left).value.isBottom, isFalse);
   });
 
+  test(
+    'type filtering preserves allocation identities and unknown scalars',
+    () {
+      final left = ClassType(null, 'Left'), right = ClassType(null, 'Right');
+      final instances = [
+        for (var index = 0; index < 256; index++)
+          FlowObject(
+            NewPayload(index.isEven ? left : right, const Constant.integer(0)),
+            Object(),
+          ),
+      ];
+      final value = FlowValue.joined(instances.map(FlowValue.object));
+      expect(
+        value.check(left).value.objects,
+        instances.where((object) => object.type == left),
+      );
+      expect(
+        value.check(left, negated: true).value.objects,
+        instances.where((object) => object.type == right),
+      );
+      expect(value.check(left).mayFail, isTrue);
+      final scalar = FlowValue.constant(const Constant.integer(7))
+          .join(FlowValue.unknown(.object));
+      final checked = scalar.check(.integer).value;
+      expect(checked.constants, isEmpty);
+      expect(checked.unknownTypes, {ValueType.integer});
+    },
+  );
+
   test('same-signature functions retain their declaration identity', () {
     final first = FunctionTarget(
       Uri.parse('memory:first'),

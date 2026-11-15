@@ -9,6 +9,59 @@ import '../support/numeric_order.dart';
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  for (final unknown in [false, true]) {
+    test(
+      'field-write summaries retain aliases and unrelated caller state ($unknown)',
+      () {
+        final type = ClassType(_uri, 'Pair');
+        final changed = InstanceField(type, 'changed', .integer);
+        final untouched = InstanceField(type, 'untouched', .integer);
+        final setter = FunctionTarget(_uri, 'set', .voidType, [type]);
+        final write = Block(setter.parameterTypes);
+        write.emit(
+          StoreField(
+            changed,
+            write.parameters.single,
+            const Constant.integer(9),
+          ),
+        );
+        write.finish(const Return());
+        final root = FunctionTarget(_uri, 'root', .integer, [type]);
+        final entry = Block(root.parameterTypes);
+        final object = entry.emit(NewPayload(type, const Constant.integer(0)));
+        entry.emit(StoreField(changed, object, const Constant.integer(1)));
+        entry.emit(StoreField(untouched, object, const Constant.integer(3)));
+        final receiver = unknown ? entry.parameters.single : object;
+        entry.emit(DirectCall(setter, [receiver]));
+        final second = entry.emit(DirectCall(setter, [receiver]));
+        entry.emit(StoreField(untouched, object, const Constant.integer(7)));
+        final third = entry.emit(DirectCall(setter, [receiver]));
+        final observed = entry.emit(LoadField(changed, object));
+        final preserved = entry.emit(LoadField(untouched, object));
+        entry.finish(Return(entry.emit(IntBinary(.add, observed, preserved))));
+        final program = IrProgram(
+          [
+            IrClass(type, [changed, untouched]),
+          ],
+          [
+            IrFunction(root, [entry]),
+            IrFunction(setter, [write]),
+          ],
+        );
+        final facts = ProgramFlow(program, [
+          (target: root, arguments: [FlowValue.unknown(type)]),
+        ]).facts;
+        expect(facts.valueOf(preserved).constant, const Constant.integer(7));
+        if (unknown) {
+          expect(facts.valueOf(observed).constant, isNull);
+        } else {
+          expect(facts.valueOf(observed).constant, const Constant.integer(9));
+        }
+        expect(facts.callActivationsOf(second), facts.callActivationsOf(third));
+      },
+    );
+  }
+
   for (final negated in [false, true]) {
     for (final overwritten in [false, true]) {
       test(

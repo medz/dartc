@@ -19,6 +19,69 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test(
+    'field-write summaries invalidate aliased bytes without touching payload',
+    () {
+      final field = InstanceField(_type, 'value', .integer);
+      final program = IrProgram([
+        IrClass(_type, [field]),
+      ], []);
+      final allocation = NewPayload(_type, const Constant.integer(8));
+      final created = _step(
+        FlowState(program, memoryLayout: _layout),
+        allocation,
+      );
+      final address = FlowValue.address(
+        FlowAddress(created.value.objects.single, ObjectHeader.fieldsOffset),
+      );
+      final payload = FlowValue.address(
+        FlowAddress(
+          created.value.objects.single,
+          _layout.objectLayout(_type).size,
+        ),
+      );
+      final caller = _store(
+        _store(created.normal!, address, _i64, _integer(2)),
+        payload,
+        _i64,
+        _integer(11),
+      );
+      final before = caller.project(
+        [created.value],
+        access: (
+          fields: {field},
+          globals: {},
+          cells: false,
+          memory: false,
+          writes: true,
+        ),
+      );
+      final after = _step(
+        before,
+        StoreField(field, allocation, _placeholder),
+        operands: [created.value, _integer(7)],
+      ).normal!;
+      final applied = caller.applySummary(
+        before,
+        after,
+        mapObject: (object) => object,
+        mapValue: (value) => value,
+      );
+      expect(_number(_load(applied, address, _i64)), isNot(2));
+      expect(_number(_load(applied, payload, _i64)), 11);
+      expect(
+        _number(
+          _step(
+            applied,
+            LoadField(field, allocation),
+            operands: [created.value],
+          ).value,
+        ),
+        7,
+      );
+    },
+  );
+
   for (final changed in [false, true]) {
     test(
       'native readers separate memory from unrelated global writes ($changed)',

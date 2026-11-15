@@ -51,7 +51,7 @@ final class ProgramFlow(
   final _cyclic = <FunctionTarget, Set<Block>>{};
   final _loops = <FunctionTarget, LoopRanges>{};
   final _liveness = <FunctionTarget, ValueLiveness>{};
-  final _readSets = <FunctionTarget, FlowReadSet?>{};
+  final _storageAccess = <FunctionTarget, FlowStorageAccess?>{};
   final _receiverBounds = <ValueType, List<ClassType>>{};
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
@@ -379,8 +379,8 @@ final class ProgramFlow(
         path.isNotEmpty ||
         caller.repeated ||
         _loopBlocks(caller.body).contains(block);
-    final reads = _readsFor(body);
-    final projected = input.project(arguments, reads: reads);
+    final access = _accessFor(body);
+    final projected = input.project(arguments, access: access);
     var suppliedState = projected;
     final aliases = <(int, int)>[
       for (var i = 0; i < arguments.length; i++)
@@ -422,7 +422,9 @@ final class ProgramFlow(
           repeated,
           aliasKey,
         );
-        if (reads == null && previous != null && previous.inputKey != precise) {
+        if ((access == null || access.writes) &&
+            previous != null &&
+            previous.inputKey != precise) {
           // Effectful calls keep allocation identities as their inputs grow.
           site.joined.add(local);
           callee = previous.callSites.length == 1
@@ -499,14 +501,11 @@ final class ProgramFlow(
       _indexInput(callee);
     }
 
+    late final incomingIdentities = callee.input!.allocationIdentities(
+      callee.arguments,
+    );
     FlowObject mapObject(FlowObject object) {
-      if (site.recursive ||
-          callee.input!.containsObject(object) ||
-          arguments.any(
-            (value) =>
-                value.objects.contains(object) ||
-                value.references.objects.contains(object),
-          )) {
+      if (site.recursive || incomingIdentities.contains(object)) {
         return object;
       }
       return site.allocations.putIfAbsent(
@@ -687,12 +686,14 @@ final class ProgramFlow(
     }
   }
 
-  FlowReadSet? _readsFor(IrFunction body) {
-    if (_readSets.containsKey(body.target)) return _readSets[body.target];
-    _readSets[body.target] = null;
+  FlowStorageAccess? _accessFor(IrFunction body) {
+    if (_storageAccess.containsKey(body.target)) {
+      return _storageAccess[body.target];
+    }
+    _storageAccess[body.target] = null;
     if (body.bodyKind != .synchronous) return null;
     final fields = <InstanceField>{}, globals = <GlobalVariable>{};
-    var cells = false, memory = false;
+    var cells = false, memory = false, writes = false;
     for (final block in body.blocks) {
       for (final operation in [
         ...block.instructions,
@@ -735,27 +736,35 @@ final class ProgramFlow(
                 )) {
               continue;
             }
-            final reads = callee is IrFunction ? _readsFor(callee) : null;
-            if (reads == null) return null;
-            fields.addAll(reads.fields);
-            globals.addAll(reads.globals);
-            cells |= reads.cells;
-            memory |= reads.memory;
+            final access = callee is IrFunction ? _accessFor(callee) : null;
+            if (access == null) return null;
+            fields.addAll(access.fields);
+            globals.addAll(access.globals);
+            cells |= access.cells;
+            memory |= access.memory;
+            writes |= access.writes;
           }
           continue;
         }
         if (operation.effects.any(
-          (effect) => effect != .readsStorage && effect != .mayThrow,
+          (effect) =>
+              effect != .readsStorage &&
+              effect != .writesStorage &&
+              effect != .mayThrow,
         )) {
           return null;
         }
-        if (!operation.effects.contains(Effect.readsStorage)) continue;
+        final mutates = operation.effects.contains(Effect.writesStorage);
+        writes |= mutates;
+        if (!mutates && !operation.effects.contains(Effect.readsStorage)) {
+          continue;
+        }
         switch (operation) {
-          case LoadField(:final field):
+          case LoadField(:final field) || StoreField(:final field):
             fields.add(field);
-          case LoadGlobal(:final global):
+          case LoadGlobal(:final global) || StoreGlobal(:final global):
             globals.add(global);
-          case ReadCell():
+          case ReadCell() || WriteCell():
             cells = true;
           case LoadNative() || LoadObjectData() || LoadObjectReference():
             memory = true;
@@ -766,11 +775,12 @@ final class ProgramFlow(
         }
       }
     }
-    return _readSets[body.target] = (
+    return _storageAccess[body.target] = (
       fields: fields,
       globals: globals,
       cells: cells,
       memory: memory,
+      writes: writes,
     );
   }
 
@@ -785,6 +795,11 @@ final class ProgramFlow(
         '${body.target.library}::${body.target.name}.',
       );
     }
+    // Local snapshots belong to this evaluation; only call summaries propagate.
+    activation.before.clear();
+    activation.after.clear();
+    activation.thrown.clear();
+    activation.edgeStates.clear();
     final escapes =
         !_nativeLookups.contains(activation) &&
         (_escapingActivations.contains(activation) ||
@@ -947,7 +962,11 @@ final class ProgramFlow(
         nextRanges.remove(operation);
       }
       activation.edges.add(jump);
-      activation.mergePoint(activation.edgeStates, jump, state);
+      if (activation.edgeStates[jump] case final known?) {
+        known.join(state);
+      } else {
+        activation.edgeStates[jump] = state.copy();
+      }
       // Stored aliases refer to the previous binding when a loop re-enters.
       final nextState = state.copy()
         ..retainSources((source) => availableAt(source, jump.target));
@@ -1047,7 +1066,7 @@ final class ProgramFlow(
       FlowState? state = incoming[block]!.copy();
       FlowResult evaluate(Instruction operation) {
         point = state!;
-        activation.mergePoint(activation.before, operation, state);
+        activation.before[operation] = state.copy();
         var result = _operation(
           activation,
           block,
@@ -1112,7 +1131,7 @@ final class ProgramFlow(
           ranges[operation] = range;
         }
         if (result.normal != null) {
-          activation.mergePoint(activation.after, operation, result.normal!);
+          activation.after[operation] = result.normal!.copy();
         }
         if (result.hasSemanticFailure) {
           activation.semanticFailures.add(operation);
@@ -1125,11 +1144,7 @@ final class ProgramFlow(
               (activation.traces[operation] ?? const FlowValue.bottom()).join(
                 result.stackTrace,
               );
-          activation.mergePoint(
-            activation.thrown,
-            operation,
-            result.exceptional!,
-          );
+          activation.thrown[operation] = result.exceptional!.copy();
         }
         final exits =
             activation.exits[operation] ?? (normal: false, exceptional: false);
@@ -3136,6 +3151,9 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     final callees = activation.calls[operation] ?? const <_Activation>{};
     var localAddress = false;
     if (stableInitialization && operation is ReferenceAddress) {
+      late final incomingIdentities = activation.input!.allocationIdentities(
+        activation.arguments,
+      );
       final value = operation.object is Constant
           ? FlowValue.constant(operation.object as Constant)
           : activation.values[operation.object];
@@ -3144,9 +3162,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
           !value.isBottom &&
           value.unknownTypes.isEmpty &&
           value.addresses.isEmpty &&
-          value.objects.every(
-            (object) => !activation.input!.containsObject(object),
-          );
+          value.objects.every((object) => !incomingIdentities.contains(object));
     }
     // Pure initialization may wait until a later read, even for writable storage.
     final binding =
@@ -3427,18 +3443,6 @@ final class _Activation(final IrCallable body) {
   bool _hasEnvironment = false;
   bool repeated = false;
   bool recursive = false;
-
-  void mergePoint<T extends Object>(
-    Map<T, FlowState> points,
-    T operation,
-    FlowState state,
-  ) {
-    if (points[operation] case final known?) {
-      known.join(state);
-    } else {
-      points[operation] = state.copy();
-    }
-  }
 
   bool mergeValue(
     Value value,

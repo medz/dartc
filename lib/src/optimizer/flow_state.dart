@@ -56,12 +56,13 @@ typedef FlowCall = FlowResult Function(
   FlowState input,
 );
 
-/// Storage observed by a body and its known read-only callees.
-typedef FlowReadSet = ({
+/// Storage read or written by a body and its statically known callees.
+typedef FlowStorageAccess = ({
   Set<InstanceField> fields,
   Set<GlobalVariable> globals,
   bool cells,
   bool memory,
+  bool writes,
 });
 
 /// One stable external address and its entry-state byte facts.
@@ -295,41 +296,47 @@ final class FlowState {
   @override
   int get hashCode => structuralKey.hashCode;
 
-  /// Projects a call input, or only storage proven observable by [reads].
+  /// Projects a call input, or only storage proven observable by [access].
   /// Ordinary calls retain globals and external reachability.
-  FlowState project(Iterable<FlowValue> roots, {FlowReadSet? reads}) {
-    final globals = reads == null
+  FlowState project(Iterable<FlowValue> roots, {FlowStorageAccess? access}) {
+    final globals = access == null
         ? _globals
         : StateMap<GlobalVariable, _Slot>.fromEntries(
             _globals.entries.where(
-              (entry) => reads.globals.contains(entry.key),
+              (entry) => access.globals.contains(entry.key),
             ),
           );
-    final escaped = reads == null ? _escaped : const FlowValue.bottom();
+    final escaped = access == null ? _escaped : const FlowValue.bottom();
     final reachable = _reachable(
       [
         ...roots,
-        if (reads == null)
+        if (access == null || access.memory)
           for (final target in _externalMemory.keys) externalResult(target)!,
         escaped,
         for (final slot in globals.values) ...[slot.value, slot.initializer],
       ],
       expose: false,
-      reads: reads,
+      access: access,
       constants: false,
     );
     var objects = const StateMap<FlowObject, _ObjectState>.empty();
-    for (final object in reachable.objects) {
+    // Unknown reference arguments can alias any supplied object being mutated.
+    for (final object in {
+      ...reachable.objects,
+      if (access?.writes == true)
+        for (final entry in _objects.entries)
+          if (_readSlots(entry.value, access).isNotEmpty) entry.key,
+    }) {
       if (_objects[object] case final state?) {
         objects = objects.withEntry(
           object,
-          reads == null
+          access == null
               ? state
               : _ObjectState._(
-                  StateMap.fromEntries(_readSlots(state, reads)),
-                  reads.memory ? state.captures : null,
+                  StateMap.fromEntries(_readSlots(state, access)),
+                  access.memory ? state.captures : null,
                   state.summary,
-                  reads.memory ? state.memory : null,
+                  access.memory ? state.memory : null,
                 ),
         );
       }
@@ -418,7 +425,9 @@ final class FlowState {
         result._allocate(object, next.map(mapValue));
         continue;
       }
+      var fieldsChanged = false;
       for (final slot in next.slots.differences(prior.slots)) {
+        fieldsChanged |= slot.key is InstanceField;
         if (slot.after == null) {
           throw StateError('A summary cannot remove a declared storage slot.');
         }
@@ -446,6 +455,9 @@ final class FlowState {
         current = current.withMemory(next.memory?.map(mapValue));
       }
       result._objects = result._objects.withEntry(object, current);
+      if (fieldsChanged && next.memory == null) {
+        result._forgetFieldBytes(object);
+      }
     }
     if (!preservesInputSources && after._escaped != before._escaped) {
       result._escaped = result._escaped.join(mapValue(after._escaped));
@@ -483,6 +495,26 @@ final class FlowState {
   /// Whether this state contains storage for the analysis allocation.
   bool containsObject(FlowObject object) =>
       _objects[object] != null || _regions[object] != null;
+
+  /// Identities carried by entry values and storage, independently of contents.
+  Set<FlowObject> allocationIdentities(Iterable<FlowValue> roots) {
+    final reachable = _reachable(
+      [
+        ...roots,
+        ...allocations,
+        _escaped,
+        for (final slot in _globals.values) ...[slot.value, slot.initializer],
+        ..._addresses.values,
+      ],
+      expose: false,
+      constants: false,
+    );
+    return {
+      ...reachable.objects,
+      for (final address in reachable.addresses)
+        if (address.base case FlowRegion(:final allocation)) allocation,
+    };
+  }
 
   /// Allocation identities whose state can be changed by an invocation.
   Iterable<FlowObject> get objects => _objects.keys;
@@ -1787,7 +1819,7 @@ final class FlowState {
   FlowValue _reachable(
     Iterable<FlowValue> roots, {
     required bool expose,
-    FlowReadSet? reads,
+    FlowStorageAccess? access,
     bool constants = true,
   }) {
     final values = <FlowValue>[];
@@ -1813,16 +1845,16 @@ final class FlowState {
         final state = _objects[object];
         if (state == null) continue;
         if (state.memory case final memory?
-            when reads == null || reads.memory) {
+            when access == null || access.memory) {
           pending.add((memory.references, true));
         }
-        if (raw && (reads == null || reads.memory)) {
+        if (raw && (access == null || access.memory)) {
           pending.addAll([
             for (final capture in state.captures ?? const <FlowValue>[])
               (capture, raw),
           ]);
         }
-        for (final entry in _readSlots(state, reads)) {
+        for (final entry in _readSlots(state, access)) {
           final slot = entry.value;
           pending.add((slot.value, raw));
           if (raw && slot.unbound) pending.add((slot.initializer, raw));
@@ -1851,12 +1883,13 @@ final class FlowState {
 
 Iterable<MapEntry<Object, _Slot>> _readSlots(
   _ObjectState state,
-  FlowReadSet? reads,
-) => reads == null || reads.memory
+  FlowStorageAccess? access,
+) => access == null || access.memory
     ? state.slots.entries
     : state.slots.entries.where(
-        (entry) =>
-            entry.key == _cell ? reads.cells : reads.fields.contains(entry.key),
+        (entry) => entry.key == _cell
+            ? access.cells
+            : access.fields.contains(entry.key),
       );
 
 final _cell = Object();

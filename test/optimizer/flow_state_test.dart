@@ -1,6 +1,6 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_state.dart';
-import 'package:dartc/src/optimizer/flow_value.dart' show FlowSource;
+import 'package:dartc/src/optimizer/flow_value.dart' show FlowRegion, FlowSource;
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
@@ -802,6 +802,31 @@ void main() {
       expect(initial.join(written), isFalse);
     },
   );
+
+  test('incoming identity survives without facts about its contents', () {
+    final type = ClassType(_uri, 'Opaque');
+    final saved = GlobalVariable(_uri, 'saved', type, isLate: true);
+    final source = NewPayload(type, const Constant.integer(0));
+    final object = FlowObject(source, _activation);
+    final state = _step(
+      FlowState(IrProgram([IrClass(type, [])], [], globals: [saved])),
+      StoreGlobal(saved, source),
+      operands: [FlowValue.object(object)],
+    ).normal!.project([]);
+    expect(state.containsObject(object), isFalse);
+    expect(state.allocationIdentities(const []), {object});
+    final address = FlowObject(
+      DirectCall(FunctionTarget(null, 'map', .integer, []), []),
+      _activation,
+    );
+    expect(
+      state.allocationIdentities([
+        FlowValue.address(FlowAddress(FlowRegion(address), 0)),
+      ]),
+      {object, address},
+    );
+    expect(_step(state, LoadGlobal(saved)).value.objects, {object});
+  });
 
   test('projection keeps globals, escapes and transitive captures', () {
     final type = CellType(.integer);

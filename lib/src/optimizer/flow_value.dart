@@ -432,7 +432,6 @@ final class FlowValue {
     ValueType type, {
     bool negated = false,
   }) {
-    var checked = const FlowValue.bottom();
     var mayFail = false;
     bool retain(ValueType actual) {
       final bool? matches = type.accepts(actual)
@@ -449,62 +448,66 @@ final class FlowValue {
       return matches == null || matches != negated;
     }
 
-    for (final constant in constants) {
-      if (retain(constant.type)) checked = checked.join(.constant(constant));
-    }
-    for (final object in objects) {
-      if (retain(object.type)) checked = checked.join(.object(object));
-    }
-    for (final address in addresses) {
-      if (retain(address.type)) checked = checked.join(.address(address));
-    }
+    final constants = {
+      for (final entry in _constants.entries)
+        if (retain(entry.value.type)) entry.key: entry.value,
+    };
+    final objects = this.objects.where((object) => retain(object.type)).toSet();
+    final addresses = this.addresses
+        .where((address) => retain(address.type))
+        .toSet();
+    final unknown = <ValueType>{};
+    const nullValue = Constant.nullValue();
     for (final bound in unknownTypes) {
       if (bound == ValueType.never) continue;
       if (bound == ValueType.nullType) {
         if (retain(bound)) {
-          checked = checked.join(.constant(const Constant.nullValue()));
+          constants[nullValue.structuralKey] = nullValue;
         }
         continue;
       }
       if (type.accepts(bound)) {
         mayFail |= negated;
-        if (!negated) checked = checked.join(.unknown(bound));
+        if (!negated) unknown.add(bound);
         continue;
       }
       if (type == ValueType.never ||
           type == ValueType.nullType && !bound.mayBeNull) {
         mayFail |= !negated;
-        if (negated) checked = checked.join(.unknown(bound));
+        if (negated) unknown.add(bound);
         continue;
       }
       mayFail = true;
       if (!negated) {
-        checked = checked.join(
-          .unknown(type.accepts(bound.nonNullable) ? bound.nonNullable : type),
-        );
+        unknown.add(type.accepts(bound.nonNullable) ? bound.nonNullable : type);
       } else if (type.accepts(ValueType.nullType)) {
         final narrowed = bound.nonNullable;
-        checked = checked.join(
-          .unknown(narrowed.mayBeNull ? ValueType.object : narrowed),
-        );
+        unknown.add(narrowed.mayBeNull ? ValueType.object : narrowed);
       } else if (type.accepts(bound.nonNullable)) {
         if (bound.mayBeNull) {
-          checked = checked.join(.constant(const Constant.nullValue()));
+          constants[nullValue.structuralKey] = nullValue;
         }
       } else {
-        checked = checked.join(.unknown(bound));
+        unknown.add(bound);
       }
     }
+    constants.removeWhere(
+      (_, value) => value is ScalarConstant && unknown.contains(value.type),
+    );
     return (
-      value: checked.isBottom
-          ? checked
+      value:
+          constants.isEmpty &&
+              objects.isEmpty &&
+              addresses.isEmpty &&
+              unknown.isEmpty
+          ? const .bottom()
           : ._(
-              checked._constants,
-              checked.objects,
-              checked.unknownTypes,
+              constants,
+              objects,
+              unknown,
               sources,
               _references,
-              checked.addresses,
+              addresses,
               _integers,
             ),
       mayFail: mayFail,
