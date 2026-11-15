@@ -36,6 +36,7 @@ void main() {
     dispatchFailure: heapRuntime.dispatchFailure,
     stackContext: heapRuntime.stackContext,
     allocate: heapRuntime.allocate,
+    allocationFailure: heapRuntime.allocationFailure,
     isOutOfMemory: heapRuntime.isOutOfMemory,
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
@@ -44,6 +45,7 @@ void main() {
     captureStackTrace: heapRuntime.captureStackTrace,
     captureTrace: heapRuntime.captureTrace,
     recordError: heapRuntime.recordError,
+    typeCheckFailure: heapRuntime.typeCheckFailure,
     primitives: heapRuntime.primitives,
     nonAllocating: [...heapRuntime.nonAllocating, function],
     nonAllocatingNatives: [

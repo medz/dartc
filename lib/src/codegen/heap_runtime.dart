@@ -29,6 +29,9 @@ enum MemoryPrimitive(final Set<Effect> effects) {
 final class HeapRuntime(
   final IrProgram program, {
   required final FunctionTarget allocate,
+
+  /// The ordinary failure path, which must not allocate while reporting exhaustion.
+  final FunctionTarget? allocationFailure,
   required final FunctionTarget isOutOfMemory,
   required final FunctionTarget release,
   required final FunctionTarget runEvents,
@@ -121,6 +124,7 @@ final class HeapRuntime(
         exhaustivenessFailure,
         patternMatchFailure,
         typeCheckFailure,
+        allocationFailure,
       ].nonNulls)
         (target, FunctionType(.never, [])),
       for (final target in [floatingRemainder, floatingModulo].nonNulls)

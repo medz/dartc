@@ -115,12 +115,14 @@ int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
         ? allocateControl(context, descriptor, bytes)
         : _allocator(context).allocate(context, descriptor, bytes, sp, pc);
   }
-  if (address == 0) {
-    // Reporting exhaustion must not allocate another exception or stack trace.
-    Error.throwWithStackTrace(const OutOfMemoryError(), StackTrace.empty);
-  }
+  if (address == 0) allocationFailure();
   return address;
 }
+
+/// Reports exhaustion without allocating an exception or a stack trace.
+@RuntimeEntry(.allocationFailure)
+Never allocationFailure() =>
+    Error.throwWithStackTrace(const OutOfMemoryError(), StackTrace.empty);
 
 /// Classifies the preallocated failure before the native boundary frees its heap.
 @RuntimeEntry(.isOutOfMemory)

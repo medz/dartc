@@ -1,10 +1,25 @@
 import '../../sdk/runtime/heap.dart';
+import '../../sdk/runtime/allocator.dart' show allocationFailure;
 
 import 'package:test/test.dart';
 
 import 'fixtures/heap_model.dart';
 
 void main() {
+  test(
+    'allocation failure preserves the preallocated error and empty trace',
+    () {
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          allocationFailure();
+        } catch (error, trace) {
+          expect(error, same(const OutOfMemoryError()));
+          expect(trace, same(StackTrace.empty));
+        }
+      }
+    },
+  );
+
   test('reuses one page record across repeated empty heap cycles', () {
     final model = HeapModel();
     final page = model.addPage();

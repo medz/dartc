@@ -255,6 +255,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     floatingRemainder: annotations.entries[RuntimeRole.floatingRemainder],
     floatingModulo: annotations.entries[RuntimeRole.floatingModulo],
     allocate: allocate,
+    allocationFailure: annotations.entries[RuntimeRole.allocationFailure],
     isOutOfMemory: isOutOfMemory,
     release: release,
     runEvents: runEvents,
