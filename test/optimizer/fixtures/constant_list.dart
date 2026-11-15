@@ -15,6 +15,14 @@ String nested() => const [
 
 String fromCodes() => String.fromCharCodes(const [65, 0x1f642, 0xd800]);
 
+int literalUnits() {
+  const value = 'A\u{1f642}\ud800';
+  return value.codeUnitAt(0) * 31 +
+      value.codeUnitAt(1) * 7 +
+      value.codeUnitAt(2) * 3 +
+      value.codeUnitAt(3);
+}
+
 int uniform(int index) {
   if (index < 0 || index >= 3) return -1;
   return const [7, 7, 7][index];

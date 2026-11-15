@@ -1,3 +1,5 @@
+import 'dart:ffi' show Uint16;
+
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/layout.dart';
@@ -724,6 +726,23 @@ final class FlowState {
 
   FlowMemory? _memoryOf(Object base) {
     if (base is FlowObject) return _objects[base]?.memory;
+    if (base case ScalarConstant(value: final String text)
+        when memoryLayout != null) {
+      return _constantMemory.putIfAbsent(base.structuralKey, () {
+        final start = memoryLayout!.objectLayout(ValueType.string).size;
+        var memory = FlowMemory(start, text.length * 2);
+        final unit = NativeScalarType(Uint16);
+        for (var index = 0; index < text.length; index++) {
+          memory = memory.write(
+            start + index * 2,
+            unit,
+            FlowValue.constant(Constant.integer(text.codeUnitAt(index))),
+            memoryLayout!.nativeLayout,
+          );
+        }
+        return memory;
+      });
+    }
     if (base is! ObjectConstant ||
         base.payload.isEmpty ||
         memoryLayout == null) {

@@ -160,4 +160,36 @@ void main() {
       );
     },
   );
+
+  test('source UTF-16 reads leave only their known computed result', () {
+    final function = body('literalUnits');
+    final facts =
+        ProgramOptimizer([
+          const ProgramSimplification(),
+          const ProgramCallSpecialization(),
+          const ProgramStoragePromotion(),
+          const ProgramStorageElimination(),
+          const ProgramBranchSpecialization(),
+          const ProgramLoopSpecialization(),
+          const DirectCallInlining(),
+          StackTraceLowering(heapRuntime.captureStackTrace),
+        ]).run(
+          program,
+          [(target: function.target, arguments: [])],
+          allocationFailure: heapRuntime.allocationFailure,
+          memoryLayoutFor: layouts,
+        );
+    final rewritten =
+        facts.program.implementationOf(function.target) as IrFunction;
+    expect(
+      facts.returnedBy(function.target).constant?.structuralKey,
+      Constant.integer(source.literalUnits()).structuralKey,
+    );
+    expect(
+      IrInterpreter(facts.program, {}).run(rewritten, []),
+      source.literalUnits(),
+    );
+    expect(facts.definitions, {function.target});
+    expect(rewritten.entry.instructions, isEmpty);
+  });
 }

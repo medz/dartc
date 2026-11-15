@@ -19,6 +19,36 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('string constants expose UTF-16 bytes within their payload only', () {
+    const literal = Constant.string('A\u{1f642}\ud800');
+    final state = FlowState(_program, memoryLayout: _layout);
+    final start = _layout.objectLayout(ValueType.string).size;
+    final address = FlowValue.address(FlowAddress(literal, start));
+    for (final (index, unit) in [65, 0xd83d, 0xde42, 0xd800].indexed) {
+      expect(
+        _number(
+          _load(state, _offset(address, index * 2), NativeScalarType(Uint16)),
+        ),
+        unit,
+      );
+      expect(
+        _number(_load(state, _offset(address, index * 2), _u8)),
+        unit & 0xff,
+      );
+    }
+    for (final offset in [-1, 7, 8]) {
+      expect(
+        _load(
+          state,
+          _offset(address, offset),
+          NativeScalarType(Uint16),
+        ).constant,
+        isNull,
+      );
+    }
+    expect(_load(FlowState(_program), address, _u8).constant, isNull);
+  });
+
   test('rebound SSA definitions do not alias earlier payload contents', () {
     final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
     final value = FlowValue.integerRange(FlowIntegerRange(3, 9))
