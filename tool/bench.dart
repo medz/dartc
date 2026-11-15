@@ -104,7 +104,9 @@ const fixtures = <_Fixture>[
   _Fixture(
     'system_libraries',
     'test/compiler/fixtures/system_libraries.dart',
-    .shared,
+    .executable,
+    run: true,
+    expected: 'system_libraries:ok\n',
   ),
 ];
 
