@@ -63,6 +63,8 @@ GC 关键入口的 `NonAllocating` 调用闭包在生成原生代码前按选定
 
 [托管对象验证](../test/codegen/managed_heap_native_test.dart)覆盖存活链、循环引用、嵌套构造、栈参数及原生重入；[源码构造验证](../test/compiler/managed_objects_test.dart)检查构造器副作用、浮点返回值、独立程序与分配失败。
 
+构造器展开保留字段初始化、父类构造及异常的原顺序。对象存储不被观察时，仍执行初始化产生的状态修改；泛型参数和多次原生入口调用的状态也必须保留。见[构造行为对照](../test/compiler/constructor_effects_test.dart)及[对象消除验证](../test/optimizer/constructor_source_test.dart)。
+
 ## 规范依据
 
 [主规范 §10–§16](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)、[类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[主构造器](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md)、[构造器提取](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md)、[增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md)。

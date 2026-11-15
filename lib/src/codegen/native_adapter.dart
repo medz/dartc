@@ -128,7 +128,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     if (!intoDart && signature.result.isVoid) {
       emitter.loadImmediate(body.resultRegister!, 0);
     }
-    if (!intoDart && heap != null) {
+    if (!intoDart) {
       emitter.loadImmediate(emitter.failureRegister, 0);
     }
     emitter.epilogue(frame);
@@ -485,7 +485,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     } else if (!intoDart) {
       emitter.loadImmediate(body.resultRegister!, 0);
     }
-    if (!intoDart && heap != null) {
+    if (!intoDart) {
       emitter.loadImmediate(emitter.failureRegister, 0);
     }
     emitter.epilogue(frame);

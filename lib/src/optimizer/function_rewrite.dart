@@ -196,18 +196,22 @@ final class FunctionRewrite(
       final body = site.body;
       final environment = site.environment;
       final handler = site.handler == null ? null : jump(site.handler!);
+      final allocation = call is Construct
+          ? NewPayload(call.instantiatedType, const Constant.integer(0))
+          : null;
       final linear = body.blocks.length == 1 && body.entry.end is Return;
       final copiedBlocks = {
         for (final block in body.blocks)
           block: Block(
             block == body.entry
-                ? const <ValueType>[]
+                ? [if (allocation != null && handler != null) call.type]
                 : block.parameters.map((p) => p.type.substitute(environment)),
           ),
       };
       final entry = copiedBlocks[body.entry]!;
+      final start = allocation != null && handler != null ? Block() : entry;
       final join = linear ? null : Block([call.type]);
-      for (final block in [...copiedBlocks.values, ?join]) {
+      for (final block in {...copiedBlocks.values, start, ?join}) {
         instructions[block] = [];
       }
       final resumed = {
@@ -220,12 +224,30 @@ final class FunctionRewrite(
       for (final block in resumed.values) {
         instructions[block] = [];
       }
+      if (allocation != null) {
+        locate(call, allocation, function);
+        if (handler == null) {
+          instructions[entry]!.add(allocation);
+        } else {
+          ends[start] = Invoke(
+            allocation,
+            onReturn: Jump(entry, [allocation]),
+            onThrow: handler,
+          );
+        }
+      }
+      final Value? receiver = allocation == null
+          ? null
+          : handler == null
+          ? allocation
+          : entry.parameters.single;
       final locals = <Value, Value>{
         for (final block in body.blocks)
           if (block != body.entry)
             for (final (i, parameter) in block.parameters.indexed)
               parameter: copiedBlocks[block]!.parameters[i],
       };
+      if (receiver != null) locals[body.entry.parameters.first] = receiver;
       final copied = <Instruction, Instruction>{};
       late Value Function(Value) read;
       Instruction clone(Instruction source) => copied.putIfAbsent(source, () {
@@ -248,7 +270,8 @@ final class FunctionRewrite(
         }
         throw StateError('Unexpected value in an inlined graph.');
       };
-      for (final (i, parameter) in body.entry.parameters.indexed) {
+      for (final (i, parameter)
+          in body.entry.parameters.skip(allocation == null ? 0 : 1).indexed) {
         final argument = value(site.arguments[i]);
         final type = parameter.type.substitute(environment);
         if (argument.type == type) {
@@ -311,9 +334,9 @@ final class FunctionRewrite(
         if (stopped) continue;
         switch (source.end) {
           case Return(:final value):
-            var returned = value == null
-                ? const Constant.nullValue()
-                : read(value);
+            var returned =
+                receiver ??
+                (value == null ? const Constant.nullValue() : read(value));
             if (body.target.requiresResultCheck) {
               final cast = TypeCast(returned, call.type);
               locate(source, cast, body, call);
@@ -364,7 +387,7 @@ final class FunctionRewrite(
             final trace = stackTrace == null ? null : read(stackTrace);
             final caught = onThrow == null ? handler : edge(onThrow);
             ends[cursor] = isRecorded
-                ? Throw.recorded(error, trace!, onThrow: caught)
+                ? Throw.recorded(error, trace, onThrow: caught)
                 : Throw(error, stackTrace: trace, onThrow: caught);
           case ExhaustivenessFailure(:final onThrow):
             ends[cursor] = ExhaustivenessFailure(
@@ -380,7 +403,7 @@ final class FunctionRewrite(
         exit = join!;
         result = join.parameters.single;
       }
-      expansions[call] = (entry: entry, exit: exit);
+      expansions[call] = (entry: start, exit: exit);
       return result;
     }
 
@@ -559,7 +582,7 @@ final class FunctionRewrite(
           ? null
           : value(original.stackTrace!);
       return original.isRecorded
-          ? Throw.recorded(exception, trace!, onThrow: handler)
+          ? Throw.recorded(exception, trace, onThrow: handler)
           : Throw(exception, stackTrace: trace, onThrow: handler);
     }
 
@@ -737,7 +760,7 @@ final class FunctionRewrite(
         Throw(
           isRecorded: true,
           :final exception,
-          stackTrace: final trace!,
+          stackTrace: final trace,
           :final onThrow,
         ) =>
           Throw.recorded(
@@ -946,7 +969,9 @@ final class FunctionRewrite(
         }
         late final live = ValueLiveness.source(site.body)
             .liveIn[site.body.entry]!;
-        if ((call is! DirectCall && call is! FunctionCall) ||
+        if ((call is! DirectCall &&
+                call is! FunctionCall &&
+                call is! Construct) ||
             !owns(call) ||
             site.arguments.indexed.any((entry) {
               final (index, value) = entry;
@@ -964,13 +989,22 @@ final class FunctionRewrite(
         }
         if (call
             case DirectCall(:final target) ||
+                Construct(initializer: final target) ||
                 FunctionCall(target: final target?)
             when target.implementation != site.body.target) {
           throw ArgumentError(
             'Inlined body differs from the proven call target.',
           );
         }
-        final parameters = site.body.target.parameterTypes;
+        if (call is Construct &&
+            call.instantiatedType.freeTypeParameters.isNotEmpty) {
+          throw ArgumentError(
+            'Inlined construction requires its actual instance type.',
+          );
+        }
+        final parameters = site.body.target.parameterTypes
+            .skip(call is Construct ? 1 : 0)
+            .toList();
         if (parameters.length != site.arguments.length ||
             parameters.indexed.any(
               (entry) => !entry.$2

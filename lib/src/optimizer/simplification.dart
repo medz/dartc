@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 
 import 'flow_value.dart';
+import 'trace_demand.dart';
 import 'function_rewrite.dart';
 import 'program_flow.dart';
 import 'program_pass.dart';
@@ -104,13 +105,18 @@ final class const ProgramSimplification() extends ProgramPass {
     final program = facts.program;
     facts.checkProgram(program);
     var changed = false;
+    final traces = demandedTraces(facts);
     final functions = <IrFunction>[];
     for (final function in program.functions) {
       if (!facts.definitions.contains(function.target)) {
         functions.add(function);
         continue;
       }
-      final rewritten = simplifyFunction(facts, function);
+      final rewritten = simplifyFunction(
+        facts,
+        function,
+        demandedTraces: traces,
+      );
       changed |= !identical(function, rewritten);
       functions.add(rewritten);
     }
@@ -162,6 +168,7 @@ IrFunction simplifyFunction(
   Set<Object>? activations,
   Set<Instruction> discardable = const {},
   Map<Instruction, Instruction>? instructionSources,
+  Set<Throw>? demandedTraces,
 }) {
   facts.checkProgram(facts.program);
   if (!identical(facts.program.implementationOf(function.target), function)) {
@@ -202,13 +209,26 @@ IrFunction simplifyFunction(
   final removable = {...discardable};
   final nonThrowing = <Instruction>{};
   final directThrows = <Throw>{};
+  final terminators = <Block, Terminator>{};
   for (final block in function.blocks) {
     final reached = [
       for (final activation in selected)
         if (facts.reachesBlock(block, activation: activation)) activation,
     ];
     if (reached.isEmpty) continue;
-    if (block.end case final Throw throwing when throwing.onThrow != null) {
+    if (block.end case final Throw throwing
+        when throwing.isRecorded &&
+            throwing.stackTrace != null &&
+            demandedTraces != null &&
+            !demandedTraces.contains(throwing)) {
+      terminators[block] = Throw.recorded(
+        throwing.exception,
+        null,
+        onThrow: throwing.onThrow,
+      );
+    }
+    if ((terminators[block] ?? block.end) case final Throw throwing
+        when throwing.onThrow != null) {
       final exception = valueOf(throwing.exception, reached);
       // Unknown class bounds can admit Error subclasses through interfaces.
       if (throwing.isRecorded ||
@@ -277,5 +297,6 @@ IrFunction simplifyFunction(
     discardable: removable,
     nonThrowing: nonThrowing,
     directThrows: directThrows,
+    terminators: terminators,
   ).run(instructionSources: instructionSources);
 }

@@ -173,7 +173,8 @@ final class NativeBoundaries(
   }
 
   bool _needsBridge(NativeSignature signature) =>
-      (signature.result is NativePointerType ||
+      (signature.result.isVoid ||
+          signature.result is NativePointerType ||
           signature.result is NativeCompoundType) ||
       signature.parameters.any(
         (type) => type is NativePointerType || type is NativeCompoundType,
@@ -249,7 +250,7 @@ final class NativeBoundaries(
               : PointerFromAddress(result, dart.returnType as ClassType),
         );
       }
-      entry.finish(Return(result));
+      entry.finish(Return(dart.returnType == .voidType ? null : result));
     }
     _functions.add(IrFunction(source, [entry]));
     return raw;

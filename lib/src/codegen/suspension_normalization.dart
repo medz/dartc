@@ -414,7 +414,7 @@ final class _Region(
         final handler = onThrow == null ? null : jump(onThrow);
         into.finish(
           isRecorded
-              ? Throw.recorded(error, trace!, onThrow: handler)
+              ? Throw.recorded(error, trace, onThrow: handler)
               : Throw(error, stackTrace: trace, onThrow: handler),
         );
       case ExhaustivenessFailure(:final onThrow):

@@ -149,7 +149,7 @@ Terminator _mapEnd(
     isRecorded
         ? Throw.recorded(
             read(exception),
-            read(stackTrace!),
+            stackTrace == null ? null : read(stackTrace),
             onThrow: onThrow == null ? null : edge(onThrow),
           )
         : Throw(

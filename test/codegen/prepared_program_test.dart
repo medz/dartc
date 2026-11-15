@@ -86,6 +86,47 @@ void main() {
     );
   });
 
+  test('caught call failures do not require a heap lifecycle', () {
+    final raise = FunctionTarget(uri, 'raise', .never, []);
+    final raised = Block()
+      ..finish(Throw.recorded(const Constant.integer(7), null));
+    final forward = FunctionTarget(uri, 'forward', .never, []);
+    final forwarded = Block();
+    forwarded.finish(Unreachable(forwarded.emit(DirectCall(raise, []))));
+    final recover = FunctionTarget(uri, 'recover', .integer, []);
+    final called = Block(), caught = Block();
+    called.finish(
+      Invoke(DirectCall(forward, []), onReturn: null, onThrow: Jump(caught)),
+    );
+    caught.finish(const Return(Constant.integer(42)));
+    final program = IrProgram([], [
+      IrFunction(raise, [raised]),
+      IrFunction(forward, [forwarded]),
+      IrFunction(recover, [called, caught]),
+    ]);
+    final preparation = _preparation(target, program, roots: [recover]);
+    final flow = CallTypeFlow(
+      preparation.program,
+      preparation.roots,
+      instantiatedTypes: preparation.instantiatedTypes,
+    );
+    final prepared = preparation.prepare(flow.facts) as PreparedProgram;
+    expect(prepared.definitions, {raise, forward, recover});
+    expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
+
+    final escaping = _preparation(target, program, roots: [forward]);
+    expect(
+      () => escaping.prepare(
+        CallTypeFlow(
+          escaping.program,
+          escaping.roots,
+          instantiatedTypes: escaping.instantiatedTypes,
+        ).facts,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test(
     'native exports enter through their ABI bridge without adding source roots',
     () {
@@ -176,6 +217,33 @@ void main() {
     ) as PreparedProgram;
     expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
   });
+
+  test(
+    'native Void discards a Dart result without changing ordinary Dart calls',
+    () {
+      final function = FunctionTarget(uri, 'forwardVoid', .voidType, [
+        .integer,
+      ]);
+      final block = Block(function.parameterTypes)
+        ..finish(const Return(Constant.integer(42)));
+      final source = IrFunction(function, [block]);
+      final boundaries = NativeBoundaries(
+        IrProgram([], [source]),
+        exports: {
+          function: NativeExport('forwardVoid', NativeSignature(Void, [Int64])),
+        },
+      );
+      final facts = ProgramOptimizer(const [
+        ProgramSimplification(),
+        DirectCallInlining(),
+      ]).run(boundaries.program, [], openEntries: boundaries.roots);
+      final bridge =
+          facts.program.implementationOf(boundaries.roots.single) as IrFunction;
+      final runner = IrInterpreter(facts.program, {});
+      expect(runner.run(source, [7]), 42);
+      expect(runner.run(bridge, [7]), isNull);
+    },
+  );
 
   test('escaped callbacks analyze ABI entry values before Dart calls', () {
     final pointer = FfiTypes.int64Pointer;

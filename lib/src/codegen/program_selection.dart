@@ -28,7 +28,7 @@ final class ProgramSelection(
     members.program,
     runtime: heap.runtime,
   );
-  var capture = false, managed = false;
+  var capture = false, managed = false, failures = false;
   Set<FunctionTarget> primitives = {};
 
   /// Source entries reached through generated code rather than checked call sites.
@@ -181,7 +181,10 @@ final class ProgramSelection(
   }
 
   /// Returns source dependencies that require preparing storage and bindings again.
-  Set<FunctionTarget> close({required bool persistent}) {
+  Set<FunctionTarget> close({
+    required bool persistent,
+    required Set<FunctionTarget> roots,
+  }) {
     final calls = {
       for (final body in functions.values) ...body.invocations.values,
     };
@@ -200,9 +203,6 @@ final class ProgramSelection(
       if (heap.initializersFor(calls).contains(layouts.pointers.initializer))
         layouts.pointers.function,
     ];
-    var exceptions = functions.values.any(
-      (body) => body.ends.values.any((end) => end is Throw || end is Invoke),
-    );
     var support = <IrFunction>[];
     while (true) {
       calls.addAll(heap.initializersFor(calls.toList()));
@@ -217,26 +217,21 @@ final class ProgramSelection(
         include(function);
         final body = functions[function.target]!;
         calls.addAll(body.invocations.values);
-        exceptions |= body.ends.values.any(
-          (end) => end is Throw || end is Invoke,
-        );
       }
-      final needsTrace =
-          calls.contains(heap.runtime?.captureTrace) ||
-          calls.contains(heap.runtime?.captureStackTrace);
-      final needsHeap =
-          needsTrace ||
-          managed ||
-          persistent ||
-          heap.allocates(calls) ||
-          calls.any((target) => heap.runtime?.primitives[target] == .context) ||
-          exceptions;
-      if (pending.isEmpty && capture == needsTrace && managed == needsHeap) {
-        break;
-      }
-      capture = needsTrace;
-      managed = needsHeap;
+      if (pending.isEmpty) break;
     }
+    failures = functions.values.any(
+      (body) => body.ends.values.any((end) => end is Throw || end is Invoke),
+    );
+    capture =
+        calls.contains(heap.runtime?.captureTrace) ||
+        calls.contains(heap.runtime?.captureStackTrace);
+    managed =
+        capture ||
+        persistent ||
+        heap.allocates(calls) ||
+        calls.any((target) => heap.runtime?.primitives[target] == .context) ||
+        _unwindsTo(roots);
     for (final body in functions.values) {
       // Factory inputs are accounted for at their originating construction sites.
       if (heap.allocates([body.target])) continue;
@@ -344,5 +339,31 @@ final class ProgramSelection(
       ],
     );
     return {};
+  }
+
+  // Only exceptions escaping an entry require the native failure lifecycle.
+  bool _unwindsTo(Set<FunctionTarget> roots) {
+    final callers = <FunctionTarget, Set<FunctionTarget>>{};
+    final pending = <FunctionTarget>[];
+    for (final body in functions.values) {
+      for (final block in body.blocks) {
+        final end = body.ends[block];
+        if (end is Throw && end.onThrow == null) pending.add(body.target);
+        for (final operation in body.instructions[block]!) {
+          if (end is Invoke && identical(end.operation, operation)) continue;
+          if (body.invocations[operation] case final target?) {
+            (callers[target] ??= {}).add(body.target);
+          }
+        }
+      }
+    }
+    final visited = <FunctionTarget>{};
+    while (pending.isNotEmpty) {
+      final target = pending.removeLast();
+      if (!visited.add(target)) continue;
+      if (roots.contains(target)) return true;
+      pending.addAll(callers[target] ?? const {});
+    }
+    return false;
   }
 }

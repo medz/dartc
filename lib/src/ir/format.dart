@@ -261,10 +261,10 @@ void writeFunction(
       Throw(
         isRecorded: true,
         :final exception,
-        stackTrace: final trace!,
+        stackTrace: final trace,
         :final onThrow,
       ) =>
-        '  throw.recorded ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
+        '  throw.recorded ${value(exception)}${trace == null ? '' : ', ${value(trace)}'}${unwind(onThrow)}',
       Throw(:final exception, stackTrace: final trace?, :final onThrow) =>
         '  rethrow ${value(exception)}, ${value(trace)}${unwind(onThrow)}',
       Throw(:final exception, :final onThrow) =>

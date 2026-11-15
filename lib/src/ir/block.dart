@@ -111,7 +111,8 @@ final class Throw._(
   /// The exception object from the Dart `throw` expression.
   final Value exception,
 
-  /// The explicit trace to propagate, or `null` to capture at a new throw.
+  /// The trace to propagate, or `null` to capture at an unrecorded throw.
+  /// A recorded throw may omit an unobserved exception-channel result.
   final Value? stackTrace,
 
   /// The exceptional edge to the innermost local handler, if any.
@@ -124,8 +125,10 @@ final class Throw._(
   new(Value exception, {Value? stackTrace, Jump? onThrow})
     : this._(exception, stackTrace, onThrow, false);
 
-  /// Unwinds an already-recorded exception with an explicit trace.
-  new recorded(Value exception, Value stackTrace, {Jump? onThrow})
+  /// Unwinds an already-recorded exception.
+  /// A null trace requires proof that no handler or external caller reads it;
+  /// recording on Error objects is a separate, preceding effect.
+  new recorded(Value exception, Value? stackTrace, {Jump? onThrow})
     : this._(exception, stackTrace, onThrow, true);
 
   this {

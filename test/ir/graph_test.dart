@@ -274,6 +274,36 @@ void main() {
     },
   );
 
+  test(
+    'inlined initialization follows storage inheritance, not interfaces',
+    () {
+      final base = ClassType(f.library, 'Base');
+      final field = InstanceField(base, 'value', .integer, isFinal: true);
+      for (final inherited in [false, true]) {
+        final child = ClassType(
+          f.library,
+          'Child',
+          superclass: inherited ? base : ValueType.object,
+          interfaces: inherited ? [] : [base],
+        );
+        final target = FunctionTarget(f.library, 'create', child, []);
+        final block = Block();
+        final storage = block.emit(
+          NewPayload(child, const Constant.integer(0)),
+        );
+        final next = Block([child]);
+        block.finish(Jump(next, [storage]));
+        final receiver = next.emit(TypeView(next.parameters.single, base));
+        next.emit(StoreField(field, receiver, one));
+        next.finish(Return(next.parameters.single));
+        expect(
+          () => IrFunction(target, [block, next]),
+          inherited ? returnsNormally : throwsStateError,
+        );
+      }
+    },
+  );
+
   test('instance calls validate receiver and supplied argument shape before dispatch', () {
     final owner = ClassType(f.library, 'Service');
     final target = FunctionTarget(

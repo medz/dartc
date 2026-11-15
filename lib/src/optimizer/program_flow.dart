@@ -2811,6 +2811,16 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     return Set.unmodifiable(_flow._roots.keys);
   }
 
+  /// Bodies whose exceptional completion can reach a caller outside this graph.
+  Set<FunctionTarget> get escapingThrows {
+    _check();
+    return Set.unmodifiable({
+      ..._flow._roots.keys,
+      for (final activation in _flow._escapingActivations)
+        activation.body.target,
+    });
+  }
+
   /// Entries whose callers admit the full declared argument bounds.
   Set<FunctionTarget> get openEntries {
     _check();
@@ -3014,6 +3024,15 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
           activation,
         ).expand((item) => item.targets[operation] ?? const <FunctionTarget>{}),
       );
+
+  /// Bodies whose exceptions can leave this operation, including allocation
+  /// failure reporting that has no explicit source call.
+  Set<FunctionTarget> unwindingTargetsOf(Instruction operation) => {
+    for (final caller in _at(operation, null))
+      for (final site in [operation, ?caller.allocationCalls[operation]])
+        for (final callee in caller.calls[site] ?? <_Activation>{})
+          if (callee.exceptional != null) callee.body.target,
+  };
 
   /// Whether a reached invocation still has an unresolved callable alternative.
   bool hasUnknownCall(Instruction operation, {Object? activation}) => _at(

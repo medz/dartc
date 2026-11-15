@@ -2075,7 +2075,7 @@ final class FunctionRepresentation(
         }
         ends[block] = Throw.recorded(
           convert(exception, .object, body),
-          stackTrace!,
+          stackTrace,
           onThrow: onThrow == null ? null : edge(onThrow),
         );
       }

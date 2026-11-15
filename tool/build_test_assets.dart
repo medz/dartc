@@ -87,6 +87,7 @@ const _compilerLibraries = {
   'native_names',
   'typed_data',
   'managed_objects',
+  'constructor_effects',
   'heap_runtime',
   'weak_references',
   'expandos',

@@ -221,6 +221,13 @@ IrProgram _inlineSelected(
               for (final (i, type) in operation.typeArguments.indexed)
                 target.typeParameters[i]: type,
             };
+          } else if (operation is Construct &&
+              sourceFacts &&
+              operation.instantiatedType.freeTypeParameters.isEmpty) {
+            target = operation.initializer;
+            if (!_entryChecksProved(operation, facts!)) continue;
+            arguments = operation.inputs;
+            environment = target.environmentFor(operation.instantiatedType);
           } else if (operation is FunctionCall) {
             final binding = closureOf(operation);
             if (binding == null) continue;
@@ -254,7 +261,6 @@ IrProgram _inlineSelected(
           final source = program.implementationOf(target);
           if (source is! IrFunction ||
               source.bodyKind != .synchronous ||
-              target.kind == .initializer ||
               target.awaiterCapture != null ||
               source.observesCallerFrame) {
             continue;
@@ -313,15 +319,21 @@ IrProgram _inlineSelected(
           if (candidate.body.closures.isNotEmpty) continue;
           late final live = ValueLiveness.source(candidate.body)
               .liveIn[candidate.body.entry]!;
+          final parameters = source.entry.parameters
+              .skip(operation is Construct ? 1 : 0)
+              .toList();
           if (arguments.indexed.any(
             (entry) =>
                 entry.$2 is CallFrameValue &&
-                live.contains(candidate.body.entry.parameters[entry.$1]),
+                live.contains(
+                  candidate.body.entry.parameters[entry.$1 +
+                      (operation is Construct ? 1 : 0)],
+                ),
           )) {
             continue;
           }
           var views = 0, boxes = 0;
-          for (final (i, parameter) in source.entry.parameters.indexed) {
+          for (final (i, parameter) in parameters.indexed) {
             final type = parameter.type.substitute(environment);
             final argument = arguments[i];
             if (type == argument.type) continue;
@@ -332,19 +344,23 @@ IrProgram _inlineSelected(
           }
           final extraAllocations =
               candidate.allocations +
+              (operation is Construct ? 1 : 0) +
               boxes -
               (sourceFacts && allocates(operation) ? 1 : 0);
           final cost =
               candidate.copies +
+              (operation is Construct ? 1 : 0) +
               views +
               11 * (extraAllocations > 0 ? extraAllocations : 0);
           final growth =
               candidate.copies +
+              (operation is Construct ? 1 : 0) +
               views +
               (handler == null ? 0 : 2 * candidate.copies);
           if (cost > maxCalleeCost || growth > budget) continue;
           budget -= growth;
-          allocations += candidate.allocations + boxes;
+          allocations +=
+              candidate.allocations + boxes + (operation is Construct ? 1 : 0);
           if (sourceFacts && allocates(operation)) allocations--;
           sites[operation] = (
             body: candidate.body,
@@ -424,26 +440,45 @@ IrProgram _inlineSelected(
       : program;
 }
 
-bool _entryChecksProved(DirectCall call, ProgramFlowFacts facts) {
-  final target = call.target;
+bool _entryChecksProved(Instruction call, ProgramFlowFacts facts) {
+  final (target, arguments, types) = switch (call) {
+    DirectCall(:final target, :final inputs, :final typeArguments) => (
+      target,
+      inputs,
+      typeArguments,
+    ),
+    Construct(:final initializer, :final inputs) => (
+      initializer,
+      inputs,
+      <ValueType>[],
+    ),
+    _ => throw ArgumentError('Expected a direct call or construction.'),
+  };
   if (target.covariantParameters.isEmpty) return true;
   final owner = target.owner!;
-  final receiver = facts.valueOf(call.inputs.first);
+  final receiver = call is Construct ? null : facts.valueOf(arguments.first);
   for (final slot in target.covariantParameters) {
     final parameter = target.signature.parameters[slot];
     final ownerDependent = parameter.freeTypeParameters.any(
       owner.typeParameters.contains,
     );
-    if (ownerDependent && receiver.unknownTypes.isNotEmpty) return false;
-    final actualTypes = receiver.types.whereType<ClassType>().toList();
+    if (ownerDependent &&
+        receiver != null &&
+        receiver.unknownTypes.isNotEmpty) {
+      return false;
+    }
+    final actualTypes = call is Construct
+        ? [call.instantiatedType]
+        : receiver!.types.whereType<ClassType>().toList();
     if (actualTypes.isEmpty) return false;
     for (final type in actualTypes) {
       final environment = {
         ...target.environmentFor(type),
-        for (final (i, type) in call.typeArguments.indexed)
-          target.typeParameters[i]: type,
+        for (final (i, type) in types.indexed) target.typeParameters[i]: type,
       };
-      final actual = facts.valueOf(call.inputs[target.argumentOffset + slot]);
+      final actual = facts.valueOf(
+        arguments[(call is Construct ? 0 : target.argumentOffset) + slot],
+      );
       if (actual.isBottom ||
           actual.check(parameter.substitute(environment)).mayFail) {
         return false;

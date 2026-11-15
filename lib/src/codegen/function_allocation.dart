@@ -931,7 +931,8 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         _edges[(block, edge)] = _edge(edge);
       case Invoke(:final onReturn):
         if (onReturn != null) _edges[(block, onReturn)] = _edge(onReturn);
-      case Throw(:final exception, stackTrace: final trace!, :final onThrow):
+      case Throw(:final exception, :final stackTrace, :final onThrow):
+        final trace = stackTrace ?? const Constant.nullValue();
         final unwind = {
           UnwindValue.exception: (
             _location(exception),

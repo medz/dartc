@@ -241,6 +241,49 @@ FunctionReferences verifyCallable(
   final idom = predecessors == null
       ? const <Block, Block>{}
       : immediateDominators(entry, predecessors);
+  bool freshReceiver(Value value, ClassType owner, [Set<Value>? seen]) {
+    seen = {...?seen};
+    if (!seen.add(value)) return false;
+    if (target.kind == .initializer && value == entry.parameters.first) {
+      for (
+        ClassType? ancestor = target.owner;
+        ancestor != null;
+        ancestor = ancestor.superclass
+      ) {
+        if (ancestor.declaration == owner.declaration) return true;
+      }
+    }
+    switch (value) {
+      case NewPayload(type: final ClassType type) ||
+          AllocatedObject(type: final ClassType type):
+        for (
+          ClassType? ancestor = type;
+          ancestor != null;
+          ancestor = ancestor.superclass
+        ) {
+          if (ancestor.declaration == owner.declaration) return true;
+        }
+        return false;
+      case TypeView(:final operand) || UncheckedCast(:final operand):
+        return freshReceiver(operand, owner, seen);
+      case BlockParameter():
+        final block = definitions[value]?.$1;
+        if (block == null || block == entry) return false;
+        final incoming = [
+          for (final predecessor in predecessors![block]!)
+            for (final edge in predecessor.successors)
+              if (edge.target == block) edge,
+        ];
+        final index = block.parameters.indexOf(value);
+        return incoming.isNotEmpty &&
+            incoming.every(
+              (edge) => freshReceiver(edge.arguments[index], owner, seen),
+            );
+      default:
+        return false;
+    }
+  }
+
   for (final block in blocks) {
     void use(Value value, int position) {
       if (value is Constant) {
@@ -421,19 +464,14 @@ FunctionReferences verifyCallable(
           (closures ??= {}).add(child);
         case StoreField(:final field, :final receiver)
             when field.isFinal && !field.isLate:
-          if (target.kind != .initializer ||
-              target.owner != field.owner ||
-              receiver != entry.parameters.first) {
+          if (!freshReceiver(receiver, field.owner)) {
             throw StateError(
               'Final field write outside its declaring initializer.',
             );
           }
         case DirectCall(target: final callee, :final inputs)
             when callee.kind == .initializer:
-          if (target.kind != .initializer ||
-              inputs.first != entry.parameters.first ||
-              (callee.owner != target.owner &&
-                  callee.owner != target.owner!.superclass?.declaration)) {
+          if (!freshReceiver(inputs.first, callee.owner!)) {
             throw StateError(
               'An initializer can only delegate on its own receiver.',
             );

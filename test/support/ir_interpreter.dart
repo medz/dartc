@@ -1896,12 +1896,12 @@ final class IrInterpreter(
           final declaration = program.classes.singleWhere(
             (c) => c.type == type.declaration,
           );
-          if (!declaration.referencePayload) {
+          final length = read(bytes) as int;
+          if (!declaration.referencePayload && length != 0) {
             throw UnsupportedError(
               'Raw inline bytes require target execution.',
             );
           }
-          final length = read(bytes) as int;
           RangeError.checkNotNegative(length, 'bytes');
           values[op] = _Instance(
             type,

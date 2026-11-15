@@ -258,7 +258,7 @@ base class ScalarCodeGenerator<R extends Object>(
                 );
               },
               safepoint,
-              failures: managed,
+              failures: managed || selection.failures,
               persistent: persistent,
               descriptorAddress: (fixup, type) {
                 relocations.add(

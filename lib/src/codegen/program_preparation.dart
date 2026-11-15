@@ -265,7 +265,7 @@ final class ProgramPreparation(
     final persistent =
         activeCallbacks.isNotEmpty ||
         !globals.isEmpty && globals.hasReferences(layouts);
-    final missing = selection.close(persistent: persistent);
+    final missing = selection.close(persistent: persistent, roots: roots);
     for (final target in missing) {
       if (program.implementationOf(target) == null) {
         throw ArgumentError('Missing support dependency: ${target.name}');
