@@ -392,6 +392,52 @@ void main() {
     }
   });
 
+  test('equal growing inputs share nested calls after each extension', () {
+    final functions = <IrFunction>[];
+    var child = FunctionTarget(_uri, 'leaf', .integer, [.integer]);
+    final leaf = Block(child.parameterTypes);
+    leaf.finish(Return(leaf.parameters.single));
+    functions.add(IrFunction(child, [leaf]));
+    for (var depth = 0; depth < 6; depth++) {
+      final target = FunctionTarget(_uri, 'level$depth', .integer, [.integer]);
+      final body = Block(target.parameterTypes);
+      final left = body.emit(DirectCall(child, body.parameters));
+      final right = body.emit(DirectCall(child, body.parameters));
+      body.finish(Return(body.emit(IntBinary(.add, left, right))));
+      functions.add(IrFunction(target, [body]));
+      child = target;
+    }
+    final program = IrProgram([], functions);
+    final flow = _flow(program, functions.last, [
+      FlowValue.constant(const Constant.integer(1)),
+    ]);
+    for (final value in [2, 4, 8]) {
+      flow.extend(
+        entries: [
+          (
+            target: child,
+            arguments: [FlowValue.constant(Constant.integer(value))],
+          ),
+        ],
+      );
+    }
+    final range = flow.facts.returnedBy(child).integers!;
+    expect((range.lower, range.upper), (64, 512));
+    for (final value in [1, 2, 4, 8]) {
+      expect(
+        IrInterpreter(program, {}).run(functions.last, [value]),
+        value * 64,
+      );
+    }
+    for (final function in functions) {
+      expect(
+        flow.facts.activationsOf(function.target).length,
+        lessThanOrEqualTo(4),
+        reason: function.target.name,
+      );
+    }
+  });
+
   test('a shared summary substitutes each callers own SSA argument', () {
     final identity = FunctionTarget(_uri, 'identity', .integer, [.integer]);
     final body = Block(identity.parameterTypes);

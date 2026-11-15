@@ -35,7 +35,8 @@ final class ProgramFlow(
   final _escapingReturns = <FunctionTarget>{};
   final _escapedCalls = <Object, _Activation>{};
   final _roots = <FunctionTarget, _Activation>{};
-  final _calls = <_ContextKey, _Activation>{};
+  final _calls = <_Activation>{};
+  final _inputs = <_ContextKey, Set<_Activation>>{};
   final _callSites = <(_Activation, Instruction, FunctionTarget), _CallSite>{};
   final _pending = <_Activation>{};
   final _owners = <Object, FunctionTarget>{};
@@ -231,7 +232,7 @@ final class ProgramFlow(
     );
   }
 
-  void _supply(
+  bool _supply(
     _Activation activation,
     List<FlowValue> arguments,
     FlowState input,
@@ -256,6 +257,7 @@ final class ProgramFlow(
           activation.input!.join(input, widen: activation.recursive) || changed;
     }
     if (changed) _pending.add(activation);
+    return changed;
   }
 
   FlowResult _invoke(
@@ -338,7 +340,8 @@ final class ProgramFlow(
         path.isNotEmpty ||
         caller.repeated ||
         _loopBlocks(caller.body).contains(block);
-    final projected = input.project(arguments, reads: _readsFor(body));
+    final reads = _readsFor(body);
+    final projected = input.project(arguments, reads: reads);
     final aliases = <(int, int)>[
       for (var i = 0; i < arguments.length; i++)
         for (var j = 0; j < i; j++)
@@ -358,8 +361,10 @@ final class ProgramFlow(
         repeated,
         aliasKey,
       );
-      var key = site.contexts[local];
-      if (key != local) {
+      final previous = site.contexts[local];
+      if (site.joined.contains(local)) {
+        callee = previous!;
+      } else {
         final keyState = projected.copy()..retainSources((_) => false);
         final precise = _ContextKey(
           target,
@@ -369,21 +374,28 @@ final class ProgramFlow(
           repeated,
           aliasKey,
         );
-        if (key == null || key == precise) {
-          key = precise;
+        if (reads == null && previous != null && previous.inputKey != precise) {
+          // Effectful calls keep allocation identities as their inputs grow.
+          site.joined.add(local);
+          callee = previous.callSites.length == 1
+              ? previous
+              : _Activation(body);
+          callee.shareInput = false;
         } else {
-          final previous = _calls[key]!;
-          // Only shared exact executions need a separate joining summary.
-          if (previous.callSites.length == 1 &&
-              previous.callSites.contains(site)) {
-            _calls.remove(key);
-            _calls[local] = previous;
-          }
-          key = local;
+          callee =
+              _inputs[precise]?.firstOrNull ??
+              (previous != null && previous.callSites.length == 1
+                  ? previous
+                  : _Activation(body));
         }
-        site.contexts[local] = key;
       }
-      callee = _calls.putIfAbsent(key!, () => _Activation(body));
+      _calls.add(callee);
+      site.contexts[local] = callee;
+      if (previous != null &&
+          previous != callee &&
+          !site.contexts.values.contains(previous)) {
+        previous.callSites.remove(site);
+      }
     }
     if (repeated && !callee.repeated) {
       callee.repeated = true;
@@ -393,6 +405,7 @@ final class ProgramFlow(
       site.recursive = true;
       for (final cycle in path) {
         cycle.recursive = true;
+        _indexInput(cycle);
         if (!cycle.repeated) {
           cycle.repeated = true;
           _pending.add(cycle);
@@ -408,7 +421,8 @@ final class ProgramFlow(
         }
       }
     }
-    if (callee.mergeEnvironment(environment)) _pending.add(callee);
+    final environmentChanged = callee.mergeEnvironment(environment);
+    if (environmentChanged) _pending.add(callee);
     caller.calls.putIfAbsent(operation, () => {}).add(callee);
     callee.readers.add(caller);
     callee.callSites.add(site);
@@ -424,7 +438,12 @@ final class ProgramFlow(
               FlowSource(parameters[a], callee),
         ]),
     ];
-    _supply(callee, supplied, projected);
+    final inputChanged = _supply(callee, supplied, projected);
+    if (inputChanged ||
+        environmentChanged ||
+        callee.inputKey?.repeated != callee.repeated) {
+      _indexInput(callee);
+    }
 
     FlowObject mapObject(FlowObject object) {
       if (site.recursive ||
@@ -533,6 +552,37 @@ final class ProgramFlow(
       }
     }
     return const [];
+  }
+
+  void _indexInput(_Activation activation) {
+    _ContextKey? key;
+    if (_calls.contains(activation) &&
+        !activation.recursive &&
+        activation.shareInput) {
+      final arguments = activation.arguments;
+      final pairs = <(int, int)>[
+        for (var i = 0; i < arguments.length; i++)
+          for (var j = 0; j < i; j++)
+            if (_equivalent(arguments[i], arguments[j])) (i, j),
+      ];
+      final state = activation.input!.copy()..retainSources((_) => false);
+      key = _ContextKey(
+        activation.body.target,
+        arguments.map((value) => value.withSources(const [])).toList(),
+        activation.environment,
+        state.structuralKey,
+        activation.repeated,
+        pairs.fold<Object?>(null, (key, pair) => (key, pair)),
+      );
+    }
+    if (key == activation.inputKey) return;
+    if (activation.inputKey case final previous?) {
+      final known = _inputs[previous]!;
+      known.remove(activation);
+      if (known.isEmpty) _inputs.remove(previous);
+    }
+    if (key != null) _inputs.putIfAbsent(key, () => {}).add(activation);
+    activation.inputKey = key;
   }
 
   FlowReadSet? _readsFor(IrFunction body) {
@@ -2550,7 +2600,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
 
   Iterable<_Activation> get _activations sync* {
     yield* _flow._roots.values;
-    yield* _flow._calls.values;
+    yield* _flow._calls;
     yield* _flow._escapedCalls.values;
   }
 
@@ -2908,7 +2958,7 @@ final class _ContextKey(
   final Object? aliases,
 ) {
   final Map<TypeParameterType, ValueType> environment = Map.unmodifiable(
-    environment,
+    _completeEnvironment(target, environment),
   );
   @override
   bool operator ==(Object other) =>
@@ -2940,7 +2990,8 @@ final class _CallSite(
   final Instruction operation,
   final FunctionTarget target,
 ) {
-  final contexts = <_ContextKey, _ContextKey>{};
+  final contexts = <_ContextKey, _Activation>{};
+  final joined = <_ContextKey>{};
   final allocations = <FlowObject, FlowObject>{};
   bool recursive = false;
 }
@@ -2996,6 +3047,8 @@ Set<Object>? _callableOrigins(FlowValue value) {
 }
 
 final class _Activation(final IrCallable body) {
+  _ContextKey? inputKey;
+  bool shareInput = true;
   late final dominance = ValueDominance(body as IrFunction);
   late final Set<Jump> backEdges = switch (body) {
     IrFunction(:final entry) => _backEdges(entry),
@@ -3060,19 +3113,7 @@ final class _Activation(final IrCallable body) {
   }
 
   bool mergeEnvironment(Map<TypeParameterType, ValueType> incoming) {
-    final complete = <TypeParameterType, ValueType>{
-      for (
-        FunctionTarget? scope = body.target;
-        scope != null;
-        scope = scope.enclosing
-      )
-        for (final parameter in [
-          ...scope.typeParameters,
-          ...?scope.owner?.typeParameters,
-        ])
-          parameter: parameter,
-      ...incoming,
-    };
+    final complete = _completeEnvironment(body.target, incoming);
     if (!_hasEnvironment) {
       environment.addAll(complete);
       _hasEnvironment = true;
@@ -3090,6 +3131,19 @@ final class _Activation(final IrCallable body) {
     return changed;
   }
 }
+
+Map<TypeParameterType, ValueType> _completeEnvironment(
+  FunctionTarget target,
+  Map<TypeParameterType, ValueType> incoming,
+) => {
+  for (FunctionTarget? scope = target; scope != null; scope = scope.enclosing)
+    for (final parameter in [
+      ...scope.typeParameters,
+      ...?scope.owner?.typeParameters,
+    ])
+      parameter: parameter,
+  ...incoming,
+};
 
 const FlowResult _unreachable = FlowResult(
   value: FlowValue.bottom(),
