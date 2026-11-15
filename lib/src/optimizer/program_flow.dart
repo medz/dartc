@@ -2562,6 +2562,13 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     );
   }
 
+  /// Callee executions reached by [operation] in the selected caller inputs.
+  Set<Object> callActivationsOf(Instruction operation, {Object? activation}) =>
+      Set.unmodifiable({
+        for (final caller in _at(operation, activation))
+          ...?caller.calls[operation],
+      });
+
   Iterable<_Activation> _at(Object source, Object? activation) {
     _check();
     final target = _flow._owners[source];

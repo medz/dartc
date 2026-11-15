@@ -291,6 +291,38 @@ void main() {
         const Constant.integer(9).structuralKey,
       );
       expect(facts.activationsOf(add.target), hasLength(2));
+      final firstExecution = facts.callActivationsOf(first).single;
+      final secondExecution = facts.callActivationsOf(second).single;
+      expect(firstExecution, isNot(same(secondExecution)));
+      for (final (execution, value) in [
+        (firstExecution, 1),
+        (secondExecution, 8),
+      ]) {
+        expect(
+          facts
+              .valueOf(add.entry.parameters.single, activation: execution)
+              .constant
+              ?.structuralKey,
+          Constant.integer(value).structuralKey,
+        );
+      }
+      expect(
+        facts.callActivationsOf(
+          first,
+          activation: facts.activationsOf(main.target).single,
+        ),
+        {firstExecution},
+      );
+      expect(
+        () => facts.callActivationsOf(first, activation: firstExecution),
+        throwsArgumentError,
+      );
+      expect(
+        () => facts.callActivationsOf(
+          DirectCall(add.target, [const Constant.integer(1)]),
+        ),
+        throwsArgumentError,
+      );
       expect(facts.valueOf(add.entry.parameters.single).constant, isNull);
       expect(facts.canDiscard(first), isTrue);
     },
