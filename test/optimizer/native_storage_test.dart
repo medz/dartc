@@ -683,7 +683,7 @@ void main() {
         operands: [
           a.object,
           FlowValue.integerRange(
-            FlowIntegerRange(start, start + 16, zeroBits: 3),
+            FlowIntegerRange(start, start + 16, strideBits: 3),
           ),
         ],
       ).value;

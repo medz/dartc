@@ -84,7 +84,7 @@ void main() {
     );
     expect(
       facts.valueOf(offset).integers,
-      FlowIntegerRange(0, 24, zeroBits: 3),
+      FlowIntegerRange(0, 24, strideBits: 3),
     );
     final shift = operations.singleWhere(
       (operation) => operation.operator == .shiftLeft,
@@ -112,7 +112,7 @@ void main() {
       );
       expect(
         facts.valueOf(offset).integers,
-        FlowIntegerRange(0, 24, zeroBits: 3),
+        FlowIntegerRange(0, 24, strideBits: 3),
       );
       final optimized =
           ProgramOptimizer(const [
@@ -175,7 +175,7 @@ void main() {
       );
       expect(
         facts.valueOf(offset).integers,
-        FlowIntegerRange(0, 24, zeroBits: 3),
+        FlowIntegerRange(0, 24, strideBits: 3),
       );
     },
   );
@@ -185,12 +185,12 @@ void main() {
     () {
       final ranges = [
         FlowIntegerRange.full,
-        FlowIntegerRange(-16, 16, zeroBits: 3),
-        FlowIntegerRange(0, 16, zeroBits: 2),
+        FlowIntegerRange(-16, 16, strideBits: 3),
+        FlowIntegerRange(0, 16, strideBits: 2),
         FlowIntegerRange(0, 64),
         FlowIntegerRange(1, 3),
         FlowIntegerRange(63, 65),
-        FlowIntegerRange(FlowIntegerRange.minimum, 0, zeroBits: 63),
+        FlowIntegerRange(FlowIntegerRange.minimum, 0, strideBits: 63),
         FlowIntegerRange(0, 0),
         FlowIntegerRange(-1, -1),
       ];

@@ -97,7 +97,7 @@ void main() {
           .single;
       expect(
         facts.valueOf(offset).addresses.single.offsets,
-        FlowIntegerRange(0, 24, zeroBits: 3),
+        FlowIntegerRange(0, 24, strideBits: 3),
       );
       expect(
         facts.returnedBy(function.target).integers,
@@ -133,19 +133,19 @@ void main() {
     );
     expect(
       facts.valueOf(scaled).addresses.single.offsets,
-      FlowIntegerRange(8, 24, zeroBits: 3),
+      FlowIntegerRange(8, 24, strideBits: 3),
     );
     expect(
       facts.valueOf(address).addresses.single.offsets,
-      FlowIntegerRange(8, 24, zeroBits: 3),
+      FlowIntegerRange(8, 24, strideBits: 3),
     );
     expect(
       facts.valueOf(shifted).addresses.single.offsets,
-      FlowIntegerRange(4, 20, zeroBits: 2),
+      FlowIntegerRange(4, 20, strideBits: 3, residue: 4),
     );
     expect(
       facts.valueOf(distance).integers,
-      FlowIntegerRange(4, 20, zeroBits: 2),
+      FlowIntegerRange(4, 20, strideBits: 3, residue: 4),
     );
     expect(facts.valueOf(address).addresses.single.type, ValueType.integer);
   });
@@ -185,7 +185,7 @@ void main() {
       FlowIntegerRange(
         FlowIntegerRange.minimum,
         FlowIntegerRange.maximum,
-        zeroBits: 3,
+        strideBits: 3,
       ),
     );
   });

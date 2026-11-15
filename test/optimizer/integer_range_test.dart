@@ -18,6 +18,23 @@ void main() {
     expect(() => FlowIntegerRange(1, 0), throwsArgumentError);
   });
 
+  test('scaled indices retain their residue through offsets and joins', () {
+    final indices = FlowIntegerRange(0, 15);
+    final even = indices.multiply(FlowIntegerRange(2, 2));
+    final odd = even.add(FlowIntegerRange(49, 49));
+    expect(odd, FlowIntegerRange(49, 79, strideBits: 1, residue: 1));
+    expect(odd.contains(50), isFalse);
+    expect(
+      odd.intersect(FlowIntegerRange(50, 60)),
+      FlowIntegerRange(51, 59, strideBits: 1, residue: 1),
+    );
+    expect(odd.intersect(FlowIntegerRange(48, 80, strideBits: 1)), isNull);
+    expect(
+      FlowIntegerRange(3, 3).join(FlowIntegerRange(7, 7)),
+      FlowIntegerRange(3, 7, strideBits: 2, residue: 3),
+    );
+  });
+
   test('arithmetic ranges include native wrapping integer results', () {
     const points = [
       FlowIntegerRange.minimum,
@@ -50,7 +67,7 @@ void main() {
     }
     expect(
       FlowIntegerRange(2, 4).multiply(FlowIntegerRange(8, 8)),
-      FlowIntegerRange(16, 32, zeroBits: 3),
+      FlowIntegerRange(16, 32, strideBits: 3),
     );
     expect(
       FlowIntegerRange(-4, 2).add(FlowIntegerRange(5, 7)),
@@ -60,21 +77,21 @@ void main() {
 
   test('alignment intersects signed bounds without inventing values', () {
     expect(
-      FlowIntegerRange(-15, 15, zeroBits: 3),
-      FlowIntegerRange(-8, 8, zeroBits: 3),
+      FlowIntegerRange(-15, 15, strideBits: 3),
+      FlowIntegerRange(-8, 8, strideBits: 3),
     );
     expect(FlowIntegerRange(0, 0).zeroBits, 64);
     expect(FlowIntegerRange(-8, -8).zeroBits, 3);
     expect(FlowIntegerRange(8, 8).zeroBits, 3);
-    final aligned = FlowIntegerRange(-8, 8, zeroBits: 3);
+    final aligned = FlowIntegerRange(-8, 8, strideBits: 3);
     expect(aligned.intersect(FlowIntegerRange(1, 7)), isNull);
     expect(aligned.intersect(FlowIntegerRange(1, 9)), FlowIntegerRange(8, 8));
     expect(
-      aligned.join(FlowIntegerRange(-4, 12, zeroBits: 2)),
-      FlowIntegerRange(-8, 12, zeroBits: 2),
+      aligned.join(FlowIntegerRange(-4, 12, strideBits: 2)),
+      FlowIntegerRange(-8, 12, strideBits: 2),
     );
     final wide = aligned.join(
-      FlowIntegerRange(-16, 16, zeroBits: 3),
+      FlowIntegerRange(-16, 16, strideBits: 3),
       widen: true,
     );
     expect(
@@ -82,18 +99,18 @@ void main() {
       FlowIntegerRange(
         FlowIntegerRange.minimum,
         FlowIntegerRange.maximum,
-        zeroBits: 3,
+        strideBits: 3,
       ),
     );
     expect(wide.contains(FlowIntegerRange.maximum), isFalse);
     expect(wide.contains(FlowIntegerRange.minimum), isTrue);
     expect(wide.intersect(FlowIntegerRange.full), wide);
     expect(
-      FlowIntegerRange(FlowIntegerRange.minimum, 0, zeroBits: 64),
+      FlowIntegerRange(FlowIntegerRange.minimum, 0, strideBits: 64),
       FlowIntegerRange(0, 0),
     );
     for (final bits in [-1, 65]) {
-      expect(() => FlowIntegerRange(0, 8, zeroBits: bits), throwsRangeError);
+      expect(() => FlowIntegerRange(0, 8, strideBits: bits), throwsRangeError);
     }
     for (final (low, high, bits) in [
       (1, 7, 3),
@@ -102,7 +119,7 @@ void main() {
       (FlowIntegerRange.maximum, FlowIntegerRange.maximum, 1),
     ]) {
       expect(
-        () => FlowIntegerRange(low, high, zeroBits: bits),
+        () => FlowIntegerRange(low, high, strideBits: bits),
         throwsArgumentError,
       );
     }
@@ -125,16 +142,24 @@ void main() {
       ];
       final ranges = [
         for (final point in points) FlowIntegerRange(point, point),
-        FlowIntegerRange(-17, 17, zeroBits: 3),
-        FlowIntegerRange(-17, 17, zeroBits: 3, excludesZero: true),
+        FlowIntegerRange(-17, 17, strideBits: 3),
+        for (final bits in [1, 2, 3, 63, 64])
+          for (final residue in [-1, 0, 1, 7])
+            FlowIntegerRange(
+              FlowIntegerRange.minimum,
+              FlowIntegerRange.maximum,
+              strideBits: bits,
+              residue: residue,
+            ),
+        FlowIntegerRange(-17, 17, strideBits: 3, excludesZero: true),
         FlowIntegerRange(-1, 1, excludesZero: true),
-        FlowIntegerRange(0, 16, zeroBits: 3, excludesZero: true),
-        FlowIntegerRange(-16, 0, zeroBits: 3, excludesZero: true),
+        FlowIntegerRange(0, 16, strideBits: 3, excludesZero: true),
+        FlowIntegerRange(-16, 0, strideBits: 3, excludesZero: true),
         for (final bits in [0, 1, 3, 63, 64])
           FlowIntegerRange(
             FlowIntegerRange.minimum,
             FlowIntegerRange.maximum,
-            zeroBits: bits,
+            strideBits: bits,
           ),
       ];
       for (final left in ranges) {

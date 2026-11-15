@@ -3416,7 +3416,8 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         result[value] = FlowIntegerRange(
           range.lower,
           range.upper,
-          zeroBits: range.zeroBits,
+          strideBits: range.strideBits,
+          residue: range.residue,
           excludesZero: true,
         );
       }
@@ -3493,7 +3494,7 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         FlowIntegerRange(
           mask != null && mask >= 0 ? 0 : FlowIntegerRange.minimum,
           mask != null && mask >= 0 ? mask : FlowIntegerRange.maximum,
-          zeroBits: left.zeroBits > right.zeroBits
+          strideBits: left.zeroBits > right.zeroBits
               ? left.zeroBits
               : right.zeroBits,
         ),
@@ -3507,7 +3508,7 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         FlowIntegerRange(
           positive ? 0 : FlowIntegerRange.minimum,
           positive ? -1 >>> (64 - upper.bitLength) : FlowIntegerRange.maximum,
-          zeroBits: left.zeroBits < right.zeroBits
+          strideBits: left.zeroBits < right.zeroBits
               ? left.zeroBits
               : right.zeroBits,
         ),
@@ -3528,12 +3529,16 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         final bits = left.zeroBits + count;
         value = right.upper < 63
             ? left.multiply(
-                FlowIntegerRange(1 << count, 1 << right.upper, zeroBits: count),
+                FlowIntegerRange(
+                  1 << count,
+                  1 << right.upper,
+                  strideBits: count,
+                ),
               )
             : FlowIntegerRange(
                 FlowIntegerRange.minimum,
                 FlowIntegerRange.maximum,
-                zeroBits: bits > 64 ? 64 : bits,
+                strideBits: bits > 64 ? 64 : bits,
               );
       } else {
         final positiveCounts = right.intersect(
@@ -3562,7 +3567,7 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         value = FlowIntegerRange(
           values.first,
           values.last,
-          zeroBits: left.zeroBits > right.upper
+          strideBits: left.zeroBits > right.upper
               ? left.zeroBits - right.upper
               : 0,
         );

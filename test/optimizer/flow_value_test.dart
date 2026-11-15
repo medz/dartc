@@ -51,7 +51,10 @@ void main() {
       final joined = FlowValue.constant(const Constant.integer(1))
           .join(FlowValue.constant(const Constant.integer(3)))
           .withSource(block.parameters.single, activation);
-      expect(joined.integers, FlowIntegerRange(1, 3));
+      expect(
+        joined.integers,
+        FlowIntegerRange(1, 3, strideBits: 1, residue: 1),
+      );
       expect(joined.check(.integer).value, joined);
       final narrowed = joined.restrictIntegers(FlowIntegerRange(3, 8));
       expect(
@@ -253,7 +256,7 @@ void main() {
       expect(first.objects, isEmpty);
       expect(first.references.objects, {base});
       expect(joined.addresses, {
-        FlowAddress.ranged(base, FlowIntegerRange(0, 4, zeroBits: 2)),
+        FlowAddress.ranged(base, FlowIntegerRange(0, 4, strideBits: 2)),
       });
       final widened = joined.join(
         FlowValue.address(FlowAddress(base, 8)),
@@ -261,7 +264,7 @@ void main() {
       );
       expect(
         widened.addresses.single.offsets,
-        FlowIntegerRange(0, FlowIntegerRange.maximum, zeroBits: 2),
+        FlowIntegerRange(0, FlowIntegerRange.maximum, strideBits: 2),
       );
       expect(widened.join(FlowValue.address(FlowAddress(base, 16))), widened);
       expect(
@@ -276,7 +279,7 @@ void main() {
       final replacement = FlowObject(site, Object());
       final rebased = joined.mapObjects((_) => replacement);
       expect(rebased.addresses, {
-        FlowAddress.ranged(replacement, FlowIntegerRange(0, 4, zeroBits: 2)),
+        FlowAddress.ranged(replacement, FlowIntegerRange(0, 4, strideBits: 2)),
       });
       expect(rebased.references.objects, {replacement});
       expect(first.withSource(site, Object()).addresses, first.addresses);

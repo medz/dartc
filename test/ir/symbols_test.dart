@@ -482,8 +482,9 @@ void main() {
     for (final hash in [virtual, direct]) {
       expect(hash.type, ValueType.integer);
       expect(hash.inputs, [receiver]);
-      expect(hash.mayThrow, isTrue);
     }
+    expect(virtual.mayThrow, isTrue);
+    expect(direct.mayThrow, isFalse);
     block.finish(Return(direct));
     final function = IrFunction(
       FunctionTarget(_library, 'hash', .integer, [.object]),

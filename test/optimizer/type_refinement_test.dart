@@ -184,7 +184,10 @@ void main() {
       ),
     ]).facts;
     expect(facts.thrownBy(function.target).exception.isBottom, isTrue);
-    expect(facts.returnedBy(function.target).integers, FlowIntegerRange(3, 7));
+    expect(
+      facts.returnedBy(function.target).integers,
+      FlowIntegerRange(3, 7, strideBits: 2, residue: 3),
+    );
     final storage = sourceProgram.functions.singleWhere(
       (body) =>
           body.target.name == 'count' &&

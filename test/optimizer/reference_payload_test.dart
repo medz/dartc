@@ -136,18 +136,18 @@ void main() {
       read(
         state,
         owner,
-        FlowIntegerRange(_start, _start + 16, zeroBits: 3),
+        FlowIntegerRange(_start, _start + 16, strideBits: 3),
       ).integers,
-      FlowIntegerRange(7, 9),
+      FlowIntegerRange(7, 9, strideBits: 1, residue: 1),
     );
     for (final offsets in [
       FlowIntegerRange(_start, _start + 16),
-      FlowIntegerRange(_start - 8, _start + 16, zeroBits: 3),
-      FlowIntegerRange(_start, _start + 24, zeroBits: 3),
+      FlowIntegerRange(_start - 8, _start + 16, strideBits: 3),
+      FlowIntegerRange(_start, _start + 24, strideBits: 3),
     ]) {
       expect(read(state, owner, offsets).integers, isNull);
     }
-    final offsets = FlowIntegerRange(_start, _start + 16, zeroBits: 3);
+    final offsets = FlowIntegerRange(_start, _start + 16, strideBits: 3);
     final allocation = _allocate(state, 24);
     var filled = allocation.state;
     for (var offset = _start; offset <= _start + 16; offset += 8) {
@@ -174,7 +174,7 @@ void main() {
       const length = 1 << 30;
       final a = _allocate(FlowState(_program, memoryLayout: _layout), length);
       final offsets = FlowValue.integerRange(
-        FlowIntegerRange(_start, _start + length - 8, zeroBits: 3),
+        FlowIntegerRange(_start, _start + length - 8, strideBits: 3),
       );
       final middle = _store(
         a.state,
