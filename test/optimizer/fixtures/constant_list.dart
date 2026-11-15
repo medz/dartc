@@ -14,3 +14,8 @@ String nested() => const [
 ][1][0];
 
 String fromCodes() => String.fromCharCodes(const [65, 0x1f642, 0xd800]);
+
+int uniform(int index) {
+  if (index < 0 || index >= 3) return -1;
+  return const [7, 7, 7][index];
+}

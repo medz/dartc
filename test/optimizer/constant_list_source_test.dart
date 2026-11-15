@@ -78,6 +78,48 @@ void main() {
   });
 
   test(
+    'uniform source list keeps its input guard and needs no list computation',
+    () {
+      final function = body('uniform');
+      final facts =
+          ProgramOptimizer(const [
+            ProgramSimplification(),
+            ProgramCallSpecialization(),
+            ProgramStoragePromotion(),
+            ProgramStorageElimination(),
+            DirectCallInlining(),
+          ]).run(program, [
+            (target: function.target, arguments: [FlowValue.unknown(.integer)]),
+          ], memoryLayoutFor: layouts);
+      final rewritten =
+          facts.program.implementationOf(function.target) as IrFunction;
+      for (final index in [
+        FlowIntegerRange.minimum,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        FlowIntegerRange.maximum,
+      ]) {
+        expect(
+          IrInterpreter(facts.program, {}).run(rewritten, [index]),
+          source.uniform(index),
+        );
+      }
+      expect(facts.definitions, {function.target});
+      expect([
+        for (final block in rewritten.blocks)
+          for (final operation in [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ])
+            ...operation.effects,
+      ], isEmpty);
+    },
+  );
+
+  test(
     'character decoding primitive reads the normalized storage contract',
     () {
       final call = body('fromCodes').entry.instructions

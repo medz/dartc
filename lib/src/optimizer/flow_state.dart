@@ -705,15 +705,12 @@ final class FlowState {
   }
 
   bool _referenceSlot(FlowValue owner, FlowValue offset) {
-    final constant = offset.constant;
-    final amount = constant is ScalarConstant && constant.value is int
-        ? constant.value as int
-        : null;
+    final offsets = offset.integers;
     final bases = <Object>[...owner.objects, ...owner.constants];
-    if (bases.isEmpty || owner.unknownTypes.isNotEmpty || amount == null) {
+    if (bases.isEmpty || owner.unknownTypes.isNotEmpty || offsets == null) {
       return false;
     }
-    return amount % ObjectHeader.alignment == 0 &&
+    return offsets.zeroBits >= ObjectHeader.alignment.bitLength - 1 &&
         bases.every((base) {
           final type = switch (base) {
             FlowObject(:final type) || ObjectConstant(:final type) => type,
@@ -721,17 +718,17 @@ final class FlowState {
           };
           return type is ClassType &&
               memoryLayout?.objectLayout(type).tracesPayload == true &&
-              (_memoryOf(base)?.contains(amount, ObjectHeader.alignment) ??
+              (_memoryOf(base)
+                      ?.containsRange(offsets, ObjectHeader.alignment) ??
                   false);
         });
   }
 
   FlowValue? _readReference(FlowValue owner, FlowValue offset) {
     if (!_referenceSlot(owner, offset)) return null;
-    final amount = (offset.constant as ScalarConstant).value as int;
     var value = const FlowValue.bottom();
     for (final base in <Object>[...owner.objects, ...owner.constants]) {
-      final read = _memoryOf(base)!.readReference(amount);
+      final read = _memoryOf(base)!.readReferenceRange(offset.integers!);
       if (read == null) return null;
       value = value.join(read);
     }

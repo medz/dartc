@@ -147,14 +147,48 @@ void main() {
                 bytes[offset + 2] << 16 |
                 bytes[offset + 3] << 24,
         ]..sort();
-        expect(
-          result.integers,
-          FlowIntegerRange(actual.first, actual.last),
-          reason: 'byte starts $lower..$upper',
-        );
+        for (final value in actual) {
+          expect(
+            result.integers!.contains(value),
+            isTrue,
+            reason: 'byte starts $lower..$upper lost $value',
+          );
+        }
+        expect(result.integers!.lower, actual.first);
+        expect(result.integers!.upper, actual.last);
       }
     }
   });
+
+  test(
+    'aligned byte reads include unknown regions between unaligned boundaries',
+    () {
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), 24);
+      final start = a.address.addresses.single.offset!;
+      final changed = _step(
+        a.state,
+        StoreObjectData(
+          ObjectConstant(_type, {}),
+          _placeholder,
+          _u32,
+          _placeholder,
+        ),
+        operands: [a.object, _integer(start + 5), FlowValue.unknown(.integer)],
+      ).normal!;
+      final value = _step(
+        changed,
+        LoadObjectData(ObjectConstant(_type, {}), _placeholder, _u8),
+        operands: [
+          a.object,
+          FlowValue.integerRange(
+            FlowIntegerRange(start, start + 16, zeroBits: 3),
+          ),
+        ],
+      ).value;
+      expect(value.constant, isNull);
+      expect(value.integers!.contains(255), isTrue);
+    },
+  );
 
   test(
     'bounded writes preserve outside bytes, other allocations and snapshots',

@@ -37,6 +37,12 @@ int wrapping(int value) {
 
 int unsignedShift(int value, int count) => value >>> count;
 
+int leftShift(int value, int count) => value << count;
+int rightShift(int value, int count) => value >> count;
+int bitAnd(int value, int mask) => value & mask;
+int bitOr(int value, int mask) => value | mask;
+int bitXor(int value, int mask) => value ^ mask;
+
 class IntegerBox(var int value);
 
 int forwardedInteger(int value) => value;

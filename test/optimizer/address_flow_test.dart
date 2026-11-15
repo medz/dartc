@@ -66,7 +66,7 @@ void main() {
           .single;
       expect(
         facts.valueOf(offset).addresses.single.offsets,
-        FlowIntegerRange(0, 24),
+        FlowIntegerRange(0, 24, zeroBits: 3),
       );
       expect(
         facts.returnedBy(function.target).integers,
@@ -102,57 +102,62 @@ void main() {
     );
     expect(
       facts.valueOf(scaled).addresses.single.offsets,
-      FlowIntegerRange(8, 24),
+      FlowIntegerRange(8, 24, zeroBits: 3),
     );
     expect(
       facts.valueOf(address).addresses.single.offsets,
-      FlowIntegerRange(8, 24),
+      FlowIntegerRange(8, 24, zeroBits: 3),
     );
     expect(
       facts.valueOf(shifted).addresses.single.offsets,
-      FlowIntegerRange(4, 20),
+      FlowIntegerRange(4, 20, zeroBits: 2),
     );
-    expect(facts.valueOf(distance).integers, FlowIntegerRange(4, 20));
+    expect(
+      facts.valueOf(distance).integers,
+      FlowIntegerRange(4, 20, zeroBits: 2),
+    );
     expect(facts.valueOf(address).addresses.single.type, ValueType.integer);
   });
 
-  test(
-    'constant pointer overflow wraps and interval overflow loses its bound',
-    () {
-      final block = Block([ValueType.integer]);
-      final pointer = block.emit(
-        PointerFromAddress(
-          block.emit(ReferenceAddress(_object)),
-          FfiTypes.int64Pointer,
-        ),
-      );
-      final shifted = block.emit(
-        PointerOffset(pointer, block.parameters.single),
-      );
-      block.finish(Return(shifted));
-      final exact = _analyze(
-        block,
-        arguments: [
-          FlowValue.constant(const Constant.integer(FlowIntegerRange.maximum)),
-        ],
-        memoryLayout: _Memory(),
-      );
-      expect(exact.valueOf(shifted).addresses.single.offset, -8);
-      final ranged = _analyze(
-        block,
-        arguments: [
-          FlowValue.integerRange(
-            FlowIntegerRange(
-              FlowIntegerRange.maximum - 1,
-              FlowIntegerRange.maximum,
-            ),
+  test('pointer overflow wraps and retains proven alignment after losing its bounds', () {
+    final block = Block([ValueType.integer]);
+    final pointer = block.emit(
+      PointerFromAddress(
+        block.emit(ReferenceAddress(_object)),
+        FfiTypes.int64Pointer,
+      ),
+    );
+    final shifted = block.emit(PointerOffset(pointer, block.parameters.single));
+    block.finish(Return(shifted));
+    final exact = _analyze(
+      block,
+      arguments: [
+        FlowValue.constant(const Constant.integer(FlowIntegerRange.maximum)),
+      ],
+      memoryLayout: _Memory(),
+    );
+    expect(exact.valueOf(shifted).addresses.single.offset, -8);
+    final ranged = _analyze(
+      block,
+      arguments: [
+        FlowValue.integerRange(
+          FlowIntegerRange(
+            FlowIntegerRange.maximum - 1,
+            FlowIntegerRange.maximum,
           ),
-        ],
-        memoryLayout: _Memory(),
-      );
-      expect(ranged.valueOf(shifted).addresses.single.offsets, isNull);
-    },
-  );
+        ),
+      ],
+      memoryLayout: _Memory(),
+    );
+    expect(
+      ranged.valueOf(shifted).addresses.single.offsets,
+      FlowIntegerRange(
+        FlowIntegerRange.minimum,
+        FlowIntegerRange.maximum,
+        zeroBits: 3,
+      ),
+    );
+  });
 
   test('generic address operations retain the actual invocation types', () {
     final t = TypeParameterType('T')..initializeBound(FfiTypes.nativeType);

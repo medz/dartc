@@ -82,7 +82,10 @@ void main() {
     final offset = operations.singleWhere(
       (operation) => operation.operator == .multiply,
     );
-    expect(facts.valueOf(offset).integers, FlowIntegerRange(0, 24));
+    expect(
+      facts.valueOf(offset).integers,
+      FlowIntegerRange(0, 24, zeroBits: 3),
+    );
     final shift = operations.singleWhere(
       (operation) => operation.operator == .shiftLeft,
     );
@@ -107,7 +110,10 @@ void main() {
       final offset = operations.singleWhere(
         (operation) => operation.operator == .multiply,
       );
-      expect(facts.valueOf(offset).integers, FlowIntegerRange(0, 24));
+      expect(
+        facts.valueOf(offset).integers,
+        FlowIntegerRange(0, 24, zeroBits: 3),
+      );
       final optimized =
           ProgramOptimizer(const [
             ProgramSimplification(),
@@ -167,7 +173,91 @@ void main() {
       final offset = operations.singleWhere(
         (operation) => operation.operator == .multiply,
       );
-      expect(facts.valueOf(offset).integers, FlowIntegerRange(0, 24));
+      expect(
+        facts.valueOf(offset).integers,
+        FlowIntegerRange(0, 24, zeroBits: 3),
+      );
+    },
+  );
+
+  test(
+    'source bit operations keep every possible result in aligned ranges',
+    () {
+      final ranges = [
+        FlowIntegerRange.full,
+        FlowIntegerRange(-16, 16, zeroBits: 3),
+        FlowIntegerRange(0, 16, zeroBits: 2),
+        FlowIntegerRange(0, 64),
+        FlowIntegerRange(1, 3),
+        FlowIntegerRange(63, 65),
+        FlowIntegerRange(FlowIntegerRange.minimum, 0, zeroBits: 63),
+        FlowIntegerRange(0, 0),
+        FlowIntegerRange(-1, -1),
+      ];
+      const points = [
+        FlowIntegerRange.minimum,
+        -16,
+        -8,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        8,
+        12,
+        16,
+        31,
+        32,
+        63,
+        64,
+        65,
+        FlowIntegerRange.maximum,
+      ];
+      for (final (name, evaluate, shift)
+          in <(String, int Function(int, int), bool)>[
+            ('leftShift', source.leftShift, true),
+            ('rightShift', source.rightShift, true),
+            ('unsignedShift', source.unsignedShift, true),
+            ('bitAnd', source.bitAnd, false),
+            ('bitOr', source.bitOr, false),
+            ('bitXor', source.bitXor, false),
+          ]) {
+        final function = body(name);
+        for (final left in ranges) {
+          for (final right in ranges) {
+            final facts = ProgramFlow(program, [
+              (
+                target: function.target,
+                arguments: [
+                  FlowValue.integerRange(left),
+                  FlowValue.integerRange(right),
+                ],
+              ),
+            ]).facts;
+            final returned = facts.returnedBy(function.target);
+            if (shift && right.upper < 0) {
+              expect(returned.isBottom, isTrue);
+              expect(
+                facts.thrownBy(function.target).exception.isBottom,
+                isFalse,
+              );
+              continue;
+            }
+            for (final x in points.where(left.contains)) {
+              for (final y in points.where(right.contains)) {
+                if (shift && y < 0) continue;
+                final actual = evaluate(x, y);
+                expect(
+                  returned.integers!.contains(actual),
+                  isTrue,
+                  reason: '$name lost ($x, $y) = $actual',
+                );
+              }
+            }
+          }
+        }
+      }
     },
   );
 

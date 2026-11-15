@@ -3132,11 +3132,30 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
       );
     case .bitAnd:
       final mask = left.constant ?? right.constant;
-      if (mask != null && mask >= 0) return result(FlowIntegerRange(0, mask));
       if (mask == -1) return result(left.constant == -1 ? right : left);
+      return result(
+        FlowIntegerRange(
+          mask != null && mask >= 0 ? 0 : FlowIntegerRange.minimum,
+          mask != null && mask >= 0 ? mask : FlowIntegerRange.maximum,
+          zeroBits: left.zeroBits > right.zeroBits
+              ? left.zeroBits
+              : right.zeroBits,
+        ),
+      );
     case .bitOr || .bitXor:
       if (left.constant == 0) return result(right);
       if (right.constant == 0) return result(left);
+      final positive = left.lower >= 0 && right.lower >= 0;
+      final upper = left.upper > right.upper ? left.upper : right.upper;
+      return result(
+        FlowIntegerRange(
+          positive ? 0 : FlowIntegerRange.minimum,
+          positive ? -1 >>> (64 - upper.bitLength) : FlowIntegerRange.maximum,
+          zeroBits: left.zeroBits < right.zeroBits
+              ? left.zeroBits
+              : right.zeroBits,
+        ),
+      );
     case .shiftLeft || .shiftRight || .unsignedShiftRight:
       final mayThrow = operation.checked && right.lower < 0;
       if (right.upper < 0) {
@@ -3144,18 +3163,33 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
       }
       FlowIntegerRange value = FlowIntegerRange.full;
       if (left.constant == 0 ||
-          operation.operator == .unsignedShiftRight && right.lower >= 64) {
+          operation.operator != .shiftRight && right.lower >= 64) {
         value = FlowIntegerRange(0, 0);
       } else if (right.constant == 0) {
         value = left;
-      } else if (operation.operator != .shiftLeft) {
+      } else if (operation.operator == .shiftLeft) {
+        final count = right.lower < 0 ? 0 : right.lower;
+        final bits = left.zeroBits + count;
+        value = right.upper < 63
+            ? left.multiply(
+                FlowIntegerRange(1 << count, 1 << right.upper, zeroBits: count),
+              )
+            : FlowIntegerRange(
+                FlowIntegerRange.minimum,
+                FlowIntegerRange.maximum,
+                zeroBits: bits > 64 ? 64 : bits,
+              );
+      } else {
+        final positiveCounts = right.intersect(
+          FlowIntegerRange(1, FlowIntegerRange.maximum),
+        );
         final counts = [
           right.lower < 0 ? 0 : right.lower,
           right.upper,
           if (operation.operator == .unsignedShiftRight &&
               left.lower < 0 &&
-              right.contains(1))
-            1,
+              positiveCounts != null)
+            positiveCounts.lower,
         ];
         final values = [
           for (final number in [left.lower, left.upper])
@@ -3169,7 +3203,13 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
             for (final count in counts) ...[0, -1 >>> count],
           ],
         ]..sort();
-        value = FlowIntegerRange(values.first, values.last);
+        value = FlowIntegerRange(
+          values.first,
+          values.last,
+          zeroBits: left.zeroBits > right.upper
+              ? left.zeroBits - right.upper
+              : 0,
+        );
       }
       return (value: FlowValue.integerRange(value), mayThrow: mayThrow);
     case .truncateDivide || .modulo || .remainder:

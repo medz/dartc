@@ -50,11 +50,112 @@ void main() {
     }
     expect(
       FlowIntegerRange(2, 4).multiply(FlowIntegerRange(8, 8)),
-      FlowIntegerRange(16, 32),
+      FlowIntegerRange(16, 32, zeroBits: 3),
     );
     expect(
       FlowIntegerRange(-4, 2).add(FlowIntegerRange(5, 7)),
       FlowIntegerRange(1, 9),
     );
   });
+
+  test('alignment intersects signed bounds without inventing values', () {
+    expect(
+      FlowIntegerRange(-15, 15, zeroBits: 3),
+      FlowIntegerRange(-8, 8, zeroBits: 3),
+    );
+    expect(FlowIntegerRange(0, 0).zeroBits, 64);
+    expect(FlowIntegerRange(-8, -8).zeroBits, 3);
+    expect(FlowIntegerRange(8, 8).zeroBits, 3);
+    final aligned = FlowIntegerRange(-8, 8, zeroBits: 3);
+    expect(aligned.intersect(FlowIntegerRange(1, 7)), isNull);
+    expect(aligned.intersect(FlowIntegerRange(1, 9)), FlowIntegerRange(8, 8));
+    expect(
+      aligned.join(FlowIntegerRange(-4, 12, zeroBits: 2)),
+      FlowIntegerRange(-8, 12, zeroBits: 2),
+    );
+    final wide = aligned.join(
+      FlowIntegerRange(-16, 16, zeroBits: 3),
+      widen: true,
+    );
+    expect(
+      wide,
+      FlowIntegerRange(
+        FlowIntegerRange.minimum,
+        FlowIntegerRange.maximum,
+        zeroBits: 3,
+      ),
+    );
+    expect(wide.contains(FlowIntegerRange.maximum), isFalse);
+    expect(wide.contains(FlowIntegerRange.minimum), isTrue);
+    expect(wide.intersect(FlowIntegerRange.full), wide);
+    expect(
+      FlowIntegerRange(FlowIntegerRange.minimum, 0, zeroBits: 64),
+      FlowIntegerRange(0, 0),
+    );
+    for (final bits in [-1, 65]) {
+      expect(() => FlowIntegerRange(0, 8, zeroBits: bits), throwsRangeError);
+    }
+    for (final (low, high, bits) in [
+      (1, 7, 3),
+      (1, FlowIntegerRange.maximum, 63),
+      (FlowIntegerRange.minimum, -1, 64),
+      (FlowIntegerRange.maximum, FlowIntegerRange.maximum, 1),
+    ]) {
+      expect(
+        () => FlowIntegerRange(low, high, zeroBits: bits),
+        throwsArgumentError,
+      );
+    }
+  });
+
+  test(
+    'aligned arithmetic and unions include every concrete wrapped result',
+    () {
+      const points = [
+        FlowIntegerRange.minimum,
+        -16,
+        -8,
+        -1,
+        0,
+        1,
+        8,
+        16,
+        FlowIntegerRange.maximum - 7,
+        FlowIntegerRange.maximum,
+      ];
+      final ranges = [
+        for (final point in points) FlowIntegerRange(point, point),
+        FlowIntegerRange(-17, 17, zeroBits: 3),
+        for (final bits in [0, 1, 3, 63, 64])
+          FlowIntegerRange(
+            FlowIntegerRange.minimum,
+            FlowIntegerRange.maximum,
+            zeroBits: bits,
+          ),
+      ];
+      for (final left in ranges) {
+        for (final right in ranges) {
+          final union = left.join(right), intersection = left.intersect(right);
+          final add = left.add(right),
+              subtract = left.subtract(right),
+              multiply = left.multiply(right);
+          for (final x in points) {
+            expect(
+              intersection?.contains(x) ?? false,
+              left.contains(x) && right.contains(x),
+            );
+            if (left.contains(x) || right.contains(x)) {
+              expect(union.contains(x), isTrue);
+            }
+            if (!left.contains(x)) continue;
+            for (final y in points.where(right.contains)) {
+              expect(add.contains(x + y), isTrue);
+              expect(subtract.contains(x - y), isTrue);
+              expect(multiply.contains(x * y), isTrue);
+            }
+          }
+        }
+      }
+    },
+  );
 }

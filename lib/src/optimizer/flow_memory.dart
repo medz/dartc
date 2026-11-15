@@ -51,22 +51,31 @@ final class FlowMemory {
       return FlowValue.unknown(FfiTypes.valueType(storage))
           .withReferences([references]);
     }
+    var result = const FlowValue.bottom();
+    for (final offset in _readStarts(offsets, size)) {
+      result = result.join(read(offset, storage, layout));
+    }
+    return result;
+  }
+
+  Set<int> _readStarts(FlowIntegerRange offsets, int size) {
     final starts = {offsets.lower, offsets.upper};
     for (final boundary in {
       for (final (begin, end) in _zeroes) ...[begin, end],
       for (final byte in _bytes.keys) ...[byte, byte + 1],
     }) {
-      // A scalar window changes only when it crosses a byte-fact boundary.
+      // A read window changes only when it crosses a byte-fact boundary.
       for (var index = 0; index < size; index++) {
         final start = boundary - index;
-        if (offsets.contains(start)) starts.add(start);
+        if (start <= offsets.upper) {
+          final next = offsets.intersect(
+            FlowIntegerRange(start, offsets.upper),
+          );
+          if (next != null) starts.add(next.lower);
+        }
       }
     }
-    var result = const FlowValue.bottom();
-    for (final offset in starts) {
-      result = result.join(read(offset, storage, layout));
-    }
-    return result;
+    return starts;
   }
 
   FlowValue get references {
@@ -161,6 +170,22 @@ final class FlowMemory {
             )
         ? first.value
         : null;
+  }
+
+  /// Joins complete traced slots only after bounds and alignment are proven.
+  FlowValue? readReferenceRange(FlowIntegerRange offsets) {
+    if (offsets.zeroBits < ObjectHeader.alignment.bitLength - 1 ||
+        !containsRange(offsets, ObjectHeader.alignment)) {
+      return null;
+    }
+    if (offsets.constant case final offset?) return readReference(offset);
+    var result = const FlowValue.bottom();
+    for (final offset in _readStarts(offsets, ObjectHeader.alignment)) {
+      final value = readReference(offset);
+      if (value == null) return null;
+      result = result.join(value);
+    }
+    return result;
   }
 
   /// Stores the language value, including boxed scalars, in one traced slot.

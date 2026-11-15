@@ -112,6 +112,91 @@ void main() {
     expect(_load(state, owner), _function);
   });
 
+  test('bounded reference reads require proven alignment and join all possible slots', () {
+    final data = ObjectConstant(
+      _type,
+      {},
+      payload: [
+        const Constant.integer(7),
+        const Constant.integer(9),
+        const Constant.integer(7),
+      ],
+    );
+    final owner = FlowValue.constant(data);
+    final state = FlowState(_program, memoryLayout: _layout);
+    FlowValue read(
+      FlowState state,
+      FlowValue owner,
+      FlowIntegerRange offsets,
+    ) => _step(state, LoadObjectReference(data, _offset), [
+      owner,
+      FlowValue.integerRange(offsets),
+    ]).value;
+    expect(
+      read(
+        state,
+        owner,
+        FlowIntegerRange(_start, _start + 16, zeroBits: 3),
+      ).integers,
+      FlowIntegerRange(7, 9),
+    );
+    for (final offsets in [
+      FlowIntegerRange(_start, _start + 16),
+      FlowIntegerRange(_start - 8, _start + 16, zeroBits: 3),
+      FlowIntegerRange(_start, _start + 24, zeroBits: 3),
+    ]) {
+      expect(read(state, owner, offsets).integers, isNull);
+    }
+    final offsets = FlowIntegerRange(_start, _start + 16, zeroBits: 3);
+    final allocation = _allocate(state, 24);
+    var filled = allocation.state;
+    for (var offset = _start; offset <= _start + 16; offset += 8) {
+      filled = _store(filled, allocation.value, _integer(7), offset: offset);
+    }
+    expect(read(filled, allocation.value, offsets), _integer(7));
+    final partial = _step(
+      filled,
+      StoreObjectData(_owner, _offset, NativeScalarType(Uint8), _offset),
+      [allocation.value, _integer(_start + 9), _integer(0)],
+    ).normal!;
+    expect(read(partial, allocation.value, offsets).constant, isNull);
+    expect(read(filled, allocation.value, offsets), _integer(7));
+    final untraced = _allocate(
+      FlowState(_program, memoryLayout: _Layout(traced: false)),
+      24,
+    );
+    expect(read(untraced.state, untraced.value, offsets).constant, isNull);
+  });
+
+  test(
+    'sparse aligned reference reads retain interior values in large payloads',
+    () {
+      const length = 1 << 30;
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), length);
+      final offsets = FlowValue.integerRange(
+        FlowIntegerRange(_start, _start + length - 8, zeroBits: 3),
+      );
+      final middle = _store(
+        a.state,
+        a.value,
+        _function,
+        offset: _start + length ~/ 2,
+      );
+      final value = _step(middle, LoadObjectReference(_owner, _offset), [
+        a.value,
+        offsets,
+      ]).value;
+      expect(value.unknownTypes, isEmpty);
+      expect(
+        value.constants.map((value) => value.structuralKey),
+        unorderedEquals([
+          const Constant.nullValue().structuralKey,
+          FunctionConstant(_callback).structuralKey,
+        ]),
+      );
+    },
+  );
+
   test(
     'constant reference bytes retain language values through raw copies',
     () {
