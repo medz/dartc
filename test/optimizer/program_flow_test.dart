@@ -323,6 +323,72 @@ void main() {
     );
   });
 
+  for (final shared in [false, true]) {
+    test('changing deep calls preserve other callers (shared: $shared)', () {
+      final functions = [_addOne()];
+      for (var depth = 0; depth < 16; depth++) {
+        final target = FunctionTarget(_uri, 'level$depth', .integer, [
+          .integer,
+        ]);
+        final body = Block(target.parameterTypes);
+        body.finish(
+          Return(body.emit(DirectCall(functions.last.target, body.parameters))),
+        );
+        functions.add(IrFunction(target, [body]));
+      }
+      final target = FunctionTarget(_uri, 'changing', .integer, [.integer]);
+      final body = Block(target.parameterTypes);
+      body.finish(
+        Return(body.emit(DirectCall(functions.last.target, body.parameters))),
+      );
+      final changing = IrFunction(target, [body]);
+      final fixedBody = Block();
+      fixedBody.finish(
+        Return(
+          fixedBody.emit(
+            DirectCall(functions.last.target, [const Constant.integer(1)]),
+          ),
+        ),
+      );
+      final fixed = IrFunction(FunctionTarget(_uri, 'fixed', .integer, []), [
+        fixedBody,
+      ]);
+      final program = IrProgram([], [...functions, changing, fixed]);
+      final fixedEntry = (target: fixed.target, arguments: <FlowValue>[]);
+      final flow = ProgramFlow(program, [
+        (
+          target: changing.target,
+          arguments: [FlowValue.constant(const Constant.integer(1))],
+        ),
+        if (shared) fixedEntry,
+      ]);
+      flow.extend(
+        entries: [
+          (
+            target: changing.target,
+            arguments: [FlowValue.constant(const Constant.integer(8))],
+          ),
+        ],
+      );
+      final range = flow.facts.returnedBy(changing.target).integers!;
+      expect((range.lower, range.upper), (2, 9));
+      for (final function in functions) {
+        expect(
+          flow.facts.activationsOf(function.target),
+          hasLength(shared ? 2 : 1),
+        );
+      }
+      if (!shared) flow.extend(entries: [fixedEntry]);
+      expect(
+        flow.facts.returnedBy(fixed.target).constant?.structuralKey,
+        const Constant.integer(2).structuralKey,
+      );
+      for (final value in [1, 8]) {
+        expect(IrInterpreter(program, {}).run(changing, [value]), value + 1);
+      }
+    });
+  }
+
   test('summary reuse returns distinct fresh objects and preserves private caller storage', () {
     final box = ClassType(_uri, 'Box');
     final field = InstanceField(box, 'value', .integer);

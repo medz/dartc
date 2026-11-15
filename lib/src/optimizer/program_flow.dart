@@ -354,10 +354,19 @@ final class ProgramFlow(
           repeated,
           aliasKey,
         );
-        // Changing inputs join locally without changing other callers' facts.
-        site.contexts[local] = key = key == null || key == precise
-            ? precise
-            : local;
+        if (key == null || key == precise) {
+          key = precise;
+        } else {
+          final previous = _calls[key]!;
+          // Only shared exact executions need a separate joining summary.
+          if (previous.callSites.length == 1 &&
+              previous.callSites.contains(site)) {
+            _calls.remove(key);
+            _calls[local] = previous;
+          }
+          key = local;
+        }
+        site.contexts[local] = key;
       }
       callee = _calls.putIfAbsent(key!, () => _Activation(body));
     }
@@ -387,6 +396,7 @@ final class ProgramFlow(
     if (callee.mergeEnvironment(environment)) _pending.add(callee);
     caller.calls.putIfAbsent(operation, () => {}).add(callee);
     callee.readers.add(caller);
+    callee.callSites.add(site);
     final parameters = body.entry.parameters;
     final supplied = [
       for (final (i, value) in plain.indexed)
@@ -2755,6 +2765,7 @@ final class _Activation(final IrCallable body) {
   final edges = <Jump>{};
   final targets = <Instruction, Set<FunctionTarget>>{};
   final calls = <Instruction, Set<_Activation>>{};
+  final callSites = <_CallSite>{};
   final readers = <_Activation>{};
   final unknownCalls = <Instruction>{};
   final externalCalls = <Instruction>{};
