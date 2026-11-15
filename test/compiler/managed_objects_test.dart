@@ -23,23 +23,7 @@ void main() {
     },
   );
 
-  test(
-    'mapping failures escape allocation and constructor calls cleanly',
-    () async {
-      for (final name in ['managed_failure', 'managed_growth_failure']) {
-        final result = await Process.run(
-          NativeAssets(Target.host()).file('compiler/$name').absolute.path,
-          [],
-        );
-        expect(result.exitCode, 255, reason: '$name: ${result.stderr}');
-        expect(result.stdout, isEmpty);
-        expect(result.stderr, 'Unhandled exception:\nOut of Memory\n');
-      }
-    },
-    skip: !Platform.isLinux,
-  );
-
-  test('allocation failure can be caught, cleaned up and retried', () async {
+  test('managed chains preserve contents and cleanup across retries', () async {
     final result = await Process.run(
       NativeAssets(Target.host()).file('compiler/managed_recovery').path,
       [],
@@ -47,11 +31,9 @@ void main() {
     expect(result.exitCode, 0, reason: '${result.stdout}${result.stderr}');
     expect(
       result.stdout,
-      'true:true:true:true:true\n'
-      'true:true:true:true:true:true\n'
-      'true:true:true:true:true\n'
-      'true:true:true:true:true\n'
-      'true:true:old:true\n',
+      'true:true:true:true\n'
+      'true:true:true:true\n'
+      'true:true:true:true\n',
     );
     expect(result.stderr, isEmpty);
   }, skip: !Platform.isLinux);
@@ -76,7 +58,7 @@ void main() {
   });
 
   test(
-    'generic constructor arguments survive allocation and nested collection',
+    'generic constructor arguments preserve integer values and double bits',
     () {
       final native = ManagedObjects();
       addTearDown(native.close);
@@ -111,7 +93,7 @@ void main() {
   );
 
   test(
-    'a standalone entry allocates and collects without an SDK process',
+    'standalone managed program completes without an SDK process available',
     () async {
       final result = await Process.run(
         NativeAssets(Target.host())

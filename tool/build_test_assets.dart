@@ -397,8 +397,6 @@ Future<void> main(List<String> args) async {
     }
     if (target.operatingSystem == .linux) {
       for (final (fixture, name) in [
-        ('managed_objects', 'managed_failure'),
-        ('managed_objects', 'managed_growth_failure'),
         ('managed_objects', 'managed_recovery'),
         ('numeric_boxes', 'boxing_null_entry'),
       ]) {

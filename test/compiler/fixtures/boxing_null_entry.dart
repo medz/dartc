@@ -1,5 +1,5 @@
 import 'numeric_boxes.dart';
-import 'managed_failure.dart' show restrictMemory;
+import 'managed_recovery.dart' show restrictMemory;
 
 void main() {
   restrictMemory(0);
