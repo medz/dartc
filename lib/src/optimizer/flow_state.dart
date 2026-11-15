@@ -468,6 +468,8 @@ final class FlowState {
       throw ArgumentError('Storage transfer requires every operand.');
     }
     switch (operation) {
+      case ObjectDescriptorAddress(:final declaration):
+        return _normal(FlowValue.address(FlowAddress(declaration, 0)), copy());
       case NativeSize() || NativeFieldOffset():
         final layout = memoryLayout?.nativeLayout;
         if (layout == null) return null;
@@ -726,6 +728,25 @@ final class FlowState {
 
   FlowMemory? _memoryOf(Object base) {
     if (base is FlowObject) return _objects[base]?.memory;
+    if (base is ClassType && memoryLayout != null) {
+      return _constantMemory.putIfAbsent(base, () {
+        final words = memoryLayout!.objectLayout(base).descriptorWords;
+        var memory = FlowMemory(
+          0,
+          words.length * ObjectHeader.alignment,
+        ).invalidate();
+        for (final (index, word) in words.indexed) {
+          if (word == null) continue;
+          memory = memory.write(
+            index * ObjectHeader.alignment,
+            NativeScalarType(Int64),
+            FlowValue.constant(Constant.integer(word)),
+            memoryLayout!.nativeLayout,
+          );
+        }
+        return memory;
+      });
+    }
     if (base case ScalarConstant(value: final String text)
         when memoryLayout != null) {
       return _constantMemory.putIfAbsent(base.structuralKey, () {

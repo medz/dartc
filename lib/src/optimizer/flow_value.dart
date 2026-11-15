@@ -42,7 +42,7 @@ final class FlowObject(
   );
 }
 
-/// An address relative to a managed allocation, constant or native callback entry.
+/// An address in managed storage, a constant, a layout descriptor or a callback.
 ///
 /// Unknown offsets do not establish that access stays in bounds.
 final class FlowAddress.ranged(
@@ -68,6 +68,7 @@ final class FlowAddress.ranged(
   this {
     if (base is! FlowObject &&
             base is! Constant &&
+            base is! ClassType &&
             base is! NativeCallbackTarget ||
         type != ValueType.integer && !FfiTypes.isPointer(type)) {
       throw ArgumentError(
@@ -86,6 +87,7 @@ final class FlowAddress.ranged(
   FlowValue get reference => switch (base) {
     final FlowObject object => FlowValue.object(object),
     final Constant constant => FlowValue.constant(constant),
+    ClassType() => const FlowValue.bottom(),
     final NativeCallbackTarget target => FlowValue._(
       const {},
       const {},

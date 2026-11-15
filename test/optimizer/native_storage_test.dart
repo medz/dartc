@@ -20,6 +20,26 @@ const _placeholder = Constant.integer(0);
 
 void main() {
   test(
+    'descriptor reads use emitted words without inventing relocated addresses',
+    () {
+      final state = FlowState(_program, memoryLayout: _layout);
+      final address = _step(state, ObjectDescriptorAddress(_type)).value;
+      expect(address.references.isBottom, isTrue);
+      expect(state.nativeReferences(address).isBottom, isTrue);
+      final words = _layout.objectLayout(_type).descriptorWords;
+      for (final (index, word) in words.indexed) {
+        expect(_number(_load(state, _offset(address, index * 8), _i64)), word);
+      }
+      expect(
+        _load(state, _offset(address, words.length * 8), _i64).constant,
+        isNull,
+      );
+      expect(_load(state, _offset(address, -1), _u8).constant, isNull);
+      expect(_load(FlowState(_program), address, _i64).constant, isNull);
+    },
+  );
+
+  test(
     'fixed bytes and declared fields never keep stale facts across writes',
     () {
       final field = InstanceField(_type, 'value', ValueType.integer);
