@@ -12,7 +12,6 @@ import 'heap_runtime.dart';
 import 'stack_traces.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
-import 'numeric_operations.dart';
 import 'global_storage.dart';
 import 'instance_storage.dart';
 import 'closure_storage.dart';
@@ -46,7 +45,7 @@ final class ProgramPreparation(
   /// The output platform used for layouts and native bindings.
   final Target target,
 
-  /// The graph after boundary normalization and any semantic rewrites.
+  /// The graph after semantic and boundary normalization and any rewrites.
   final IrProgram program, {
   required NativeBoundaries boundaries,
   Map<FunctionTarget, NativeImport> imports = const {},
@@ -165,12 +164,6 @@ final class ProgramPreparation(
           .where((c) => c.type == ValueType.string)
           .firstOrNull,
     );
-    final arithmetic = NumericOperations(
-      floatingRemainder: runtime?.floatingRemainder,
-      floatingModulo: runtime?.floatingModulo,
-      argumentError: constructor(.argumentError),
-      unsupportedError: constructor(.unsupportedError),
-    );
     final instantiatedTypes = TypeMetadata.fields.keys;
     final records = RecordStorage(
       program.classes,
@@ -184,24 +177,7 @@ final class ProgramPreparation(
       bodies,
       lateError: lateErrorType == null ? null : constructor(lateErrorType),
     );
-    for (final body in bodies) {
-      for (final block in body.blocks) {
-        final operations = switch (block.end) {
-          Invoke(:final operation) => block.instructions.followedBy([
-            operation,
-          ]),
-          _ => block.instructions,
-        };
-        for (final operation in operations) {
-          arithmetic.callFor(operation);
-        }
-      }
-    }
-    final helpers = [
-      ...arithmetic.functions,
-      ...globals.functions,
-      ...instances.functions,
-    ];
+    final helpers = [...globals.functions, ...instances.functions];
     if (!globals.isEmpty) selected.add(globals.address);
     final requiredTypes = {
       ...instantiatedTypes,
@@ -226,7 +202,6 @@ final class ProgramPreparation(
     final layouts = ProgramLayout(
       [
         ...casts.classes,
-        ...arithmetic.classes,
         ...program.classes,
         if (!globals.isEmpty) globals.declaration,
         ...closures.classes,
@@ -242,7 +217,6 @@ final class ProgramPreparation(
         ...instantiatedTypes,
         for (final declaration in [
           ...casts.classes,
-          ...arithmetic.classes,
           if (!globals.isEmpty) globals.declaration,
           ...closures.classes,
           ?records.declaration,
@@ -258,7 +232,6 @@ final class ProgramPreparation(
       traces,
       casts,
       members,
-      arithmetic,
       globals,
       instances,
       imports: imports,

@@ -9,7 +9,6 @@ import 'heap_plan.dart';
 import 'instance_storage.dart';
 import 'member_calls.dart';
 import 'native_invocation.dart';
-import 'numeric_operations.dart';
 import 'program_layout.dart';
 import 'stack_traces.dart';
 
@@ -20,7 +19,6 @@ final class ProgramSelection(
   final StackTraces traces,
   final CheckedCasts casts,
   final MemberCalls members,
-  final NumericOperations arithmetic,
   final GlobalStorage globals,
   final InstanceStorage instances, {
   final Map<FunctionTarget, NativeImport> imports = const {},
@@ -94,8 +92,7 @@ final class ProgramSelection(
             }) {
           continue;
         }
-        if (operation is Instruction &&
-            invalid(arithmetic.effectsOf(operation))) {
+        if (operation is Instruction && invalid(operation.effects)) {
           reject(operation);
         }
       }
@@ -134,11 +131,26 @@ final class ProgramSelection(
     for (final instruction
         in body.instructions.values.expand((v) => v).whereType<Instruction>()) {
       if (body.aliases.contains(instruction)) continue;
+      if (instruction
+          case IntBinary(
+                checked: true,
+                operator: IntOperator(mayThrow: true),
+              ) ||
+              NumericToInt(
+                checked: true,
+                operand: Value(type: != ValueType.integer),
+              ) ||
+              NumericRoundToDouble(
+                operand: Value(type: != ValueType.integer),
+              )) {
+        throw StateError(
+          'Numeric checks must be normalized before target preparation.',
+        );
+      }
       final box = body.boxes[instruction];
       final target = box != null
           ? heap.box(body.typeOf(box))
           : body.invocations[instruction] ??
-                arithmetic.callFor(instruction) ??
                 layouts.strings.callFor(instruction) ??
                 globals.callFor(instruction) ??
                 switch (instruction) {
@@ -174,7 +186,6 @@ final class ProgramSelection(
       ...members.functions,
       ...layouts.closures.functions,
       ...layouts.records.functions,
-      ...arithmetic.functions,
       ...globals.functions,
       ...instances.functions,
       ...casts.functions,
@@ -290,7 +301,6 @@ final class ProgramSelection(
         ...layouts.native.classes,
         if (casts.functions.isNotEmpty) ...casts.classes,
         if (!globals.isEmpty) globals.declaration,
-        ...arithmetic.classes,
         ...layouts.closures.classes,
         ?layouts.records.generatedClass,
         layouts.strings.declaration,

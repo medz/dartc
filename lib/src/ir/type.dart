@@ -414,10 +414,13 @@ sealed class const ValueType() {
   /// The static type after Dart's postfix null assertion.
   ValueType get nonNullable => this == nullType ? never : this;
 
-  /// Whether Dart equality on this receiver can only use a core scalar implementation.
-  bool get hasScalarEquality {
+  /// Whether Dart equality on this receiver uses a built-in value operation.
+  bool get hasBuiltinEquality {
     final base = nonNullable;
-    return number.accepts(base) || base == boolean || base == string;
+    return number.accepts(base) ||
+        base == boolean ||
+        base == string ||
+        base == typeType;
   }
 
   /// Whether an operand of [type] can be passed here without a conversion.

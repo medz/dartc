@@ -6,6 +6,7 @@ import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/constant_data.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -28,6 +29,19 @@ void main() {
     ),
     runtime: heapRuntime,
   ).run();
+
+  test('semantic Type values do not assume their future storage class', () {
+    for (final view in [ValueType.typeType, ValueType.object]) {
+      final target = FunctionTarget(null, 'typeEquals', .boolean, [.typeType]);
+      final entry = Block(target.parameterTypes);
+      final type = entry.emit(TypeView(entry.parameters.single, view));
+      entry.finish(Return(entry.emit(Equals(type, TypeConstant(.integer)))));
+      final program = normalize(IrFunction(target, [entry]));
+      final facts = ProgramFlow(program, [], openEntries: [target]).facts;
+      expect(facts.returnedBy(target).constant, isNull);
+      expect(facts.returnedBy(target).unknownTypes, {ValueType.boolean});
+    }
+  });
 
   test('nested constants and defaults share the emitted object storage', () {
     final list = SequenceConstant(CoreTypes.listOf(.integer), [

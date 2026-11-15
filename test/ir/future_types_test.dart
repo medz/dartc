@@ -53,7 +53,7 @@ void main() {
     );
     expect(outer.nonNullable, either(.integer));
     expect(either(.integer).mayBeNull, isFalse);
-    expect(either(.integer).hasScalarEquality, isFalse);
+    expect(either(.integer).hasBuiltinEquality, isFalse);
     final t = parameter('T');
     expect(either(t).mayBeNull, isTrue);
     expect(either(t).accepts(.nullType), isFalse);

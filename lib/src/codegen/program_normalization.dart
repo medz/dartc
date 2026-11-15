@@ -3,6 +3,7 @@ import 'package:dartc/optimizer.dart';
 
 import 'heap_runtime.dart';
 import 'list_storage.dart';
+import 'numeric_normalization.dart';
 import 'suspension_normalization.dart';
 
 /// Resolves semantic operations to their checked implementation before analysis.
@@ -15,6 +16,13 @@ final class ProgramNormalization(
 }) {
   final _helpers = <Object, IrFunction>{};
   late final _lists = ListStorage(program.classes);
+  late final _numeric = NumericNormalization(
+    _helpers,
+    argumentError: _constructor(ValueType.argumentError),
+    unsupportedError: _constructor(ValueType.unsupportedError),
+    floatingRemainder: runtime?.floatingRemainder,
+    floatingModulo: runtime?.floatingModulo,
+  );
   final _classes = {
     for (final declaration in program.classes) declaration.type: declaration,
   };
@@ -54,7 +62,11 @@ final class ProgramNormalization(
     }
     final normalized = changed
         ? IrProgram(
-            program.classes,
+            [
+              ...program.classes,
+              for (final declaration in _numeric.classes)
+                if (!_classes.containsKey(declaration.type)) declaration,
+            ],
             functions,
             globals: program.globals,
             externals: externals,
@@ -68,6 +80,11 @@ final class ProgramNormalization(
       runtime ??
           (throw StateError('Suspension normalization requires runtime.')),
     ).run();
+  }
+
+  IrCallable? _constructor(ClassType type) {
+    final target = _classes[type]?.constructors['new'];
+    return target == null ? null : program.implementationOf(target);
   }
 
   IrFunction _function(IrFunction source) {
@@ -142,7 +159,7 @@ final class ProgramNormalization(
                 )!.typeArguments.single,
               ],
             ),
-          _ => null,
+          _ => _numeric.normalize(operation),
         };
         if (replacement != null) operations[operation] = replacement;
       }

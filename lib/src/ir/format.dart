@@ -203,11 +203,13 @@ void writeFunction(
     StringCodeUnitAt() => 'codeUnitAt ${value(op.string)}, ${value(op.index)}',
     NumericNegate() => 'negate ${value(op.operand)}',
     NumericToDouble() => 'toDouble ${value(op.operand)}',
-    NumericToInt() => '${op.rounding.name} ${value(op.operand)}',
+    NumericToInt() =>
+      '${op.rounding.name}${op.checked ? '' : '.unchecked'} ${value(op.operand)}',
     NumericRoundToDouble() =>
       '${op.rounding.name}ToDouble ${value(op.operand)}',
     NumericSquareRoot() => 'sqrt ${value(op.operand)}',
-    IntBinary() => '${op.operator.name} ${value(op.left)}, ${value(op.right)}',
+    IntBinary() =>
+      '${op.operator.name}${op.checked ? '' : '.unchecked'} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
       'call ${symbol(op.target, op.ownerType)}${typeArgs(op.typeArguments)}(${op.inputs.map(value).join(', ')})',
     NativeCall() =>

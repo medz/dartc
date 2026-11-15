@@ -1,41 +1,41 @@
 import 'package:dartc/ir.dart';
 
 /// Builds checked numeric operations with ordinary control flow and exceptions.
-final class NumericOperations({
-  IrCallable? argumentError,
+final class NumericNormalization(
+  final Map<Object, IrFunction> functions, {
+  final IrCallable? argumentError,
   final FunctionTarget? floatingRemainder,
   final FunctionTarget? floatingModulo,
-  IrCallable? unsupportedError,
+  final IrCallable? unsupportedError,
 }) {
-  final IrCallable? _argumentError = argumentError;
-  final IrCallable? _unsupportedError = unsupportedError;
-  final _functions = <IntOperator, IrFunction>{};
-  final _binaries = <(NumericOperator, ValueType, ValueType), IrFunction>{};
-  final _unary = <bool, IrFunction>{};
-  final _conversions = <(IntegerRounding, bool), IrFunction>{};
-  final _finiteConversions = <IntegerRounding, IrFunction>{};
-  final _doubleRoundings = <(IntegerRounding, bool), IrFunction>{};
-  final _nativeOperations = <Instruction>{};
+  final classes = <IrClass>[];
 
-  // Helper types must be available before their bodies are selected lazily.
-  final classes = [IrClass(CoreTypes.integerDivisionByZeroException, [])];
+  Instruction? normalize(Instruction instruction) {
+    if (instruction
+        case IntBinary(
+          :final operator,
+          :final left,
+          :final right,
+          checked: true,
+        )
+        when _boundedShift(instruction)) {
+      return IntBinary.unchecked(operator, left, right);
+    }
+    final target = _callFor(instruction);
+    return target == null ? null : DirectCall(target, instruction.inputs);
+  }
 
-  Iterable<IrFunction> get functions => _functions.values
-      .followedBy(_binaries.values)
-      .followedBy(_unary.values)
-      .followedBy(_conversions.values)
-      .followedBy(_finiteConversions.values)
-      .followedBy(_doubleRoundings.values);
-
-  FunctionTarget? callFor(Instruction instruction) {
+  FunctionTarget? _callFor(Instruction instruction) {
     if (instruction
         case NumericBinary(:final operator, :final left, :final right)
         when left.type == .floating && right.type == .floating) {
       if (operator == .modulo) return floatingModulo;
       if (operator == .remainder) return floatingRemainder;
     }
-    if (_nativeOperations.contains(instruction)) return null;
-    if (_boundedShift(instruction)) return null;
+    if (instruction is IntBinary && !instruction.checked ||
+        instruction is NumericToInt && !instruction.checked) {
+      return null;
+    }
     if (instruction case NumericToInt(:final operand, :final rounding)) {
       return operand.type == .integer
           ? null
@@ -66,12 +66,6 @@ final class NumericOperations({
     final operator = _operator(instruction);
     return operator == null ? null : _function(operator).target;
   }
-
-  /// Effects after checks proven by numeric selection have been discharged.
-  Set<Effect> effectsOf(Instruction instruction) =>
-      _nativeOperations.contains(instruction) || _boundedShift(instruction)
-      ? const {}
-      : instruction.effects;
 
   bool _boundedShift(Instruction instruction) => switch (instruction) {
     IntBinary(
@@ -116,43 +110,44 @@ final class NumericOperations({
 
   bool _unboxed(ValueType type) => type == .integer || type == .floating;
 
-  IrFunction _unaryOperation(bool toDouble) => _unary.putIfAbsent(toDouble, () {
-    final target = FunctionTarget(
-      null,
-      toDouble ? 'toDouble' : 'negate',
-      toDouble ? .floating : .number,
-      [.number],
-    );
-    final entry = Block(target.parameterTypes),
-        integer = Block(),
-        floating = Block();
-    final value = entry.parameters.single;
-    entry.finish(
-      Branch(
-        entry.emit(TypeTest(value, .integer)),
-        Jump(integer),
-        Jump(floating),
-      ),
-    );
-    for (final (block, type) in [
-      (integer, ValueType.integer),
-      (floating, ValueType.floating),
-    ]) {
-      final narrowed = block.emit(TypeCast(value, type));
-      block.finish(
-        Return(
-          block.emit(
-            toDouble
-                ? NumericToDouble(narrowed)
-                : type == ValueType.integer
-                ? IntBinary(.subtract, const Constant.integer(0), narrowed)
-                : NumericNegate(narrowed),
+  IrFunction _unaryOperation(bool toDouble) =>
+      functions.putIfAbsent(toDouble, () {
+        final target = FunctionTarget(
+          null,
+          toDouble ? 'toDouble' : 'negate',
+          toDouble ? .floating : .number,
+          [.number],
+        );
+        final entry = Block(target.parameterTypes),
+            integer = Block(),
+            floating = Block();
+        final value = entry.parameters.single;
+        entry.finish(
+          Branch(
+            entry.emit(TypeTest(value, .integer)),
+            Jump(integer),
+            Jump(floating),
           ),
-        ),
-      );
-    }
-    return IrFunction(target, [entry, integer, floating]);
-  });
+        );
+        for (final (block, type) in [
+          (integer, ValueType.integer),
+          (floating, ValueType.floating),
+        ]) {
+          final narrowed = block.emit(TypeCast(value, type));
+          block.finish(
+            Return(
+              block.emit(
+                toDouble
+                    ? NumericToDouble(narrowed)
+                    : type == ValueType.integer
+                    ? IntBinary(.subtract, const Constant.integer(0), narrowed)
+                    : NumericNegate(narrowed),
+              ),
+            ),
+          );
+        }
+        return IrFunction(target, [entry, integer, floating]);
+      });
 
   IrFunction _binary(
     NumericOperator operator,
@@ -166,7 +161,7 @@ final class NumericOperations({
         rightType == .integer) {
       return _function(.truncateDivide);
     }
-    return _binaries.putIfAbsent((operator, leftType, rightType), () {
+    return functions.putIfAbsent((operator, leftType, rightType), () {
       final target = FunctionTarget(
         null,
         '${operator.name}.${leftType.dartName}.${rightType.dartName}',
@@ -235,7 +230,7 @@ final class NumericOperations({
   }
 
   IrFunction _function(IntOperator operator) =>
-      _functions.putIfAbsent(operator, () {
+      functions.putIfAbsent(operator, () {
         final target = FunctionTarget(null, operator.name, .integer, [
           .integer,
           .integer,
@@ -244,6 +239,9 @@ final class NumericOperations({
             operator == .shiftRight ||
             operator == .unsignedShiftRight) {
           return _shift(target, operator);
+        }
+        if (classes.isEmpty) {
+          classes.add(IrClass(CoreTypes.integerDivisionByZeroException, []));
         }
         final entry = Block(target.parameterTypes);
         final [left, right] = entry.parameters;
@@ -278,8 +276,9 @@ final class NumericOperations({
                 : const Constant.integer(0),
           ),
         );
-        final quotient = divide.emit(IntBinary(.truncateDivide, left, right));
-        _nativeOperations.add(quotient);
+        final quotient = divide.emit(
+          IntBinary.unchecked(.truncateDivide, left, right),
+        );
         if (operator == .truncateDivide) {
           divide.finish(Return(quotient));
         } else {
@@ -322,7 +321,7 @@ final class NumericOperations({
       });
 
   IrFunction _shift(FunctionTarget target, IntOperator operator) {
-    final error = _argumentError;
+    final error = argumentError;
     if (error == null) {
       throw UnsupportedError(
         'Integer shifts require the ArgumentError constructor body.',
@@ -368,9 +367,8 @@ final class NumericOperations({
           : const Return(Constant.integer(0)),
     );
     final result = shift.emit(
-      IntBinary(operator, value, shift.parameters.single),
+      IntBinary.unchecked(operator, value, shift.parameters.single),
     );
-    _nativeOperations.add(result);
     shift.finish(Return(result));
     return IrFunction(target, [entry, valid, failed, large, shift]);
   }
@@ -378,7 +376,7 @@ final class NumericOperations({
   IrFunction _conversion(
     IntegerRounding rounding,
     bool floating,
-  ) => _conversions.putIfAbsent((rounding, floating), () {
+  ) => functions.putIfAbsent((rounding, floating, false), () {
     final target = FunctionTarget(
       null,
       '${rounding.name}${floating ? 'Double' : 'Num'}',
@@ -408,7 +406,7 @@ final class NumericOperations({
       );
       return IrFunction(target, [entry, integer, other]);
     }
-    final error = _unsupportedError;
+    final error = unsupportedError;
     if (error == null) {
       throw UnsupportedError(
         'Numeric conversions require the UnsupportedError constructor body.',
@@ -495,7 +493,7 @@ final class NumericOperations({
 
   // The caller proves a finite value strictly inside the signed integer range.
   IrFunction _finiteConversion(IntegerRounding rounding) =>
-      _finiteConversions.putIfAbsent(rounding, () {
+      functions.putIfAbsent(rounding, () {
         final target = FunctionTarget(
           null,
           '${rounding.name}Finite',
@@ -505,8 +503,7 @@ final class NumericOperations({
         final convert = Block(target.parameterTypes);
         final value = convert.parameters.single;
         final blocks = [convert];
-        final result = convert.emit(NumericToInt(value, .truncate));
-        _nativeOperations.add(result);
+        final result = convert.emit(NumericToInt.unchecked(value));
         if (rounding == .truncate) {
           convert.finish(Return(result));
         } else {
@@ -587,7 +584,7 @@ final class NumericOperations({
       });
 
   IrFunction _doubleRounding(IntegerRounding rounding, bool floating) =>
-      _doubleRoundings.putIfAbsent((rounding, floating), () {
+      functions.putIfAbsent((rounding, floating, true), () {
         final target = FunctionTarget(
           null,
           '${rounding.name}ToDouble${floating ? 'Double' : 'Num'}',

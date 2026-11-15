@@ -6,7 +6,7 @@ import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/global_storage.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
-import 'package:dartc/src/codegen/numeric_operations.dart';
+import 'package:dartc/codegen.dart' show ProgramNormalization;
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/program_selection.dart';
 import 'package:dartc/src/codegen/stack_traces.dart';
@@ -73,7 +73,6 @@ void main() {
           ),
           {},
         ),
-        NumericOperations(),
         GlobalStorage([]),
         layout.instances,
       );
@@ -116,7 +115,6 @@ void main() {
             origin == 'generated' ? [callee] : [root],
           ).facts,
         ),
-        NumericOperations(),
         GlobalStorage([]),
         layout.instances,
       );
@@ -180,7 +178,6 @@ void main() {
       StackTraces(heapRuntime),
       CheckedCasts(),
       MemberCalls(program, functions.map((body) => body.target).toSet()),
-      NumericOperations(),
       GlobalStorage([]),
       layout.instances,
     );
@@ -191,15 +188,9 @@ void main() {
     expect(selection.functions[root]!.invocations.values, contains(member));
   });
 
-  test('heap support closes transitively generated call dependencies', () {
-    final program = IrProgram([], []);
+  test('normalized numeric calls retain heap and exception dependencies', () {
     final casts = CheckedCasts();
     final traces = StackTraces(heapRuntime);
-    final arithmetic = NumericOperations();
-    final layouts = ProgramLayout([
-      ...casts.classes,
-      ...arithmetic.classes,
-    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final heap = HeapPlan(runtime: heapRuntime);
     final helper = FunctionTarget(
       Uri.parse('memory:heap-support'),
@@ -229,18 +220,26 @@ void main() {
       ),
     );
 
+    final program = ProgramNormalization(
+      IrProgram([], [
+        IrFunction(helper, [entry]),
+        IrFunction(division, [divide]),
+      ]),
+    ).run();
+    final layouts = ProgramLayout([
+      ...casts.classes,
+      ...program.classes,
+    ], nativeLayout: NativeLayout(const Target(.linux, .arm64)));
     final selection = ProgramSelection(
       layouts,
       heap,
       traces,
       casts,
       MemberCalls(program, {}),
-      arithmetic,
       GlobalStorage([]),
       layouts.instances,
     );
-    selection.include(IrFunction(helper, [entry]));
-    selection.include(IrFunction(division, [divide]));
+    program.functions.forEach(selection.include);
     expect(selection.close(persistent: true), {
       heapRuntime.allocate,
       heapRuntime.isOutOfMemory,
@@ -319,17 +318,24 @@ void main() {
       ),
     );
 
+    final normalized = ProgramNormalization(
+      IrProgram(program.classes, [
+        ...program.functions,
+        IrFunction(helper, [entry]),
+      ]),
+    ).run();
     final selection = ProgramSelection(
       layouts,
       heap,
       traces,
       casts,
-      MemberCalls(program, {}),
-      NumericOperations(argumentError: init),
+      MemberCalls(normalized, {}),
       GlobalStorage([]),
       layouts.instances,
     );
-    selection.include(IrFunction(helper, [entry]));
+    normalized.functions
+        .where((body) => body.target != constructor)
+        .forEach(selection.include);
     expect(selection.close(persistent: true), {
       constructor,
       heapRuntime.allocate,

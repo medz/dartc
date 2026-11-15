@@ -13,6 +13,18 @@ void main() {
     expect(marker.mayThrow, isFalse);
     expect(marker.inputs, [value]);
   });
+  test('discharged numeric checks survive graph copying', () {
+    for (final operation in <Instruction>[
+      IntBinary.unchecked(.truncateDivide, n, n),
+      IntBinary.unchecked(.shiftLeft, n, n),
+      NumericToInt.unchecked(const Constant.floating(1.5)),
+    ]) {
+      expect(operation.effects, isEmpty);
+      expect(operation.mapInputs((value) => value).effects, isEmpty);
+    }
+    expect(() => IntBinary.unchecked(.modulo, n, n), throwsArgumentError);
+    expect(() => NumericToInt.unchecked(n), throwsArgumentError);
+  });
   test('non-covariant field results can throw before their value is used', () {
     final t = TypeParameterType('T')..initializeBound(.object.nullable);
     final owner = ClassType(uri, 'Callbacks', typeParameters: [t]);
@@ -67,6 +79,9 @@ void main() {
       Effect.mayThrow,
     });
     expect(Equals(n, n).effects, isEmpty);
+    final type = Block([ValueType.typeType]).parameters.single;
+    expect(Equals(type, TypeConstant(.integer)).effects, isEmpty);
+    expect(Equals(type, TypeConstant(.integer)).implicitMember, isNull);
     expect(Equals(receiver, receiver).effects, contains(Effect.callsUserCode));
     expect(() => LoadGlobal(lazy).effects.clear(), throwsUnsupportedError);
   });

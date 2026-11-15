@@ -640,7 +640,10 @@ sealed class Instruction(super.type) extends Value {
       final NullCheck v => NullCheck(map(v.operand)),
       final Equals v => Equals(map(v.left), map(v.right), negated: v.negated),
       final Identical v => Identical(map(v.left), map(v.right)),
-      final IntBinary v => IntBinary(v.operator, map(v.left), map(v.right)),
+      final IntBinary v =>
+        v.checked
+            ? IntBinary(v.operator, map(v.left), map(v.right))
+            : IntBinary.unchecked(v.operator, map(v.left), map(v.right)),
       final NumericBinary v => NumericBinary(
         v.operator,
         map(v.left),
@@ -677,7 +680,10 @@ sealed class Instruction(super.type) extends Value {
       final NumericToDouble v => NumericToDouble(map(v.operand)),
       final NumericSquareRoot v => NumericSquareRoot(map(v.operand)),
       final FloatBitCast v => FloatBitCast(map(v.operand), width: v.width),
-      final NumericToInt v => NumericToInt(map(v.operand), v.rounding),
+      final NumericToInt v =>
+        v.checked
+            ? NumericToInt(map(v.operand), v.rounding)
+            : NumericToInt.unchecked(map(v.operand)),
       final NumericRoundToDouble v => NumericRoundToDouble(
         map(v.operand),
         v.rounding,
@@ -903,9 +909,10 @@ sealed class Instruction(super.type) extends Value {
     StoreObjectData() => const {.writesStorage},
     TypeCast() ||
     NullCheck() ||
-    IntBinary(operator: IntOperator(mayThrow: true)) ||
+    IntBinary(checked: true, operator: IntOperator(mayThrow: true)) ||
     NumericBinary(canThrow: true) => const {.mayThrow},
-    NumericToInt(operand: Value(type: final type)) when type != .integer =>
+    NumericToInt(checked: true, operand: Value(type: final type))
+        when type != .integer =>
       const {.mayThrow},
     TypeView(:final operand) || UncheckedCast(:final operand)
         when (operand.type == .integer || operand.type == .floating) &&
@@ -2142,7 +2149,7 @@ final class Equals(
   this : super(.boolean);
 
   /// Whether the comparison may call a user-defined equality operator.
-  bool get mayCallUserCode => !left.type.hasScalarEquality;
+  bool get mayCallUserCode => !left.type.hasBuiltinEquality;
   @override
   Iterable<Value> get inputs => [left, right];
 }
@@ -2158,7 +2165,7 @@ final class Identical(final Value left, final Value right) extends Instruction {
 }
 
 /// An arithmetic or comparison instruction on two integers.
-final class IntBinary(
+final class IntBinary._(
   /// The operation applied to [left] and [right].
   final IntOperator operator,
 
@@ -2167,13 +2174,35 @@ final class IntBinary(
 
   /// The second operand.
   final Value right,
+
+  /// Whether Dart division and shift checks remain to be lowered.
+  final bool checked,
 ) extends Instruction {
   /// Creates an instruction with the result type of [operator].
   ///
   /// Throws [ArgumentError] unless both operands have type [ValueType.integer].
+  new(IntOperator operator, Value left, Value right)
+    : this._(operator, left, right, true);
+
+  /// Uses checks already established by the surrounding control flow.
+  ///
+  /// Division requires a divisor other than zero or minus one. Shift counts
+  /// must be in 0..63. Only truncating division and shifts support this form.
+  new unchecked(IntOperator operator, Value left, Value right)
+    : this._(operator, left, right, false);
+
   this : super(operator.result) {
     if (left.type != .integer || right.type != .integer) {
       throw ArgumentError('Integer operands required.');
+    }
+    if (!checked &&
+        operator != .truncateDivide &&
+        operator != .shiftLeft &&
+        operator != .shiftRight &&
+        operator != .unsignedShiftRight) {
+      throw ArgumentError(
+        'Unchecked integer operation requires division or a shift.',
+      );
     }
   }
 
@@ -2514,10 +2543,22 @@ enum IntegerRounding() {
 ///
 /// Finite values outside the native integer range clamp to its bounds.
 /// Non-finite values throw UnsupportedError; integer operands retain their value.
-final class NumericToInt(final Value operand, final IntegerRounding rounding)
-    extends Instruction {
+final class NumericToInt._(
+  final Value operand,
+  final IntegerRounding rounding,
+
+  /// Whether finite-range checks remain to be lowered.
+  final bool checked,
+) extends Instruction {
+  new(Value operand, IntegerRounding rounding)
+    : this._(operand, rounding, true);
+
+  /// Truncates a double proven finite and strictly within the signed 64-bit range.
+  new unchecked(Value operand) : this._(operand, .truncate, false);
+
   this : super(.integer) {
-    if (!ValueType.number.accepts(operand.type)) {
+    if (!ValueType.number.accepts(operand.type) ||
+        !checked && operand.type != .floating) {
       throw ArgumentError('A non-nullable numeric operand is required.');
     }
   }

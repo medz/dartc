@@ -205,7 +205,7 @@ final class ValueOperations(
     );
     final parts = graph.instructions[nonzero]!;
     final bits = DoubleBits(value);
-    final high = IntBinary(
+    final high = IntBinary.unchecked(
       .unsignedShiftRight,
       bits,
       const Constant.integer(32),
@@ -216,7 +216,7 @@ final class ValueOperations(
       folded,
       const Constant.integer(0x9e3779b9),
     );
-    final upper = IntBinary(
+    final upper = IntBinary.unchecked(
       .unsignedShiftRight,
       mixed,
       const Constant.integer(16),

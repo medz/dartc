@@ -1273,6 +1273,14 @@ final class ProgramFlow(
             exceptional: null,
           );
         }
+        if (operation is Equals &&
+            inputs.first.types.every(ValueType.typeType.accepts)) {
+          activation.operationEffects[operation] = const {};
+          return FlowResult(
+            value: FlowValue.unknown(.boolean),
+            normal: state.copy(),
+          );
+        }
         if (_integerOperation(operation, inputs) case final result?) {
           activation.operationEffects[operation] = {
             if (result.mayThrow) Effect.mayThrow,
@@ -3092,7 +3100,7 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
       if (left.constant == 0) return result(right);
       if (right.constant == 0) return result(left);
     case .shiftLeft || .shiftRight || .unsignedShiftRight:
-      final mayThrow = right.lower < 0;
+      final mayThrow = operation.checked && right.lower < 0;
       if (right.upper < 0) {
         return (value: const FlowValue.bottom(), mayThrow: true);
       }
@@ -3133,7 +3141,7 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
             : left.constant == 0
             ? FlowValue.constant(const Constant.integer(0))
             : FlowValue.unknown(.integer),
-        mayThrow: right.contains(0),
+        mayThrow: operation.checked && right.contains(0),
       );
     case .divide:
       break;
@@ -3288,10 +3296,10 @@ Constant? _fold(
           .truncateDivide => left ~/ right,
           .modulo => left % right,
           .remainder => left.remainder(right),
-          .lessThan => left < right,
-          .lessOrEqual => left <= right,
-          .greaterThan => left > right,
-          .greaterOrEqual => left >= right,
+          .lessThan => (_numericOrder(left, right) ?? 1) < 0,
+          .lessOrEqual => (_numericOrder(left, right) ?? 1) <= 0,
+          .greaterThan => (_numericOrder(left, right) ?? -1) > 0,
+          .greaterOrEqual => (_numericOrder(left, right) ?? -1) >= 0,
         };
       case NumericNegate():
         result = -(scalars.single as num);
@@ -3299,7 +3307,11 @@ Constant? _fold(
         result = (scalars.single as num).toDouble();
       case Equals(:final negated)
           when constants.every((value) => value is ScalarConstant):
-        result = (scalars[0] == scalars[1]) != negated;
+        result =
+            (scalars[0] is num && scalars[1] is num
+                ? _numericOrder(scalars[0] as num, scalars[1] as num) == 0
+                : scalars[0] == scalars[1]) !=
+            negated;
       case Equals(:final negated)
           when constants.every((value) => value is TypeConstant):
         result =
@@ -3392,3 +3404,10 @@ Constant? _fold(
     _ => null,
   };
 }
+
+// Use exact compareTo ordering, with IEEE NaN and signed-zero rules.
+int? _numericOrder(num left, num right) => left.isNaN || right.isNaN
+    ? null
+    : left == 0 && right == 0
+    ? 0
+    : left.compareTo(right);

@@ -4,10 +4,76 @@ import 'package:dartc/src/optimizer/program_flow.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
+import '../support/numeric_order.dart';
 
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  test('numeric facts retain exact values, signed zero and unordered NaN', () {
+    final comparisons = <Instruction Function(Value, Value)>[
+      Equals.new,
+      (left, right) => Equals(left, right, negated: true),
+      for (final operator in <NumericOperator>[
+        .lessThan,
+        .lessOrEqual,
+        .greaterThan,
+        .greaterOrEqual,
+      ])
+        (left, right) => NumericBinary(operator, left, right),
+    ];
+    for (final comparison in comparisons) {
+      final entry = Block([.number, .number]);
+      final operation = comparison(entry.parameters[0], entry.parameters[1]);
+      entry.emit(operation);
+      entry.finish(Return(operation));
+      final target = FunctionTarget(_uri, 'compare', .boolean, [
+        .number,
+        .number,
+      ]);
+      final program = IrProgram([], [
+        IrFunction(target, [entry]),
+      ]);
+      for (final (a, b) in <(num, num)>[
+        (9007199254740993, 9007199254740992.0),
+        (-9007199254740993, -9007199254740992.0),
+        (0x7fffffffffffffff, 9223372036854775808.0),
+        (-0x8000000000000000, -9223372036854775808.0),
+        (0, -0.0),
+        (0.0, -0.0),
+        (0, double.nan),
+        (double.nan, double.nan),
+        (double.infinity, double.infinity),
+        (-double.infinity, 0),
+        (0, 5e-324),
+      ]) {
+        for (final (first, second) in [(a, b), (b, a)]) {
+          FlowValue argument(num value) => FlowValue.constant(
+            value is int
+                ? Constant.integer(value)
+                : Constant.floating(value as double),
+          );
+          final order = numericOrder(first, second);
+          final expected = switch (operation) {
+            Equals(:final negated) => (order == 0) != negated,
+            NumericBinary(operator: .lessThan) => order != null && order < 0,
+            NumericBinary(operator: .lessOrEqual) =>
+              order != null && order <= 0,
+            NumericBinary(operator: .greaterThan) => order != null && order > 0,
+            _ => order != null && order >= 0,
+          };
+          final facts = ProgramFlow(program, [
+            (target: target, arguments: [argument(first), argument(second)]),
+          ]).facts;
+          expect(
+            facts.returnedBy(target).constant?.structuralKey,
+            Constant.boolean(expected).structuralKey,
+            reason: '${operation.runtimeType}: $first versus $second',
+          );
+        }
+      }
+    }
+  });
+
   test(
     'entry constants validate nested payload callbacks without invoking them',
     () {
