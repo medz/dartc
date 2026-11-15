@@ -27,7 +27,12 @@ final class FunctionRewrite(
   final Map<BlockParameter, ({Block block, Map<Jump, Value> incoming})> phis =
       const {},
   final Set<Instruction> nonReturning = const {},
+
+  /// Operations that may disappear entirely when their results are unused.
   final Set<Instruction> discardable = const {},
+
+  /// Retained operations proven unable to reach their exception handler.
+  final Set<Instruction> nonThrowing = const {},
 
   /// Local throws proven not to record implicit state on their exception value.
   /// A newly captured trace is still required while its handler observes it.
@@ -457,6 +462,10 @@ final class FunctionRewrite(
     };
 
     Terminator branchEnd(Branch branch) {
+      if (_sameEdge(branch.ifTrue, branch.ifFalse)) {
+        changed = true;
+        return jump(branch.ifTrue);
+      }
       final condition = value(branch.condition);
       if (condition case ScalarConstant(value: final bool takeTrue)) {
         changed = true;
@@ -476,7 +485,7 @@ final class FunctionRewrite(
         return jump(normal);
       }
       final template = operations[invocation.operation] ?? invocation.operation;
-      if (!template.mayThrow) {
+      if (!template.mayThrow || nonThrowing.contains(invocation.operation)) {
         changed = true;
         final operation = copy(invocation.operation);
         instructions[current]!.add(operation);
@@ -484,15 +493,6 @@ final class FunctionRewrite(
         return normal == null || _never(invocation.operation)
             ? Unreachable(operation)
             : jump(normal);
-      }
-      if (discardable.contains(invocation.operation)) {
-        final normal = invocation.onReturn;
-        if (normal == null) {
-          throw StateError('A non-returning operation cannot be discarded.');
-        }
-        changed = true;
-        instructions[current]!.add(copy(invocation.operation));
-        return jump(normal);
       }
       final returns =
           invocation.onReturn != null && !_never(invocation.operation);
@@ -973,6 +973,7 @@ final class FunctionRewrite(
     if ([
       ...discardable,
       ...nonReturning,
+      ...nonThrowing,
       ...inlined.keys,
     ].any((value) => !owns(value))) {
       throw ArgumentError('A rewrite obligation belongs to another function.');
@@ -984,10 +985,12 @@ final class FunctionRewrite(
     )) {
       throw ArgumentError('A direct throw requires an owned local handler.');
     }
+    final needed = <Value>{};
     Iterable<Jump> outgoing(Block block) {
       if (block.instructions.any(_never)) return const [];
       final end = _end(block);
       if (end is Branch) {
+        if (_sameEdge(end.ifTrue, end.ifFalse)) return [end.ifTrue];
         if (_replacement(end.condition) case ScalarConstant(
           value: final bool test,
         )) {
@@ -995,99 +998,114 @@ final class FunctionRewrite(
         }
       }
       if (end is Invoke) {
-        if (!(operations[end.operation] ?? end.operation).mayThrow) {
+        if (!(operations[end.operation] ?? end.operation).mayThrow ||
+            nonThrowing.contains(end.operation)) {
           return _never(end.operation) ? const [] : [?end.onReturn];
         }
         if (_never(end.operation)) return [end.onThrow];
-        if (discardable.contains(end.operation)) return [?end.onReturn];
+        if (discardable.contains(end.operation) &&
+            !needed.contains(end.operation)) {
+          return [?end.onReturn];
+        }
       }
       return end.successors;
     }
 
-    final liveBlocks = <Block>{}, queued = [function.entry];
-    final incoming = <BlockParameter, List<Value>>{};
-    while (queued.isNotEmpty) {
-      final block = queued.removeLast();
-      if (!liveBlocks.add(block)) continue;
-      for (final edge in outgoing(block)) {
-        queued.add(edge.target);
-        for (final (i, argument) in edge.arguments.indexed) {
-          (incoming[edge.target.parameters[i]] ??= []).add(argument);
-        }
-        for (final entry in phis.entries) {
-          if (entry.value.block != edge.target) continue;
-          final argument = entry.value.incoming[edge];
-          if (argument == null) {
-            throw ArgumentError('A phi is missing an executable predecessor.');
+    final liveBlocks = <Block>{};
+    int previousDemand;
+    do {
+      previousDemand = needed.length;
+      liveBlocks.clear();
+      final queued = [function.entry];
+      final incoming = <BlockParameter, List<Value>>{};
+      while (queued.isNotEmpty) {
+        final block = queued.removeLast();
+        if (!liveBlocks.add(block)) continue;
+        for (final edge in outgoing(block)) {
+          queued.add(edge.target);
+          for (final (i, argument) in edge.arguments.indexed) {
+            (incoming[edge.target.parameters[i]] ??= []).add(argument);
           }
-          (incoming[entry.key] ??= []).add(argument);
+          for (final entry in phis.entries) {
+            if (entry.value.block != edge.target) continue;
+            final argument = entry.value.incoming[edge];
+            if (argument == null) {
+              throw ArgumentError(
+                'A phi is missing an executable predecessor.',
+              );
+            }
+            (incoming[entry.key] ??= []).add(argument);
+          }
         }
       }
-    }
-    final needed = <Value>{}, uses = <Value>[];
-    final requiredOperations = <Instruction>{};
-    for (final block in liveBlocks) {
-      Instruction? stop;
-      for (final operation in block.instructions) {
-        if ((operations[operation] ?? operation).effects.isNotEmpty &&
-                !discardable.contains(operation) ||
-            _never(operation)) {
-          uses.add(operation);
-          requiredOperations.add(operation);
-        }
-        if (_never(operation)) {
-          stop = operation;
-          break;
-        }
-      }
-      if (stop != null) continue;
-      final end = _end(block);
-      switch (end) {
-        case Return(:final value?):
-          uses.add(value);
-        case Branch(:final condition):
-          uses.add(condition);
-        case Invoke(:final operation):
-          if (!discardable.contains(operation) || _never(operation)) {
+      final uses = <Value>[
+        for (final parameter in needed.whereType<BlockParameter>())
+          ...?incoming[parameter],
+      ];
+      final requiredOperations = <Instruction>{};
+      for (final block in liveBlocks) {
+        Instruction? stop;
+        for (final operation in block.instructions) {
+          if ((operations[operation] ?? operation).effects.isNotEmpty &&
+                  !discardable.contains(operation) ||
+              _never(operation)) {
             uses.add(operation);
             requiredOperations.add(operation);
           }
-        case Throw(:final exception, :final stackTrace):
-          uses.add(exception);
-          if (stackTrace != null) uses.add(stackTrace);
-        case Unreachable(:final cause):
-          uses.add(cause);
-        case Await(:final operand):
+          if (_never(operation)) {
+            stop = operation;
+            break;
+          }
+        }
+        if (stop != null) continue;
+        final end = _end(block);
+        switch (end) {
+          case Return(:final value?):
+            uses.add(value);
+          case Branch(:final condition, :final ifTrue, :final ifFalse):
+            if (!_sameEdge(ifTrue, ifFalse)) uses.add(condition);
+          case Invoke(:final operation):
+            if (!discardable.contains(operation) || _never(operation)) {
+              uses.add(operation);
+              requiredOperations.add(operation);
+            }
+          case Throw(:final exception, :final stackTrace):
+            uses.add(exception);
+            if (stackTrace != null) uses.add(stackTrace);
+          case Unreachable(:final cause):
+            uses.add(cause);
+          case Await(:final operand):
+            uses.add(operand);
+          case Yield(:final value):
+            uses.add(value);
+          case YieldStream(:final stream):
+            uses.add(stream);
+          default:
+            break;
+        }
+      }
+      while (uses.isNotEmpty) {
+        final original = uses.removeLast();
+        final operand = _replacement(original);
+        if (!identical(original, operand) &&
+            !requiredOperations.contains(original)) {
           uses.add(operand);
-        case Yield(:final value):
-          uses.add(value);
-        case YieldStream(:final stream):
-          uses.add(stream);
-        default:
-          break;
+          continue;
+        }
+        if (!needed.add(original)) continue;
+        if (!identical(original, operand)) uses.add(operand);
+        if (original is Instruction) {
+          uses.addAll((operations[original] ?? original).inputs);
+          uses.addAll(inlined[original]?.arguments ?? const []);
+        }
+        if (original is BlockParameter) {
+          uses.addAll(incoming[original] ?? const []);
+        }
+        if (original is TestedValue) {
+          uses.addAll([original.test, original.test.operand]);
+        }
       }
-    }
-    while (uses.isNotEmpty) {
-      final original = uses.removeLast();
-      final operand = _replacement(original);
-      if (!identical(original, operand) &&
-          !requiredOperations.contains(original)) {
-        uses.add(operand);
-        continue;
-      }
-      if (!needed.add(original)) continue;
-      if (!identical(original, operand)) uses.add(operand);
-      if (original is Instruction) {
-        uses.addAll((operations[original] ?? original).inputs);
-        uses.addAll(inlined[original]?.arguments ?? const []);
-      }
-      if (original is BlockParameter) {
-        uses.addAll(incoming[original] ?? const []);
-      }
-      if (original is TestedValue) {
-        uses.addAll([original.test, original.test.operand]);
-      }
-    }
+    } while (needed.length != previousDemand);
     final parameterSlots = {
       for (final block in liveBlocks)
         block: [
@@ -1121,3 +1139,10 @@ Iterable<Value> _endValues(Terminator terminal) => [
     _ => const <Value>[],
   },
 ];
+
+bool _sameEdge(Jump left, Jump right) =>
+    left.target == right.target &&
+    left.arguments.length == right.arguments.length &&
+    left.arguments.indexed.every(
+      (entry) => entry.$2 == right.arguments[entry.$1],
+    );

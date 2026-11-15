@@ -1,17 +1,20 @@
-import 'package:dartc/frontend.dart';
+import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
+import '../support/runtime.dart';
 import 'fixtures/local_exceptions.dart' as source;
 
 void main() {
   late IrProgram program;
   setUpAll(() async {
-    program = await AnalysisSession([
-      'test/optimizer/fixtures/local_exceptions.dart',
-    ]).use((input) async => (await Lowering().lower(input)).program);
+    await prepareRuntime('test/optimizer/fixtures/local_exceptions.dart');
+    program = ProgramNormalization(
+      heapRuntime.program,
+      runtime: heapRuntime,
+    ).run();
   });
   for (final (name, evaluate) in [
     ('caughtValue', source.caughtValue),
@@ -33,12 +36,13 @@ void main() {
               ProgramStoragePromotion(),
               ProgramStorageElimination(),
               DirectCallInlining(),
+              ProgramBranchSpecialization(),
             ]).run(program, [
               (
                 target: function.target,
                 arguments: [FlowValue.unknown(.integer)],
               ),
-            ]);
+            ], allocationFailure: heapRuntime.allocationFailure);
         final body =
             facts.program.implementationOf(function.target) as IrFunction;
         for (final input in [

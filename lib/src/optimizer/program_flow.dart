@@ -23,6 +23,9 @@ final class ProgramFlow(
   /// Raw ABI entries used only when their declared callback addresses escape.
   Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
   final FlowMemoryLayout? memoryLayout,
+
+  /// Ordinary target body reporting a retained allocation's failure.
+  final FunctionTarget? allocationFailure,
 }) {
   final _nativeEntries = Map<NativeCallbackTarget, FunctionTarget>.unmodifiable(
     nativeEntries,
@@ -46,6 +49,14 @@ final class ProgramFlow(
   ProgramFlowFacts? _facts;
 
   this {
+    if (allocationFailure case final target?
+        when program.implementationOf(target) is! IrFunction ||
+            target.kind != .function ||
+            target.signature != FunctionType(.never, [])) {
+      throw ArgumentError(
+        'Allocation failure requires a supplied no-argument Never body.',
+      );
+    }
     for (final target in _nativeEntries.values) {
       if (program.implementationOf(target) is! IrFunction ||
           target.kind != .function ||
@@ -470,6 +481,7 @@ final class ProgramFlow(
       value: mapValue(callee.returned),
       normal: apply(callee.normal, normal: true),
       exceptional: apply(callee.exceptional),
+      allocationFailureOnly: !callee.hasSemanticFailure,
       exception: mapValue(callee.exception),
       stackTrace: mapValue(callee.stackTrace),
     );
@@ -694,8 +706,13 @@ final class ProgramFlow(
     void exceptional(
       FlowState state,
       FlowValue exception,
-      FlowValue stackTrace,
-    ) {
+      FlowValue stackTrace, {
+      bool allocationFailureOnly = false,
+    }) {
+      if (!allocationFailureOnly && !activation.hasSemanticFailure) {
+        activation.hasSemanticFailure = true;
+        summaryChanged = true;
+      }
       if (escapes && !_nativeActivations.contains(activation)) {
         state.escape([exception, stackTrace]);
         _admitEscaped(state);
@@ -734,6 +751,34 @@ final class ProgramFlow(
           state,
           read,
         );
+        if (activation.operationEffects[operation]?.contains(
+              Effect.allocates,
+            ) ??
+            false) {
+          final target = allocationFailure;
+          final failed = target == null
+              ? FlowResult(exceptional: state.copy())
+              : _invoke(
+                  activation,
+                  block,
+                  activation.allocationCalls.putIfAbsent(
+                    operation,
+                    () => DirectCall(target, []),
+                  ),
+                  target,
+                  const [],
+                  state,
+                );
+          result = _joinResult(
+            result,
+            FlowResult(
+              exceptional: failed.exceptional,
+              exception: failed.exception,
+              stackTrace: failed.stackTrace,
+              allocationFailureOnly: true,
+            ),
+          );
+        }
         final type = operation.type.substitute(activation.environment);
         var bounded = result.value;
         if (bounded.types.any((actual) => !type.accepts(actual))) {
@@ -746,6 +791,7 @@ final class ProgramFlow(
             value: bounded,
             normal: bounded.isBottom ? null : result.normal,
             exceptional: result.exceptional,
+            allocationFailureOnly: result.allocationFailureOnly,
             exception: result.exception,
             stackTrace: result.stackTrace,
             effects: result.effects,
@@ -759,6 +805,9 @@ final class ProgramFlow(
         }
         if (result.normal != null) {
           activation.mergePoint(activation.after, operation, result.normal!);
+        }
+        if (result.hasSemanticFailure) {
+          activation.semanticFailures.add(operation);
         }
         if (result.exceptional != null) {
           activation.exceptions[operation] =
@@ -786,7 +835,12 @@ final class ProgramFlow(
       for (final operation in block.instructions) {
         final result = evaluate(operation);
         if (result.exceptional case final thrown?) {
-          exceptional(thrown, result.exception, result.stackTrace);
+          exceptional(
+            thrown,
+            result.exception,
+            result.stackTrace,
+            allocationFailureOnly: result.allocationFailureOnly,
+          );
         }
         state = result.normal;
         if (state == null) break;
@@ -879,7 +933,11 @@ final class ProgramFlow(
         );
       }
     }
-    if (activation.exceptional != null) activation.effects.add(Effect.mayThrow);
+    if (activation.hasSemanticFailure) activation.effects.add(Effect.mayThrow);
+    if (body.target == allocationFailure?.implementation &&
+        activation.effects.contains(Effect.allocates)) {
+      throw StateError('Allocation failure reporting cannot allocate.');
+    }
     summaryChanged |= beforeEffects != activation.effects.length;
     if (escapes) {
       for (final state in [activation.normal, activation.exceptional]) {
@@ -934,7 +992,7 @@ final class ProgramFlow(
       );
       activation.operationEffects[operation] = {
         ...stored.effects,
-        if (stored.exceptional != null) Effect.mayThrow,
+        if (stored.hasSemanticFailure) Effect.mayThrow,
       };
       return stored;
     }
@@ -1240,7 +1298,6 @@ final class ProgramFlow(
         return FlowResult(
           value: FlowValue.unknown(.typeType),
           normal: state.copy(),
-          exceptional: state.copy(),
         );
       case TypeTest(:final testedType, :final negated):
         final expected = testedType.substitute(activation.environment);
@@ -1261,7 +1318,9 @@ final class ProgramFlow(
         return FlowResult(
           value: FlowValue.unknown(.boolean),
           normal: state.copy(),
-          exceptional: operation.mayThrow ? state.copy() : null,
+          exceptional: operation.effects.contains(Effect.mayThrow)
+              ? state.copy()
+              : null,
         );
       case TypeCast() || NullCheck():
         final checked = inputs.single.check(
@@ -1277,7 +1336,7 @@ final class ProgramFlow(
         );
       case TypeView() || UncheckedCast():
         final value = inputs.single.check(resultType).value;
-        activation.operationEffects[operation] = const {};
+        activation.operationEffects[operation] = operation.effects;
         return FlowResult(
           value: value,
           normal: value.isBottom ? null : state.copy(),
@@ -1337,6 +1396,7 @@ final class ProgramFlow(
                     : result.value,
                 normal: result.normal,
                 exceptional: result.exceptional,
+                allocationFailureOnly: result.allocationFailureOnly,
                 exception: result.exception,
                 stackTrace: result.stackTrace,
               );
@@ -1363,7 +1423,9 @@ final class ProgramFlow(
               : FlowValue.unknown(resultType)
                     .withReferences(inputs.map((value) => value.references)),
           normal: resultType == .never ? null : next,
-          exceptional: operation.mayThrow ? next.copy() : null,
+          exceptional: operation.effects.contains(Effect.mayThrow)
+              ? next.copy()
+              : null,
         );
     }
   }
@@ -1579,6 +1641,8 @@ final class ProgramFlow(
             exceptional: checked.mayFail
                 ? _joinState(invoked.exceptional, invoked.normal)
                 : invoked.exceptional,
+            allocationFailureOnly:
+                !checked.mayFail && invoked.allocationFailureOnly,
             exception: checked.mayFail
                 ? invoked.exception.join(FlowValue.unknown(.object))
                 : invoked.exception,
@@ -2069,7 +2133,12 @@ final class ProgramFlow(
                 .withSources(const [])
                 .withReferences(inputs.map((value) => value.references)),
       normal: resultType == .never ? null : next,
-      exceptional: effects.contains(Effect.mayThrow) ? next.copy() : null,
+      exceptional:
+          effects.contains(Effect.mayThrow) ||
+              effects.contains(Effect.allocates)
+          ? next.copy()
+          : null,
+      allocationFailureOnly: !effects.contains(Effect.mayThrow),
     );
   }
 
@@ -2625,16 +2694,18 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
         for (final item in _at(operation, activation)) ...[
           ...?item.operationEffects[operation],
           ...?item.externalEffects[operation],
-          for (final callee in item.calls[operation] ?? <_Activation>{})
-            ...callee.effects,
+          for (final call in [operation, ?item.allocationCalls[operation]])
+            for (final callee in item.calls[call] ?? <_Activation>{})
+              ...callee.effects,
         ],
       });
 
   /// Whether discarding an unused operation preserves effects and termination.
   bool canDiscard(Instruction operation, {Object? activation}) {
     final exits = exitsOf(operation, activation: activation);
-    if (!exits.normal || exits.exceptional) return false;
+    if (!exits.normal) return false;
     for (final item in _at(operation, activation)) {
+      if (item.semanticFailures.contains(operation)) return false;
       if (!_discardableOperation(item, operation, {})) return false;
     }
     return true;
@@ -2643,8 +2714,9 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
   bool _discardableOperation(
     _Activation activation,
     Instruction operation,
-    Set<_Activation> visiting,
-  ) {
+    Set<_Activation> visiting, {
+    bool ignoreFailure = false,
+  }) {
     if (activation.unknownCalls.contains(operation) ||
         activation.externalCalls.contains(operation)) {
       return false;
@@ -2673,17 +2745,31 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
       }
     }
     for (final callee in callees) {
-      if (!_discardableBody(callee, visiting)) return false;
+      if (!_discardableBody(callee, visiting, ignoreFailure: ignoreFailure)) {
+        return false;
+      }
     }
-    return true;
+    final failure = activation.allocationCalls[operation];
+    return failure == null ||
+        _discardableOperation(
+          activation,
+          failure,
+          visiting,
+          ignoreFailure: true,
+        );
   }
 
-  bool _discardableBody(_Activation activation, Set<_Activation> visiting) {
+  bool _discardableBody(
+    _Activation activation,
+    Set<_Activation> visiting, {
+    bool ignoreFailure = false,
+  }) {
     if (!visiting.add(activation) ||
         activation.recursive ||
         activation.body is! IrFunction ||
-        activation.normal == null ||
-        activation.exceptional != null) {
+        (activation.normal == null &&
+            !(ignoreFailure && activation.exceptional != null)) ||
+        (!ignoreFailure && activation.hasSemanticFailure)) {
       return false;
     }
     final body = activation.body as IrFunction;
@@ -2698,7 +2784,15 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
       ...activation.externalEffects.keys,
       ...activation.calls.keys,
     }) {
-      if (!_discardableOperation(activation, operation, visiting)) return false;
+      if (activation.allocationCalls.containsValue(operation)) continue;
+      if (!_discardableOperation(
+        activation,
+        operation,
+        visiting,
+        ignoreFailure: ignoreFailure,
+      )) {
+        return false;
+      }
     }
     visiting.remove(activation);
     return true;
@@ -2834,11 +2928,13 @@ final class _Activation(final IrCallable body) {
   final after = <Instruction, FlowState>{};
   final thrown = <Instruction, FlowState>{};
   final exceptions = <Instruction, FlowValue>{};
+  final semanticFailures = <Instruction>{};
   final traces = <Instruction, FlowValue>{};
   final blocks = <Block>{};
   final edges = <Jump>{};
   final targets = <Instruction, Set<FunctionTarget>>{};
   final calls = <Instruction, Set<_Activation>>{};
+  final allocationCalls = <Instruction, DirectCall>{};
   final callSites = <_CallSite>{};
   final readers = <_Activation>{};
   final unknownCalls = <Instruction>{};
@@ -2856,6 +2952,7 @@ final class _Activation(final IrCallable body) {
   FlowValue returned = const FlowValue.bottom();
   FlowValue exception = const FlowValue.bottom();
   FlowValue stackTrace = const FlowValue.bottom();
+  bool hasSemanticFailure = false;
   bool _hasEnvironment = false;
   bool repeated = false;
   bool recursive = false;
@@ -2927,6 +3024,8 @@ FlowResult _joinResult(FlowResult left, FlowResult right) {
     value: left.value.join(right.value),
     normal: _joinState(left.normal, right.normal),
     exceptional: _joinState(left.exceptional, right.exceptional),
+    allocationFailureOnly:
+        !left.hasSemanticFailure && !right.hasSemanticFailure,
     exception: left.exception.join(right.exception),
     stackTrace: left.stackTrace.join(right.stackTrace),
     effects: {...left.effects, ...right.effects},

@@ -31,6 +31,7 @@ final class const ProgramSimplification() extends ProgramPass {
       final replacements = <Value, Value>{};
       final nonReturning = <Instruction>{};
       final discardable = <Instruction>{};
+      final nonThrowing = <Instruction>{};
       final directThrows = <Throw>{};
       for (final block in function.blocks) {
         if (!facts.reachesBlock(block)) continue;
@@ -77,7 +78,9 @@ final class const ProgramSimplification() extends ProgramPass {
           }
           if (value is Instruction) {
             if (facts.canDiscard(value)) discardable.add(value);
-            if (!facts.exitsOf(value).normal) nonReturning.add(value);
+            final exits = facts.exitsOf(value);
+            if (!exits.normal) nonReturning.add(value);
+            if (!exits.exceptional) nonThrowing.add(value);
           }
         }
       }
@@ -86,6 +89,7 @@ final class const ProgramSimplification() extends ProgramPass {
         replacements: replacements,
         nonReturning: nonReturning,
         discardable: discardable,
+        nonThrowing: nonThrowing,
         directThrows: directThrows,
       ).run();
       changed |= !identical(function, rewritten);

@@ -440,6 +440,41 @@ void main() {
     },
   );
 
+  test('discardable retained invokes keep their failure region', () {
+    for (final observed in [false, true]) {
+      final target = FunctionTarget(_uri, 'allocation', .integer, [.integer]);
+      final entry = Block(target.parameterTypes),
+          normal = Block([ValueType.integer]),
+          caught = Block();
+      final call = DirectCall(_tick, entry.parameters);
+      entry.finish(
+        Invoke(call, onReturn: Jump(normal, [call]), onThrow: Jump(caught)),
+      );
+      normal.finish(
+        Return(observed ? normal.parameters.single : const Constant.integer(7)),
+      );
+      caught.finish(const Return(Constant.integer(-1)));
+      final before = IrFunction(target, [entry, normal, caught]);
+      final after = FunctionRewrite(before, discardable: {call}).run();
+      final events = <int>[];
+      final interpreter = IrInterpreter(
+        IrProgram([], [after], externals: [IrExternal(_tick)]),
+        {},
+        externalCalls: {
+          _tick: (arguments) {
+            final value = arguments.single as int;
+            events.add(value);
+            if (value < 0) throw StateError('allocation');
+            return value;
+          },
+        },
+      );
+      expect(interpreter.run(after, [-3]), observed ? -1 : 7);
+      expect(interpreter.run(after, [42]), observed ? 42 : 7);
+      expect(events, observed ? [-3, 42] : isEmpty);
+    }
+  });
+
   test(
     'direct local throws retain operand effects and reject foreign proofs',
     () {

@@ -453,13 +453,13 @@ enum Effect() {
   /// Changes observable storage, including lazy initialization.
   writesStorage,
 
-  /// Creates a value or storage, independently of its machine representation.
+  /// Creates a value or storage whose retained representation may fail.
   allocates,
 
   /// May invoke Dart code with arbitrary effects.
   callsUserCode,
 
-  /// May transfer control to a Dart exception handler.
+  /// May throw independently of allocation or representation failure.
   mayThrow,
 
   /// Extends the lifetime of referenced values through this point.
@@ -817,7 +817,8 @@ sealed class Instruction(super.type) extends Value {
     .mayThrow,
     .keepsAlive,
   };
-  static const _allocate = <Effect>{.allocates, .mayThrow};
+  static const _allocate = <Effect>{.allocates};
+  static const _checkedAllocate = <Effect>{.allocates, .mayThrow};
   static const _checkedWrite = <Effect>{.writesStorage, .mayThrow};
   static const _bindOnce = <Effect>{.readsStorage, .writesStorage, .mayThrow};
 
@@ -856,21 +857,22 @@ sealed class Instruction(super.type) extends Value {
     Construct() ||
     BindMethod(direct: false) ||
     Equals(mayCallUserCode: true) => _call,
-    CaptureStackTrace() => const {.allocates},
-    NewCollection() ||
     ListFilled() ||
-    MakeInvocation() ||
-    BindMethod(direct: true) ||
+    StringFromCharCode() ||
     InstantiateFunction() ||
     InstantiateFunctionFrom() ||
-    MakeClosure() ||
     NewCell() ||
+    NewPayload() => _checkedAllocate,
+    CaptureStackTrace() ||
+    NewCollection() ||
+    MakeInvocation() ||
+    BindMethod(direct: true) ||
+    MakeClosure() ||
     MakeRecord() ||
     StringConcat() ||
-    StringFromCharCode() ||
     AssertionFailure() ||
     PatternMatchFailure() => _allocate,
-    CopyCell() => const {.readsStorage, .allocates, .mayThrow},
+    CopyCell() => const {.readsStorage, .allocates},
     CopyNative() => const {.readsStorage, .writesStorage},
     LoadGlobal(global: GlobalVariable(initializer: != null)) ||
     LoadField(field: InstanceField(initializer: != null)) ||
@@ -926,7 +928,6 @@ sealed class Instruction(super.type) extends Value {
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() ||
-    NewPayload() ||
     NativeView() => _allocate,
     FrameValue() ||
     Identical() ||
@@ -951,7 +952,8 @@ sealed class Instruction(super.type) extends Value {
   };
 
   /// Whether evaluation can transfer control to a Dart exception handler.
-  bool get mayThrow => effects.contains(Effect.mayThrow);
+  bool get mayThrow =>
+      effects.contains(Effect.mayThrow) || effects.contains(Effect.allocates);
 }
 
 /// Captures the caller's logical stack, excluding this implementation frame.

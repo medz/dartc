@@ -28,7 +28,10 @@ final class StackTraceLowering(final FunctionTarget capture)
     for (final function in program.functions) {
       final operations = <Instruction, Instruction>{
         for (final block in function.blocks)
-          for (final operation in block.instructions)
+          for (final operation in [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ])
             if (operation is CaptureStackTrace)
               operation: DirectCall(capture, [
                 FrameValue(.callerStackPointer),

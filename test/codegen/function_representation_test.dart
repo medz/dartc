@@ -228,7 +228,7 @@ void main() {
       expect(
         cast.effects,
         source == ValueType.integer || source == ValueType.floating
-            ? {Effect.allocates, Effect.mayThrow}
+            ? {Effect.allocates}
             : isEmpty,
       );
       expect(checks.functions, isEmpty);

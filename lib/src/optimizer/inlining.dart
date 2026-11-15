@@ -7,7 +7,7 @@ import 'program_pass.dart';
 /// Expands known direct and lexical calls without changing their entry values.
 ///
 /// Callees are expanded before their callers, independently of declaration order.
-/// Costs include actual allocation effects, copied operations and argument views.
+/// Costs include additional allocation effects, copied operations and argument views.
 /// Limits must be nonnegative; zero disables expansion. Callees must be
 /// synchronous bodies that can be copied with their parameter and type bindings.
 /// Arguments retain evaluation order, effects and exceptional continuations.
@@ -92,7 +92,13 @@ IrProgram _inlineSelected(
             })
           >{};
       final dominance = ValueDominance(input);
-      MakeClosure? closureOf(FunctionCall call) {
+      final owned = {
+        for (final block in input.blocks) ...[
+          ...block.instructions,
+          if (block.end case Invoke(:final operation)) operation,
+        ],
+      };
+      ({MakeClosure closure, Value receiver})? closureOf(FunctionCall call) {
         Value unwrap(Value value) {
           while (true) {
             switch (value) {
@@ -105,12 +111,49 @@ IrProgram _inlineSelected(
         }
 
         final literal = unwrap(call.function);
-        if (literal is MakeClosure) return literal;
+        if (literal is MakeClosure) {
+          return (closure: literal, receiver: literal);
+        }
         if (!sourceFacts) return null;
         for (final equivalent in facts.equivalentsOf(call.function)) {
           final literal = unwrap(equivalent);
           if (literal is MakeClosure && dominance.before(literal, call)) {
-            return literal;
+            return (closure: literal, receiver: literal);
+          }
+        }
+        final callable = facts.valueOf(call.function);
+        if (callable.objects.isEmpty ||
+            callable.unknownTypes.isNotEmpty ||
+            callable.constants.isNotEmpty ||
+            callable.addresses.isNotEmpty) {
+          return null;
+        }
+        final origins = {for (final object in callable.objects) object.site};
+        if (origins.singleOrNull case final MakeClosure closure
+            when owned.contains(closure) &&
+                closure.inputs.every(
+                  (value) => dominance.before(value, call),
+                )) {
+          final state = facts.pointStateOf(call)!.before;
+          for (final object in callable.objects) {
+            final captures = state.capturesOf(object);
+            if (captures == null || captures.length != closure.inputs.length) {
+              return null;
+            }
+            for (final (index, value) in closure.inputs.indexed) {
+              final actual = captures[index], current = facts.valueOf(value);
+              if (!(actual.constant != null &&
+                      current.constant != null &&
+                      actual.constant!.structuralKey ==
+                          current.constant!.structuralKey) &&
+                  !actual.sources.any(current.sources.contains)) {
+                return null;
+              }
+            }
+          }
+          // Invoke results are available through their normal-edge parameter.
+          if (closure.type.accepts(literal.type)) {
+            return (closure: closure, receiver: literal);
           }
         }
         return null;
@@ -137,8 +180,9 @@ IrProgram _inlineSelected(
                 target.typeParameters[i]: type,
             };
           } else if (operation is FunctionCall) {
-            final closure = closureOf(operation);
-            if (closure == null) continue;
+            final binding = closureOf(operation);
+            if (binding == null) continue;
+            final closure = binding.closure;
             target = closure.target;
             final declaration = program.implementationOf(target);
             if (declaration == null) continue;
@@ -147,7 +191,7 @@ IrProgram _inlineSelected(
                 target.typeParameters[i]: type,
             };
             arguments = [
-              closure,
+              binding.receiver,
               ...closure.inputs,
               ...target.signature
                   .instantiate(operation.typeArguments)
@@ -181,8 +225,14 @@ IrProgram _inlineSelected(
               boxes++;
             }
           }
+          final extraAllocations =
+              candidate.allocations +
+              boxes -
+              (sourceFacts && allocates(operation) ? 1 : 0);
           final cost =
-              candidate.copies + views + 11 * (candidate.allocations + boxes);
+              candidate.copies +
+              views +
+              11 * (extraAllocations > 0 ? extraAllocations : 0);
           final growth =
               candidate.copies +
               views +

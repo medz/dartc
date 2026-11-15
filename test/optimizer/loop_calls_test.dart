@@ -1,31 +1,35 @@
-import 'package:dartc/frontend.dart';
+import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
+import '../support/runtime.dart';
 import 'fixtures/loop_calls.dart' as source;
 
 void main() {
   late IrProgram program;
   setUpAll(() async {
-    program = await AnalysisSession(['test/optimizer/fixtures/loop_calls.dart'])
-        .use((input) async => (await Lowering().lower(input)).program);
+    await prepareRuntime('test/optimizer/fixtures/loop_calls.dart');
+    program = ProgramNormalization(
+      heapRuntime.program,
+      runtime: heapRuntime,
+    ).run();
   });
 
-  test('finite known callbacks have no recursion or execution obligation', () {
+  test('finite known callbacks are discardable despite allocation failure', () {
     final function = program.functions.singleWhere(
       (body) => body.target.name == 'nestedCallbacks',
     );
     final facts = ProgramFlow(program, [
       (target: function.target, arguments: [FlowValue.unknown(.integer)]),
-    ]).facts;
+    ], allocationFailure: heapRuntime.allocationFailure).facts;
     final call = function.blocks
         .expand((block) => block.instructions)
         .whereType<DirectCall>()
         .single;
     expect(facts.canDiscard(call), isTrue);
-    expect(facts.exitsOf(call), (normal: true, exceptional: false));
+    expect(facts.exitsOf(call), (normal: true, exceptional: true));
   });
 
   for (final (name, evaluate) in <(String, int Function(int))>[
@@ -50,9 +54,10 @@ void main() {
             ProgramStoragePromotion(),
             ProgramStorageElimination(),
             DirectCallInlining(),
+            ProgramBranchSpecialization(),
           ]).run(program, [
             (target: function.target, arguments: [FlowValue.unknown(.integer)]),
-          ]);
+          ], allocationFailure: heapRuntime.allocationFailure);
       expect(facts.returnedBy(function.target).isBottom, isFalse);
       final rewritten =
           facts.program.implementationOf(function.target) as IrFunction;

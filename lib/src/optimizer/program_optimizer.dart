@@ -20,6 +20,8 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
   /// analysis from [entries] and [openEntries], never from the old call closure.
   /// [memoryLayoutFor] selects storage for each graph being analyzed; a rewrite
   /// must not silently reuse the replaced graph's layout decisions.
+  /// [allocationFailure] supplies the same ordinary failure body used by target
+  /// allocation; its exception values and state remain visible to handlers.
   ProgramFlowFacts run(
     IrProgram program,
     Iterable<FlowEntry> entries, {
@@ -27,6 +29,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     Iterable<FunctionTarget> escapingReturns = const [],
     Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
     FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
+    FunctionTarget? allocationFailure,
   }) {
     final initial = [
       for (final entry in entries)
@@ -47,6 +50,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       escapingReturns: escaping,
       nativeEntries: callbacks,
       memoryLayout: memoryLayoutFor?.call(input),
+      allocationFailure: allocationFailure,
     ).facts;
     var facts = analyze(program);
     final stages = [

@@ -14,6 +14,9 @@ final class const FlowResult({
   final FlowState? normal,
   final FlowState? exceptional,
 
+  /// Failure may disappear only when the allocation itself is eliminated.
+  final bool allocationFailureOnly = false,
+
   /// Effects performed by this transfer itself, excluding source callees.
   final Set<Effect> effects = const {},
   FlowValue? exception,
@@ -21,6 +24,9 @@ final class const FlowResult({
 }) {
   final FlowValue? _exception = exception;
   final FlowValue? _stackTrace = stackTrace;
+
+  /// Whether a failure remains obligatory even when the result is unused.
+  bool get hasSemanticFailure => exceptional != null && !allocationFailureOnly;
 
   /// An unreachable exceptional exit carries no thrown value.
   FlowValue get exception =>
@@ -401,6 +407,7 @@ final class FlowState {
       value: result.normal == null ? const .bottom() : value,
       normal: result.normal,
       exceptional: result.exceptional,
+      allocationFailureOnly: result.allocationFailureOnly,
       exception: result.exception,
       stackTrace: result.stackTrace,
       effects: const {Effect.allocates},
@@ -866,6 +873,7 @@ final class FlowState {
           value: read.value.join(_null),
           normal: read.normal,
           exceptional: read.exceptional,
+          allocationFailureOnly: read.allocationFailureOnly,
           exception: read.exception,
           stackTrace: read.stackTrace,
           effects: read.effects,
@@ -941,6 +949,7 @@ final class FlowState {
             value: committed.normal == null ? const .bottom() : .unknown(type),
             normal: committed.normal,
             exceptional: committed.exceptional,
+            allocationFailureOnly: committed.allocationFailureOnly,
             exception: committed.exception,
             stackTrace: committed.stackTrace,
             effects: committed.effects,
@@ -953,6 +962,7 @@ final class FlowState {
           value: const .bottom(),
           normal: null,
           exceptional: initialized.exceptional,
+          allocationFailureOnly: initialized.allocationFailureOnly,
           exception: initialized.exception,
           stackTrace: initialized.stackTrace,
         ),
@@ -1078,6 +1088,7 @@ final class FlowState {
           value: const FlowValue.bottom(),
           normal: null as FlowState?,
           exceptional: initialized.exceptional,
+          allocationFailureOnly: initialized.allocationFailureOnly,
           exception: initialized.exception,
           stackTrace: initialized.stackTrace,
         );
@@ -1365,6 +1376,7 @@ FlowResult _merge(FlowResult left, FlowResult right) => FlowResult(
   value: left.value.join(right.value),
   normal: _joinStates(left.normal, right.normal),
   exceptional: _joinStates(left.exceptional, right.exceptional),
+  allocationFailureOnly: !left.hasSemanticFailure && !right.hasSemanticFailure,
   exception: left.exception.join(right.exception),
   stackTrace: left.stackTrace.join(right.stackTrace),
   effects: Set.unmodifiable({...left.effects, ...right.effects}),
@@ -1374,6 +1386,7 @@ FlowResult _withEffects(FlowResult result, Set<Effect> effects) => FlowResult(
   value: result.value,
   normal: result.normal,
   exceptional: result.exceptional,
+  allocationFailureOnly: result.allocationFailureOnly,
   exception: result.exception,
   stackTrace: result.stackTrace,
   effects: Set.unmodifiable({...result.effects, ...effects}),
@@ -1387,6 +1400,7 @@ FlowResult _checkedRead(FlowResult result, ValueType type) {
       value: checked.value,
       normal: checked.value.isBottom ? null : result.normal,
       exceptional: result.exceptional,
+      allocationFailureOnly: result.allocationFailureOnly,
       exception: result.exception,
       stackTrace: result.stackTrace,
       effects: result.effects,

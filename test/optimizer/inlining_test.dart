@@ -484,7 +484,7 @@ void main() {
     expect(_inline(result, [root]), same(result));
   });
 
-  test('default expansion preserves external calls and allocation effects', () {
+  test('default expansion preserves calls and removes unused allocations', () {
     final wrapper = FunctionTarget(_uri, 'wrapper', .integer, [.integer]);
     final forwarding = Block(wrapper.parameterTypes);
     forwarding.finish(
@@ -537,7 +537,7 @@ void main() {
       rewritten.blocks
           .expand((block) => block.instructions)
           .whereType<StringConcat>(),
-      hasLength(1),
+      isEmpty,
     );
     expect(
       result.implementationOf(wrapper),
