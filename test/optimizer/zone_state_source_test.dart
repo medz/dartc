@@ -10,28 +10,36 @@ import '../support/runtime.dart';
 import 'fixtures/zone_state.dart' as source;
 
 void main() {
-  test(
-    'zoneCall retains computation without unobserved zone storage',
-    () async {
-      await prepareRuntime('test/optimizer/fixtures/zone_state.dart');
-      final program = ProgramNormalization(
-        heapRuntime.program,
-        runtime: heapRuntime,
-      ).run();
+  late IrProgram program;
+  setUpAll(() async {
+    await prepareRuntime('test/optimizer/fixtures/zone_state.dart');
+    program = ProgramNormalization(
+      heapRuntime.program,
+      runtime: heapRuntime,
+    ).run();
+  });
+  for (final (name, evaluate) in [
+    ('zoneCall', source.zoneCall),
+    ('restoredZone', source.restoredZone),
+  ]) {
+    test('$name retains computation without unobserved state', () async {
       final function = program.functions.singleWhere(
         (body) =>
-            body.target.name == 'zoneCall' &&
+            body.target.name == name &&
             body.target.library.toString().endsWith(
               '/optimizer/fixtures/zone_state.dart',
             ),
       );
       final facts =
-          ProgramOptimizer(const [
-            ProgramSimplification(),
-            ProgramCallSpecialization(),
-            ProgramStoragePromotion(),
-            ProgramStorageElimination(),
-            DirectCallInlining(),
+          ProgramOptimizer([
+            const ProgramSimplification(),
+            const ProgramCallSpecialization(),
+            const ProgramStoragePromotion(),
+            const ProgramStorageElimination(),
+            const ProgramBranchSpecialization(),
+            const ProgramLoopSpecialization(),
+            const DirectCallInlining(),
+            StackTraceLowering(heapRuntime.captureStackTrace),
           ]).run(
             program,
             [
@@ -40,6 +48,7 @@ void main() {
                 arguments: [FlowValue.unknown(.integer)],
               ),
             ],
+            allocationFailure: heapRuntime.allocationFailure,
             memoryLayoutFor: (graph) => ProgramLayout(
               graph.classes,
               nativeLayout: NativeLayout(Target.host()),
@@ -59,7 +68,7 @@ void main() {
       ]) {
         expect(
           IrInterpreter(facts.program, {}).run(rewritten, [value]),
-          source.zoneCall(value),
+          evaluate(value),
         );
       }
       expect(facts.definitions, {function.target});
@@ -71,6 +80,6 @@ void main() {
           ])
             ...operation.effects,
       ], isEmpty);
-    },
-  );
+    });
+  }
 }

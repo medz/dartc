@@ -109,7 +109,8 @@ final class FunctionRewrite(
   }
 
   /// Applies the replacements, removes dead paths and preserves source origins.
-  IrFunction run() {
+  /// [instructionSources] receives copied instructions' original function sites.
+  IrFunction run({Map<Instruction, Instruction>? instructionSources}) {
     final (blocks: liveBlocks, :needed, :parameterSlots, :templates) =
         _demand();
     final added = <Block, List<BlockParameter>>{
@@ -161,6 +162,9 @@ final class FunctionRewrite(
       IrFunction owner, [
       Object? callSite,
     ]) {
+      if (source is Instruction && copy is Instruction && owner == function) {
+        instructionSources?[copy] = source;
+      }
       final location =
           owner.sourceLocations[source] ??
           (identical(owner, function)

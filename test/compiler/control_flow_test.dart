@@ -83,6 +83,12 @@ void main() {
     }
   });
 
+  test('nested exception cleanup preserves program results', () {
+    for (final value in [-0x8000000000000000, -4, 0, 41, 0x7fffffffffffffff]) {
+      expect(native.restoredState(value), sdk.restoredState(value));
+    }
+  });
+
   test('recursive returns preserve the first result across a second recursive call', () {
     for (var value = -1; value <= 12; value++) {
       expect(native.recursive(value), sdk.recursive(value), reason: '$value');

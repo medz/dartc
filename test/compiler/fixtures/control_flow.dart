@@ -2,6 +2,8 @@ import 'dart:ffi';
 
 import 'package:dartc/interop.dart';
 
+import '../../optimizer/fixtures/zone_state.dart' as state;
+
 @Export<Int64 Function(Int64, Int64)>()
 int choose(int a, int b) {
   if (a < b) return b - a;
@@ -181,3 +183,6 @@ Pointer<Int64> deferredPointer(Pointer<Int64> value, int count) {
   }
   return result;
 }
+
+@Export<Int64 Function(Int64)>()
+int restoredState(int value) => state.restoredZone(value);

@@ -61,5 +61,10 @@ final class ControlFlow() {
         Pointer<Int64> Function(Pointer<Int64>, int)
       >('deferredPointer');
 
+  late final restoredState = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'restoredState',
+      );
+
   void close() => _library.close();
 }

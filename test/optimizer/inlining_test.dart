@@ -97,6 +97,81 @@ void main() {
     }
   });
 
+  test(
+    'actual call inputs shrink shared bodies before applying the budget',
+    () {
+      final helper = FunctionTarget(_uri, 'shared', .integer, [
+        .boolean,
+        .integer,
+      ]);
+      final choosing = Block(helper.parameterTypes),
+          short = Block(),
+          long = Block();
+      choosing.finish(Branch(choosing.parameters[0], Jump(long), Jump(short)));
+      short.finish(
+        Return(
+          short.emit(
+            IntBinary(.add, choosing.parameters[1], const Constant.integer(2)),
+          ),
+        ),
+      );
+      for (var i = 0; i < 13; i++) {
+        long.emit(DirectCall(_tick, [Constant.integer(i)]));
+      }
+      long.finish(Return(choosing.parameters[1]));
+      IrFunction caller(String name, bool noisy) {
+        final target = FunctionTarget(_uri, name, .integer, [.integer]);
+        final entry = Block(target.parameterTypes);
+        entry.finish(
+          Return(
+            entry.emit(
+              DirectCall(helper, [
+                Constant.boolean(noisy),
+                entry.parameters.single,
+              ]),
+            ),
+          ),
+        );
+        return IrFunction(target, [entry]);
+      }
+
+      final quiet = caller('quiet', false), noisy = caller('noisy', true);
+      final program = IrProgram(
+        [],
+        [
+          quiet,
+          noisy,
+          IrFunction(helper, [choosing, short, long]),
+        ],
+        externals: [
+          IrExternal(_tick, effects: {Effect.writesStorage}),
+        ],
+      );
+      final after = _inline(program, [quiet.target, noisy.target, helper]);
+      expect(
+        (after.implementationOf(quiet.target) as IrFunction).callees,
+        isEmpty,
+      );
+      expect((after.implementationOf(noisy.target) as IrFunction).callees, {
+        helper,
+      });
+      for (final value in [-9, 0, 41]) {
+        for (final graph in [program, after]) {
+          final events = <int>[];
+          expect(_run(graph, quiet.target, [value], events), value + 2);
+          expect(events, isEmpty);
+          expect(_run(graph, noisy.target, [value], events), value);
+          expect(events, List.generate(13, (index) => index));
+          events.clear();
+          expect(_run(graph, helper, [false, value], events), value + 2);
+          expect(events, isEmpty);
+          expect(_run(graph, helper, [true, value], events), value);
+          expect(events, List.generate(13, (index) => index));
+        }
+      }
+    },
+  );
+
   test('a non-returning invocation keeps its proof after CFG expansion', () {
     final helper = FunctionTarget(_uri, 'chooseOrThrow', .integer, [.boolean]);
     final branch = Block(helper.parameterTypes),
@@ -453,16 +528,16 @@ void main() {
       ),
     );
     final increment = IrFunction(helper, [body]);
-    final root = FunctionTarget(_uri, 'root', .integer, []);
+    final root = FunctionTarget(_uri, 'root', .integer, [.integer]);
     IrFunction calls(FunctionTarget target) {
-      final entry = Block();
-      final a = entry.emit(DirectCall(helper, [const Constant.integer(1)]));
+      final entry = Block(target.parameterTypes);
+      final a = entry.emit(DirectCall(helper, [entry.parameters.single]));
       final b = entry.emit(DirectCall(helper, [a]));
       entry.finish(Return(entry.emit(DirectCall(helper, [b]))));
       return IrFunction(target, [entry]);
     }
 
-    final unused = calls(FunctionTarget(_uri, 'unused', .integer, []));
+    final unused = calls(FunctionTarget(_uri, 'unused', .integer, [.integer]));
     final program = IrProgram([], [increment, calls(root), unused]);
     expect(_inline(program, [root], maxCalleeCost: 0), same(program));
     expect(_inline(program, [root], maxCallerGrowth: 0), same(program));
@@ -471,7 +546,7 @@ void main() {
       throwsRangeError,
     );
     final result = _inline(program, [root], maxCallerGrowth: 2);
-    expect(_run(result, root, []), 4);
+    expect(_run(result, root, [1]), 4);
     expect(
       (result.implementationOf(root) as IrFunction).entry.instructions
           .whereType<DirectCall>()

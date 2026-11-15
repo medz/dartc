@@ -412,6 +412,94 @@ void main() {
     );
   }
 
+  test(
+    'restored global roots retain weakly observed objects through collection',
+    () {
+      final box = _box();
+      final weakType = ClassType(_uri, 'Weak');
+      final field = InstanceField(weakType, 'target', box.type.nullable);
+      final constructor = FunctionTarget(
+        _uri,
+        '',
+        .voidType,
+        [box.type],
+        owner: weakType,
+        kind: .initializer,
+      );
+      final initialize = Block(constructor.parameterTypes);
+      initialize.emit(
+        StoreField(field, initialize.parameters[0], initialize.parameters[1]),
+      );
+      initialize.finish(const Return());
+      final global = GlobalVariable(_uri, 'temporary', box.type.nullable);
+      final target = FunctionTarget(_uri, 'root', .boolean, []);
+      final collect = FunctionTarget(_uri, 'collect', .voidType, []);
+      final entry = Block(),
+          normal = Block(),
+          failure = Block([.object, .stackTrace]);
+      final value = entry.emit(Construct(box.constructor.target, [_one]));
+      final weak = entry.emit(Construct(constructor, [value]));
+      final saved = entry.emit(LoadGlobal(global));
+      entry.emit(StoreGlobal(global, value));
+      final call = DirectCall(collect, []);
+      entry.finish(
+        Invoke(
+          call,
+          onReturn: Jump(normal),
+          onThrow: Jump(failure, [
+            UnwindValue.exception,
+            UnwindValue.stackTrace,
+          ]),
+        ),
+      );
+      normal.emit(StoreGlobal(global, saved));
+      normal.finish(
+        Return(
+          normal.emit(TypeTest(normal.emit(LoadField(field, weak)), box.type)),
+        ),
+      );
+      failure.emit(StoreGlobal(global, saved));
+      failure.finish(
+        Throw.recorded(failure.parameters[0], failure.parameters[1]),
+      );
+      final program = IrProgram(
+        [
+          box.declaration,
+          IrClass(
+            weakType,
+            [field],
+            constructors: [constructor],
+            weakFields: [field],
+          ),
+        ],
+        [
+          box.constructor,
+          IrFunction(constructor, [initialize]),
+          IrFunction(target, [entry, normal, failure]),
+        ],
+        globals: [global],
+        externals: [
+          IrExternal(collect, effects: {Effect.allocates}),
+        ],
+      );
+      final optimized = _optimize(program, target);
+      expect(
+        _operations(optimized, target).whereType<StoreGlobal>(),
+        hasLength(3),
+      );
+      for (final graph in [program, optimized]) {
+        expect(
+          IrInterpreter(
+            graph,
+            {},
+            externalCalls: {collect: (_) => null},
+          ).run(graph.implementationOf(target) as IrFunction, []),
+          isTrue,
+        );
+      }
+    },
+  );
+
   for (final use in ['unused', 'read', 'escape']) {
     test('address lifetime follows its actual $use use', () {
       final box = _box();

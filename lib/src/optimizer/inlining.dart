@@ -3,6 +3,8 @@ import 'package:dartc/ir.dart';
 import 'function_rewrite.dart';
 import 'program_flow.dart';
 import 'program_pass.dart';
+import 'simplification.dart';
+import 'storage_elimination.dart';
 
 /// Expands known direct and lexical calls without changing their entry values.
 ///
@@ -50,6 +52,7 @@ IrProgram _inlineSelected(
   int maxCallerGrowth,
   Map<FunctionTarget, int> remaining,
 ) {
+  final discardableStorage = storageDiscardable(facts);
   final expanded =
       <FunctionTarget, ({IrFunction body, int copies, int allocations})>{};
   final visiting = <FunctionTarget>{};
@@ -216,7 +219,56 @@ IrProgram _inlineSelected(
               source.observesCallerFrame) {
             continue;
           }
-          final candidate = expand(source);
+          var candidate = expand(source);
+          if (sourceFacts) {
+            final activations = facts
+                .callActivationsOf(operation)
+                .intersection(facts.activationsOf(target).toSet());
+            if (activations.isNotEmpty) {
+              final origins = <Instruction, Instruction>{};
+              final specialized = simplifyFunction(
+                facts,
+                source,
+                activations: activations,
+                discardable: discardableStorage(
+                  source,
+                  activations: activations,
+                ),
+                instructionSources: origins,
+              );
+              var allocations = 0;
+              for (final block in specialized.blocks) {
+                for (final operation in [
+                  ...block.instructions,
+                  if (block.end case Invoke(:final operation)) operation,
+                ]) {
+                  final origin = facts.owns(operation)
+                      ? operation
+                      : origins[operation];
+                  if (origin == null
+                      ? operation.effects.contains(Effect.allocates)
+                      : activations.any(
+                          (activation) => facts
+                              .effectsOf(origin, activation: activation)
+                              .contains(Effect.allocates),
+                        )) {
+                    allocations++;
+                  }
+                }
+              }
+              final cost = copies(specialized);
+              if (!identical(specialized, source) &&
+                  specialized.closures.isEmpty &&
+                  cost + 11 * allocations <
+                      candidate.copies + 11 * candidate.allocations) {
+                candidate = (
+                  body: specialized,
+                  copies: cost,
+                  allocations: allocations,
+                );
+              }
+            }
+          }
           if (candidate.body.closures.isNotEmpty) continue;
           var views = 0, boxes = 0;
           for (final (i, parameter) in source.entry.parameters.indexed) {
