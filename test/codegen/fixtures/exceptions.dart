@@ -245,8 +245,8 @@ ObjectModule exceptions(Target target) {
   for (final (from, handler) in [(report, first), (first, second)]) {
     from.finish(
       Invoke(
-        DirectCall(heapRuntime.allocationFailure!, []),
-        onReturn: null,
+        NewPayload(node, const Constant.integer(0x7fffffffffffffff)),
+        onReturn: Jump(incorrect),
         onThrow: Jump(handler, [UnwindValue.exception, UnwindValue.stackTrace]),
       ),
     );
