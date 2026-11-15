@@ -3,11 +3,8 @@ import 'package:dartc/ir.dart';
 import 'program_layout.dart';
 
 /// Generates checked conversions using ordinary type tests and exception edges.
-final class CheckedCasts({
-  final FunctionTarget? failure,
-  Map<Object, IrFunction>? functions,
-}) {
-  final _functions = functions ?? <Object, IrFunction>{};
+final class CheckedCasts({final FunctionTarget? failure}) {
+  final _functions = <FunctionTarget, IrFunction>{};
   final _checks =
       <
         (ValueType, ValueType, bool),

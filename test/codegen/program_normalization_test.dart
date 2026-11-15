@@ -5,11 +5,16 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/constant_data.dart';
+import 'package:dartc/src/codegen/checked_casts.dart';
+import 'package:dartc/src/codegen/function_representation.dart';
+import 'package:dartc/src/codegen/heap_plan.dart';
+import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
+import '../support/ir_interpreter.dart';
 
 void main() {
   late IrProgram runtimeProgram;
@@ -29,6 +34,65 @@ void main() {
     ),
     runtime: heapRuntime,
   ).run();
+
+  test('checks use the non-null proof exposed by local storage promotion', () {
+    for (final nullable in [false, true]) {
+      for (final assertion in [false, true]) {
+        final target = FunctionTarget(null, 'choose', .object, [
+          .boolean,
+          .object,
+          .object,
+        ]);
+        final entry = Block(target.parameterTypes),
+            left = Block(),
+            right = Block(),
+            done = Block();
+        final cell = entry.emit(
+          NewCell(CellType(.object.nullable), const Constant.nullValue()),
+        );
+        entry.finish(Branch(entry.parameters.first, Jump(left), Jump(right)));
+        left.emit(WriteCell(cell, entry.parameters[1]));
+        left.finish(Jump(done));
+        right.emit(
+          WriteCell(
+            cell,
+            nullable ? const Constant.nullValue() : entry.parameters[2],
+          ),
+        );
+        right.finish(Jump(done));
+        final value = done.emit(ReadCell(cell));
+        done.finish(
+          Return(
+            done.emit(assertion ? NullCheck(value) : TypeCast(value, .object)),
+          ),
+        );
+        final program = const ProgramStoragePromotion().bind().normalize(
+          normalize(IrFunction(target, [entry, left, right, done])),
+        );
+        final function = program.implementationOf(target) as IrFunction;
+        final interpreter = IrInterpreter(program, {});
+        expect(interpreter.run(function, [true, 7, 9]), 7);
+        if (nullable) {
+          expect(
+            () => interpreter.run(function, [false, 7, 9]),
+            throwsA(isA<TypeError>()),
+          );
+        } else {
+          expect(interpreter.run(function, [false, 7, 9]), 9);
+        }
+        final casts = CheckedCasts(failure: heapRuntime.typeCheckFailure);
+        final representation = FunctionRepresentation(
+          function,
+          ProgramLayout([], nativeLayout: NativeLayout(Target.host())),
+          casts,
+          MemberCalls(program, {target}),
+          HeapPlan(),
+        );
+        expect(casts.functions, nullable ? hasLength(1) : isEmpty);
+        if (!nullable) expect(representation.invocations, isEmpty);
+      }
+    }
+  });
 
   test('semantic Type values do not assume their future storage class', () {
     for (final view in [ValueType.typeType, ValueType.object]) {

@@ -123,7 +123,7 @@ void main() {
         selected.instructions[block]!.add(call);
         selected.invocations[call] = callee;
       }
-      expect(selection.close(persistent: false), isEmpty);
+      expect(selection.close(persistent: false, roots: {root}), isEmpty);
       expect(selection.implicitCalls, origin == 'source' ? isEmpty : {callee});
     }
   });
@@ -178,7 +178,7 @@ void main() {
       layout.instances,
     );
     functions.forEach(selection.include);
-    selection.close(persistent: false);
+    selection.close(persistent: false, roots: {root});
     expect(selection.implicitCalls, isNot(contains(constructor)));
     expect(selection.implicitCalls, isNot(contains(member)));
     expect(selection.functions[root]!.invocations.values, contains(member));
@@ -234,7 +234,7 @@ void main() {
       layouts.instances,
     );
     program.functions.forEach(selection.include);
-    expect(selection.close(persistent: true), {
+    expect(selection.close(persistent: true, roots: {helper, division}), {
       heapRuntime.allocate,
       heapRuntime.isOutOfMemory,
       heapRuntime.release,
@@ -318,7 +318,7 @@ void main() {
       layouts.instances,
     );
     selection.include(IrFunction(helper, [entry]));
-    expect(selection.close(persistent: true), {
+    expect(selection.close(persistent: true, roots: {helper}), {
       constructor,
       heapRuntime.allocate,
       heapRuntime.isOutOfMemory,
