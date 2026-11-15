@@ -581,7 +581,19 @@ void main() {
     final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
     final b = _allocate(a.state, 8);
     final input = b.state.project([a.address, b.address]);
+    expect(input.nativeReferences(a.address).isBottom, isTrue);
     final output = _store(input, a.address, _i64, b.address);
+    expect(output.nativeReferences(a.address).objects, {
+      b.object.objects.single,
+    });
+    expect(
+      output.nativeReferences(a.address).objects,
+      isNot(contains(a.object.objects.single)),
+    );
+    expect(
+      output.nativeReferences(.unknown(.integer)).unknownTypes,
+      isNotEmpty,
+    );
     final mapped = FlowObject(b.object.objects.single.site, Object());
     FlowObject object(FlowObject value) =>
         value == b.object.objects.single ? mapped : value;
@@ -596,6 +608,7 @@ void main() {
     expect(address.base, mapped);
     expect(address.offset, b.address.addresses.single.offset);
     expect(applied.reachableValues([a.object]).objects, contains(mapped));
+    expect(applied.nativeReferences(a.address).objects, {mapped});
     expect(_number(_load(b.state, a.address, _i64)), 0);
   });
 

@@ -845,6 +845,22 @@ final class FlowState {
   bool containsNative(FlowValue address, NativeTypeRef storage) =>
       _containsNative(address, memoryLayout?.nativeLayout.of(storage).size);
 
+  /// References held anywhere in the addressed storage, excluding its owner.
+  /// Unknown backing storage can contain any reference.
+  FlowValue nativeReferences(FlowValue address) {
+    final unknown = FlowValue.unknown(.object.nullable);
+    var value =
+        address.addresses.isEmpty ||
+            address.constants.isNotEmpty ||
+            address.unknownTypes.isNotEmpty
+        ? unknown
+        : const FlowValue.bottom();
+    for (final pointer in address.addresses) {
+      value = value.join(_memoryOf(pointer.base)?.references ?? unknown);
+    }
+    return value;
+  }
+
   bool _containsNative(FlowValue address, int? size) =>
       size != null &&
       address.addresses.isNotEmpty &&
