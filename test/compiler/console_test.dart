@@ -22,7 +22,7 @@ void main() {
       expect(normal.exitCode, 0, reason: '${normal.stderr}');
       expect(
         normal.stdout,
-        'Hello, Dart!\nNUL:\u0000 中文🙂\n\ufffdx\ufffd\nnull\n',
+        'Hello, Dart!\nNUL:\u0000 中文🙂\n\ufffdx\ufffd\nnull\n42\n43\n',
       );
       expect(normal.stderr, isEmpty);
 

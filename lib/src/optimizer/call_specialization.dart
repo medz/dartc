@@ -201,7 +201,10 @@ ClassType? _receiverOwner(
     if (owner != null) return owner;
   }
   final actual = facts.valueOf(receiver);
-  if (actual.isBottom || actual.unknownTypes.isNotEmpty) return null;
+  if (actual.isBottom ||
+      declaration.typeParameters.isNotEmpty && actual.unknownTypes.isNotEmpty) {
+    return null;
+  }
   final owners = <ClassType>{};
   for (final type in actual.types) {
     final owner = type is ClassType ? type.asInstanceOf(declaration) : null;

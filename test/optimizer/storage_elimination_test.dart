@@ -117,7 +117,12 @@ void main() {
     block.emit(StoreGlobal(global, value));
     block.finish(const Return(_one));
     final body = IrFunction(target, [block]);
-    final program = IrProgram([], [body], globals: [global]);
+    final program = IrProgram(
+      [],
+      [body],
+      globals: [global],
+      externals: [IrExternal(tick)],
+    );
     final optimized = _optimize(program, target);
     final operations = _operations(optimized, target);
     expect(operations.whereType<StoreGlobal>(), isEmpty);
@@ -342,6 +347,7 @@ void main() {
         box.constructor,
         IrFunction(target, [block]),
       ],
+      externals: [IrExternal(consume)],
     );
     final optimized = _optimize(program, target);
     expect(
@@ -532,15 +538,11 @@ void main() {
       final block = Block();
       final object = block.emit(Construct(box.constructor.target, [_one]));
       final address = block.emit(ReferenceAddress(object));
+      final save = FunctionTarget(_uri, 'saveAddress', .voidType, [.integer]);
       if (use == 'read') {
         block.emit(LoadNative(address, NativeScalarType(Uint8)));
       } else if (use == 'escape') {
-        block.emit(
-          DirectCall(
-            FunctionTarget(_uri, 'saveAddress', .voidType, [.integer]),
-            [address],
-          ),
-        );
+        block.emit(DirectCall(save, [address]));
       }
       block.emit(KeepAlive(object));
       block.finish(const Return());
@@ -550,6 +552,7 @@ void main() {
           box.constructor,
           IrFunction(target, [block]),
         ],
+        externals: [IrExternal(save)],
       );
       expect(
         _operations(_optimize(program, target), target).whereType<KeepAlive>(),
@@ -595,13 +598,10 @@ void main() {
       );
       final captured = block.emit(MakeClosure(closure, [value]));
       final global = GlobalVariable(_uri, 'root', box.type.nullable);
+      final observe = FunctionTarget(_uri, 'observe', .voidType, [box.type]);
       block.emit(StoreGlobal(global, value));
       if (exposed) {
-        block.emit(
-          DirectCall(FunctionTarget(_uri, 'observe', .voidType, [box.type]), [
-            value,
-          ]),
-        );
+        block.emit(DirectCall(observe, [value]));
       }
       block.emit(KeepAlive(captured));
       block.finish(const Return());
@@ -613,6 +613,7 @@ void main() {
           IrFunction(target, [block]),
         ],
         globals: [global],
+        externals: [IrExternal(observe)],
       );
       final optimized = _optimize(program, target);
       expect(

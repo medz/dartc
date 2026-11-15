@@ -68,6 +68,34 @@ void main() {
     }
   });
 
+  test('receiver bounds distinguish unique and polymorphic dispatch', () {
+    final entry = program.functions.singleWhere(
+      (body) => body.target.name == 'readReceiver',
+    );
+    for (final name in ['Child', 'Parent']) {
+      final type = program.classes.singleWhere((c) => c.type.name == name).type;
+      final result = const ProgramCallSpecialization().run(
+        ProgramFlow(program, [
+          (target: entry.target, arguments: [FlowValue.unknown(type)]),
+        ]).facts,
+      );
+      final body = result.implementationOf(entry.target) as IrFunction;
+      expect(body.virtualMembers.isEmpty, name == 'Child');
+      if (name == 'Child') {
+        expect(body.callees.single.owner, type);
+      }
+      for (final caller in ['readChild', if (name == 'Parent') 'readParent']) {
+        final function = result.functions.singleWhere(
+          (body) => body.target.name == caller,
+        );
+        expect(
+          IrInterpreter(result, {}).run(function, []),
+          caller == 'readChild' ? source.readChild() : source.readParent(),
+        );
+      }
+    }
+  });
+
   for (final example in <String, int Function(int)>{
     'narrowedReceiver': source.narrowedReceiver,
     'covariantReceiver': source.covariantReceiver,

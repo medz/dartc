@@ -195,6 +195,7 @@ final class FunctionRewrite(
       final site = inlined[call]!;
       final body = site.body;
       final environment = site.environment;
+      final live = ValueLiveness.source(body).liveIn[body.entry]!;
       final handler = site.handler == null ? null : jump(site.handler!);
       final allocation = call is Construct
           ? NewPayload(call.instantiatedType, const Constant.integer(0))
@@ -274,7 +275,7 @@ final class FunctionRewrite(
           in body.entry.parameters.skip(allocation == null ? 0 : 1).indexed) {
         final argument = value(site.arguments[i]);
         final type = parameter.type.substitute(environment);
-        if (argument.type == type) {
+        if (argument.type == type || !live.contains(parameter)) {
           locals[parameter] = argument;
         } else {
           final view = TypeView(argument, type);

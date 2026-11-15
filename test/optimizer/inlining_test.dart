@@ -287,12 +287,9 @@ void main() {
     () {
       final helper = FunctionTarget(_uri, 'first', .integer, [
         .integer,
-        .integer,
+        .object,
       ]);
       final body = Block(helper.parameterTypes);
-      body.emit(
-        IntBinary(.multiply, body.parameters[1], const Constant.integer(9)),
-      );
       body.finish(
         Return(
           body.emit(
@@ -325,6 +322,12 @@ void main() {
         expect(events, [1, 2, 3]);
       }
       expect((result.implementationOf(root) as IrFunction).callees, {_tick});
+      expect(
+        (result.implementationOf(root) as IrFunction).blocks
+            .expand((block) => block.instructions)
+            .whereType<TypeView>(),
+        isEmpty,
+      );
       expect(CallTypeFlow(result, [root]).facts.definitions, {root, _tick});
       expect(() => facts.checkProgram(result), throwsArgumentError);
       expect(facts.definitions, contains(helper));

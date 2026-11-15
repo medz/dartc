@@ -33,6 +33,12 @@ int defaultArgument() => Child().read();
 
 int dispatch(int value) => Child().add(value);
 
+int readReceiver(Parent receiver) => receiver.read();
+
+int readChild() => readReceiver(Child());
+
+int readParent() => readReceiver(Parent());
+
 int add(int value, [int offset = 7]) => value + offset;
 
 int staticValue(int value) {

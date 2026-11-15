@@ -353,8 +353,15 @@ final class ProgramFlow(
     _definitions.add(target);
     final body = program.implementationOf(target);
     if (body is! IrFunction) {
+      if (body is! IrExternal) {
+        throw StateError(
+          'Call analysis requires a body or an explicit external declaration: '
+          '${target.library}::${target.owner == null ? '' : '${target.owner!.name}.'}'
+          '${target.name}',
+        );
+      }
       caller.externalCalls.add(operation);
-      final effects = body is IrExternal ? body.effects : Effect.values.toSet();
+      final effects = body.effects;
       caller.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
       return _external(
         caller,
@@ -364,8 +371,8 @@ final class ProgramFlow(
         input,
         target.returnType.substitute(environment),
         effects: effects,
-        memory: body is IrExternal ? body.memory : const .arbitrary(),
-        capturesArguments: body is! IrExternal || body.capturesArguments,
+        memory: body.memory,
+        capturesArguments: body.capturesArguments,
         returned: input.externalResult(target),
       );
     }

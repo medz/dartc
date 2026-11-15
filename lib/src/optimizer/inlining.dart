@@ -334,6 +334,12 @@ IrProgram _inlineSelected(
           }
           var views = 0, boxes = 0;
           for (final (i, parameter) in parameters.indexed) {
+            if (!live.contains(
+              candidate.body.entry.parameters[i +
+                  (operation is Construct ? 1 : 0)],
+            )) {
+              continue;
+            }
             final type = parameter.type.substitute(environment);
             final argument = arguments[i];
             if (type == argument.type) continue;

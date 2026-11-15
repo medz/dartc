@@ -141,6 +141,16 @@ void main() {
     program = await AnalysisSession([
       'test/optimizer/fixtures/finite_loops.dart',
     ]).use((input) async => (await Lowering().lower(input)).program);
+    final tick = program.functions
+        .expand((body) => body.callees)
+        .where((target) => target.name == 'tick')
+        .first;
+    program = IrProgram(
+      program.classes,
+      program.functions,
+      globals: program.globals,
+      externals: [...program.externals, IrExternal(tick)],
+    );
   });
   ProgramFlowFacts optimize(IrFunction function) =>
       ProgramOptimizer(const [

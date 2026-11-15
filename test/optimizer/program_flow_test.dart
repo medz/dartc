@@ -9,6 +9,21 @@ import '../support/numeric_order.dart';
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  test('a missing called body is not an implicit external declaration', () {
+    final missing = FunctionTarget(_uri, 'missing', .voidType, []);
+    final root = FunctionTarget(_uri, 'root', .voidType, []);
+    final entry = Block();
+    entry.emit(DirectCall(missing, []));
+    entry.finish(const Return());
+    final program = IrProgram([], [
+      IrFunction(root, [entry]),
+    ]);
+    expect(
+      () => ProgramFlow(program, [(target: root, arguments: <FlowValue>[])]),
+      throwsStateError,
+    );
+  });
+
   for (final unknown in [false, true]) {
     test(
       'field-write summaries retain aliases and unrelated caller state ($unknown)',

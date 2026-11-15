@@ -25,6 +25,27 @@ void main() {
     expect(() => IntBinary.unchecked(.modulo, n, n), throwsArgumentError);
     expect(() => NumericToInt.unchecked(n), throwsArgumentError);
   });
+  test(
+    'numeric constants need no runtime allocation when viewed as objects',
+    () {
+      for (final constant in [n, const Constant.floating(1.5)]) {
+        final parameter = Block([constant.type]).parameters.single;
+        for (final operation in [
+          TypeView(constant, .object),
+          UncheckedCast(constant, .object),
+        ]) {
+          expect(operation.effects, isEmpty);
+        }
+        for (final operation in [
+          TypeView(parameter, .object),
+          UncheckedCast(parameter, .object),
+        ]) {
+          expect(operation.effects, {Effect.allocates});
+          expect(operation.mayThrow, isTrue);
+        }
+      }
+    },
+  );
   test('non-covariant field results can throw before their value is used', () {
     final t = TypeParameterType('T')..initializeBound(.object.nullable);
     final owner = ClassType(uri, 'Callbacks', typeParameters: [t]);

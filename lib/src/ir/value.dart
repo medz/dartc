@@ -969,7 +969,8 @@ sealed class Instruction(super.type) extends Value {
         when type != .integer =>
       const {.mayThrow},
     TypeView(:final operand) || UncheckedCast(:final operand)
-        when (operand.type == .integer || operand.type == .floating) &&
+        when operand is! Constant &&
+            (operand.type == .integer || operand.type == .floating) &&
             type != .integer &&
             type != .floating =>
       _allocate,
