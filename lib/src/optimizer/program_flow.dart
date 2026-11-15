@@ -348,11 +348,12 @@ final class ProgramFlow(
       );
       var key = site.contexts[local];
       if (key != local) {
+        final keyState = projected.copy()..retainSources((_) => false);
         final precise = _ContextKey(
           target,
           plain,
           environment,
-          projected.structuralKey,
+          keyState.structuralKey,
           repeated,
           aliasKey,
         );

@@ -389,6 +389,50 @@ void main() {
     );
   });
 
+  test(
+    'repeated reads share semantic inputs despite newly recorded SSA names',
+    () {
+      final type = CellType(.integer);
+      final target = FunctionTarget(_uri, 'same', .boolean, [.integer]);
+      final getter = FunctionTarget(
+        _uri,
+        'read',
+        .integer,
+        [],
+        kind: .closure,
+        enclosing: target,
+        sourceOffset: 0,
+        captures: [type],
+      );
+      final reading = Block(getter.parameterTypes);
+      reading.finish(Return(reading.emit(ReadCell(reading.parameters[1]))));
+      final entry = Block(target.parameterTypes);
+      final cell = entry.emit(NewCell(type, entry.parameters.single));
+      final closure = entry.emit(MakeClosure(getter, [cell]));
+      final first = entry.emit(FunctionCall(closure, []));
+      final second = entry.emit(FunctionCall(closure, []));
+      entry.finish(Return(entry.emit(Equals(first, second))));
+      final function = IrFunction(target, [entry]);
+      final program = IrProgram([], [
+        function,
+        IrFunction(getter, [reading]),
+      ]);
+      final facts = ProgramFlow(program, [
+        (target: target, arguments: [FlowValue.unknown(.integer)]),
+      ]).facts;
+      expect(facts.activationsOf(getter), hasLength(1));
+      expect(facts.equivalentsOf(first), contains(entry.parameters.single));
+      expect(facts.equivalentsOf(second), contains(entry.parameters.single));
+      expect(
+        facts.returnedBy(target).constant?.structuralKey,
+        const Constant.boolean(true).structuralKey,
+      );
+      for (final value in [-1, 0, 41]) {
+        expect(IrInterpreter(program, {}).run(function, [value]), isTrue);
+      }
+    },
+  );
+
   for (final shared in [false, true]) {
     test('changing deep calls preserve other callers (shared: $shared)', () {
       final functions = [_addOne()];
