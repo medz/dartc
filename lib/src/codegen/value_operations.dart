@@ -4,12 +4,12 @@ import 'package:dartc/runtime/contracts.dart' show TypeKind;
 import 'double_bits.dart';
 import 'program_layout.dart';
 import 'reference_equality.dart';
-import 'selected_graph.dart';
+import 'selected_function.dart';
 import 'storage_access.dart';
 
 /// Builds comparisons and hashes from runtime value identities.
 final class ValueOperations(
-  final SelectedGraph graph,
+  final SelectedFunction graph,
   final ProgramLayout layouts,
   final FunctionTarget invalid,
 ) {
