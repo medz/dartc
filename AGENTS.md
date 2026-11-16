@@ -2,7 +2,7 @@
 
 ## Start and Scope
 
-Start with the [contributor docs](.agents/docs/README.md) and the relevant [task card](.agents/docs/board.md). Read the design and skills needed for the current work. User instructions take precedence; task readiness does not grant authorization. Documentation maintenance does not resume paused compiler work.
+Start with the [contributor docs](.agents/docs/README.md). If the user has not selected a task, use the [current recommendation](.agents/docs/board.md#现在从哪里开始) and [human collaboration flow](.agents/docs/workflow.md#人机协作入口) to propose a concrete next outcome; do not ask the user to navigate task IDs. Read the task, design and skills needed for that work. User instructions take precedence; task readiness does not grant authorization. Documentation maintenance does not resume paused compiler work.
 
 ## Architecture
 
