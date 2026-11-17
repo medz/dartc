@@ -59,6 +59,7 @@ const _compilerLibraries = {
   'integer_text',
   'boolean_text',
   'scalar_globals',
+  'implicit_global',
   'managed_globals',
   'late_fields',
   'late_locals',

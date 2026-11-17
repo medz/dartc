@@ -273,9 +273,7 @@ final class FlowState {
   }
 
   _Slot _initial(GlobalVariable global) =>
-      !global.isLate && global.initializer == null
-      ? _Slot.bound(_null)
-      : const _Slot.unbound();
+      global.isInitiallyBound ? _Slot.bound(_null) : const _Slot.unbound();
 
   /// An immutable key for the current version, safe after this wrapper changes.
   Object get structuralKey => (

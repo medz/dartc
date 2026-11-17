@@ -533,6 +533,9 @@ final class GlobalVariable(
   /// The zero-argument body evaluated on a read of an unbound slot.
   final FunctionTarget? initializer,
 }) {
+  /// Whether this binding contains Dart null from the start of module life.
+  bool get isInitiallyBound => !isLate && initializer == null;
+
   /// Whether source assignment can write the storage.
   bool get isWritable => !isFinal || isLate && initializer == null;
 
@@ -544,7 +547,7 @@ final class GlobalVariable(
         (owner!.library != library || !identical(owner, owner!.declaration))) {
       throw ArgumentError('Global storage requires its declaring class.');
     }
-    if (!isLate && initializer == null && (isFinal || !type.mayBeNull)) {
+    if (isInitiallyBound && (isFinal || !type.mayBeNull)) {
       throw ArgumentError(
         'Uninitialized non-late storage must be nullable and mutable.',
       );

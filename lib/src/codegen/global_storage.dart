@@ -15,7 +15,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
   final _type = ClassType(null, 'Root');
   final _getters = <GlobalVariable, IrFunction>{};
   final _setters = <GlobalVariable, IrFunction>{};
-  final _fields = <GlobalVariable, (InstanceField, InstanceField)>{};
+  final _fields = <GlobalVariable, (InstanceField, InstanceField?)>{};
 
   late final IrClass declaration;
 
@@ -42,11 +42,13 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
       final index = _fields.length;
       _fields[global] = (
         InstanceField(_type, 'value.$index', global.type),
-        InstanceField(_type, 'bound.$index', .boolean),
+        global.isInitiallyBound
+            ? null
+            : InstanceField(_type, 'bound.$index', .boolean),
       );
     }
     declaration = IrClass(_type, [
-      for (final (value, bound) in _fields.values) ...[value, bound],
+      for (final (value, bound) in _fields.values) ...[value, ?bound],
     ]);
     for (final global in globals) {
       final index = _getters.length;
@@ -67,11 +69,6 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
     final data = Uint8List(storage.layout.size);
     final words = ByteData.sublistView(data);
     words.setUint64(ObjectHeader.sizeOffset, data.length, Endian.little);
-    for (final entry in _fields.entries) {
-      if (!entry.key.isLate && entry.key.initializer == null) {
-        words.setUint64(storage.offsetOf(entry.value.$2), 1, Endian.little);
-      }
-    }
     return data;
   }
 
@@ -102,7 +99,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
     final entry = Block();
     final base = entry.emit(DirectCall(address, []));
     final (valueField, boundField) = _fields[global]!;
-    if (!global.isLate && global.initializer == null) {
+    if (boundField == null) {
       entry.finish(Return(entry.emit(LoadField(valueField, base))));
       return IrFunction(target, [entry]);
     }
@@ -135,7 +132,7 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
       commit = Block();
       final failed = Block();
       blocks.addAll([commit, failed]);
-      final flag = entry.emit(LoadField(boundField, base));
+      final flag = entry.emit(LoadField(boundField!, base));
       entry.finish(Branch(flag, Jump(failed), Jump(commit)));
       _throwLateError(
         failed,
@@ -145,7 +142,9 @@ final class GlobalStorage(Iterable<IrFunction> input, {IrCallable? lateError}) {
       );
     }
     commit.emit(StoreField(valueField, base, entry.parameters.single));
-    commit.emit(StoreField(boundField, base, const Constant.boolean(true)));
+    if (boundField != null) {
+      commit.emit(StoreField(boundField, base, const Constant.boolean(true)));
+    }
     commit.finish(const Return());
     return IrFunction(target, blocks);
   }
