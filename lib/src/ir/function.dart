@@ -1,3 +1,5 @@
+import 'package:dartc/interop.dart' show NativeCompoundType;
+
 import 'block.dart';
 import 'core_types.dart';
 import 'format.dart';
@@ -109,6 +111,14 @@ final class const ReleasedMemory(
   final int lengthParameter,
 ) extends ExternalMemory;
 
+/// The C adapter writes a by-value result into its first raw argument.
+/// Result storage is ABI-owned and never becomes a source argument.
+/// [arguments] keeps indices in the original source signature.
+final class NativeResultMemory(
+  final NativeCompoundType type,
+  final ExternalMemory arguments,
+) extends ExternalMemory;
+
 /// A Dart callable whose implementation is supplied outside the IR graph.
 ///
 /// Calls retain normal Dart argument and return types. A native binding must
@@ -138,7 +148,12 @@ final class IrExternal(
     if (target.kind == .closure || target.kind == .fieldInitializer) {
       throw ArgumentError('Invalid external declaration ${target.name}.');
     }
-    final parameters = switch (memory) {
+    final hiddenResult = memory is NativeResultMemory;
+    final offset = hiddenResult ? 1 : 0;
+    final access = hiddenResult
+        ? (memory as NativeResultMemory).arguments
+        : memory;
+    final parameters = switch (access) {
       ZeroedMemory(:final lengthParameter) => [lengthParameter],
       WrittenMemory(:final addressParameter, :final lengthParameter) ||
       ReleasedMemory(
@@ -150,11 +165,15 @@ final class IrExternal(
     if (parameters.any(
           (index) =>
               index < 0 ||
-              index >= target.parameterTypes.length ||
-              target.parameterTypes[index] != ValueType.integer,
+              index + offset >= target.parameterTypes.length ||
+              target.parameterTypes[index + offset] != ValueType.integer,
         ) ||
-        memory is ZeroedMemory && target.returnType != ValueType.integer ||
-        (memory is WrittenMemory || memory is ReleasedMemory) &&
+        hiddenResult &&
+            (target.parameterTypes.firstOrNull != ValueType.integer ||
+                target.returnType != ValueType.voidType ||
+                access is NativeResultMemory) ||
+        access is ZeroedMemory && target.returnType != ValueType.integer ||
+        (hiddenResult || access is WrittenMemory || access is ReleasedMemory) &&
             !this.effects.contains(Effect.writesStorage)) {
       throw ArgumentError('Invalid native storage contract.');
     }

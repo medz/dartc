@@ -73,12 +73,23 @@ final class NativeBoundaries(
       if (_needsBridge(binding)) {
         final raw = _bridge(target, intoDart: false);
         externals.removeWhere((declaration) => declaration.target == target);
+        final result = binding.result;
         externals.add(
           IrExternal(
             raw,
-            effects: declaration.effects,
+            effects: {
+              ...declaration.effects,
+              if (result is NativeCompoundType) Effect.writesStorage,
+            },
             terminates: declaration.terminates,
-            memory: declaration.memory,
+            memory: result is NativeCompoundType
+                ? NativeResultMemory(
+                    result,
+                    declaration.effects.contains(Effect.writesStorage)
+                        ? declaration.memory
+                        : const ExternalMemory.unchanged(),
+                  )
+                : declaration.memory,
             capturesArguments: declaration.capturesArguments,
           ),
         );

@@ -53,7 +53,8 @@ export 'src/ir/function.dart'
         UnchangedMemory,
         ZeroedMemory,
         WrittenMemory,
-        ReleasedMemory;
+        ReleasedMemory,
+        NativeResultMemory;
 export 'src/ir/program.dart' show IrClass, IrProgram;
 export 'src/ir/ffi_types.dart' show FfiTypes;
 export 'src/ir/signature.dart'

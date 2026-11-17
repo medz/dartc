@@ -2487,6 +2487,18 @@ final class ProgramFlow(
     effects ??= operation.effects;
     activation.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
     var next = state.copy();
+    if (memory case NativeResultMemory(:final type, :final arguments)) {
+      final bytes = memoryLayout?.nativeLayout.of(type).size;
+      next = next.overwriteNative(
+        inputs.first,
+        bytes == null
+            ? FlowValue.unknown(.integer)
+            : FlowValue.constant(Constant.integer(bytes)),
+      );
+      // The C implementation can only capture or mutate its source arguments.
+      inputs = inputs.sublist(1);
+      memory = arguments;
+    }
     if (capturesArguments) next.escape(inputs);
     if (effects.contains(Effect.writesStorage)) {
       switch (memory) {
