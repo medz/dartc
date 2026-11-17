@@ -1743,9 +1743,13 @@ final class ProgramFlow(
             if (result.mayThrow) Effect.mayThrow,
           };
           return FlowResult(
-            value: result.value.withReferences(
-              inputs.map((value) => value.references),
-            ),
+            // A predicate produces a boolean, not an address derived from its
+            // operands. Integer arithmetic still retains raw capabilities.
+            value: resultType == .boolean
+                ? result.value
+                : result.value.withReferences(
+                    inputs.map((value) => value.references),
+                  ),
             normal: result.value.isBottom ? null : state.copy(),
             exceptional: result.mayThrow ? state.copy() : null,
           );
@@ -1800,7 +1804,9 @@ final class ProgramFlow(
           value: resultType == .never
               ? const FlowValue.bottom()
               : FlowValue.unknown(resultType)
-                    .withReferences(inputs.map((value) => value.references)),
+                    .withReferences(resultType == .boolean
+                        ? const []
+                        : inputs.map((value) => value.references)),
           normal: resultType == .never ? null : next,
           exceptional: operation.effects.contains(Effect.mayThrow)
               ? next.copy()
