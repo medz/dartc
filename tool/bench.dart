@@ -2,62 +2,102 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-/// Runs a fixed compiler benchmark suite and records time, RSS and output size.
+import 'package:crypto/crypto.dart';
+
+/// Measures fixed compiler workloads and records bounded process outcomes.
 ///
-/// The report is written to build/bench/latest.json. Machine-specific reports
-/// stay under build/ and are never source inputs.
+/// Reports identify exact inputs and distinguish sampled RSS from a peak.
 Future<void> main(List<String> arguments) async {
   final options = _Options.parse(arguments);
   if (options.help) {
     stdout.writeln(_usage);
     return;
   }
+  final selected = fixtures
+      .where(
+        (fixture) =>
+            options.only == null || options.only!.contains(fixture.name),
+      )
+      .toList();
+  final inputs = {
+    for (final fixture in selected)
+      fixture.name: await _fileIdentity(fixture.path),
+  };
+  final harness = await _fileIdentity(Platform.script.toFilePath());
+  final baseline = _readBaseline(options, inputs);
   final lock = await _benchLock();
-  if (lock == null) return;
+  if (lock == null) {
+    exitCode = 1;
+    return;
+  }
   try {
+    final source = options.compiler == null
+        ? await _sourceIdentity(built: options.build)
+        : null;
     var compiler = options.compiler == null
-        ? _defaultCompiler()
-        : _Compiler(options.compiler!, const []);
+        ? _Compiler(Platform.resolvedExecutable, const [
+            'run',
+            'bin/dartc.dart',
+          ])
+        : _Compiler(_resolveExecutable(options.compiler!), const []);
+    _Measurement? build;
     if (options.build) {
       final built = File('build/bench/dartc').absolute.path;
-      final build = await Process.run(Platform.resolvedExecutable, [
+      build = await _measure(Platform.resolvedExecutable, [
         'run',
         'tool/build.dart',
         built,
-      ]);
-      if (build.exitCode != 0) {
-        stderr.writeln('${build.stdout}${build.stderr}');
-        exitCode = build.exitCode;
+      ], options.timeout);
+      if (build.failed) {
+        stderr.writeln(
+          '${build.stdout}\n${build.stderr}\n${build.error ?? ''}',
+        );
+        exitCode = 1;
         return;
       }
       compiler = _Compiler(built, const []);
     }
-    final report = <String, Object?>{};
+    final binary = await _fileIdentity(compiler.executable);
     final rows = <_Row>[];
-    var failed = false;
-    for (final fixture in fixtures) {
-      if (options.only != null && !options.only!.contains(fixture.name)) {
-        continue;
-      }
-      final row = await _run(fixture, compiler, options);
-      rows.add(row);
-      report[fixture.name] = row.toJson();
-      failed |= row.failed;
+    for (final fixture in selected) {
+      rows.add(await _run(fixture, compiler, options, inputs[fixture.name]!));
     }
-    final baseline = options.baseline == null
-        ? null
-        : jsonDecode(File(options.baseline!).readAsStringSync())
-              as Map<String, dynamic>;
+    final inputChanges = <String>[];
+    if ((await _fileIdentity(compiler.executable))['sha256'] !=
+        binary['sha256']) {
+      inputChanges.add('compiler executable');
+    }
+    if (source != null &&
+        (await _sourceIdentity(built: options.build))['sha256'] !=
+            source['sha256']) {
+      inputChanges.add('compiler sources or SDK resources');
+    }
+    for (final fixture in selected) {
+      if ((await _fileIdentity(fixture.path))['sha256'] !=
+          inputs[fixture.name]!['sha256']) {
+        inputChanges.add(fixture.path);
+      }
+    }
     final document = <String, Object?>{
+      'format': 2,
+      'harness': harness,
       'created': DateTime.now().toUtc().toIso8601String(),
-      'revision': _gitRevision(),
-      'dart': Platform.version,
+      'host': _hostIdentity(),
       'compiler': {
-        'executable': compiler.executable,
+        ...binary,
         'prefix': compiler.prefix,
+        'mode': options.compilerMode,
+        'source': source,
       },
       'target': options.target,
-      'fixtures': report,
+      'configuration': options.toJson(),
+      'environmentSha256': _environmentIdentity(),
+      'rssSampling': {'scope': 'direct compiler process', 'intervalUs': 100000},
+      'timing':
+          'wall microseconds from process start through exit and pipe drain',
+      'inputChanges': inputChanges,
+      if (build != null) 'build': build.toJson(),
+      'fixtures': {for (final row in rows) row.name: row.toJson()},
     };
     final output = File(options.output ?? 'build/bench/latest.json');
     await output.parent.create(recursive: true);
@@ -65,14 +105,113 @@ Future<void> main(List<String> arguments) async {
       const JsonEncoder.withIndent('  ').convert(document),
     );
     _print(rows, baseline, options);
-    if (baseline != null &&
-        rows.any((row) => row.regressed(baseline, options))) {
-      failed = true;
+    if (inputChanges.isNotEmpty) {
+      stderr.writeln(
+        'Benchmark inputs changed during measurement: ${inputChanges.join(', ')}',
+      );
     }
-    if (failed) exitCode = 1;
+    if (inputChanges.isNotEmpty ||
+        rows.any(
+          (row) =>
+              row.failed ||
+              baseline != null && row.regressed(baseline, options),
+        )) {
+      exitCode = 1;
+    }
   } finally {
     if (lock.existsSync()) lock.deleteSync();
   }
+}
+
+typedef _Baseline = Map<String, ({int elapsedUs, int bytes, int? runMedianUs})>;
+
+_Baseline? _readBaseline(
+  _Options options,
+  Map<String, Map<String, Object?>> inputs,
+) {
+  final path = options.baseline;
+  if (path == null) return null;
+  final document = jsonDecode(File(path).readAsStringSync());
+  if (document is! Map<String, dynamic> ||
+      document['format'] != 2 ||
+      document['fixtures'] is! Map<String, dynamic> ||
+      document['inputChanges'] is! List ||
+      (document['inputChanges'] as List).isNotEmpty) {
+    throw const FormatException(
+      'Invalid benchmark baseline: expected an unchanged format 2 report.',
+    );
+  }
+  final configuration = document['configuration'];
+  final compiler = document['compiler'];
+  final host = document['host'];
+  if (document['target'] != options.target ||
+      compiler is! Map ||
+      compiler['mode'] != options.compilerMode ||
+      host is! Map ||
+      _hostIdentity().entries.any((entry) => host[entry.key] != entry.value) ||
+      configuration is! Map ||
+      configuration['execute'] != options.execute ||
+      configuration['runRepeats'] != options.runRepeats) {
+    throw const FormatException(
+      'Invalid benchmark baseline: host, compiler mode, target or execution configuration differs.',
+    );
+  }
+  final previous = document['fixtures'] as Map<String, dynamic>;
+  final baseline = <String, ({int elapsedUs, int bytes, int? runMedianUs})>{};
+  for (final fixture in fixtures) {
+    if (!inputs.containsKey(fixture.name)) continue;
+    final row = previous[fixture.name];
+    if (row is! Map<String, dynamic> ||
+        row['failed'] != false ||
+        row['exitCode'] != 0 ||
+        row['timedOut'] != false ||
+        row['outputComplete'] != true ||
+        row['error'] != null ||
+        row['failure'] != null ||
+        row['source'] is! Map ||
+        (row['source'] as Map)['sha256'] != inputs[fixture.name]!['sha256']) {
+      throw FormatException(
+        'Invalid benchmark baseline: ${fixture.name} requires an unchanged successful workload.',
+      );
+    }
+    final runs = row['runs'];
+    final runCount = options.execute && fixture.run ? options.runRepeats : 0;
+    if (runs is! List ||
+        runs.length != runCount ||
+        runs.any(
+          (run) =>
+              run is! Map ||
+              run['exitCode'] != 0 ||
+              run['timedOut'] != false ||
+              run['outputComplete'] != true ||
+              run['matched'] != true ||
+              run['error'] != null,
+        )) {
+      throw FormatException(
+        'Invalid benchmark baseline: ${fixture.name} has incomplete or failed execution records.',
+      );
+    }
+    final elapsedUs = row['elapsedUs'];
+    final bytes = row['bytes'];
+    final runMedianUs = row['runMedianUs'];
+    if (elapsedUs is! int ||
+        elapsedUs <= 0 ||
+        bytes is! int ||
+        bytes <= 0 ||
+        (options.execute &&
+            fixture.run &&
+            (runMedianUs is! int || runMedianUs <= 0))) {
+      throw FormatException(
+        'Invalid benchmark baseline: ${fixture.name} requires positive comparison measurements.',
+      );
+    }
+    baseline[fixture.name] = (
+      elapsedUs: elapsedUs,
+      bytes: bytes,
+      runMedianUs: options.execute && fixture.run ? runMedianUs as int : null,
+    );
+  }
+  return baseline;
 }
 
 const fixtures = <_Fixture>[
@@ -132,7 +271,10 @@ final class const _Fixture(
   }
 }
 
-enum _Kind { executable, shared }
+enum _Kind() {
+  executable,
+  shared,
+}
 
 final class _Options(
   final bool help,
@@ -142,12 +284,20 @@ final class _Options(
   final String? output,
   final String? baseline,
   final Duration timeout,
+  final Duration runTimeout,
+  final bool execute,
   final double maxTimeGrowth,
   final double maxSizeGrowth,
   final bool build,
   final int runRepeats,
 ) {
-  factory _Options.parse(List<String> arguments) {
+  String get compilerMode => compiler != null
+      ? 'external'
+      : build
+      ? 'built'
+      : 'source';
+
+  factory parse(List<String> arguments) {
     var help = false;
     Set<String>? only;
     String? compiler;
@@ -155,6 +305,8 @@ final class _Options(
     String? output;
     String? baseline;
     var timeout = const Duration(seconds: 120);
+    var runTimeout = const Duration(seconds: 120);
+    var execute = true;
     var maxTimeGrowth = 10.0;
     var maxSizeGrowth = 5.0;
     var build = false;
@@ -176,6 +328,12 @@ final class _Options(
         timeout = Duration(
           seconds: int.parse(argument.substring('--timeout='.length)),
         );
+      } else if (argument.startsWith('--run-timeout=')) {
+        runTimeout = Duration(
+          seconds: int.parse(argument.substring('--run-timeout='.length)),
+        );
+      } else if (argument == '--compile-only') {
+        execute = false;
       } else if (argument.startsWith('--max-time-growth=')) {
         maxTimeGrowth = double.parse(
           argument.substring('--max-time-growth='.length),
@@ -199,6 +357,36 @@ final class _Options(
         throw ArgumentError.value(argument, 'argument', 'Unknown option');
       }
     }
+    if (!help) {
+      const targets = {'macos-arm64', 'macos-x64', 'linux-arm64', 'linux-x64'};
+      if (!targets.contains(target) || execute && target != _hostTarget()) {
+        throw ArgumentError(
+          'Unsupported execution target $target; cross-generation requires --compile-only.',
+        );
+      }
+      if (only != null &&
+          (only.isEmpty ||
+              only.any(
+                (name) => !fixtures.any((fixture) => fixture.name == name),
+              ))) {
+        throw ArgumentError.value(
+          only,
+          'only',
+          'Unknown or empty fixture selection',
+        );
+      }
+      if (timeout <= Duration.zero ||
+          runTimeout <= Duration.zero ||
+          !maxTimeGrowth.isFinite ||
+          maxTimeGrowth < 0 ||
+          !maxSizeGrowth.isFinite ||
+          maxSizeGrowth < 0 ||
+          build && compiler != null) {
+        throw ArgumentError(
+          'Timeouts must be positive, growth limits finite and nonnegative, and --build cannot be combined with --compiler.',
+        );
+      }
+    }
     return _Options(
       help,
       only,
@@ -207,59 +395,76 @@ final class _Options(
       output,
       baseline,
       timeout,
+      runTimeout,
+      execute,
       maxTimeGrowth,
       maxSizeGrowth,
       build,
       runRepeats,
     );
   }
+
+  Map<String, Object?> toJson() => {
+    'compileTimeoutUs': timeout.inMicroseconds,
+    'runTimeoutUs': runTimeout.inMicroseconds,
+    'execute': execute,
+    'runRepeats': runRepeats,
+    'maxTimeGrowth': maxTimeGrowth,
+    'maxSizeGrowth': maxSizeGrowth,
+  };
 }
 
 final class _Row(
-  final String name,
-  final int exitCode,
-  final int elapsedMs,
-  final int peakRssKiB,
-  final int bytes,
-  final bool timedOut,
-  final String stdoutTail,
-  final String stderrTail,
-  final int? runMs,
-  final int? runExitCode,
-  final String runStdout,
-  final bool runMatched,
+  final _Fixture fixture,
+  final Map<String, Object?> source,
+  final _Measurement compilation,
+  final List<_Measurement> runs,
+  final Map<String, Object?>? artifact,
+  final String? failure,
 ) {
+  String get name => fixture.name;
+  int get bytes => artifact?['bytes'] as int? ?? 0;
+  int? get runMedianUs {
+    if (runs.isEmpty) return null;
+    final times = [for (final run in runs) run.elapsedUs]..sort();
+    return times[times.length ~/ 2];
+  }
+
+  bool matches(_Measurement run) =>
+      fixture.expected == null ||
+      run.stdoutLength == fixture.expected!.length &&
+          run.stdout == fixture.expected;
   bool get failed =>
-      timedOut || exitCode != 0 || (runExitCode ?? 0) != 0 || !runMatched;
+      compilation.failed ||
+      failure != null ||
+      runs.any((run) => run.failed || !matches(run));
 
   Map<String, Object?> toJson() => {
-    'exitCode': exitCode,
-    'elapsedMs': elapsedMs,
-    'peakRssKiB': peakRssKiB,
+    ...compilation.toJson(),
+    'source': source,
+    'artifact': artifact,
     'bytes': bytes,
-    'timedOut': timedOut,
-    'stdout': stdoutTail,
-    'stderr': stderrTail,
-    'runMs': runMs,
-    'runExitCode': runExitCode,
-    'runStdout': runStdout,
-    'runMatched': runMatched,
+    'runMedianUs': runMedianUs,
+    'runs': [
+      for (final run in runs) {...run.toJson(), 'matched': matches(run)},
+    ],
+    'failure': failure,
+    'failed': failed,
   };
 
-  bool regressed(Map<String, dynamic> baseline, _Options options) {
-    final previous = baseline[name];
-    if (previous is! Map) return false;
-    final oldMs = previous['elapsedMs'];
-    final oldBytes = previous['bytes'];
-    if (oldMs is int && oldMs > 0) {
-      final growth = (elapsedMs - oldMs) * 100 / oldMs;
-      if (growth > options.maxTimeGrowth) return true;
-    }
-    if (oldBytes is int && oldBytes > 0) {
-      final growth = (bytes - oldBytes) * 100 / oldBytes;
-      if (growth > options.maxSizeGrowth) return true;
-    }
-    return false;
+  bool regressed(_Baseline baseline, _Options options) {
+    final previous = baseline[name]!;
+    bool grew(int value, int old, double limit) =>
+        (value - old) * 100 / old > limit;
+    return grew(
+          compilation.elapsedUs,
+          previous.elapsedUs,
+          options.maxTimeGrowth,
+        ) ||
+        grew(bytes, previous.bytes, options.maxSizeGrowth) ||
+        previous.runMedianUs != null &&
+            runMedianUs != null &&
+            grew(runMedianUs!, previous.runMedianUs!, options.maxTimeGrowth);
   }
 }
 
@@ -267,82 +472,233 @@ Future<_Row> _run(
   _Fixture fixture,
   _Compiler compiler,
   _Options options,
+  Map<String, Object?> source,
 ) async {
-  final output = fixture.output(options.target);
-  await File(output).parent.create(recursive: true);
-  final args = [
-    ...compiler.prefix,
-    fixture.path,
-    '--kind',
-    fixture.kind == .executable ? 'exe' : 'shared',
-    '--target',
-    options.target,
-    '-o',
-    output,
-  ];
-  final watch = Stopwatch()..start();
-  final process = await Process.start(
-    compiler.executable,
-    args,
-    workingDirectory: Directory.current.path,
-  );
-  var peakRss = 0;
-  final stdoutBuffer = <String>[];
-  final stderrBuffer = <String>[];
-  final subscriptions = [
-    process.stdout.transform(utf8.decoder).listen(stdoutBuffer.add),
-    process.stderr.transform(utf8.decoder).listen(stderrBuffer.add),
-  ];
-  var timedOut = false;
-  final rssWatch = Timer.periodic(const Duration(milliseconds: 100), (_) async {
-    final rss = await _rssKiB(process.pid);
-    if (rss > peakRss) peakRss = rss;
-  });
-  final exit = await process.exitCode.timeout(
-    options.timeout,
-    onTimeout: () {
-      timedOut = true;
-      process.kill(ProcessSignal.sigkill);
-      return -1;
-    },
-  );
-  rssWatch.cancel();
-  await Future.wait(subscriptions.map((subscription) => subscription.cancel()));
-  watch.stop();
-  int? runMs;
-  int? runExitCode;
-  var runStdout = '';
-  var runMatched = true;
-  if (fixture.run && !timedOut && exit == 0) {
-    final times = <int>[];
-    for (var index = 0; index < options.runRepeats; index++) {
-      final runWatch = Stopwatch()..start();
-      final run = await Process.run(File(output).absolute.path, const []);
-      runWatch.stop();
-      times.add(runWatch.elapsedMilliseconds);
-      runExitCode = run.exitCode;
-      runStdout = '${run.stdout}';
-      runMatched &= fixture.expected == null || runStdout == fixture.expected;
-      if (run.exitCode != 0) break;
-    }
-    times.sort();
-    runMs = times.isEmpty ? null : times[times.length ~/ 2];
+  final output = File(fixture.output(options.target));
+  await output.parent.create(recursive: true);
+  if (FileSystemEntity.typeSync(output.path, followLinks: false) != .notFound) {
+    await output.delete();
   }
-  final bytes = File(output).existsSync() ? File(output).lengthSync() : 0;
-  return _Row(
-    fixture.name,
-    exit,
-    watch.elapsedMilliseconds,
-    peakRss,
-    bytes,
-    timedOut,
-    _tail(stdoutBuffer),
-    _tail(stderrBuffer),
-    runMs,
-    runExitCode,
-    runStdout,
-    runMatched,
+  final compilation = await _measure(
+    compiler.executable,
+    [
+      ...compiler.prefix,
+      fixture.path,
+      '--kind',
+      fixture.kind == .executable ? 'exe' : 'shared',
+      '--target',
+      options.target,
+      '-o',
+      output.path,
+    ],
+    options.timeout,
+    sampleRss: true,
   );
+  final runs = <_Measurement>[];
+  Map<String, Object?>? artifact;
+  String? failure;
+  if (!compilation.failed) {
+    if (!output.existsSync()) {
+      failure = 'Compiler exited successfully without producing an output.';
+    } else {
+      artifact = await _fileIdentity(output.path);
+      if (options.execute && fixture.run) {
+        for (var index = 0; index < options.runRepeats; index++) {
+          final run = await _measure(
+            output.absolute.path,
+            const [],
+            options.runTimeout,
+          );
+          runs.add(run);
+          if (run.failed ||
+              fixture.expected != null &&
+                  (run.stdoutLength != fixture.expected!.length ||
+                      run.stdout != fixture.expected)) {
+            break;
+          }
+        }
+        if ((await _fileIdentity(output.path))['sha256'] !=
+            artifact['sha256']) {
+          failure = 'Output changed during execution.';
+        }
+      }
+    }
+  }
+  return _Row(fixture, source, compilation, runs, artifact, failure);
+}
+
+final class _Measurement(
+  final List<String> command,
+  final int? exitCode,
+  final int elapsedUs,
+  final bool timedOut,
+  final bool outputComplete,
+  final String stdout,
+  final int stdoutLength,
+  final String stderr,
+  final int stderrLength,
+  final String? error,
+  final int? sampledMaxRssKiB,
+  final int rssSamples,
+) {
+  bool get failed =>
+      exitCode != 0 || timedOut || !outputComplete || error != null;
+  Map<String, Object?> toJson() => {
+    'command': command,
+    'exitCode': exitCode,
+    'elapsedUs': elapsedUs,
+    'timedOut': timedOut,
+    'outputComplete': outputComplete,
+    'stdout': stdout,
+    'stdoutTruncated': stdout.length != stdoutLength,
+    'stderr': stderr,
+    'stderrTruncated': stderr.length != stderrLength,
+    'error': error,
+    'sampledMaxRssKiB': sampledMaxRssKiB,
+    'rssSamples': rssSamples,
+  };
+}
+
+final class _Capture() {
+  var tail = '';
+  var length = 0;
+  void add(String text) {
+    length += text.length;
+    tail += text;
+    if (tail.length > 4000) tail = tail.substring(tail.length - 4000);
+  }
+}
+
+Future<_Measurement> _measure(
+  String executable,
+  List<String> arguments,
+  Duration timeout, {
+  bool sampleRss = false,
+}) async {
+  final watch = Stopwatch()..start();
+  final out = _Capture();
+  final err = _Capture();
+  Process process;
+  try {
+    process = await Process.start(executable, arguments);
+  } on ProcessException catch (error) {
+    watch.stop();
+    return _Measurement(
+      [executable, ...arguments],
+      null,
+      watch.elapsedMicroseconds,
+      false,
+      false,
+      '',
+      0,
+      '',
+      0,
+      '$error',
+      null,
+      0,
+    );
+  }
+  final output = process.stdout
+      .transform(const Utf8Decoder(allowMalformed: true))
+      .listen(out.add);
+  final errors = process.stderr
+      .transform(const Utf8Decoder(allowMalformed: true))
+      .listen(err.add);
+  final drained = [output.asFuture<void>(), errors.asFuture<void>()];
+  int? sampledMaxRss;
+  var samples = 0;
+  Future<void>? sample;
+  final sampler = sampleRss
+      ? Timer.periodic(const Duration(milliseconds: 100), (_) {
+          if (sample != null) return;
+          sample = _rssKiB(process.pid)
+              .then((rss) {
+                if (rss != null) {
+                  samples++;
+                  if (sampledMaxRss == null || rss > sampledMaxRss!) {
+                    sampledMaxRss = rss;
+                  }
+                }
+              })
+              .whenComplete(() => sample = null);
+        })
+      : null;
+  int? code;
+  var timedOut = false;
+  var complete = false;
+  String? failure;
+  try {
+    await Future.wait<void>([
+      process.exitCode.then((value) {
+        code = value;
+      }),
+      ...drained,
+    ]).timeout(timeout);
+    complete = true;
+  } on TimeoutException {
+    timedOut = true;
+    if (code == null) await _terminate(process);
+    code = await process.exitCode;
+    await Future.wait([output.cancel(), errors.cancel()]);
+  } catch (error) {
+    failure = '$error';
+    if (code == null) await _terminate(process);
+    code = await process.exitCode;
+    await Future.wait([output.cancel(), errors.cancel()]);
+  } finally {
+    watch.stop();
+    sampler?.cancel();
+    await sample;
+  }
+  return _Measurement(
+    [executable, ...arguments],
+    code,
+    watch.elapsedMicroseconds,
+    timedOut,
+    complete,
+    out.tail,
+    out.length,
+    err.tail,
+    err.length,
+    failure,
+    sampledMaxRss,
+    samples,
+  );
+}
+
+Future<void> _terminate(Process process) async {
+  // Stop new direct children while collecting the currently visible descendants.
+  process.kill(ProcessSignal.sigstop);
+  try {
+    final listing = await Process.run('ps', ['-axo', 'pid=,ppid=']);
+    if (listing.exitCode == 0) {
+      final parents = <int, int>{};
+      for (final line in '${listing.stdout}'.split('\n')) {
+        final fields = line.trim().split(RegExp(r'\s+'));
+        if (fields.length == 2) {
+          final pid = int.tryParse(fields[0]);
+          final parent = int.tryParse(fields[1]);
+          if (pid != null && parent != null) parents[pid] = parent;
+        }
+      }
+      final descendants = <int>[process.pid];
+      for (var index = 0; index < descendants.length; index++) {
+        for (final entry in parents.entries) {
+          if (entry.value == descendants[index] &&
+              !descendants.contains(entry.key)) {
+            descendants.add(entry.key);
+          }
+        }
+      }
+      for (final child in descendants.reversed) {
+        Process.killPid(child, ProcessSignal.sigkill);
+      }
+    }
+  } on ProcessException {
+    // The direct child is still killed if process enumeration is unavailable.
+  } finally {
+    process.kill(ProcessSignal.sigkill);
+  }
 }
 
 Future<File?> _benchLock() async {
@@ -359,14 +715,27 @@ Future<File?> _benchLock() async {
     }
     try {
       lock.createSync(exclusive: true);
-      lock.writeAsStringSync('$pid\n');
-      return lock;
-    } on FileSystemException {
+    } on FileSystemException catch (error) {
+      // POSIX EEXIST is contention. Permission, missing-parent and filesystem
+      // failures must keep their real cause instead of waiting five minutes.
+      if (error.osError?.errorCode != 17) rethrow;
       if (watch.elapsed > const Duration(minutes: 5)) {
         stderr.writeln('Another dartc benchmark holds $lock.');
         return null;
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
+      continue;
+    }
+    try {
+      lock.writeAsStringSync('$pid\n');
+      return lock;
+    } on FileSystemException {
+      try {
+        lock.deleteSync();
+      } on FileSystemException {
+        // Preserve the original write failure if cleanup also fails.
+      }
+      rethrow;
     }
   }
 }
@@ -376,57 +745,49 @@ bool _processAlive(int pid) {
   return result.exitCode == 0;
 }
 
-Future<int> _rssKiB(int pid) async {
-  final result = await Process.run('ps', ['-o', 'rss=', '-p', '$pid']);
-  if (result.exitCode != 0) return 0;
-  return int.tryParse('${result.stdout}'.trim()) ?? 0;
+Future<int?> _rssKiB(int pid) async {
+  try {
+    final result = await Process.run('ps', ['-o', 'rss=', '-p', '$pid']);
+    if (result.exitCode != 0) return null;
+    return int.tryParse('${result.stdout}'.trim());
+  } on ProcessException {
+    return null;
+  }
 }
 
-String _tail(List<String> lines) {
-  final join = lines.join();
-  const limit = 4000;
-  return join.length <= limit ? join : join.substring(join.length - limit);
-}
-
-void _print(List<_Row> rows, Map<String, dynamic>? baseline, _Options options) {
+void _print(List<_Row> rows, _Baseline? baseline, _Options options) {
   stdout.writeln(
-    '${'fixture'.padRight(20)} ${'time'.padLeft(10)} ${'rss MiB'.padLeft(9)} '
-    '${'bytes'.padLeft(10)} ${'run'.padLeft(8)} status',
+    'fixture              compile us sampled RSS KiB      bytes       run us status',
   );
   for (final row in rows) {
     final previous = baseline?[row.name];
-    final delta = previous is Map && previous['elapsedMs'] is int
-        ? ' (${_signed(row.elapsedMs - (previous['elapsedMs'] as int))} ms)'
+    final delta = previous != null
+        ? ' (${_signed(row.compilation.elapsedUs - previous.elapsedUs)} us)'
         : '';
+    final status =
+        row.compilation.timedOut || row.runs.any((run) => run.timedOut)
+        ? 'TIMEOUT'
+        : row.failed
+        ? 'FAIL'
+        : baseline != null && row.regressed(baseline, options)
+        ? 'REGRESSION'
+        : 'ok';
     stdout.writeln(
       '${row.name.padRight(20)} '
-      '${'${row.elapsedMs} ms'.padLeft(10)} '
-      '${(row.peakRssKiB / 1024).toStringAsFixed(1).padLeft(9)} '
-      '${'${row.bytes}'.padLeft(10)} '
-      '${(row.runMs == null ? '-' : '${row.runMs} ms').padLeft(8)} '
-      '${row.timedOut
-          ? 'TIMEOUT'
-          : row.failed
-          ? 'FAIL(${row.exitCode}/${row.runExitCode})'
-          : 'ok'}$delta',
+      '${row.compilation.elapsedUs.toString().padLeft(10)} '
+      '${(row.compilation.sampledMaxRssKiB?.toString() ?? '-').padLeft(15)} '
+      '${row.bytes.toString().padLeft(10)} '
+      '${(row.runMedianUs?.toString() ?? '-').padLeft(12)} $status$delta',
     );
   }
   if (baseline != null) {
     stdout.writeln(
-      'baseline growth limits: time +${options.maxTimeGrowth}%, '
-      'size +${options.maxSizeGrowth}%',
+      'baseline growth limits: compile/run time +${options.maxTimeGrowth}%, size +${options.maxSizeGrowth}%',
     );
   }
 }
 
 String _signed(int value) => value >= 0 ? '+$value' : '$value';
-
-_Compiler _defaultCompiler() {
-  return _Compiler(Platform.resolvedExecutable, const [
-    'run',
-    'bin/dartc.dart',
-  ]);
-}
 
 String _hostTarget() {
   final os = Platform.isMacOS ? 'macos' : 'linux';
@@ -435,8 +796,89 @@ String _hostTarget() {
 }
 
 String _gitRevision() {
-  final result = Process.runSync('git', ['rev-parse', '--short', 'HEAD']);
+  final result = Process.runSync('git', ['rev-parse', 'HEAD']);
   return result.exitCode == 0 ? '${result.stdout}'.trim() : 'unknown';
+}
+
+Future<Map<String, Object?>> _fileIdentity(String path) async {
+  final file = File(path);
+  return {
+    'path': file.absolute.path,
+    'bytes': await file.length(),
+    'sha256': (await sha256.bind(file.openRead()).first).toString(),
+  };
+}
+
+Map<String, String> _hostIdentity() => {
+  'target': _hostTarget(),
+  'operatingSystemVersion': Platform.operatingSystemVersion,
+  'dart': Platform.version,
+};
+
+Future<Map<String, Object?>> _sourceIdentity({required bool built}) async {
+  final files = <File>[if (built) File('tool/build.dart')];
+  for (final path in ['bin', 'lib', 'sdk', if (built) 'tool/src']) {
+    await for (final entry in Directory(
+      path,
+    ).list(recursive: true, followLinks: false)) {
+      if (entry is Link) {
+        throw FileSystemException(
+          'Cannot fingerprint symbolic source input',
+          entry.path,
+        );
+      }
+      if (entry is File) files.add(entry);
+    }
+  }
+  for (final path in [
+    'pubspec.yaml',
+    'pubspec.lock',
+    '.dart_tool/package_config.json',
+  ]) {
+    if (File(path).existsSync()) files.add(File(path));
+  }
+  files.sort((a, b) => a.path.compareTo(b.path));
+  final content = StringBuffer();
+  final sdk = StringBuffer();
+  for (final file in files) {
+    final digest = (await _fileIdentity(file.path))['sha256'];
+    final entry = '${file.path}\u0000$digest\n';
+    content.write(entry);
+    if (file.path.startsWith('sdk/')) sdk.write(entry);
+  }
+  return {
+    'revision': _gitRevision(),
+    'sha256': sha256.convert(utf8.encode('$content')).toString(),
+    'files': files.length,
+    'sdk': {
+      'version': File('sdk/std/version').readAsStringSync().trim(),
+      'revision': File('sdk/std/revision').readAsStringSync().trim(),
+      'sha256': sha256.convert(utf8.encode('$sdk')).toString(),
+    },
+  };
+}
+
+String _environmentIdentity() {
+  final names = Platform.environment.keys.toList()..sort();
+  return sha256
+      .convert(
+        utf8.encode(
+          [for (final name in names) '$name\u0000${Platform.environment[name]}']
+              .join('\n'),
+        ),
+      )
+      .toString();
+}
+
+String _resolveExecutable(String executable) {
+  if (executable.contains('/')) {
+    return File(executable).resolveSymbolicLinksSync();
+  }
+  for (final directory in (Platform.environment['PATH'] ?? '').split(':')) {
+    final file = File('$directory/$executable');
+    if (file.existsSync()) return file.resolveSymbolicLinksSync();
+  }
+  throw ArgumentError.value(executable, 'compiler', 'Executable not found');
 }
 
 String _safe(String value) => value.replaceAll(RegExp('[^a-zA-Z0-9_.-]'), '_');
@@ -447,7 +889,7 @@ const _usage = '''
 Usage: dart run tool/bench.dart [options]
 
 Compiles the fixed fixtures under tool/bench/fixtures and records wall time,
-child peak RSS, output bytes and execution status in build/bench/latest.json.
+sampled direct-process RSS, output bytes and execution status in build/bench/latest.json.
 
 Options:
   --only=a,b              Run selected fixtures only.
@@ -455,10 +897,18 @@ Options:
                           dart run bin/dartc.dart).
   --build                 Build build/bench/dartc and use it.
   --target=macos-arm64    Target passed to the compiler.
-  --timeout=seconds       Per-compilation limit (default: 120).
+  --timeout=seconds       Compilation/build deadline (default: 120).
+  --run-timeout=seconds   Deadline for each output execution (default: 120).
+  --compile-only         Generate without execution; required for another target.
   --run-repeats=3         Executable runs per fixture; the median is reported.
   --output=path           Report path (default: build/bench/latest.json).
-  --baseline=path         Compare against a previous report.
-  --max-time-growth=10    Allowed time growth percentage.
+  --baseline=path         Compare selected fixtures against a successful report
+                          for the same target.
+  --max-time-growth=10    Allowed compile/run time growth percentage.
   --max-size-growth=5     Allowed output-size growth percentage.
+
+Format 2 records microseconds, commands, binary/workload hashes and configuration.
+Source and SDK identity are recorded for source and --build compilers; an external
+--compiler has unknown source provenance. RSS is a 100 ms direct-process sample,
+not a peak or a process-tree measurement. No execution means no runtime result.
 ''';
