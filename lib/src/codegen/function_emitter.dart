@@ -86,8 +86,8 @@ abstract interface class FunctionEmitter<R>() {
   /// Terminates on a broken target invariant; this is not a Dart exception.
   void abort(int status);
 
-  /// Reports a failure escaping the native boundary, then terminates.
-  void reportFailure(void Function(Fixup) message, int length);
+  /// Terminates immediately with the status in the first integer ABI argument.
+  void exitProcess();
 
   /// The registers this generator makes available to its allocator.
   List<R> get allocatableRegisters;

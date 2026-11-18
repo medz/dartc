@@ -21,7 +21,7 @@ final class const ProgramStorageElimination() extends ProgramPass {
     final functions = <IrFunction>[];
     for (final function in program.functions) {
       final rewritten = facts.definitions.contains(function.target)
-          ? FunctionRewrite(function, discardable: discardable(function)).run()
+          ? FunctionRewrite(function, executionShapes: program.executionShapes, discardable: discardable(function)).run()
           : function;
       changed |= !identical(function, rewritten);
       functions.add(rewritten);
@@ -31,6 +31,8 @@ final class const ProgramStorageElimination() extends ProgramPass {
             program.classes,
             functions,
             globals: program.globals,
+            nativeBoundaries: program.nativeBoundaries,
+            executionShapes: program.executionShapes,
             externals: program.externals,
           )
         : program;
@@ -64,12 +66,45 @@ storageDiscardable(ProgramFlowFacts facts) {
     for (final declaration in program.classes) ...declaration.weakFields,
   };
 
+  void readScalarPayload(Value operand) {
+    final value = facts.valueOf(operand);
+    if (value.managedBackings.isNotEmpty || value.hasUnknownBacking) {
+      payloads = payloads.join(value.carrierReferences);
+    }
+  }
+
+  // Some language operations consume numeric contents through a reference
+  // shape (num/Object views). Other scalar reads follow their declared physical
+  // input contract. Reference transport alone does not inspect payload bytes.
+  void readOperationPayloads(IrFunction body, Instruction operation) {
+    final shapes = program.executionShapes ?? ExecutionShapes.defaults;
+    final inputs = operation.inputs.toList();
+    final required = shapes.inputShapesOf(body, operation);
+    final observesContents = switch (operation) {
+      Equals() ||
+      Identical() ||
+      ObjectHashCode() ||
+      NumericBinary() ||
+      NumericNegate() ||
+      NumericToDouble() ||
+      NumericToInt() ||
+      NumericRoundToDouble() ||
+      NumericSquareRoot() || ProjectValue() => true,
+      _ => false,
+    };
+    for (final (index, input) in inputs.indexed) {
+      if (observesContents || required[index].isScalar) {
+        readScalarPayload(input);
+      }
+    }
+  }
+
   void readField(InstanceField field, FlowValue receiver) {
     reads[field] = (reads[field] ?? const FlowValue.bottom()).join(receiver);
   }
 
   FlowValue objectAddress(Value object, Value offset) {
-    final owner = facts.valueOf(object);
+    final owner = facts.valueOf(object).carrierReferences;
     final offsets = facts.valueOf(offset).integers;
     var address = const FlowValue.bottom();
     for (final base in <Object>[...owner.objects, ...owner.constants]) {
@@ -115,6 +150,7 @@ storageDiscardable(ProgramFlowFacts facts) {
       ]) {
         final point = facts.pointStateOf(operation);
         if (point == null) continue;
+        readOperationPayloads(body, operation);
         final states = points[operation] = [
           point.before,
           ?point.normal,
@@ -145,6 +181,70 @@ storageDiscardable(ProgramFlowFacts facts) {
           _ => const .bottom(),
         });
         switch (operation) {
+          case ObjectRuntimeType(:final operand, direct: true) ||
+              TypeTest(operand: final operand) ||
+              TypeCast(operand: final operand):
+            payloads = payloads.join(
+              FlowValue.joined([
+                for (final object in facts.valueOf(operand).objects)
+                  if (object.callableStorage != null) FlowValue.object(object),
+              ]),
+            );
+          case Equals(:final left, :final right):
+            for (final value in [facts.valueOf(left), facts.valueOf(right)]) {
+              for (final object in value.objects) {
+                if (object.callableStorage != null) {
+                  for (final field in [
+                    FunctionStorage.identity,
+                    FunctionStorage.anchor,
+                    FunctionStorage.arguments,
+                  ]) {
+                    readField(field, FlowValue.object(object));
+                  }
+                }
+              }
+            }
+          case ObjectHashCode(:final operand):
+            for (final object in facts.valueOf(operand).objects) {
+              if (object.callableStorage != null) {
+                for (final field in [
+                  FunctionStorage.identity,
+                  FunctionStorage.anchor,
+                  FunctionStorage.arguments,
+                ]) {
+                  readField(field, FlowValue.object(object));
+                }
+              }
+            }
+          case ReadFunctionEnvironment(:final function) ||
+              ReadFunctionTypeArgument(:final function) ||
+              FunctionCall(:final function):
+            final visited = <FlowObject>{};
+            void callableFields(FlowValue value) {
+              for (final object in value.objects) {
+                if (!visited.add(object)) continue;
+                final storage = object.callableStorage;
+                if (storage == null) {
+                  if (object.site is InstantiateFunction ||
+                      object.site is InstantiateFunctionFrom) {
+                    for (final origin
+                        in point.before.capturesOf(object) ??
+                            const <FlowValue>[]) {
+                      callableFields(origin);
+                    }
+                  }
+                  continue;
+                }
+                for (final field in storage.fields) {
+                  readField(field, FlowValue.object(object));
+                }
+                if (storage.origin case final origin?) {
+                  final original = point.before.storedFieldOf(object, origin);
+                  if (original != null) callableFields(original);
+                }
+              }
+            }
+            callableFields(facts.valueOf(function));
           case ReferenceAddress(:final object):
             addressable = addressable.join(facts.valueOf(object));
           case NativeAddress(:final view):
@@ -160,6 +260,8 @@ storageDiscardable(ProgramFlowFacts facts) {
           case StoreGlobal(:final global)
               when global.isFinal && facts.exitsOf(operation).exceptional:
             globals.add(global);
+          case InitializeStorageField(:final field, :final source):
+            readField(field, facts.valueOf(source));
           case ReadCell(:final cell) || CopyCell(:final cell):
             cells = cells.join(facts.valueOf(cell));
           case WriteCell(:final cell)
@@ -233,6 +335,24 @@ storageDiscardable(ProgramFlowFacts facts) {
             payloads = payloads.join(facts.valueOf(codes));
           default:
             break;
+        }
+      }
+      final shapes = program.executionShapes ?? ExecutionShapes.defaults;
+      switch (block.end) {
+        case Return(value: final value?)
+            when shapes.entryOf(body.target).result.isScalar:
+          readScalarPayload(value);
+        case Branch(:final condition):
+          readScalarPayload(condition);
+        default:
+          break;
+      }
+      for (final edge in block.successors) {
+        if (!facts.reachesEdge(edge)) continue;
+        for (final (index, argument) in edge.arguments.indexed) {
+          if (shapes.shapeOf(body, edge.target.parameters[index]).isScalar) {
+            readScalarPayload(argument);
+          }
         }
       }
       // Suspended protocols can expose their objects.
@@ -345,6 +465,12 @@ storageDiscardable(ProgramFlowFacts facts) {
                   facts.valueOf(receiver),
                   reads[field] ?? const .bottom(),
                 ),
+          ),
+          InitializeStorageField(:final field, :final destination, :final source) => (
+            facts.valueOf(destination),
+            facts.valueOf(source),
+            _overlaps(facts, facts.valueOf(destination), payloads) ||
+                _overlaps(facts, facts.valueOf(destination), reads[field] ?? const .bottom()),
           ),
           WriteCell(:final cell, :final value) => (
             facts.valueOf(cell),
@@ -546,6 +672,10 @@ Set<Instruction> _restoredGlobalWrites(
 
 bool _overlaps(ProgramFlowFacts facts, FlowValue a, FlowValue b) {
   if (a.isBottom || b.isBottom) return false;
+  // Lifetime and storage demands concern the physical allocation even when
+  // the represented Dart value remains a scalar.
+  a = a.carrierReferences;
+  b = b.carrierReferences;
   if (a.objects.any(
     (left) =>
         b.objects.any((right) => facts.mayAliasAcrossSummaries(left, right)),
@@ -575,9 +705,10 @@ bool _retains(
 
 FlowValue _mortal(FlowValue references) {
   var mortal = const FlowValue.bottom();
-  for (final object in references.objects) {
+  for (final object in {...references.objects, ...references.managedBackings}) {
     mortal = mortal.join(.object(object));
   }
+  if (references.hasUnknownBacking) mortal = mortal.join(.unknown(.object));
   for (final type in references.unknownTypes) {
     if ([
       ValueType.number.nullable,

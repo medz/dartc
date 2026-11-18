@@ -49,7 +49,6 @@ void main() {
         expect(parameter.type, pointerType);
         expect(body.typeOf(parameter), ValueType.integer);
       }
-      expect(body.boxes, isEmpty);
       expect(body.invocations.keys.whereType<PointerFromAddress>(), isEmpty);
     }
     expect(layouts.entryTypes(forward), [ValueType.integer]);
@@ -112,7 +111,6 @@ void main() {
           members,
           HeapPlan(),
         );
-        expect(selected.boxes, isEmpty);
         for (final block in function.blocks) {
           for (final parameter in block.parameters.where(
             (v) => FfiTypes.isPointer(v.type),

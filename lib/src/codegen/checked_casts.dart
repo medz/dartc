@@ -97,17 +97,9 @@ final class CheckedCasts({final FunctionTarget? failure}) {
           final accepted = nullOnly && result == source
               ? operand
               : test.refinement(true) ?? operand;
-          final done = Block(result == .voidType ? [] : [result]);
-          entry.finish(
-            Branch(
-              test,
-              Jump(done, result == .voidType ? [] : [accepted]),
-              Jump(failed),
-            ),
-          );
-          done.finish(
-            Return(result == .voidType ? null : done.parameters.single),
-          );
+          final done = Block([result]);
+          entry.finish(Branch(test, Jump(done, [accepted]), Jump(failed)));
+          done.finish(Return(done.parameters.single));
           blocks.add(done);
         }
         _fail(failed);

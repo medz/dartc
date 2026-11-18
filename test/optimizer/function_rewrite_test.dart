@@ -8,6 +8,177 @@ final _uri = Uri.parse('memory:rewrite');
 final _tick = FunctionTarget(_uri, 'tick', .integer, [.integer]);
 
 void main() {
+  for (final carrier in [ExecutionShape.word, ExecutionShape.reference]) {
+    test('rewritten projections follow the producing call ABI ($carrier)', () {
+      final source = FunctionTarget(_uri, 'source', .integer, []);
+      final root = FunctionTarget(_uri, 'consume', .integer, []);
+      final shapes = ExecutionShapes(entries: {
+        source: ExecutionSignature([], carrier),
+      });
+      final entry = Block();
+      final result = entry.emit(DirectCall(source, []));
+      final projection = entry.emit(ProjectValue(result, ExecutionShape.word));
+      entry.finish(Return(projection));
+      final body = FunctionRewrite(
+        IrFunction(root, [entry]),
+        executionShapes: shapes,
+      ).run();
+      shapes.verify(body);
+      expect(body.entry.instructions.whereType<ProjectValue>(),
+          carrier.isReference ? hasLength(1) : isEmpty);
+      expect(body.entry.instructions.whereType<DirectCall>().single.target, source);
+      expect(body.entry.instructions.whereType<MaterializeValue>(), isEmpty);
+    });
+  }
+  for (final negated in [false, true]) {
+    test(
+      'a narrowed test operand replaces an unchanged refinement ($negated)',
+      () {
+        final target = FunctionTarget(_uri, 'narrowedOperand', .integer, [
+          .integer,
+        ]);
+        final entry = Block(target.parameterTypes),
+            yes = Block([ValueType.integer]),
+            no = Block();
+        final viewed = entry.emit(
+          TypeView(entry.parameters.single, ValueType.object.nullable),
+        );
+        final test = entry.emit(
+          TypeTest(viewed, ValueType.integer, negated: negated),
+        );
+        final selected = Jump(yes, [test.refinement(!negated)!]);
+        entry.finish(
+          Branch(
+            test,
+            negated ? Jump(no) : selected,
+            negated ? selected : Jump(no),
+          ),
+        );
+        yes.finish(
+          Return(
+            yes.emit(
+              IntBinary(.add, yes.parameters.single, const Constant.integer(1)),
+            ),
+          ),
+        );
+        no.finish(const Return(Constant.integer(-1)));
+        final source = IrFunction(target, [entry, yes, no]);
+        final rewritten = FunctionRewrite(
+          source,
+          operations: {
+            test: TypeTest(
+              entry.parameters.single,
+              ValueType.integer,
+              negated: negated,
+            ),
+          },
+        ).run();
+        final branch = rewritten.entry.end as Branch;
+        final edge = negated ? branch.ifFalse : branch.ifTrue;
+        expect(edge.arguments.single, same(rewritten.entry.parameters.single));
+        expect(
+          rewritten.blocks
+              .expand((b) => b.instructions)
+              .whereType<UncheckedCast>(),
+          isEmpty,
+        );
+        for (final body in [source, rewritten]) {
+          final runner = IrInterpreter(IrProgram([], [body]), {});
+          for (final input in [1, 42]) {
+            expect(runner.run(body, [input]), input + 1);
+          }
+        }
+      },
+    );
+  }
+  test('removing a branch cannot retain its type refinement proof', () {
+    final target = FunctionTarget(_uri, 'invalidProof', .integer, [
+      .object.nullable,
+    ]);
+    final entry = Block(target.parameterTypes),
+        yes = Block([.integer]),
+        no = Block();
+    final check = entry.emit(TypeTest(entry.parameters.single, .integer));
+    final yesEdge = Jump(yes, [check.refinement(true)!]);
+    entry.finish(Branch(check, yesEdge, Jump(no)));
+    yes.finish(Return(yes.parameters.single));
+    no.finish(const Return(Constant.integer(-1)));
+    final original = IrFunction(target, [entry, yes, no]);
+    final predicate = FunctionTarget(_uri, 'predicate', .boolean, [
+      .object.nullable,
+    ]);
+    for (final end in <Terminator>[yesEdge, Branch(check, Jump(no), yesEdge)]) {
+      expect(
+        () => FunctionRewrite(
+          original,
+          operations: {check: DirectCall(predicate, entry.parameters)},
+          terminators: {entry: end},
+        ).run(),
+        throwsArgumentError,
+      );
+    }
+  });
+
+  test('lowered predicates narrow only their selected edge', () {
+    final target = FunctionTarget(_uri, 'classify', .integer, [
+      .object.nullable,
+    ]);
+    final entry = Block(target.parameterTypes),
+        yes = Block([.integer]),
+        no = Block();
+    final test = entry.emit(TypeTest(entry.parameters.single, .integer));
+    entry.finish(Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)));
+    yes.finish(
+      Return(
+        yes.emit(
+          IntBinary(.add, yes.parameters.single, const Constant.integer(1)),
+        ),
+      ),
+    );
+    no.finish(const Return(Constant.integer(43)));
+    final original = IrFunction(target, [entry, yes, no]);
+    final predicate = FunctionTarget(_uri, 'predicate', .boolean, [
+      .object.nullable,
+    ]);
+    final implementation = FunctionTarget(_uri, 'implementation', .boolean, [
+      .object.nullable,
+    ]);
+    final body = Block(implementation.parameterTypes);
+    body.finish(Return(body.emit(DirectCall(predicate, body.parameters))));
+    final rewritten = FunctionRewrite(
+      original,
+      lowered: {
+        test: (
+          body: IrFunction(implementation, [body]),
+          arguments: [entry.parameters.single],
+          environment: const {},
+          handler: null,
+        ),
+      },
+    ).run();
+    final calls = <Object?>[];
+    final program = IrProgram(
+      [],
+      [rewritten],
+      externals: [IrExternal(predicate, effects: {}, capturesArguments: false)],
+    );
+    final interpreter = IrInterpreter(
+      program,
+      {},
+      externalCalls: {
+        predicate: (arguments) {
+          calls.add(arguments.single);
+          return arguments.single is int;
+        },
+      },
+    );
+    for (final input in [41, 'value', null]) {
+      expect(interpreter.run(rewritten, [input]), input is int ? 42 : 43);
+      expect(calls, [input]);
+      calls.clear();
+    }
+  });
+
   test(
     'replacement terminators preserve operand effects, handlers and origins',
     () {

@@ -16,7 +16,7 @@ final class const ProgramStoragePromotion() extends ProgramPass {
     run,
     normalize: (program) {
       final functions = [
-        for (final function in program.functions) _LocalCells(function).run(),
+        for (final function in program.functions) _LocalCells(function, program.executionShapes).run(),
       ];
       return functions.indexed.any(
             (entry) => !identical(entry.$2, program.functions[entry.$1]),
@@ -25,6 +25,8 @@ final class const ProgramStoragePromotion() extends ProgramPass {
               program.classes,
               functions,
               globals: program.globals,
+              nativeBoundaries: program.nativeBoundaries,
+              executionShapes: program.executionShapes,
               externals: program.externals,
             )
           : program;
@@ -48,6 +50,8 @@ final class const ProgramStoragePromotion() extends ProgramPass {
             facts.program.classes,
             functions,
             globals: facts.program.globals,
+            nativeBoundaries: facts.program.nativeBoundaries,
+            executionShapes: facts.program.executionShapes,
             externals: facts.program.externals,
           )
         : facts.program;
@@ -55,7 +59,7 @@ final class const ProgramStoragePromotion() extends ProgramPass {
 }
 
 /// Promotes private cells whose complete set of uses is local reads and writes.
-final class _LocalCells(final IrFunction function) {
+final class _LocalCells(final IrFunction function, final ExecutionShapes? executionShapes) {
   final incoming = <Block, List<Jump>>{};
   final owners = <Jump, Block>{};
   final aliases = <Value, NewCell>{};
@@ -154,6 +158,7 @@ final class _LocalCells(final IrFunction function) {
     }
     return FunctionRewrite(
       function,
+      executionShapes: executionShapes,
       replacements: replacements,
       phis: phis,
       discardable: removed,
@@ -255,6 +260,7 @@ final class _Promotion(
         ? function
         : FunctionRewrite(
             function,
+            executionShapes: facts.program.executionShapes,
             replacements: replacements,
             phis: phis,
             discardable: replacements.keys.cast<Instruction>().toSet(),

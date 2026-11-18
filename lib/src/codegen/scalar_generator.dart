@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'dart:ffi' show Void, Int64;
+import 'dart:ffi' show Int64;
 
 import 'package:dartc/object.dart';
 import 'package:dartc/abi.dart';
@@ -22,7 +22,6 @@ import 'native_adapter.dart';
 import 'native_callback.dart';
 import 'constant_data.dart';
 import 'stack_maps.dart';
-import 'heap_entry.dart';
 
 /// Generates native modules with target-specific function emitters.
 base class ScalarCodeGenerator<R extends Object>(
@@ -43,9 +42,8 @@ base class ScalarCodeGenerator<R extends Object>(
     };
     final nativeSymbols = prepared.nativeSymbols;
     final entryPoint = prepared.entryPoint, runtime = prepared.runtime;
-    final persistent = prepared.persistent, cleanup = prepared.cleanup;
+    final cleanup = prepared.cleanup;
     final layouts = selection.layouts, heap = selection.heap;
-    final globals = selection.globals;
     final relocations = <Relocation>[];
     final symbolNames = <String, int>{};
     int nativeSymbol(String name) {
@@ -55,6 +53,9 @@ base class ScalarCodeGenerator<R extends Object>(
 
     final nativeCalls = <(int, Fixup, int)>[];
     final nativeAddresses = <(int, Fixup, int)>[];
+    final nativeDataAddresses = <NativeData, List<(int, Fixup)>>{};
+    final moduleObjectAddresses = <ModuleObject, List<(int, Fixup)>>{};
+    final moduleRootAddresses = <(int, Fixup)>[];
     final code = BytesBuilder(copy: false), symbols = <Symbol>[];
     final callbackOwners = <NativeCallbackTarget, List<(int, Fixup)>>{};
     final callbackAddresses = <NativeCallbackTarget, List<(int, Fixup)>>{};
@@ -77,8 +78,14 @@ base class ScalarCodeGenerator<R extends Object>(
     final indices = {
       for (final (i, declaration) in selected.indexed) declaration: i,
     };
+    final addressesStackMaps = functions.values.any(
+      (function) => function.body.instructions.values
+          .expand((values) => values)
+          .any((value) => value is StackMapAddress),
+    );
     final hasRoots =
         managed ||
+        addressesStackMaps ||
         functions.values.any(
           (function) =>
               function.liveReferences.values.any((roots) => roots.isNotEmpty),
@@ -94,6 +101,7 @@ base class ScalarCodeGenerator<R extends Object>(
           (entryPoint == null ? 0 : 1),
       stackTraces: capture,
       stackContext: runtime?.stackContext,
+      functionSymbols: indices,
     );
     FunctionTarget? frameSource;
     void safepoint(
@@ -110,11 +118,7 @@ base class ScalarCodeGenerator<R extends Object>(
       }
     }
 
-    final globalAddresses = <(int, Fixup)>[],
-        contextAddresses = <(int, Fixup)>[];
-    final rootAddresses = <(int, Fixup)>[],
-        errorAddresses = <(int, Fixup)>[],
-        uncaughtAddresses = <(int, Fixup)>[];
+    final rootAddresses = <(int, Fixup)>[];
     void call(Fixup fixup, FunctionTarget callee) {
       final index = indices[callee];
       if (index == null) {
@@ -125,48 +129,11 @@ base class ScalarCodeGenerator<R extends Object>(
       );
     }
 
-    HeapEntry<R>? entry(FunctionEmitter<R> emitter) => !managed
-        ? null
-        : HeapEntry(
-            emitter,
-            heap.release,
-            heap.isOutOfMemory,
-            heap.runEvents,
-            (fixup) => rootAddresses.add((code.length, fixup)),
-            (fixup) => errorAddresses.add((code.length, fixup)),
-            (fixup) => uncaughtAddresses.add((code.length, fixup)),
-            call,
-            (position) => safepoint(position, StackRoots(0, 0, [])),
-            context: persistent
-                ? (fixup) => contextAddresses.add((code.length, fixup))
-                : null,
-            globals: persistent && !globals.isEmpty
-                ? (fixup) => globalAddresses.add((code.length, fixup))
-                : null,
-          );
     void codeAddress(Fixup fixup, int position) => maps.reference(
       code.length + fixup.offset,
       fixup.encoding,
       code.length + position,
     );
-    Uint8List release(FunctionEmitter<R> emitter) {
-      final destination = emitter.convention.classify(
-        NativeSignature(Void, [Int64]),
-      );
-      final context = entry(emitter)!;
-      final frame = context.frame(destination.stackBytes);
-      emitter.prologue(frame);
-      context.enter(frame);
-      final argument =
-          (destination.parameters.single as RegisterArgument<R>).register;
-      emitter.move(argument, emitter.heapRegister);
-      call(emitter.call(), heap.release);
-      safepoint(emitter.position, StackRoots(0, 0, []));
-      context.restoreCaller(frame);
-      emitter.epilogue(frame);
-      return emitter.finish();
-    }
-
     for (final declaration in selected) {
       final source = functions[declaration]?.body.sourceTarget ?? declaration;
       frameSource = capture ? source : null;
@@ -174,21 +141,12 @@ base class ScalarCodeGenerator<R extends Object>(
       final exported = export != null && !needsEntry(export.signature);
       code.add(Uint8List((-code.length) & 15));
       final emitter = _createFunction();
-      final bytes = declaration == cleanup
-          ? release(emitter)
-          : declaration == globals.address
-          ? globals.emitAddress(
-              emitter,
-              (fixup) => globalAddresses.add((code.length, fixup)),
-            )
-          : layouts.nativeCalls.signatures.containsKey(declaration)
+      final bytes = layouts.nativeCalls.entries.containsKey(declaration)
           ? NativeAdapter(emitter).generate(
-              layouts.nativeCalls.signatures[declaration]!,
+              layouts.nativeCalls.entries[declaration]!.signature,
               (_, _, _) =>
                   throw StateError('Expected an indirect native call.'),
               intoDart: false,
-              heap: entry(emitter),
-              codeAddress: codeAddress,
               indirectCall: (position, frame) => safepoint(
                 position,
                 StackRoots(
@@ -216,26 +174,22 @@ base class ScalarCodeGenerator<R extends Object>(
               nativeCalls.add((code.length, fixup, symbol));
             }, (fixup) => callbackTemplates.add((code.length, fixup)))
           : binding != null
-          ? NativeAdapter(emitter).generate(
-              binding.signature,
-              (fixup, position, frame) {
-                final symbol = nativeSymbol(
-                  target.nativeSymbol(binding.symbol),
-                );
-                nativeCalls.add((code.length, fixup, symbol));
-                safepoint(
-                  position,
-                  StackRoots(
-                    frame.incomingStackOffset,
-                    frame.returnAddressOffset,
-                    [],
-                  ),
-                );
-              },
-              intoDart: false,
-              heap: entry(emitter),
-              codeAddress: codeAddress,
-            )
+          ? NativeAdapter(emitter).generate(binding.signature, (
+              fixup,
+              position,
+              frame,
+            ) {
+              final symbol = nativeSymbol(target.nativeSymbol(binding.symbol));
+              nativeCalls.add((code.length, fixup, symbol));
+              safepoint(
+                position,
+                StackRoots(
+                  frame.incomingStackOffset,
+                  frame.returnAddressOffset,
+                  [],
+                ),
+              );
+            }, intoDart: false)
           : ScalarFunction(
               FunctionAllocation(
                 functions[declaration] ??
@@ -259,7 +213,27 @@ base class ScalarCodeGenerator<R extends Object>(
               },
               safepoint,
               failures: managed || selection.failures,
-              persistent: persistent,
+              callableTable: constants.callableTable,
+              constantSymbol: (fixup, symbol) {
+                relocations.add(
+                  .instruction(
+                    0,
+                    code.length + fixup.offset,
+                    fixup.encoding,
+                    symbol,
+                  ),
+                );
+              },
+              stackMapAddress: (fixup) =>
+                  rootAddresses.add((code.length, fixup)),
+              moduleRootsAddress: (fixup) =>
+                  moduleRootAddresses.add((code.length, fixup)),
+              moduleObjectAddress: (fixup, declaration) {
+                (moduleObjectAddresses[declaration] ??= []).add((
+                  code.length,
+                  fixup,
+                ));
+              },
               descriptorAddress: (fixup, type) {
                 relocations.add(
                   .instruction(
@@ -279,6 +253,12 @@ base class ScalarCodeGenerator<R extends Object>(
                 }
                 final symbol = nativeSymbol(target.nativeSymbol(name));
                 nativeAddresses.add((code.length, fixup, symbol));
+              },
+              nativeDataAddress: (fixup, declaration) {
+                (nativeDataAddresses[declaration] ??= []).add((
+                  code.length,
+                  fixup,
+                ));
               },
               codeAddress: codeAddress,
             );
@@ -309,7 +289,6 @@ base class ScalarCodeGenerator<R extends Object>(
           safepoint(position, StackRoots(0, 0, []));
         },
         intoDart: true,
-        heap: entry(emitter),
         callback: callbackEntry(emitter, callback.key),
       );
       for (final (start, fixup)
@@ -333,15 +312,11 @@ base class ScalarCodeGenerator<R extends Object>(
       if (!needsEntry(value.signature)) continue;
       code.add(Uint8List((-code.length) & 15));
       final emitter = _createFunction();
-      final bytes = NativeAdapter(emitter).generate(
-        value.signature,
-        (fixup, position, frame) {
-          call(fixup, key);
-          safepoint(position, StackRoots(0, 0, []));
-        },
-        intoDart: true,
-        heap: entry(emitter),
-      );
+      final bytes = NativeAdapter(emitter)
+          .generate(value.signature, (fixup, position, frame) {
+            call(fixup, key);
+            safepoint(position, StackRoots(0, 0, []));
+          }, intoDart: true);
       symbols.add(
         .new(
           target.nativeSymbol(value.symbol),
@@ -357,41 +332,164 @@ base class ScalarCodeGenerator<R extends Object>(
     if (entryPoint case (:final function, :final symbol)) {
       code.add(Uint8List((-code.length) & 15));
       final emitter = _createFunction();
-      final context = entry(emitter);
-      final frame = context?.frame(0);
-      final exitCode = runtime?.processExitCode;
       final bytes = emitter.start(() {
-        if (context != null) context.enter(frame!);
-        final fixup = emitter.call();
-        call(fixup, function);
+        call(emitter.call(), function);
         safepoint(emitter.position, StackRoots(0, 0, []));
-        if (context != null) {
-          context.leave(frame!, null, release: true, processExitCode: exitCode);
-        } else if (exitCode != null) {
-          call(emitter.call(), exitCode);
-        }
-        return exitCode == null
-            ? null
-            : emitter.convention
+        return function.returnType == ValueType.integer
+            ? emitter.convention
                   .classify(NativeSignature(Int64, []))
-                  .resultRegister;
-      }, frame);
+                  .resultRegister
+            : null;
+      }, null);
       symbols.add(.new(symbol, 0, code.length, bytes.length));
       code.add(bytes);
     }
-    final globalData = globals.isEmpty ? null : globals.initialData(layouts);
-    final descriptor = globals.isEmpty
-        ? null
-        : constants.typeAddress(globals.declaration.type);
-    final globalType = globals.isEmpty
-        ? null
-        : constants.addressOf(layouts.types.constant(globals.declaration.type));
+    final moduleObjects = {
+      for (final declaration in moduleObjectAddresses.keys)
+        declaration: constants.moduleObjectData(declaration),
+    };
     assert(symbols.length == constants.symbolBase);
     symbols.addAll(constants.symbols);
     final sections = [
       Section.code(code.takeBytes()),
       if (constants.symbols.isNotEmpty) constants.finish(),
     ];
+    final moduleSymbols = <int>[];
+    if (moduleObjects.isNotEmpty) {
+      final bytes = BytesBuilder(copy: false);
+      final section = sections.length;
+      for (final MapEntry(key: declaration, value: image)
+          in moduleObjects.entries) {
+        final symbol = symbols.length;
+        final offset = bytes.length;
+        moduleSymbols.add(symbol);
+        symbols.add(
+          Symbol(
+            '.dartc.object$symbol',
+            section,
+            offset,
+            image.bytes.length,
+            kind: .data,
+            binding: .local,
+          ),
+        );
+        bytes.add(image.bytes);
+        for (final reference in image.references) {
+          relocations.add(
+            Relocation.address(
+              section,
+              offset + reference.offset,
+              reference.symbol,
+            ),
+          );
+        }
+        for (final (start, fixup) in moduleObjectAddresses[declaration]!) {
+          relocations.add(
+            Relocation.instruction(
+              0,
+              start + fixup.offset,
+              fixup.encoding,
+              symbol,
+            ),
+          );
+        }
+      }
+      sections.add(Section.data(bytes.takeBytes(), alignment: 8));
+    }
+    if (moduleRootAddresses.isNotEmpty) {
+      final table = symbols.length;
+      final section = sections.length;
+      final data = ByteData(
+        ModuleRootTable.entries +
+            moduleSymbols.length * ModuleRootTable.entrySize,
+      );
+      data.setUint64(
+        ModuleRootTable.count,
+        moduleSymbols.length,
+        target.byteOrder,
+      );
+      symbols.add(
+        Symbol(
+          '.dartc.moduleRoots',
+          section,
+          0,
+          data.lengthInBytes,
+          kind: .data,
+          binding: .local,
+        ),
+      );
+      for (final (index, symbol) in moduleSymbols.indexed) {
+        relocations.add(
+          Relocation.address(
+            section,
+            ModuleRootTable.entries + index * ModuleRootTable.entrySize,
+            symbol,
+          ),
+        );
+      }
+      for (final (start, fixup) in moduleRootAddresses) {
+        relocations.add(
+          Relocation.instruction(
+            0,
+            start + fixup.offset,
+            fixup.encoding,
+            table,
+          ),
+        );
+      }
+      sections.add(
+        Section.readOnlyData(data.buffer.asUint8List(), alignment: 8),
+      );
+    }
+    final nativeDataGroups = <SectionKind, List<NativeData>>{};
+    for (final data in nativeDataAddresses.keys) {
+      final kind = !data.writable
+          ? SectionKind.readOnlyData
+          : data.bytes.every((byte) => byte == 0)
+          ? SectionKind.zeroFill
+          : SectionKind.data;
+      (nativeDataGroups[kind] ??= []).add(data);
+    }
+    for (final MapEntry(key: kind, value: declarations)
+        in nativeDataGroups.entries) {
+      final content = BytesBuilder(copy: false);
+      var size = 0, alignment = 1;
+      for (final data in declarations) {
+        final padding = (-size) & (data.alignment - 1);
+        size += padding;
+        if (data.alignment > alignment) alignment = data.alignment;
+        final symbol = symbols.length;
+        for (final (start, fixup) in nativeDataAddresses[data]!) {
+          relocations.add(
+            .instruction(0, start + fixup.offset, fixup.encoding, symbol),
+          );
+        }
+        symbols.add(
+          Symbol(
+            '.dartc.data$symbol',
+            sections.length,
+            size,
+            data.bytes.length,
+            kind: .data,
+            binding: .local,
+          ),
+        );
+        if (kind != .zeroFill) {
+          content.add(Uint8List(padding));
+          content.add(data.bytes);
+        }
+        size += data.bytes.length;
+      }
+      sections.add(switch (kind) {
+        .readOnlyData => Section.readOnlyData(
+          content.takeBytes(),
+          alignment: alignment,
+        ),
+        .data => Section.data(content.takeBytes(), alignment: alignment),
+        .zeroFill => Section.zeroFill(size, alignment: alignment),
+        _ => throw StateError('Invalid native data section.'),
+      });
+    }
     if (callbackTemplates.isNotEmpty) {
       final trampoline = _createFunction().callbackTrampoline();
       final page = Uint8List(NativeCallbackLayout.pageBytes);
@@ -441,97 +539,22 @@ base class ScalarCodeGenerator<R extends Object>(
       );
       sections.add(Section.zeroFill(8, alignment: 8));
     }
-    if (globalData != null) {
-      final symbol = symbols.length, section = sections.length;
-      symbols.add(
-        Symbol(
-          '.dartc.globals',
-          section,
-          0,
-          globalData.length,
-          kind: .data,
-          binding: .local,
-        ),
+    if (cleanup != null) {
+      relocations.add(
+        Relocation.address(sections.length, 0, indices[cleanup]!),
       );
-      sections.add(Section.data(globalData, alignment: 8));
-      relocations.addAll([
-        Relocation.address(section, ObjectHeader.descriptorOffset, descriptor!),
-        Relocation.address(section, ObjectHeader.typeOffset, globalType!),
-      ]);
-      for (final (start, fixup) in globalAddresses) {
-        relocations.add(
-          Relocation.instruction(
-            0,
-            start + fixup.offset,
-            fixup.encoding,
-            symbol,
-          ),
-        );
-      }
+      sections.add(Section.finalizers(List.filled(8, 0)));
     }
-    if (persistent) {
-      final symbol = symbols.length;
-      symbols.add(
-        Symbol(
-          '.dartc.heap',
-          sections.length,
-          0,
-          RuntimeContext.size,
-          kind: .data,
-          binding: .local,
-        ),
+    final rootSymbol = maps.finish(
+      sections,
+      symbols,
+      relocations,
+      required: rootAddresses.isNotEmpty,
+    );
+    for (final (start, fixup) in rootAddresses) {
+      relocations.add(
+        .instruction(0, start + fixup.offset, fixup.encoding, rootSymbol!),
       );
-      sections.add(Section.zeroFill(RuntimeContext.size, alignment: 8));
-      for (final (start, fixup) in contextAddresses) {
-        relocations.add(
-          Relocation.instruction(
-            0,
-            start + fixup.offset,
-            fixup.encoding,
-            symbol,
-          ),
-        );
-      }
-      if (entryPoint == null) {
-        relocations.add(
-          Relocation.address(sections.length, 0, indices[cleanup]!),
-        );
-        sections.add(Section.finalizers(List.filled(8, 0)));
-      }
-    }
-    final rootSymbol = maps.finish(sections, symbols, relocations);
-    if (managed) {
-      for (final (uses, name, message) in [
-        (errorAddresses, '.dartc.oom', HeapEntry.message),
-        (uncaughtAddresses, '.dartc.uncaught', HeapEntry.uncaughtMessage),
-      ]) {
-        for (final (start, fixup) in uses) {
-          relocations.add(
-            .instruction(
-              0,
-              start + fixup.offset,
-              fixup.encoding,
-              symbols.length,
-            ),
-          );
-        }
-        symbols.add(
-          .new(
-            name,
-            sections.length,
-            0,
-            message.length,
-            kind: .data,
-            binding: .local,
-          ),
-        );
-        sections.add(.readOnlyData(message.codeUnits));
-      }
-      for (final (start, fixup) in rootAddresses) {
-        relocations.add(
-          .instruction(0, start + fixup.offset, fixup.encoding, rootSymbol!),
-        );
-      }
     }
     return .new(
       target,

@@ -45,7 +45,7 @@ void main() {
 
   test('type operations bind to the checked Dart bodies and constructors', () {
     final runtime = heapRuntime.types!;
-    final values = TypeValues(runtime);
+    final values = TypeImplementations(runtime: runtime).values;
     for (final entry in runtime.entries) {
       expect(runtime.program.implementationOf(entry), isA<IrFunction>());
     }
@@ -70,7 +70,10 @@ void main() {
       typeParameters: [x, y],
       superclass: base.instantiate([y, x]),
     );
-    final relations = TypeRelations(TypeValues(), [child]);
+    final relations = TypeImplementations(
+      runtime: heapRuntime.types,
+      declarations: [child],
+    ).relations;
     final target = relations.argumentOf(base, 0);
     final body = relations.functions.singleWhere(
       (body) => body.target == target,
@@ -79,7 +82,7 @@ void main() {
       body.blocks.expand((block) => block.instructions).whereType<Construct>(),
       isEmpty,
     );
-    expect(body.callees, isEmpty);
+    expect(body.callees, {heapRuntime.types!.entry(.typeArgument)});
   });
 
   test('nominal projections use source normalization and lexical shifting', () {
@@ -100,7 +103,7 @@ void main() {
     );
     final values = TypeValues(heapRuntime.types);
     final relations = TypeRelations(values, [base, child]);
-    final target = relations.viewOf(base);
+    final target = relations.projectorOf(child);
     final projection = relations.projection;
     final view = relations.functions.singleWhere(
       (body) => body.target == target,

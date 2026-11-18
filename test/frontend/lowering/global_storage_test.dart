@@ -26,6 +26,7 @@ void main() {
       ('lateNullableInitializersOnce', sdk.lateNullableInitializersOnce),
       ('throwingNeverRead', sdk.throwingNeverRead),
       ('unboundNeverRead', sdk.unboundNeverRead),
+      ('observableVoidRead', sdk.observableVoidRead),
       ('unusedInitializer', sdk.unusedInitializer),
       ('lazyReadOrder', sdk.lazyReadOrder),
       ('defaultNulls', sdk.defaultNulls),

@@ -1,10 +1,14 @@
 import 'dart:ffi';
 
+import 'package:dartc/abi.dart';
 import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/frontend.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart';
+import 'package:dartc/src/codegen/program_preparation.dart'
+    show PreparedProgramEmission;
 import 'package:dartc/runtime/contracts.dart';
 import 'package:dartc/src/compiler/runtime.dart';
 import 'package:dartc/target.dart';
@@ -21,6 +25,8 @@ void main() {
   HeapRuntime withCritical(
     FunctionTarget function, {
     IrFunction? processStatus,
+    FunctionTarget? linkEntry,
+    FunctionTarget? unlinkEntry,
     Iterable<NativeReference> nativeContracts = const [],
   }) => HeapRuntime(
     processStatus == null
@@ -38,6 +44,8 @@ void main() {
     allocate: heapRuntime.allocate,
     allocationFailure: heapRuntime.allocationFailure,
     isOutOfMemory: heapRuntime.isOutOfMemory,
+    linkEntry: linkEntry ?? heapRuntime.linkEntry,
+    unlinkEntry: unlinkEntry ?? heapRuntime.unlinkEntry,
     release: heapRuntime.release,
     runEvents: heapRuntime.runEvents,
     processExitCode: processStatus?.target,
@@ -77,25 +85,57 @@ void main() {
           heapRuntime.program.implementationOf(target) as IrExternal;
       expect(external.effects, operation.effects, reason: target.name);
     }
-    final readonly = heapRuntime.primitives.entries
-        .singleWhere((entry) => entry.value == .context)
-        .key;
+    final readonly = heapRuntime.program.functions.singleWhere(
+      (body) =>
+          body.target.owner?.name == 'Memory' && body.target.name == 'context',
+    );
     expect(
-      (heapRuntime.program.implementationOf(readonly) as IrExternal).effects,
+      readonly.blocks.expand((block) => block.instructions).single.effects,
       {Effect.readsStorage},
     );
-    final native = lowered.imports.entries.where(
-      (entry) =>
-          lowered.runtime.nonAllocating.contains(entry.key) ||
-          entry.value.isLeaf,
-    );
-    for (final entry in native) {
-      expect(
-        (heapRuntime.program.implementationOf(entry.key) as IrExternal).effects,
-        {Effect.readsStorage, Effect.writesStorage},
-        reason: entry.key.name,
-      );
+    for (final entry in lowered.imports.entries) {
+      if (lowered.program.implementationOf(entry.key) case IrExternal source) {
+        final bound = heapRuntime.program.implementationOf(entry.key);
+        if (bound is! IrExternal || heapRuntime.primitives.containsKey(entry.key)) {
+          continue;
+        }
+        final critical = lowered.runtime.nonAllocating.contains(entry.key);
+        expect(bound.effects, {
+          ...source.effects,
+        }..removeAll({
+          if (critical || entry.value.isLeaf) Effect.callsUserCode,
+          if (critical) ...[Effect.allocates, Effect.mayThrow],
+        }), reason: entry.key.name);
+      }
     }
+  });
+
+  test('leaf calling convention preserves declared failure and memory effects', () {
+    final leaf = FunctionTarget(uri, 'readNative', .integer, []);
+    final signature = NativeFunctionType(NativeSignature(Int64, []));
+    final source = IrExternal(
+      leaf,
+      effects: {Effect.readsStorage, Effect.allocates, Effect.mayThrow, Effect.callsUserCode},
+      memory: const .unchanged(),
+      terminates: true,
+      capturesArguments: false,
+    );
+    final bound = bindRuntime((
+      program: IrProgram(
+        lowered.program.classes,
+        lowered.program.functions,
+        globals: lowered.program.globals,
+        externals: [...lowered.program.externals, source],
+      ),
+      entryPoint: lowered.entryPoint,
+      exports: lowered.exports,
+      imports: {...lowered.imports, leaf: NativeReference('asset', 'read', signature, isLeaf: true)},
+      runtime: lowered.runtime,
+    ), Target.host()).program.implementationOf(leaf) as IrExternal;
+    expect(bound.effects, {Effect.readsStorage, Effect.allocates, Effect.mayThrow});
+    expect(bound.memory, same(source.memory));
+    expect(bound.terminates, isTrue);
+    expect(bound.capturesArguments, isFalse);
   });
 
   test('runtime entries must implement their machine boundary signatures', () {
@@ -121,6 +161,8 @@ void main() {
         heapRuntime.program,
         allocate: heapRuntime.release,
         isOutOfMemory: heapRuntime.isOutOfMemory,
+        linkEntry: heapRuntime.linkEntry,
+        unlinkEntry: heapRuntime.unlinkEntry,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         copyBytes: heapRuntime.copyBytes,
@@ -137,6 +179,8 @@ void main() {
         heapRuntime.program,
         allocate: heapRuntime.allocate,
         isOutOfMemory: heapRuntime.isOutOfMemory,
+        linkEntry: heapRuntime.linkEntry,
+        unlinkEntry: heapRuntime.unlinkEntry,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         copyBytes: heapRuntime.copyBytes,
@@ -159,6 +203,8 @@ void main() {
         heapRuntime.program,
         allocate: heapRuntime.allocate,
         isOutOfMemory: heapRuntime.isOutOfMemory,
+        linkEntry: heapRuntime.linkEntry,
+        unlinkEntry: heapRuntime.unlinkEntry,
         release: heapRuntime.release,
         runEvents: heapRuntime.runEvents,
         copyBytes: heapRuntime.copyBytes,
@@ -170,6 +216,64 @@ void main() {
       ),
       throwsArgumentError,
     );
+  });
+
+  test('entry protocols require their signatures and ordinary Dart bodies', () {
+    expect(
+      heapRuntime.linkEntry,
+      same(lowered.runtime.entries[RuntimeRole.linkEntry]),
+    );
+    expect(
+      heapRuntime.unlinkEntry,
+      same(lowered.runtime.entries[RuntimeRole.unlinkEntry]),
+    );
+    for (final (link, unlink) in [
+      (heapRuntime.unlinkEntry, heapRuntime.unlinkEntry),
+      (heapRuntime.linkEntry, heapRuntime.release),
+      (
+        FunctionTarget(
+          uri,
+          'missingLink',
+          .voidType,
+          List.filled(4, ValueType.integer),
+        ),
+        heapRuntime.unlinkEntry,
+      ),
+      (
+        heapRuntime.linkEntry,
+        FunctionTarget(uri, 'missingUnlink', .voidType, [.integer, .integer]),
+      ),
+    ]) {
+      expect(
+        () => withCritical(
+          heapRuntime.isOutOfMemory,
+          linkEntry: link,
+          unlinkEntry: unlink,
+        ),
+        throwsArgumentError,
+      );
+    }
+  });
+
+  test('runtime binding rejects a missing entry protocol', () {
+    for (final missing in [RuntimeRole.linkEntry, RuntimeRole.unlinkEntry]) {
+      final entries = {...lowered.runtime.entries}..remove(missing);
+      final result = (
+        program: lowered.program,
+        entryPoint: lowered.entryPoint,
+        exports: lowered.exports,
+        imports: lowered.imports,
+        runtime: RuntimeDeclarations(
+          entries,
+          lowered.runtime.primitives,
+          lowered.runtime.nonAllocating,
+          lowered.runtime.systemFunctions,
+          aliases: lowered.runtime.aliases,
+          stackContext: lowered.runtime.stackContext,
+        ),
+      );
+      expect(() => bindRuntime(result, Target.host()), throwsArgumentError);
+    }
   });
 
   test('runtime linking rejects conflicting instance storage', () {
@@ -268,11 +372,49 @@ void main() {
   });
 
   final generator = Arm64CodeGenerator(const Target(.linux, .arm64));
-  test('standalone primitives preserve their required entry context', () {
-    for (final primitive in [MemoryPrimitive.clock, MemoryPrimitive.context]) {
-      final target = heapRuntime.primitives.entries
-          .singleWhere((entry) => entry.value == primitive)
-          .key;
+  test(
+    'root protocol transitions satisfy the selected no-allocation contract',
+    () {
+      const operations = {
+        'link',
+        'unlink',
+        'publish',
+        'stop',
+        'resume',
+        'close',
+      };
+      final targets = heapRuntime.program.functions
+          .map((function) => function.target)
+          .where(
+            (target) =>
+                target.owner?.name == 'NativeRoots' &&
+                operations.contains(target.name),
+          )
+          .toList();
+      expect(targets.map((target) => target.name), unorderedEquals(operations));
+      expect(heapRuntime.nonAllocating, containsAll(targets));
+      final prepared = Compiler(generator.target)
+          .prepare(heapRuntime.program, roots: targets, runtime: heapRuntime);
+      expect(prepared.definitions, containsAll(targets));
+      expect(() => generator.generate(prepared), returnsNormally);
+    },
+  );
+
+  test('standalone services preserve their required entry context', () {
+    final clock = heapRuntime.primitives.entries
+        .singleWhere((entry) => entry.value == MemoryPrimitive.clock)
+        .key;
+    final context = heapRuntime.program.functions.singleWhere(
+      (body) =>
+          body.target.owner?.name == 'Memory' && body.target.name == 'context',
+    );
+    expect(
+      context.blocks
+          .expand((block) => block.instructions)
+          .whereType<ReadNativeContext>(),
+      hasLength(1),
+    );
+    for (final target in [clock, context.target]) {
       final block = Block();
       block.finish(Return(block.emit(DirectCall(target, []))));
       final prepared = Compiler(generator.target).prepare(
@@ -283,44 +425,62 @@ void main() {
         runtime: heapRuntime,
       );
       final module = generator.generate(prepared);
-      expect(
-        module.symbols.any((symbol) => symbol.name == target.name),
-        isTrue,
-      );
-      expect(
-        prepared.definitions.contains(heapRuntime.release),
-        primitive == MemoryPrimitive.context,
-      );
+      expect(module.symbols, isNotEmpty);
+      // Ordinary source roots remain Dart callees; they cannot release their
+      // caller's heap before returning a managed value or its context.
+      expect(prepared.definitions, isNot(contains(heapRuntime.release)));
+      if (target == context.target) {
+        final caller = FunctionTarget(uri, 'contextCaller', .integer, []);
+        final body = Block();
+        body.emit(BindNativeContext(const Constant.integer(0x1234)));
+        body.finish(Return(body.emit(DirectCall(entry, []))));
+        final graph = prepared.program;
+        final invoked = IrProgram(
+          graph.classes,
+          [
+            ...graph.functions,
+            IrFunction(caller, [body]),
+          ],
+          globals: graph.globals,
+          externals: graph.externals,
+        );
+        final facts = ProgramFlow(invoked, [
+          (target: caller, arguments: []),
+        ]).facts;
+        expect(
+          (facts.returnedBy(caller).constant as ScalarConstant).value,
+          0x1234,
+        );
+      }
     }
   });
   test('an unmanaged process still calls its final status provider', () {
     final status = FunctionTarget(uri, 'processStatus', .integer, []);
     final block = Block()..finish(Return(const Constant.integer(43)));
-    final module = generator.generate(
-      Compiler(generator.target).prepare(
-        IrProgram([], [mainBody(false)]),
-        roots: const [],
-        runtime: withCritical(
-          status,
-          processStatus: IrFunction(status, [block]),
-        ),
-        entryPoint: (function: entry, symbol: 'start'),
+    final prepared = Compiler(generator.target).prepare(
+      IrProgram([], [mainBody(false)]),
+      roots: const [],
+      runtime: withCritical(status, processStatus: IrFunction(status, [block])),
+      entryPoint: (function: entry, symbol: 'start'),
+    );
+    final module = generator.generate(prepared);
+    expect(module.symbols.any((symbol) => symbol.name == 'start'), isTrue);
+    final facts = ProgramFlow(
+      prepared.program,
+      [(target: prepared.entryPoint!.function, arguments: [])],
+      memoryLayout: ProgramLayout(
+        prepared.program.classes,
+        functions: prepared.program.functions,
+        nativeLayout: NativeLayout(generator.target),
       ),
-    );
-    final index = module.symbols.indexWhere(
-      (symbol) => symbol.name == status.name,
-    );
-    final start = module.symbols.singleWhere(
-      (symbol) => symbol.name == 'start',
-    );
+    ).facts;
+    // The body returns 42, but process completion must use the provider's 43,
+    // whether the actual call remains or its implementation has been inlined.
     expect(
-      module.relocations.where(
-        (relocation) =>
-            relocation.symbol == index &&
-            relocation.offset >= start.offset &&
-            relocation.offset < start.offset + start.size!,
-      ),
-      hasLength(1),
+      (facts.returnedBy(prepared.entryPoint!.function).constant
+              as ScalarConstant)
+          .value,
+      43,
     );
   });
   test(
@@ -334,9 +494,25 @@ void main() {
           )
           .target;
       for (final managed in [false, true]) {
-        final program = IrProgram([], [mainBody(managed)]);
+        final resultType = managed
+            ? CoreTypes.listOf(.integer)
+            : ValueType.integer;
+        final lifecycle = FunctionTarget(uri, 'lifecycle', resultType, []);
+        final body = Block();
+        body.finish(
+          Return(
+            managed
+                ? body.emit(NewCollection(CoreTypes.listOf(.integer)))
+                : const Constant.integer(42),
+          ),
+        );
+        // Returning the fresh list keeps its allocation observable. Reading
+        // only its empty length is a valid allocation-free compiler short path.
+        final program = IrProgram([], [
+          IrFunction(lifecycle, [body]),
+        ]);
         final prepared = Compiler(generator.target)
-            .prepare(program, roots: [entry], runtime: heapRuntime);
+            .prepare(program, roots: [lifecycle], runtime: heapRuntime);
         final module = generator.generate(prepared);
         expect(prepared.definitions, isNot(contains(eventLoopRun)));
         for (final target in [heapRuntime.allocate, heapRuntime.release]) {
@@ -354,7 +530,7 @@ void main() {
         if (managed) {
           expect(
             () => generator.generate(
-              Compiler(generator.target).prepare(program, roots: [entry]),
+              Compiler(generator.target).prepare(program, roots: [lifecycle]),
             ),
             throwsArgumentError,
           );
@@ -362,6 +538,25 @@ void main() {
       }
     },
   );
+
+  test('an eliminated local collection needs no managed lifecycle', () {
+    final prepared = Compiler(generator.target).prepare(
+      IrProgram([], [mainBody(true)]),
+      roots: [entry],
+      runtime: heapRuntime,
+    );
+    final module = generator.generate(prepared);
+    for (final target in [
+      heapRuntime.allocate,
+      heapRuntime.release,
+      heapRuntime.runEvents,
+    ]) {
+      expect(
+        module.symbols.any((symbol) => symbol.name == target.name),
+        isFalse,
+      );
+    }
+  });
 
   test(
     'ordinary pointer helpers cross branches and return in critical closures',

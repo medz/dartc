@@ -2,8 +2,10 @@ import 'dart:ffi';
 
 import 'package:dartc/compiler.dart';
 import 'package:dartc/codegen.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -16,6 +18,30 @@ void main() {
     Arm64CodeGenerator(const Target(.linux, .arm64)),
     X64CodeGenerator(const Target(.linux, .x64)),
   ]) {
+    PreparedProgram prepareSelection(
+      IrProgram program,
+      Iterable<FunctionTarget> roots,
+    ) {
+      // Dispatch selection needs the original call graph. The public compiler
+      // may inline these pure getters before this representation stage.
+      final composed = IrProgram(
+        [...heapRuntime.program.classes, ...program.classes],
+        [...heapRuntime.program.functions, ...program.functions],
+        globals: [...heapRuntime.program.globals, ...program.globals],
+        externals: [...heapRuntime.program.externals, ...program.externals],
+      );
+      final boundaries = NativeBoundaries(composed, roots: roots);
+      final preparation = ProgramPreparation(
+        generator.target,
+        boundaries.program,
+        boundaries: boundaries,
+        runtime: heapRuntime,
+      );
+      return preparation.prepare(
+        ProgramFlow(preparation.program, [], openEntries: roots).facts,
+      );
+    }
+
     test('${generator.target} selects reachable runtimeType overrides', () {
       final owner = ClassType(library, 'Override');
       final interface = ClassType(library, 'Interface');
@@ -68,8 +94,7 @@ void main() {
             IrFunction(root, [entry]),
           ],
         );
-        final prepared = Compiler(generator.target)
-            .prepare(program, runtime: heapRuntime, roots: [root]);
+        final prepared = prepareSelection(program, [root]);
         expect(prepared.definitions.contains(getter), !direct);
         expect(generator.generate(prepared).sections, isNotEmpty);
       }
@@ -167,10 +192,9 @@ void main() {
     );
 
     test(
-      '${generator.target} preserves calls producing a statically tested value',
+      '${generator.target} preserves effects producing a statically tested value',
       () {
         final producer = FunctionTarget(library, 'produce', .integer, []);
-        final produced = Block()..finish(Return(const Constant.integer(7)));
         final target = FunctionTarget(library, 'test', .boolean, []);
         final body = Block();
         body.finish(
@@ -180,18 +204,28 @@ void main() {
         );
         final module = generator.generate(
           Compiler(generator.target).prepare(
-            IrProgram([], [
-              IrFunction(producer, [produced]),
-              IrFunction(target, [body]),
-            ]),
+            IrProgram(
+              [],
+              [
+                IrFunction(target, [body]),
+              ],
+              externals: [IrExternal(producer)],
+            ),
             runtime: heapRuntime,
-            roots: [producer, target],
+            roots: [target],
+            imports: {
+              producer: NativeImport('produce', NativeSignature(Int64, [])),
+            },
           ),
         );
-        final call = module.relocations
+        final producerIndex = module.symbols.indexWhere(
+          (symbol) => symbol.name == 'produce',
+        );
+        expect(producerIndex, isNonNegative);
+        final calls = module.relocations
             .whereType<InstructionRelocation>()
-            .single;
-        expect(module.symbols[call.symbol].name, 'produce');
+            .where((relocation) => relocation.symbol == producerIndex);
+        expect(calls, hasLength(1));
       },
     );
 

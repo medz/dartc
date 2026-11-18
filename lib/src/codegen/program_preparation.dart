@@ -11,35 +11,19 @@ import 'heap_plan.dart';
 import 'heap_runtime.dart';
 import 'checked_casts.dart';
 import 'member_calls.dart';
-import 'global_storage.dart';
 import 'instance_storage.dart';
 import 'closure_storage.dart';
 import 'string_storage.dart';
 import 'record_storage.dart';
+import 'type_environment.dart';
+import 'type_implementations.dart';
+import 'callable_implementations.dart';
+import 'native_views.dart';
 
-/// A target preparation step, either closed or requiring more source facts.
-sealed class const PreparationResult();
-
-/// Source calls and instance classes discovered during target preparation.
+/// Prepares a closed source graph after execution lowerings and analysis.
 ///
-/// Extend the analysis of the same program with these facts, then prepare again.
-/// Calls admit all values allowed by their declared parameter types.
-final class PreparationDependencies._(
-  Iterable<FunctionTarget> calls,
-  Iterable<ClassType> instantiatedTypes,
-) extends PreparationResult {
-  /// Calls introduced by generated support code.
-  final Set<FunctionTarget> calls = .unmodifiable(calls);
-
-  /// Classes instantiated without a source constructor call.
-  final Set<ClassType> instantiatedTypes = .unmodifiable(instantiatedTypes);
-}
-
-/// Prepares storage after native bridges have entered semantic analysis.
-///
-/// Preparation consumes driver-supplied call and type facts, reporting
-/// [PreparationDependencies] until the driver obtains a [PreparedProgram].
-/// Runtime source definitions must be supplied with the input program.
+/// Runtime definitions and actual generated calls must already be in [program].
+/// Missing execution edges fail here; preparation never widens unknown roots.
 final class ProgramPreparation(
   /// The output platform used for layouts and native bindings.
   final Target target,
@@ -51,6 +35,9 @@ final class ProgramPreparation(
   Map<NativeReference, String> nativeSymbols = const {},
   ({FunctionTarget function, String symbol})? entryPoint,
   HeapRuntime? runtime,
+  TypeImplementations? typeImplementations,
+  CallableImplementations? callableImplementations,
+  NativeViews? nativeViews,
 }) {
   /// Independently callable source, export and process entries.
   late final Set<FunctionTarget> roots;
@@ -62,15 +49,21 @@ final class ProgramPreparation(
     nativeSymbols,
   );
   final _entryPoint = entryPoint;
-  final _runtime = runtime;
+  final _runtime = runtime?.rebind(program);
+  late final TypeImplementations _typeImplementations;
+  late final CallableImplementations _callableImplementations;
+  final _nativeViews = nativeViews;
   final NativeBoundaries _boundaries = boundaries;
   late final Map<FunctionTarget, NativeImport> _imports;
 
   this {
-    roots = .unmodifiable({
-      ...boundaries.roots,
-      if (entryPoint != null) ?runtime?.processExitCode,
-    });
+    _typeImplementations =
+        typeImplementations ?? TypeImplementations(runtime: _runtime?.types);
+    _typeImplementations.rebind(_runtime?.types);
+    _callableImplementations =
+        callableImplementations ??
+        CallableImplementations(types: _typeImplementations);
+    roots = .unmodifiable({...boundaries.roots});
     for (final entry in roots) {
       if (program.implementationOf(entry) == null) {
         throw ArgumentError('Missing native entry body: ${entry.name}');
@@ -85,6 +78,12 @@ final class ProgramPreparation(
       if (entry.value.signature != boundaries.imports[entry.key]!.signature) {
         throw ArgumentError(
           'Native import signature changed after boundary lowering.',
+        );
+      }
+      if (entry.value.isLeaf != boundaries.imports[entry.key]!.isLeaf ||
+          entry.value.isNonAllocating != boundaries.imports[entry.key]!.isNonAllocating) {
+        throw ArgumentError(
+          'Native effect promises changed after boundary lowering.',
         );
       }
     }
@@ -120,11 +119,33 @@ final class ProgramPreparation(
   ///
   /// Facts for another graph, or facts invalidated by analysis changes, fail.
   /// A rewrite requires a new preparation and a new analysis from its roots.
-  PreparationResult prepare(CallTypeFacts facts) {
-    facts.checkProgram(this.program);
-    if (roots.any((root) => !facts.admitsUnknownCall(root))) {
+  PreparedProgram prepare(ProgramCallFacts facts) {
+    facts.checkProgram(program);
+    if (facts is ProgramFlowFacts && facts.pendingExecutionCalls.isNotEmpty) {
+      throw StateError(
+        'Execution entries remain unimplemented for actual source calls: '
+        '${facts.pendingExecutionCalls.values.expand((targets) => targets).map((target) => target.name).toSet().join(', ')}.',
+      );
+    }
+    if (roots.any((root) => !facts.coversEntry(root))) {
       throw ArgumentError('Call facts must cover every preparation root.');
     }
+    final environment = TypeEnvironment(
+      program.functions.map((function) => function.target),
+    );
+    while (true) {
+      final revision = environment.revision;
+      final result = _prepare(facts, environment);
+      if (environment.revision == revision) return result;
+      // A changed ABI invalidates every caller, layout and root allocation.
+      // Rebuild from the same checked source before consuming dependencies.
+    }
+  }
+
+  PreparedProgram _prepare(
+    ProgramCallFacts facts,
+    TypeEnvironment environment,
+  ) {
     final program = this.program;
     final runtime = _runtime;
     final imports = _imports;
@@ -133,8 +154,16 @@ final class ProgramPreparation(
       for (final entry in callbacks.entries) entry.value.address: entry.key,
     };
     final sourceDefinitions = facts.definitions;
+    if (program.executionShapes case final shapes?) {
+      for (final function in program.functions) {
+        if (facts.definitions.contains(function.target)) shapes.verify(function);
+      }
+    }
     final selected = sourceDefinitions.toSet();
-    final heap = HeapPlan(runtime: runtime);
+    final heap = HeapPlan(
+      runtime: runtime,
+      managedContext: _boundaries.runtimeContext,
+    );
     final casts = CheckedCasts(failure: runtime?.typeCheckFailure);
     IrCallable? constructor(ValueType? type, [String name = 'new']) {
       final target = program.classes
@@ -157,6 +186,20 @@ final class ProgramPreparation(
         .whereType<IrCallable>()
         .toList();
     final bodies = sourceBodies.whereType<IrFunction>().toList();
+    if (bodies.any(
+      (body) => body.blocks.any(
+        (block) =>
+            block.instructions.any((operation) => operation is NativeCall) ||
+            switch (block.end) {
+              Invoke(operation: NativeCall()) => true,
+              _ => false,
+            },
+      ),
+    )) {
+      throw StateError(
+        'NativeCallLowering must enter analysis before preparation.',
+      );
+    }
     final strings = StringStorage(
       source: program.classes
           .where((c) => c.type == ValueType.string)
@@ -167,23 +210,15 @@ final class ProgramPreparation(
       program.classes,
       bodies.expand((body) => body.recordTypes),
     );
-    final globals = GlobalStorage(
-      bodies,
-      lateError: lateErrorType == null ? null : constructor(lateErrorType),
-    );
     final instances = InstanceStorage(
       bodies,
       lateError: lateErrorType == null ? null : constructor(lateErrorType),
     );
-    final helpers = [...globals.functions, ...instances.functions];
-    if (!globals.isEmpty) selected.add(globals.address);
+    final helpers = [...instances.functions];
     final requiredTypes = {
       ...instantiatedTypes,
       for (final function in helpers) ...function.instantiatedClasses,
     };
-    if (requiredTypes.any((type) => !facts.instantiates(type))) {
-      return PreparationDependencies._(const {}, requiredTypes);
-    }
     final members = MemberCalls(
       program,
       sourceDefinitions,
@@ -194,15 +229,15 @@ final class ProgramPreparation(
     final functions = [...bodies, ...helpers];
     final closures = ClosureStorage(
       [...sourceBodies, ...helpers],
+      storageDeclarations: program.classes,
+      definitions: [...program.functions, ...program.externals],
+      storedFunctions: _typeImplementations.values.descriptorFunctions,
+      callableImplementations: _callableImplementations,
       boundMethods: members.tearOffTargets,
-      lateFailure: instances.failure?.target,
     );
     final layouts = ProgramLayout(
-      [
-        ...program.classes,
-        if (!globals.isEmpty) globals.declaration,
-        ...closures.classes,
-      ],
+      [...program.classes, ...closures.classes],
+      executionShapes: program.executionShapes,
       nativeLayout: NativeLayout(target),
       functions: functions,
       instanceStorage: instances,
@@ -210,13 +245,12 @@ final class ProgramPreparation(
       stringStorage: strings,
       recordStorage: records,
       typeRuntime: runtime?.types,
+      typeImplementations: _typeImplementations,
+      typeEnvironment: environment,
+      nativeViews: _nativeViews,
       referencedClasses: [
         ...instantiatedTypes,
-        for (final declaration in [
-          if (!globals.isEmpty) globals.declaration,
-          ...closures.classes,
-          ?records.declaration,
-        ])
+        for (final declaration in [...closures.classes, ?records.declaration])
           declaration.type,
         for (final function in [...sourceBodies, ...helpers])
           ...function.referencedClasses,
@@ -227,7 +261,6 @@ final class ProgramPreparation(
       heap,
       casts,
       members,
-      globals,
       instances,
       imports: imports,
       callbacks: {
@@ -239,54 +272,52 @@ final class ProgramPreparation(
       final binding = imports[declaration];
       if (binding != null ||
           callbackGetters.containsKey(declaration) ||
-          declaration == globals.address ||
           heap.primitives.contains(declaration)) {
         continue;
       }
-      if (declaration == runtime?.types?.projection) {
-        selection.include(layouts.relations.projection);
-      } else if (function is! IrFunction) {
+      if (function is IrFunction) {
+        selection.include(function);
+      } else {
         throw ArgumentError(
           'Definition has no body: ${declaration.library}::'
           '${declaration.owner == null ? '' : '${declaration.owner!.dartName}.'}'
           '${declaration.name}',
         );
-      } else {
-        selection.include(function);
       }
     }
     final calls = {
-      for (final body in selection.functions.values) ...body.invocations.values,
+      for (final body in selection.functions.values) ...body.callees,
     };
     final activeCallbacks = {
       for (final entry in callbacks.entries)
         if (calls.contains(entry.value.address)) entry.key: entry.value,
     };
-    final persistent =
-        activeCallbacks.isNotEmpty ||
-        !globals.isEmpty && globals.hasReferences(layouts);
+    final persistent = _boundaries.persistent;
     final missing = selection.close(persistent: persistent, roots: roots);
     for (final target in missing) {
       if (program.implementationOf(target) == null) {
         throw ArgumentError('Missing support dependency: ${target.name}');
       }
     }
-    final additional = {
-      ...missing,
-      for (final callback in activeCallbacks.values) ...[
-        callback.address,
-        callback.target,
-      ],
-      for (final target in selection.implicitCalls)
-        if (program.implementationOf(target) is IrFunction) target,
-    }.where((target) => !facts.admitsUnknownCall(target)).toSet();
-    if (additional.isNotEmpty) {
-      return PreparationDependencies._(additional, requiredTypes);
-    }
-    if (missing.isNotEmpty) {
+    if (missing.isNotEmpty || selection.implicitCalls.isNotEmpty) {
       throw StateError(
-        'Required source calls were not selected: '
-        '${missing.map((target) => target.name).join(', ')}',
+        'Execution implementations must enter their actual callers before '
+        'target preparation: '
+        'missing definitions: ${missing.map((target) => target.name).join(', ')}; '
+        'unobserved calls: ${selection.unobservedCalls.entries.map((entry) => '${entry.value.caller.owner?.name ?? ''}.${entry.value.caller.name} '
+            '[${entry.key.runtimeType}] -> '
+            '${entry.value.target.owner?.name ?? ''}.${entry.value.target.name}').join(', ')}',
+      );
+    }
+    final nativeEntries = {
+      ..._boundaries.exports.keys,
+      for (final callback in activeCallbacks.values) callback.target,
+      if (_entryPoint != null) _entryPoint.function,
+    };
+    if (runtime == null && selection.unwindsTo(roots) ||
+        !_boundaries.hasLifecycle && selection.unwindsTo(nativeEntries)) {
+      throw ArgumentError(
+        'An escaping Dart failure requires an explicit runtime entry lifecycle.',
       );
     }
     for (final function in runtime?.nonAllocating ?? const []) {
@@ -310,7 +341,7 @@ final class ProgramPreparation(
 /// Emission may assign locations and addresses but cannot add dependencies.
 final class PreparedProgram._(
   final ProgramPreparation _input,
-  final CallTypeFacts _facts,
+  final ProgramCallFacts _facts,
   final ProgramSelection _selection,
   Set<FunctionTarget> selected,
   final bool _persistent,
@@ -319,9 +350,12 @@ final class PreparedProgram._(
     ({FunctionTarget address, FunctionTarget target})
   >
   _callbacks,
-) extends PreparationResult {
+) {
   /// The exact source input to the converged analysis.
   IrProgram get program => _input.program;
+
+  /// Runtime entries checked against this exact rewritten program, if supplied.
+  HeapRuntime? get runtime => _input._runtime;
 
   /// The platform used for layout and native ABI selection.
   Target get target => _input.target;
@@ -329,9 +363,7 @@ final class PreparedProgram._(
   /// Definitions retained after source and generated dependencies converge.
   late final Set<FunctionTarget> definitions;
 
-  final FunctionTarget? _cleanup = _persistent && _input._entryPoint == null
-      ? FunctionTarget(null, 'release', .voidType, [])
-      : null;
+  final FunctionTarget? _cleanup = _input._boundaries.cleanup;
   late final Set<String> _nativeNames;
 
   this {
@@ -339,7 +371,7 @@ final class PreparedProgram._(
       ...selected,
       ..._selection.functions.keys,
       ..._selection.primitives,
-      ..._selection.layouts.nativeCalls.signatures.keys,
+      ..._selection.layouts.nativeCalls.entries.keys,
       ?_cleanup,
     });
     final names = <String>{};
@@ -383,7 +415,6 @@ extension PreparedProgramEmission on PreparedProgram {
   Map<NativeReference, String> get nativeSymbols => _input._nativeSymbols;
   ({FunctionTarget function, String symbol})? get entryPoint =>
       _input._entryPoint;
-  HeapRuntime? get runtime => _input._runtime;
   bool get persistent => _persistent;
   FunctionTarget? get cleanup => _cleanup;
 

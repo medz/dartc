@@ -34,17 +34,16 @@ final class MemoryFunction<R extends Object>(
       case .fail:
         emitter.abort(71);
         return emitter.finish();
+      case .exitProcess:
+        emitter.exitProcess();
+        return emitter.finish();
       case .currentThread:
         emitter.currentThread();
-      case .callbackTemplate || .context:
+      case .callbackTemplate:
         final result = emitter.convention
             .classify(NativeSignature(Int64, []))
             .resultRegister!;
-        if (primitive == .context) {
-          emitter.move(result, emitter.heapRegister);
-        } else {
-          emitter.address(result, callbackTemplate);
-        }
+        emitter.address(result, callbackTemplate);
     }
     emitter.loadImmediate(emitter.failureRegister, 0);
     emitter.ret();

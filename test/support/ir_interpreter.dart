@@ -7,6 +7,7 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/abi.dart';
 import 'package:dartc/target.dart';
+import 'package:dartc/optimizer.dart' show FlowTypeLayout;
 import 'package:test/test.dart';
 
 import 'numeric_order.dart';
@@ -20,6 +21,7 @@ final class IrInterpreter(
   final IrProgram program,
   final Map<(Uri, String), Object? Function(int)> imports, {
   final Object? Function(NativeCall, int, List<Object?>)? callNative,
+  final FlowTypeLayout? typeLayout,
   final Map<FunctionTarget, Object? Function(List<Object?>)> externalCalls =
       const {},
 }) {
@@ -107,13 +109,16 @@ final class IrInterpreter(
   }
 
   final _staticFunctions = <Object, _FunctionValue>{};
+  final _physicalFunctions = <_Instance, _FunctionValue>{};
+  final _entryTables = <FunctionTarget, int>{};
 
   final _constants = <Object, Object>{};
+  final _moduleObjects = <ModuleObject, _Instance>{};
 
   final _types = <ValueType, _TypeValue>{};
 
   _TypeValue _typeValue(ValueType type) {
-    final normalized = type.normalize();
+    final normalized = type.reify();
     return _types.putIfAbsent(normalized, () => _TypeValue(normalized));
   }
 
@@ -151,6 +156,9 @@ final class IrInterpreter(
     Map<TypeParameterType, ValueType> environment = const {},
   ]) {
     value = _resolvedConstant(value, environment);
+    if (value is ObjectConstant) {
+      value = typeLayout?.canonicalTypeConstant(value) ?? value;
+    }
     return switch (value) {
       ScalarConstant(:final value) => value,
       TypeConstant(:final representedType) => _typeValue(representedType),
@@ -161,6 +169,7 @@ final class IrInterpreter(
         :final constructorSignature,
         :final constructorAlias,
         :final constructorTypeArguments,
+        :final invocationEntry,
       ) =>
         _staticFunctions.putIfAbsent(
           value.structuralKey,
@@ -179,6 +188,8 @@ final class IrInterpreter(
                 : constructorSignature,
             constructorAlias,
             constructorTypeArguments,
+            invocationEntry,
+            value.runtimeValueType as FunctionType,
           ),
         ),
       RecordConstant(:final type, :final fields) => _constants.putIfAbsent(
@@ -234,6 +245,15 @@ final class IrInterpreter(
             .asInstanceOf(target.owner!)!
             .typeEnvironment,
       };
+    }
+    // Direct calls enter the same checked body as virtual/callable dispatch.
+    // Receiver substitution above supplies the actual owning type arguments.
+    for (final index in target.covariantParameters) {
+      _typeOperation(
+        target.signature.parameters[index].substitute(environment),
+        arguments[target.argumentOffset + index],
+        cast: true,
+      );
     }
     if (target.library.toString() == 'dart:async' && !target.kind.hasReceiver) {
       if (target.name == 'scheduleMicrotask' && target.owner == null) {
@@ -438,7 +458,10 @@ final class IrInterpreter(
         init.name == 'getter' ? 1 : 2,
       );
     }
-    final instance = _Instance(instantiatedType ?? init.owner!, this);
+    final instance = _Instance(
+      (instantiatedType ?? init.owner!).reify() as ClassType,
+      this,
+    );
     if (init.owner == CoreTypes.mapEntry) {
       instance.fields[CoreTypes.mapEntryKey] = arguments[0];
       instance.fields[CoreTypes.mapEntryValue] = arguments[1];
@@ -571,8 +594,26 @@ final class IrInterpreter(
     List<Object?> positional,
     Map<String, Object?> named, [
     List<ValueType> typeArguments = const [],
+    CallEntryBinding? entryBinding,
   ]) {
-    var target = fn.target;
+    _checkStoredFunction(fn.genericOrigin ?? fn);
+    var target = fn.invocationEntry ?? fn.target;
+    if (entryBinding != null &&
+        target.kind != .initializer &&
+        target.kind != .factory) {
+      final entry = entryBinding.entries[target.implementation];
+      if (entry == null) {
+        throw StateError(
+          'Missing callable execution entry for ${target.name}.',
+        );
+      }
+      return _enter(entry, [
+        fn,
+        ...positional,
+        for (final name in entryBinding.shape.named.keys) named[name],
+        for (final type in typeArguments) _typeValue(type),
+      ]);
+    }
     var environment = {
       ...fn.environment,
       if (fn.receiver != null)
@@ -611,6 +652,20 @@ final class IrInterpreter(
       target = resolved.target;
       environment = {...environment, ...resolved.ownerType.typeEnvironment};
     }
+    if (entryBinding != null) {
+      final entry = entryBinding.entries[target];
+      if (entry == null) {
+        throw StateError(
+          'Missing callable execution entry for ${target.name}.',
+        );
+      }
+      return _enter(entry, [
+        fn,
+        ...positional,
+        for (final name in entryBinding.shape.named.keys) named[name],
+        for (final type in typeArguments) _typeValue(type),
+      ]);
+    }
     final declaredSignature =
         target.signature.substitute(environment) as FunctionType;
     final signature = declaredSignature.typeParameters.isEmpty
@@ -636,6 +691,15 @@ final class IrInterpreter(
             if (target.kind.hasReceiver) fn.receiver,
             ...arguments,
           ], environment);
+  }
+
+  void _checkStoredFunction(_FunctionValue value) {
+    final storage = value.physicalStorage;
+    final expected = _entryTables[value.invocationEntry ?? value.target];
+    if (storage != null && (expected == null ||
+        storage.fields[FunctionStorage.entries] != expected)) {
+      throw StateError('Callable storage has a foreign execution table.');
+    }
   }
 
   bool _matchesShape(
@@ -801,6 +865,9 @@ final class IrInterpreter(
     if (receiver is _FunctionValue && selector.name == 'call') {
       if (selector.kind == .getter) return receiver;
       if (selector.kind == .method) {
+        if (operation?.entryBinding case final binding?) {
+          return _invoke(receiver, positional, named, types, binding);
+        }
         return _dynamicFunction(
           receiver,
           positional,
@@ -865,6 +932,11 @@ final class IrInterpreter(
         );
         final other = program.lookupMember(receiver.type, alternate);
         if (other.target case final target?) {
+          if (selector.kind == .getter) {
+            if (operation?.methodBindings[target] case final binding?) {
+              return _enter(binding, [receiver]);
+            }
+          }
           final function = _FunctionValue(target, receiver);
           if (selector.kind == .getter) return function;
           if (operation?.getterCalls[target] case final helper?) {
@@ -1411,8 +1483,15 @@ final class IrInterpreter(
     List<Object?> positional,
     Map<String, Object?> named, [
     List<ValueType> typeArguments = const [],
+    CallEntryBinding? entryBinding,
   ]) => switch (function) {
-    _FunctionValue() => _invoke(function, positional, named, typeArguments),
+    _FunctionValue() => _invoke(
+      function,
+      positional,
+      named,
+      typeArguments,
+      entryBinding,
+    ),
     _NativeFunction(:final callback) => callback(positional),
     _ => throw StateError('Not a fixture function: $function'),
   };
@@ -1843,6 +1922,12 @@ final class IrInterpreter(
     Map<TypeParameterType, ValueType> environment, [
     _ExecutionFrame? frame,
   ]) {
+    environment = {
+      ...environment,
+      for (final binding in function.typeBindings)
+        if (binding.value case TypeConstant(:final representedType))
+          binding.parameter: representedType,
+    };
     ValueType resolve(ValueType type) => type.substitute(environment);
     final values = frame?.values ?? <Value, Object?>{};
     Object? read(Value v) => switch (v) {
@@ -1856,20 +1941,16 @@ final class IrInterpreter(
       final matches = switch (type) {
         NonNullableTypeParameterType(:final parameter) =>
           value != null && (checkType(parameter, value, cast: false) as bool),
-        PromotedTypeParameterType(
-          :final parameter,
-          :final bound,
-          :final isNonNullable,
-        ) =>
+        PromotedType(:final lexicalType, :final bound, :final isNonNullable) =>
           (!isNonNullable || value != null) &&
-              (checkType(parameter, value, cast: false) as bool) &&
+              (checkType(lexicalType, value, cast: false) as bool) &&
               (checkType(bound, value, cast: false) as bool),
         FutureOrType(:final argument, :final futureType) =>
           (checkType(argument, value, cast: false) as bool) ||
               (checkType(futureType, value, cast: false) as bool),
         _
             when type != type.nonNullable &&
-                (type.nonNullable is PromotedTypeParameterType ||
+                (type.nonNullable is PromotedType ||
                     type.nonNullable is FutureOrType) =>
           value == null ||
               (checkType(type.nonNullable, value, cast: false) as bool),
@@ -1887,7 +1968,14 @@ final class IrInterpreter(
       switch (op) {
         case CaptureStackTrace():
           values[op] = StackTrace.current;
-        case FrameValue() || ObjectDescriptorAddress() || InitializeObject():
+        case FrameValue() ||
+            StackMapAddress() ||
+            ModuleRootsAddress() ||
+            ReadNativeContext() ||
+            BindNativeContext() ||
+            NativeLocalStorage() ||
+            ObjectDescriptorAddress() ||
+            InitializeObject():
           throw UnsupportedError(
             'Machine storage and frame values require target execution.',
           );
@@ -1908,6 +1996,14 @@ final class IrInterpreter(
             this,
             payload: List.filled(length ~/ ObjectHeader.alignment, null),
           );
+        case ModuleObjectReference(:final declaration):
+          values[op] = _moduleObjects.putIfAbsent(declaration, () {
+            final object = _Instance(declaration.type, this);
+            for (final entry in declaration.initialFields.entries) {
+              object.fields[entry.key] = _constant(entry.value);
+            }
+            return object;
+          });
         case LoadObjectReference(:final object, :final byteOffset):
           final instance = read(object) as _Instance;
           values[op] =
@@ -1924,6 +2020,7 @@ final class IrInterpreter(
         case NativeView() ||
             NativeAddress() ||
             NativeSymbolAddress() ||
+            NativeDataAddress() ||
             NativeSize() ||
             NativeFieldOffset() ||
             CopyNative():
@@ -1949,6 +2046,8 @@ final class IrInterpreter(
             (read(pointer) as ffi.Pointer).address +
                 (read(index) as int) * size,
           );
+        case RawNativeCall():
+          throw UnsupportedError('Raw native calls require target execution.');
         case NativeCall(:final pointer, :final arguments):
           final invoke = callNative;
           if (invoke == null) {
@@ -1959,8 +2058,10 @@ final class IrInterpreter(
           final address = (read(pointer) as ffi.Pointer).address;
           values[op] = invoke(op, address, arguments.map(read).toList());
         case LoadObjectData() ||
+            MaterializedValue() ||
             ReferenceAddress() ||
             ReferenceFromAddress() ||
+            ManagedStorageAllocation() ||
             AllocatedObject() ||
             StoreObjectData():
           throw UnsupportedError(
@@ -2023,6 +2124,30 @@ final class IrInterpreter(
           }
         case ReifyType(:final template):
           values[op] = _typeValue(resolve(template));
+        case CheckedTypeArgument(
+          :final parameter,
+          :final argument,
+          environment: final raw,
+          :final implementation,
+        ):
+          final actual = read(argument) as _TypeValue;
+          final substituted = {
+            for (final entry in raw.entries)
+              entry.key: (read(entry.value) as _TypeValue).representedType,
+          };
+          if (implementation != null) {
+            _enter(implementation, op.inputs.map(read).toList());
+          } else if (!parameter.bound
+              .substitute(substituted)
+              .accepts(actual.representedType)) {
+            throw TypeError();
+          }
+          values[op] = actual;
+          if (function.typeBindings.any(
+            (binding) => identical(binding.value, op),
+          )) {
+            environment[parameter] = actual.representedType;
+          }
         case ObjectHashCode(:final operand, :final direct):
           values[op] = direct
               ? identityHashCode(read(operand))
@@ -2178,12 +2303,42 @@ final class IrInterpreter(
           }
         case AssertionFailure(:final message):
           throw AssertionError(message == null ? null : read(message));
-        case Construct(:final initializer, :final inputs):
-          values[op] = _construct(
+        case FunctionEntryTableAddress(:final target):
+          values[op] = _entryTables.putIfAbsent(target, () => _entryTables.length + 1);
+        case CellStorageView(:final backing):
+          values[op] = read(backing);
+        case CellStorageReference(:final cell):
+          values[op] = read(cell);
+        case CellReference(:final cell):
+          values[op] = read(cell);
+        case CallableReference(:final function):
+          values[op] = read(function);
+        case Construct(:final initializer, :final arguments, :final callableStorage):
+          final instance = _construct(
             initializer,
-            inputs.map(read).toList(),
-            resolve(op.type) as ClassType,
+            arguments.map(read).toList(),
+            op.instantiatedType.substitute(environment) as ClassType,
           );
+          if (callableStorage == null) {
+            values[op] = instance;
+          } else {
+            final storage = callableStorage;
+            final source = storage.source;
+            if (source == null) {
+              final original = instance.fields[storage.origin] as _FunctionValue;
+              var list = instance.fields[storage.arguments] as _Instance?;
+              final types = <ValueType>[];
+              while (list != null) {
+                types.add((list.fields[TypeMetadata.head] as _TypeValue).representedType);
+                list = list.fields[TypeMetadata.tail] as _Instance?;
+              }
+              values[op] = _physicalFunctions[instance] = original.instantiate(types, storage: instance, shape: storage);
+            } else {
+              values[op] = _physicalFunctions[instance] = _FunctionValue(source,
+                  null, const [], const {}, null, null, null, null, null,
+                  null, null, instance, storage);
+            }
+          }
         case MakeClosure(:final target, :final inputs):
           values[op] = _FunctionValue(
             target,
@@ -2191,6 +2346,52 @@ final class IrInterpreter(
             inputs.map(read).toList(),
             environment,
           );
+        case ReadFunctionTypeArgument(
+          :final function,
+          :final source,
+          :final parameter,
+        ):
+          final value = read(function) as _FunctionValue;
+          final original = value.genericOrigin ?? value;
+          _checkStoredFunction(original);
+          if ((original.invocationEntry ?? original.target.implementation) !=
+              source) {
+            throw StateError(
+              'Callable type environment source does not match its value.',
+            );
+          }
+          final own = source.typeParameters.indexOf(parameter);
+          final actual = own >= 0
+              ? value.typeArguments![own]
+              : original.environment[parameter] ??
+                    (original.receiver == null
+                        ? null
+                        : (_runtimeValueType(original.receiver) as ClassType)
+                              .asInstanceOf(source.owner!)
+                              ?.typeEnvironment[parameter]);
+          if (actual == null) {
+            throw StateError('Missing captured type argument.');
+          }
+          values[op] = _typeValue(actual);
+        case ReadFunctionEnvironment(
+          :final function,
+          :final source,
+          :final capture,
+        ):
+          final value = read(function) as _FunctionValue;
+          final original = value.genericOrigin ?? value;
+          _checkStoredFunction(original);
+          if ((original.invocationEntry ?? original.target.implementation) !=
+              source) {
+            throw StateError(
+              'Callable environment source does not match its value.',
+            );
+          }
+          values[op] = capture != null
+              ? original.captures[capture]
+              : source.kind == .closure
+              ? original
+              : original.receiver;
         case NewCell(:final initial, :final initializer):
           final type = op.type as CellType;
           final cell = _Cell(
@@ -2215,6 +2416,14 @@ final class IrInterpreter(
           _storeCell(read(cell) as _Cell, read(value));
         case BindMethod(:final method, :final receiver, :final direct):
           final instance = read(receiver);
+          if (op.entryBinding case final binding?) {
+            final type = _runtimeValueType(instance);
+            final source = direct ? method : program.lookupMember(
+              type is ClassType ? type : ValueType.nullClass, method.selector).target;
+            final entry = binding.entries[source] ?? (throw StateError('Missing actual fixture method producer.'));
+            values[op] = _enter(entry, [instance, ...op.executionTypes.map(read)]);
+            break;
+          }
           if (method.owner == ValueType.nullClass) {
             values[op] = _FunctionValue(method, null);
             break;
@@ -2298,10 +2507,15 @@ final class IrInterpreter(
           :final positional,
           :final named,
           :final typeArguments,
+          :final entryBinding,
         ):
-          values[op] = _call(read(function), positional.map(read).toList(), {
-            for (final e in named.entries) e.key: read(e.value),
-          }, typeArguments.map(resolve).toList());
+          values[op] = _call(
+            read(function),
+            positional.map(read).toList(),
+            {for (final e in named.entries) e.key: read(e.value)},
+            typeArguments.map(resolve).toList(),
+            entryBinding,
+          );
         case LoadLibrary(:final reference):
           values[op] = _GuestFuture(
             CoreTypes.futureOf(.dynamicType),
@@ -2316,6 +2530,14 @@ final class IrInterpreter(
           values[op] = _loadGlobal(global);
         case StoreGlobal(:final global, :final value):
           _storeGlobal(global, read(value));
+        case InitializeStorageField(:final field, :final destination, :final source):
+          final from = read(source) as _Instance;
+          final to = read(destination) as _Instance;
+          if (from.fields.containsKey(field)) {
+            to.fields[field] = from.fields[field];
+          } else {
+            to.fields.remove(field);
+          }
         case StoreField(:final field, :final receiver, :final value):
           final instance = read(receiver) as _Instance;
           final type = field.type.substitute(
@@ -2328,11 +2550,56 @@ final class IrInterpreter(
             instance.fields[field] = converted;
           }
         case LoadField(:final field, :final receiver):
-          values[op] = field.owner == CoreTypes.mapEntry
-              ? _entryField(read(receiver), field)
-              : field.isLate
-              ? _loadLateField(read(receiver) as _Instance, field)
-              : (read(receiver) as _Instance).fields[field];
+          final object = read(receiver);
+          if (object is _FunctionValue && field.owner == FunctionStorage.type) {
+            final original = object.genericOrigin ?? object;
+            if ((object.physicalStorage ?? original.physicalStorage) case final storage?) {
+              final raw = storage.fields[field];
+              values[op] = raw is _Instance ? _physicalFunctions[raw] ?? raw : raw;
+            } else if (field == FunctionStorage.entries) {
+              values[op] = _entryTables.putIfAbsent(
+                  original.invocationEntry ?? original.target, () => _entryTables.length + 1);
+            } else if (field == FunctionStorage.identity) {
+              values[op] = identityHashCode(original.target);
+            } else if (field == FunctionStorage.arguments) {
+              _Instance? list;
+              for (final type in (object.typeArguments ?? const <ValueType>[]).reversed) {
+                list = _Instance(TypeMetadata.list, this)
+                  ..fields[TypeMetadata.head] = _typeValue(type)
+                  ..fields[TypeMetadata.tail] = list;
+              }
+              values[op] = list;
+            } else {
+              values[op] = null;
+            }
+          } else if (object is _TypeValue) {
+            final layout = typeLayout;
+            if (layout == null) {
+              throw StateError(
+                'Reading built-in type metadata requires a shared type layout.',
+              );
+            }
+            final view = layout.typeConstant(
+              TypeConstant(object.representedType),
+            );
+            final value = view.fields[field];
+            if (value == null) {
+              throw StateError(
+                'The built-in type representation has no field $field.',
+              );
+            }
+            values[op] = _constant(value);
+          } else {
+            if (field.initiallyUnbound && object is _Instance &&
+                !object.fields.containsKey(field)) {
+              throw StateError('A raw slot must be initialized before a Dart read.');
+            }
+            values[op] = field.owner == CoreTypes.mapEntry
+                ? _entryField(object, field)
+                : field.isLate
+                ? _loadLateField(object as _Instance, field)
+                : (object as _Instance).fields[field];
+          }
           if (field.requiresReadCheck) {
             values[op] = checkType(op.type, values[op], cast: true);
           }
@@ -2392,6 +2659,15 @@ final class IrInterpreter(
                       member,
                     ) ??
                     member;
+          if (op.entryBinding case final binding?) {
+            final entry = binding.entries[target] ??
+                (throw StateError('Missing actual member execution entry.'));
+            values[op] = _invoke(_FunctionValue(entry, null), [value,
+              ...positional.map(read),
+              for (final name in binding.names) read(named[name]!),
+              ...op.executionTypes.map(read)], const {}, const []);
+            break;
+          }
           values[op] = _invoke(
             _FunctionValue(target, value),
             positional.map(read).toList(),
@@ -2416,6 +2692,12 @@ final class IrInterpreter(
           values[op] = checkType(type, read(operand), cast: true);
         case TypeView(:final operand) || UncheckedCast(:final operand):
           values[op] = read(operand);
+        case MaterializeValue(value: final Value value) ||
+            ProjectValue(value: final Value value) ||
+            ConstantCarrier(value: final Value value):
+          // The source-level model observes the scalar language result. Physical
+          // payload reads and allocation failure require the lowered memory model.
+          values[op] = read(value);
         case NullCheck(:final operand):
           values[op] = read(operand)!;
         case StringConcat(:final left, :final right):
@@ -2519,10 +2801,13 @@ final class IrInterpreter(
           :final inputs,
           :final ownerType,
           :final typeArguments,
+          :final lexicalEnvironment,
         ):
           final arguments = inputs.map(read).toList();
           values[op] = _enter(target, arguments, {
             ...environment,
+            for (final entry in lexicalEnvironment.entries)
+              entry.key: resolve(entry.value),
             if (ownerType != null)
               ...(resolve(ownerType) as ClassType).typeEnvironment,
             for (final (i, parameter) in target.typeParameters.indexed)
@@ -2759,12 +3044,26 @@ final class _GeneratorIterator(
 }
 
 Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
+  type = type.runtimeCheckType;
+  if (type case PromotedType(
+    :final lexicalType,
+    :final bound,
+    :final isNonNullable,
+  )) {
+    final matches =
+        (!isNonNullable || value != null) &&
+        (_typeOperation(lexicalType, value, cast: false) as bool) &&
+        (_typeOperation(bound, value, cast: false) as bool);
+    if (!cast) return matches;
+    if (!matches) throw TypeError();
+    return value;
+  }
   if (type == ValueType.dynamicType) return cast ? value : true;
   Object? run<T>() => cast ? value as T : value is T;
   Object? scalar<T>() => type == type.nonNullable ? run<T>() : run<T?>();
   final actual = switch (value) {
     ffi.Pointer() => FfiTypes.pointerRuntimeType,
-    _TypeValue() => ValueType.typeType,
+    _TypeValue() => TypeMetadata.type,
     _Instance(:final type) => type,
     _CollectionValue(:final type) => type,
     _GeneratorIterable(:final type) ||
@@ -2778,7 +3077,7 @@ Object? _typeOperation(ValueType type, Object? value, {required bool cast}) {
   };
   if (actual != null || type.nonNullable is FunctionType) {
     final ok = actual != null
-        ? type.accepts(actual)
+        ? type.accepts(actual.runtimeValueBound)
         : value == null && type.accepts(.nullType);
     if (!cast) return ok;
     if (!ok) throw TypeError();
@@ -2898,15 +3197,30 @@ final class _TypeValue(final ValueType representedType) {
 
 final class _FunctionValue(
   final FunctionTarget target, [
-  final Object? receiver,
-  final List<Object?> captures = const [],
-  final Map<TypeParameterType, ValueType> environment = const {},
+  final Object? _receiver,
+  final List<Object?> _captures = const [],
+  final Map<TypeParameterType, ValueType> _environment = const {},
   final List<ValueType>? typeArguments,
   final _FunctionValue? genericOrigin,
   final FunctionType? constructorSignature,
   final (Uri, String)? constructorAlias,
   final List<ValueType>? constructorTypeArguments,
+  final FunctionTarget? invocationEntry,
+  final FunctionType? constantSignature,
+  final _Instance? physicalStorage,
+  final CallableStorage? physicalShape,
 ]) {
+  Object? get receiver => physicalShape?.source?.kind.isVirtual == true
+      ? physicalStorage!.fields[physicalShape!.captures.single] : _receiver;
+  List<Object?> get captures => physicalShape?.source?.kind == FunctionKind.closure
+      ? physicalShape!.captures.map((field) => physicalStorage!.fields[field]).toList()
+      : _captures;
+  Map<TypeParameterType, ValueType> get environment => physicalShape == null || physicalShape!.source == null
+      ? _environment : {
+        for (final (index, parameter) in physicalShape!.parameters.indexed)
+          if (physicalStorage!.fields[physicalShape!.descriptors[index]]
+              case _TypeValue(:final representedType)) parameter: representedType,
+      };
   @override
   String toString() =>
       throw UnsupportedError('Unmodeled fixture function formatting');
@@ -2922,7 +3236,9 @@ final class _FunctionValue(
             : null,
       );
 
-  _FunctionValue instantiate(List<ValueType> arguments) {
+  _FunctionValue instantiate(List<ValueType> arguments, {
+    _Instance? storage, CallableStorage? shape,
+  }) {
     _instantiateSignature(reifiedSignature, arguments);
     return _FunctionValue(
       target,
@@ -2934,10 +3250,16 @@ final class _FunctionValue(
       constructorSignature,
       constructorAlias,
       constructorTypeArguments,
+      invocationEntry,
+      constantSignature == null
+          ? null
+          : _instantiateSignature(constantSignature!, arguments),
+      storage, shape,
     );
   }
 
   FunctionType get reifiedSignature {
+    if (constantSignature != null) return constantSignature!;
     final signature = genericSignature.substitute({
       ...environment,
       if (receiver != null)
@@ -2945,9 +3267,11 @@ final class _FunctionValue(
             .asInstanceOf(target.owner!)!
             .typeEnvironment,
     }) as FunctionType;
-    return typeArguments == null
-        ? signature
-        : _instantiateSignature(signature, typeArguments!);
+    return (typeArguments == null
+                ? signature
+                : _instantiateSignature(signature, typeArguments!))
+            .reify()
+        as FunctionType;
   }
 
   bool get isConstructor =>
@@ -3094,6 +3418,12 @@ final class _Instance(
 }
 
 final class _RecordValue(final RecordType type, final List<Object?> fields) {
+  RecordType get runtimeValueType =>
+      RecordType(fields.take(type.positionalCount).map(_runtimeValueType), {
+        for (final entry in type.slots.entries.skip(type.positionalCount))
+          entry.key: _runtimeValueType(fields[entry.value]),
+      });
+
   @override
   bool operator ==(Object other) =>
       other is _RecordValue &&
@@ -3224,10 +3554,10 @@ ValueType _runtimeValueType(Object? value) => switch (value) {
   _GeneratorIterable() || _GeneratorIterator() => throw UnsupportedError(
     'Unmodeled concrete generator runtime type',
   ),
-  _RecordValue(:final type) => type,
+  _RecordValue() => value.runtimeValueType,
   _FunctionValue() => value.reifiedSignature,
   _NativeFunction(:final signature) => signature,
-  _TypeValue() => ValueType.typeType,
+  _TypeValue() => TypeMetadata.type,
   bool() => ValueType.boolean,
   int() => ValueType.integer,
   double() => ValueType.floating,

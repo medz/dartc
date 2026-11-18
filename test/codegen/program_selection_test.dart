@@ -3,7 +3,6 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
-import 'package:dartc/src/codegen/global_storage.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/codegen.dart' show ProgramNormalization;
@@ -71,7 +70,6 @@ void main() {
           ),
           {},
         ),
-        GlobalStorage([]),
         layout.instances,
       );
       selection.include(function);
@@ -112,7 +110,6 @@ void main() {
             origin == 'generated' ? [callee] : [root],
           ).facts,
         ),
-        GlobalStorage([]),
         layout.instances,
       );
       selection.include(function);
@@ -174,7 +171,6 @@ void main() {
       HeapPlan(runtime: heapRuntime),
       CheckedCasts(failure: heapRuntime.typeCheckFailure),
       MemberCalls(program, functions.map((body) => body.target).toSet()),
-      GlobalStorage([]),
       layout.instances,
     );
     functions.forEach(selection.include);
@@ -230,7 +226,6 @@ void main() {
       heap,
       casts,
       MemberCalls(program, {}),
-      GlobalStorage([]),
       layouts.instances,
     );
     program.functions.forEach(selection.include);
@@ -314,7 +309,6 @@ void main() {
       heap,
       casts,
       MemberCalls(program, {}),
-      GlobalStorage([]),
       layouts.instances,
     );
     selection.include(IrFunction(helper, [entry]));

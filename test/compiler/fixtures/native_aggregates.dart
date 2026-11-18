@@ -410,9 +410,5 @@ double readVariableRow(int count) {
 
 @Export<Void Function(Pointer<Mixed>, Pointer<Mixed>)>()
 void copyNativeState(Pointer<Mixed> destination, Pointer<Mixed> source) {
-  Memory.copyBytes(
-    destination.cast<Uint8>(),
-    source.cast<Uint8>(),
-    sizeOf<Mixed>(),
-  );
+  Memory.copyBytes(destination.address, source.address, sizeOf<Mixed>());
 }

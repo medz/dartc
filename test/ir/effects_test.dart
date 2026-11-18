@@ -26,7 +26,7 @@ void main() {
     expect(() => NumericToInt.unchecked(n), throwsArgumentError);
   });
   test(
-    'numeric constants need no runtime allocation when viewed as objects',
+    'language views stay pure and materialization owns allocation failure',
     () {
       for (final constant in [n, const Constant.floating(1.5)]) {
         final parameter = Block([constant.type]).parameters.single;
@@ -40,9 +40,15 @@ void main() {
           TypeView(parameter, .object),
           UncheckedCast(parameter, .object),
         ]) {
-          expect(operation.effects, {Effect.allocates});
-          expect(operation.mayThrow, isTrue);
+          expect(operation.effects, isEmpty);
+          expect(operation.mayThrow, isFalse);
         }
+        expect(ConstantCarrier(constant).effects, isEmpty);
+        expect(MaterializeValue(parameter).effects, {
+          Effect.allocates,
+          Effect.mayThrow,
+        });
+        expect(MaterializeValue(parameter).mayThrow, isTrue);
       }
     },
   );
@@ -103,8 +109,22 @@ void main() {
     });
     expect(Equals(n, n).effects, isEmpty);
     final type = Block([ValueType.typeType]).parameters.single;
-    expect(Equals(type, TypeConstant(.integer)).effects, isEmpty);
-    expect(Equals(type, TypeConstant(.integer)).implicitMember, isNull);
+    expect(
+      Equals(type, TypeConstant(.integer)).effects,
+      contains(Effect.callsUserCode),
+    );
+    expect(Equals(type, TypeConstant(.integer)).implicitMember, isNotNull);
+    for (final descriptor in <Value>[
+      TypeConstant(.integer),
+      ReifyType(.integer),
+      ObjectRuntimeType(n, direct: true),
+      Block([TypeMetadata.type]).parameters.single,
+      TypeView(TypeConstant(.integer), ValueType.object),
+    ]) {
+      expect(descriptor.isTypeDescriptor, isTrue);
+      expect(Equals(descriptor, type).effects, isEmpty);
+      expect(Equals(descriptor, type).implicitMember, isNull);
+    }
     expect(Equals(receiver, receiver).effects, contains(Effect.callsUserCode));
     expect(() => LoadGlobal(lazy).effects.clear(), throwsUnsupportedError);
   });

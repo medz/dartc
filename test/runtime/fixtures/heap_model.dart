@@ -13,8 +13,11 @@ final class Node() {
   Node? value;
 }
 
-final class ModelRoots() implements RootSet {
+final class ModelRoots(final ObjectAccess objects) implements RootSet {
   final values = <Object>[];
+  final controls = <Object>[];
+  final modules = <Object>[];
+  void Function()? onVisit, onConditional, onClearWeak;
   bool deferred = false, stopped = false, closed = false;
 
   @override
@@ -25,7 +28,29 @@ final class ModelRoots() implements RootSet {
   }
 
   @override
-  void visit(ReferenceVisitor visitor) => values.forEach(visitor.visit);
+  void visit(ReferenceVisitor visitor) {
+    onVisit?.call();
+    for (final control in controls.followedBy(modules)) {
+      objects.visitStrong(control, visitor);
+    }
+    values.forEach(visitor.visit);
+  }
+
+  @override
+  void traceConditional(Liveness live, ReferenceVisitor visitor) {
+    onConditional?.call();
+    for (final control in controls.followedBy(modules)) {
+      objects.traceConditional(control, live, visitor);
+    }
+  }
+
+  @override
+  void clearWeak(Liveness live) {
+    onClearWeak?.call();
+    for (final control in controls.followedBy(modules)) {
+      objects.clearWeak(control, live);
+    }
+  }
 
   @override
   void resume() => stopped = false;
@@ -48,7 +73,7 @@ final class ModelFinalization() implements Finalization {
 }
 
 final class HeapModel() implements ObjectAccess {
-  final roots = ModelRoots();
+  late final roots = ModelRoots(this);
   final finalization = ModelFinalization();
   late final heap = Heap(this, roots, finalization);
   final pages = <Page, List<Node>>{};

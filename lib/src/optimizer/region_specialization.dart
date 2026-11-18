@@ -7,8 +7,9 @@ IrFunction specializeRegion(
   IrFunction function,
   Block header,
   Set<Block> region,
-  Set<Jump> entries,
-) {
+  Set<Jump> entries, {
+  ExecutionShapes? executionShapes,
+}) {
   final blocks = {
     for (final block in region)
       block: Block(block.parameters.map((value) => value.type)),
@@ -30,7 +31,9 @@ IrFunction specializeRegion(
   };
   final origins = <Object, Object>{
     for (final entry in blocks.entries) entry.value: entry.key,
+    for (final entry in values.entries) entry.value: entry.key,
   };
+  final context = regionExpansionKey(function, header, entries);
   Value read(Value value) {
     if (values[value] case final copy?) return copy;
     if (value is Instruction && owned.contains(value)) {
@@ -45,10 +48,15 @@ IrFunction specializeRegion(
     return value;
   }
 
-  Jump edge(Jump source) => Jump(
-    source.target == header ? header : blocks[source.target] ?? source.target,
-    source.arguments.map(read),
-  );
+  Jump edge(Jump source) {
+    final copy = Jump(
+      source.target == header ? header : blocks[source.target] ?? source.target,
+      source.arguments.map(read),
+    );
+    origins[copy] = source;
+    return copy;
+  }
+
   for (final block in region) {
     final copy = blocks[block]!;
     for (final operation in block.instructions) {
@@ -56,6 +64,7 @@ IrFunction specializeRegion(
     }
     copy.finish(_mapEnd(block.end, read, edge));
   }
+  final copiedSites = origins.keys.toSet();
   final parameters = <(Block, Value), BlockParameter>{};
   final pending = <(Block, Value)>[];
   Value outside(Value value, Block block) {
@@ -79,14 +88,14 @@ IrFunction specializeRegion(
         operations[operation] = operation.mapInputs(use);
       }
     }
-    ends[block] = _mapEnd(
-      block.end,
-      use,
-      (edge) => Jump(
+    ends[block] = _mapEnd(block.end, use, (edge) {
+      final copy = Jump(
         entries.contains(edge) ? blocks[header]! : edge.target,
         edge.arguments.map(use),
-      ),
-    );
+      );
+      origins[copy] = edge;
+      return copy;
+    });
   }
   final incoming = <Block, List<(Block, Jump, bool)>>{};
   for (final block in function.blocks) {
@@ -116,12 +125,28 @@ IrFunction specializeRegion(
   }
   return FunctionRewrite(
     function,
+    executionShapes: executionShapes,
     operations: operations,
     terminators: ends,
     origins: origins,
+    originContexts: {for (final copy in copiedSites) copy: context},
     phis: phis,
   ).run();
 }
+
+/// Stable identity for one actual region copy, including its incoming paths.
+Object regionExpansionKey(
+  IrFunction function,
+  Block header,
+  Set<Jump> entries,
+) => (
+  function.originOf(header),
+  [
+    for (final owner in function.blocks)
+      for (final (index, edge) in owner.successors.indexed)
+        if (entries.contains(edge)) (function.originOf(owner), index),
+  ].fold<Object>((), (key, entry) => (key, entry)),
+);
 
 Terminator _mapEnd(
   Terminator end,

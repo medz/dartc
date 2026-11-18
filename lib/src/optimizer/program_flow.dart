@@ -6,6 +6,7 @@ import 'flow_value.dart';
 import 'integer_range.dart';
 import 'loop_ranges.dart';
 import 'memory_layout.dart';
+import 'program_call_facts.dart';
 
 /// One actual invocation, with all semantic entry arguments.
 typedef FlowEntry = ({FunctionTarget target, List<FlowValue> arguments});
@@ -29,12 +30,19 @@ final class ProgramFlow(
   /// Ordinary target body reporting a retained allocation's failure.
   final FunctionTarget? allocationFailure,
 
+  /// The trusted runtime entry returning fresh managed storage or throwing.
+  final FunctionTarget? managedAllocator,
+
   /// Fixed native regions returned by zero-argument external getters.
   /// Bytes describe the real entry state; null bytes are unknown. Getters must
   /// return the same nonzero address throughout this execution context.
   Map<FunctionTarget, List<int?>> initialMemory = const {},
 }) {
   late final Map<FunctionTarget, FlowMemoryBinding> _externalMemory;
+  late final _cellStorages = {
+    for (final declaration in program.classes)
+      declaration.type: ?declaration.cellStorage,
+  };
   final _nativeEntries = Map<NativeCallbackTarget, FunctionTarget>.unmodifiable(
     nativeEntries,
   );
@@ -45,6 +53,8 @@ final class ProgramFlow(
   final _roots = <FunctionTarget, _Activation>{};
   final _calls = <_Activation>{};
   final _inputs = <_ContextKey, Set<_Activation>>{};
+  final _inputIdentities = <(FunctionTarget, int), _InputIdentity>{};
+  final _ancestry = _CallAncestry();
   final _callSites = <(_Activation, Instruction, FunctionTarget), _CallSite>{};
   final _pending = <_Activation>{};
   final _owners = <Object, FunctionTarget>{};
@@ -52,6 +62,8 @@ final class ProgramFlow(
   final _loops = <FunctionTarget, LoopRanges>{};
   final _liveness = <FunctionTarget, ValueLiveness>{};
   final _storageAccess = <FunctionTarget, FlowStorageAccess?>{};
+  final _allocating = <FunctionTarget, bool>{};
+  final _accessPlans = <FunctionTarget, _AccessPlan>{};
   final _receiverBounds = <ValueType, List<ClassType>>{};
   final _definitions = <FunctionTarget>{};
   FlowState? _externalState;
@@ -78,6 +90,11 @@ final class ProgramFlow(
           'Entry storage requires a non-mutating external address getter.',
         );
       }
+    }
+    if (managedAllocator case final target?
+        when program.implementationOf(target) is! IrFunction ||
+            target.signature != FunctionType(.integer, List.filled(5, ValueType.integer))) {
+      throw ArgumentError('Managed allocation requires its supplied runtime body.');
     }
     if (allocationFailure case final target?
         when program.implementationOf(target) is! IrFunction ||
@@ -177,7 +194,23 @@ final class ProgramFlow(
       _pending.remove(activation);
       _evaluate(activation);
     }
+    for (final activation in _activeContexts) {
+      for (final entry in activation.storageViews.entries) {
+        if (!entry.value) {
+          throw StateError(
+            'Unproven storage origin for ${entry.key.runtimeType} in '
+            '${activation.body.target.name}.',
+          );
+        }
+      }
+    }
     return true;
+  }
+
+  Iterable<_Activation> get _activeContexts sync* {
+    yield* _roots.values;
+    yield* _calls;
+    yield* _escapedCalls.values;
   }
 
   void _validateEntry(FlowEntry entry) {
@@ -188,6 +221,7 @@ final class ProgramFlow(
     }
     for (final (index, value) in entry.arguments.indexed) {
       if (value.objects.isNotEmpty ||
+          value.managedBackings.isNotEmpty ||
           value.references.objects.isNotEmpty ||
           value.sources.isNotEmpty) {
         throw ArgumentError(
@@ -219,8 +253,11 @@ final class ProgramFlow(
         final constant = pending.removeLast();
         if (!visited.add(constant)) continue;
         switch (constant) {
-          case FunctionConstant(:final target):
-            if (program.implementationOf(target.implementation) == null) {
+          case FunctionConstant(:final target, :final invocationEntry):
+            if (program.implementationOf(
+                  invocationEntry ?? target.implementation,
+                ) ==
+                null) {
               throw ArgumentError(
                 'Entry function value belongs to another program.',
               );
@@ -253,7 +290,7 @@ final class ProgramFlow(
     activation.mergeEnvironment(const {});
     _supply(
       activation,
-      entry.arguments,
+      entry.arguments.map((value) => value.asExternal()).toList(),
       open
           ? (_externalState ??= FlowState(
               program,
@@ -276,10 +313,17 @@ final class ProgramFlow(
     if (arguments.length != activation.body.target.parameterTypes.length) {
       throw StateError('Invocation lost semantic arguments.');
     }
+    input = input.copy(resetWrites: true);
     var changed = false;
+    final signature = (program.executionShapes ?? ExecutionShapes.defaults)
+        .entryOf(activation.body.target);
     for (final (index, value) in arguments.indexed) {
+      final supplied = signature.parameters[index].isReference &&
+              ExecutionShapes.forType(activation.body.target.parameterTypes[index]).isScalar &&
+              value.unknownTypes.isNotEmpty && value.managedBackings.isEmpty
+          ? value.withManagedBackings(const [], unknown: true) : value;
       final joined = activation.arguments[index].join(
-        value,
+        supplied,
         widen: activation.recursive,
       );
       changed |= joined != activation.arguments[index];
@@ -292,7 +336,10 @@ final class ProgramFlow(
       changed =
           activation.input!.join(input, widen: activation.recursive) || changed;
     }
-    if (changed) _pending.add(activation);
+    if (changed) {
+      activation._incomingIdentities = null;
+      _pending.add(activation);
+    }
     return changed;
   }
 
@@ -311,7 +358,9 @@ final class ProgramFlow(
     if (arguments.any((value) => value.isBottom)) return _unreachable;
     final target = source.implementation;
     if (operation case FunctionCall(target: final bound?)
-        when bound != target) {
+        when bound != target &&
+            !(operation.entryBinding?.entries.values.contains(target) ??
+                false)) {
       throw StateError('Function value violates its proven call target.');
     }
     environment = {...environment};
@@ -334,10 +383,10 @@ final class ProgramFlow(
       arguments = [...arguments];
       for (final index in checks) {
         final slot = target.argumentOffset + index;
-        final expected = target.signature.parameters[index].substitute(
+        final expected = target.signature.parameters[index].substituteForFlow(
           environment,
         );
-        final checked = arguments[slot].check(expected);
+        final checked = arguments[slot].check(expected, runtimeTypes: true);
         failedCheck |= checked.mayFail;
         arguments[slot] = checked.value;
       }
@@ -352,6 +401,12 @@ final class ProgramFlow(
     caller.targets.putIfAbsent(operation, () => {}).add(target);
     _definitions.add(target);
     final body = program.implementationOf(target);
+    if (_deferredAllocationProjection(operation) &&
+        (body is IrFunction ? _mayAllocate(body)
+            : body is! IrExternal || body.effects.contains(Effect.allocates) ||
+                body.effects.contains(Effect.callsUserCode))) {
+      input = _allocationInput(caller, block, operation, arguments, input);
+    }
     if (body is! IrFunction) {
       if (body is! IrExternal) {
         throw StateError(
@@ -369,13 +424,15 @@ final class ProgramFlow(
         operation,
         arguments,
         input,
-        target.returnType.substitute(environment),
+        target.returnType.substituteForFlow(environment),
         effects: effects,
         memory: body.memory,
         capturesArguments: body.capturesArguments,
         returned: input.externalResult(target),
+        allocationProjected: true,
       );
     }
+    _ancestry.link(caller.body.target, target);
     final path = _recursivePath(caller, operation, target, arguments);
     final site = _callSites.putIfAbsent((
       caller,
@@ -386,7 +443,7 @@ final class ProgramFlow(
         path.isNotEmpty ||
         caller.repeated ||
         _loopBlocks(caller.body).contains(block);
-    final access = _accessFor(body);
+    final access = _accessForInput(body, arguments, input);
     final projected = input.project(arguments, access: access);
     var suppliedState = projected;
     final aliases = <(int, int)>[
@@ -397,6 +454,7 @@ final class ProgramFlow(
     var plain = [for (final value in arguments) value.withSources(const [])];
     late final _Activation callee;
     _Activation? retired;
+    _CallInput? binding;
     if (path.isNotEmpty) {
       callee = path.last;
     } else {
@@ -413,11 +471,20 @@ final class ProgramFlow(
         local,
         () => _CallInput(plain, projected.copy()),
       );
+      binding = invocation;
       invocation.join(plain, projected);
-      plain = invocation.arguments;
-      suppliedState = invocation.state;
+      final prepared = invocation.prepare(
+        target,
+        _inputIdentities,
+        private: access != null && !access.exposed,
+      );
+      plain = prepared.arguments;
+      suppliedState = prepared.state;
       final previous = invocation.activation;
-      if (site.joined.contains(local)) {
+      if (prepared.reset) {
+        site.joined.remove(local);
+        callee = _Activation(body);
+      } else if (site.joined.contains(local)) {
         callee = previous!;
       } else {
         final keyState = suppliedState.copy()..retainSources((_) => false);
@@ -429,10 +496,12 @@ final class ProgramFlow(
           repeated,
           aliasKey,
         );
-        if ((access == null || access.writes) &&
+        if ((access == null || access.writes || previous?.recursive == true) &&
             previous != null &&
             previous.inputKey != precise) {
           // Effectful calls keep allocation identities as their inputs grow.
+          // Recursive summaries are deliberately unindexed: retain their joined
+          // call-site identity instead of repeatedly starting another SCC.
           site.joined.add(local);
           callee = previous.callSites.length == 1
               ? previous
@@ -508,25 +577,37 @@ final class ProgramFlow(
       _indexInput(callee);
     }
 
-    late final incomingIdentities = callee.input!.allocationIdentities(
-      callee.arguments,
-    );
     FlowObject mapObject(FlowObject object) {
-      if (site.recursive || incomingIdentities.contains(object)) {
+      if (object.site is NativeDataAddress ||
+          object.site is ModuleObjectReference ||
+          site.recursive) {
         return object;
       }
-      return site.allocations.putIfAbsent(
-        object,
+      if (binding?.originals[object] case final original?) return original;
+      if (binding?.incomingIdentities.contains(object) ??
+          callee.incomingIdentities.contains(object)) {
+        return object;
+      }
+      final mapped = site.allocations.putIfAbsent(
+        _allocationKey(object),
         () => FlowObject(
           object.site,
           _AllocationContext(object, site),
           type: object.type,
           variant: object.variant,
+          cellStorage: object.cellStorage,
+          storageView: object.storageView,
         ),
       );
+      (mapped.activation as _AllocationContext).origins.add(object);
+      return mapped;
     }
 
-    FlowValue mapValue(FlowValue value, {bool normal = false}) {
+    FlowValue mapValue(
+      FlowValue value, {
+      bool normal = false,
+      FlowState? exit,
+    }) {
       final sources = <FlowSource>{};
       for (final source in value.sources) {
         if (!identical(source.activation, callee)) {
@@ -538,6 +619,28 @@ final class ProgramFlow(
             callee.returned.sources.contains(source)) {
           sources.add(resultSource);
         }
+        if (source.value case final Instruction read
+            when read is LoadField || read is ReadCell || read is LoadGlobal) {
+          final operands = [
+            for (final operand in read.inputs)
+              operand is Constant
+                  ? FlowValue.constant(operand)
+                  : callee.values[operand] ?? const FlowValue.bottom(),
+          ];
+          if (exit?.preservesRead(read, operands) == true) {
+            sources.addAll(
+              input
+                      .boundValueOf(
+                        read,
+                        operands
+                            .map((value) => value.mapObjects(mapObject))
+                            .toList(),
+                      )
+                      ?.sources ??
+                  const <FlowSource>{},
+            );
+          }
+        }
         final index = parameters.indexWhere(
           (parameter) => identical(parameter, source.value),
         );
@@ -546,29 +649,28 @@ final class ProgramFlow(
       return value.mapObjects(mapObject).withSources(sources);
     }
 
-    FlowState? apply(FlowState? after, {bool normal = false}) => after == null
+    FlowState? apply(_StateSummary? summary, {bool normal = false}) =>
+        summary == null
         ? null
         : input.applySummary(
-            projected,
-            after.project([
+            summary.entry,
+            summary.exit.project([
               ...supplied,
-              ...projected.allocations,
+              ...suppliedState.allocations,
               callee.returned,
               callee.exception,
             ]),
             mapObject: mapObject,
-            mapValue: (value) => mapValue(value, normal: normal),
-            preservesInputSources: callee.effects.every(
-              (effect) => effect == .readsStorage || effect == .mayThrow,
-            ),
+            mapValue: (value) =>
+                mapValue(value, normal: normal, exit: summary.exit),
           );
     final invoked = FlowResult(
-      value: mapValue(callee.returned),
-      normal: apply(callee.normal, normal: true),
-      exceptional: apply(callee.exceptional),
+      value: mapValue(callee.returned, exit: callee.normal),
+      normal: apply(callee.normalSummary, normal: true),
+      exceptional: apply(callee.exceptionalSummary),
       allocationFailureOnly: !callee.hasSemanticFailure,
-      exception: mapValue(callee.exception),
-      stackTrace: mapValue(callee.stackTrace),
+      exception: mapValue(callee.exception, exit: callee.exceptional),
+      stackTrace: mapValue(callee.stackTrace, exit: callee.exceptional),
     );
     return failedCheck
         ? _joinResult(
@@ -584,6 +686,7 @@ final class ProgramFlow(
     FunctionTarget target,
     List<FlowValue> arguments,
   ) {
+    if (!_ancestry.mayHaveAncestor(caller.body.target, target)) return const [];
     bool matches(_Activation candidate) {
       if (candidate.body.target != target ||
           !candidate.callSites.any(
@@ -620,7 +723,8 @@ final class ProgramFlow(
         return path.reversed.toList();
       }
       for (final parent in item.readers) {
-        if (child.containsKey(parent)) continue;
+        if (child.containsKey(parent) ||
+            !_ancestry.mayHaveAncestor(parent.body.target, target)) continue;
         child[parent] = item;
         pending.add(parent);
       }
@@ -697,98 +801,558 @@ final class ProgramFlow(
     if (_storageAccess.containsKey(body.target)) {
       return _storageAccess[body.target];
     }
-    _storageAccess[body.target] = null;
-    if (body.bodyKind != .synchronous) return null;
-    final fields = <InstanceField>{}, globals = <GlobalVariable>{};
-    var cells = false, memory = false, writes = false;
-    for (final block in body.blocks) {
-      for (final operation in [
-        ...block.instructions,
-        if (block.end case Invoke(:final operation)) operation,
-      ]) {
-        if (operation is AllocatedObject) {
-          return null;
+    // Local footprints start at the bottom, including recursive callees. Propagate
+    // their finite dependencies to a fixed point instead of treating an SCC's
+    // unfinished summary as unknown access to the caller's entire state.
+    final discover = <FunctionTarget>[body.target];
+    final callers = <FunctionTarget, Set<FunctionTarget>>{};
+    for (var i = 0; i < discover.length; i++) {
+      final target = discover[i];
+      if (_storageAccess.containsKey(target)) continue;
+      final local = _localStorageAccess(program.implementationOf(target));
+      _storageAccess[target] = local.access;
+      _allocating[target] = local.allocates;
+      for (final callee in local.calls) {
+        (callers[callee] ??= {}).add(target);
+        discover.add(callee);
+      }
+    }
+    final pending = discover.toSet();
+    while (pending.isNotEmpty) {
+      final callee = pending.first;
+      pending.remove(callee);
+      final incoming = _storageAccess[callee];
+      for (final caller in callers[callee] ?? const <FunctionTarget>{}) {
+        if (_allocating[callee] == true && _allocating[caller] != true) {
+          _allocating[caller] = true;
+          pending.add(caller);
         }
-        List<FunctionTarget>? targets;
-        if (operation case DirectCall(:final target)) {
-          targets = [target];
-        } else if (operation case InstanceCall(
+        final previous = _storageAccess[caller];
+        if (previous == null) continue;
+        if (incoming == null) {
+          _storageAccess[caller] = null;
+          pending.add(caller);
+          continue;
+        }
+        final fields = previous.fields.length,
+            globals = previous.globals.length,
+            data = previous.data.length,
+            modules = previous.modules.length;
+        previous.fields.addAll(incoming.fields);
+        previous.globals.addAll(incoming.globals);
+        previous.data.addAll(incoming.data);
+        previous.modules.addAll(incoming.modules);
+        final next = (
+          fields: previous.fields,
+          globals: previous.globals,
+          data: previous.data,
+          modules: previous.modules,
+          context: previous.context || incoming.context,
+          cells: previous.cells || incoming.cells,
+          memory: previous.memory || incoming.memory,
+          writes: previous.writes || incoming.writes,
+          exposed: previous.exposed || incoming.exposed,
+          rawWrites: previous.rawWrites || incoming.rawWrites,
+        );
+        if (fields != next.fields.length ||
+            globals != next.globals.length ||
+            data != next.data.length ||
+            modules != next.modules.length ||
+            previous.context != next.context ||
+            previous.cells != next.cells ||
+            previous.memory != next.memory ||
+            previous.writes != next.writes ||
+            previous.exposed != next.exposed ||
+            previous.rawWrites != next.rawWrites) {
+          _storageAccess[caller] = next;
+          pending.add(caller);
+        }
+      }
+    }
+    return _storageAccess[body.target];
+  }
+
+  bool _mayAllocate(IrFunction body) {
+    _accessFor(body);
+    return _allocating[body.target]!;
+  }
+
+  // One input plan owns both dispatch/branch dependencies and native write
+  // ranges. It reads no mutable contents and consumes no previously solved
+  // facts: changing caller input always obtains a fresh proof. Unknown values
+  // retain every possible edge, including exceptional continuations.
+  FlowStorageAccess? _accessForInput(
+    IrFunction body,
+    List<FlowValue> arguments,
+    FlowState input,
+  ) {
+    final active = <FunctionTarget, (List<FlowValue>, FlowValue)>{};
+    FlowStorageAccess? visit(
+      FunctionTarget target,
+      List<FlowValue>? arguments,
+      FlowState state,
+    ) {
+      final body = program.implementationOf(target);
+      final declared = body is IrFunction
+          ? _accessFor(body)
+          : _localStorageAccess(body).access;
+      if (declared != null && !declared.rawWrites) return declared;
+      if (arguments == null) return declared;
+      if (body is IrExternal) {
+        if (declared == null) return null;
+        final memory = body.memory;
+        if (memory is! WrittenMemory ||
+            !state.boundsNativeRange(
+              arguments[memory.addressParameter],
+              arguments[memory.lengthParameter],
+            )) {
+          return declared;
+        }
+        return (
+          fields: declared.fields,
+          globals: declared.globals,
+          data: declared.data,
+          modules: declared.modules,
+          context: declared.context,
+          cells: declared.cells,
+          memory: declared.memory,
+          writes: declared.writes,
+          exposed: declared.exposed,
+          rawWrites: false,
+        );
+      }
+      if (body is! IrFunction || body.bodyKind != .synchronous) return declared;
+      final plain = arguments
+          .map((value) => value.withSources(const []))
+          .toList();
+      final context = state.nativeContext.withSources(const []);
+      if (active[target] case final previous?) {
+        // A repeated identical proof closes its dependency cycle. Changing
+        // recursive arguments instead retain the declaration's conservative
+        // fixed point; recursion never creates an unbounded proof worklist.
+        return _sameValues(previous.$1, plain) && previous.$2 == context
+            ? _emptyStorageAccess()
+            : declared;
+      }
+      active[target] = (plain, context);
+      try {
+        final plan = _accessPlans.putIfAbsent(target, () => _AccessPlan(body));
+        final proofState = plan.bindsContext
+            ? state.copy(nativeContext: FlowValue.unknown(.integer))
+            : state;
+        final values = <Value, FlowValue>{
+          for (final (index, parameter) in body.entry.parameters.indexed)
+            parameter: plain[index],
+        };
+        FlowValue read(Value value) {
+          if (value is Constant) return FlowValue.constant(value);
+          if (values[value] case final known?) return known;
+          // A cyclic phi starts unknown, not bottom. Every incoming edge is
+          // included, even if its predecessor is not currently selected.
+          values[value] = FlowValue.unknown(value.type);
+          FlowValue? result;
+          if (value is BlockParameter) {
+            final block = plan.parameters[value]!;
+            final index = block.parameters.indexOf(value);
+            result = FlowValue.joined([
+              for (final edge in plan.incoming[block] ?? const <Jump>[])
+                read(edge.arguments[index]),
+            ]);
+          } else if (value is Instruction) {
+            final operands = value.inputs.map(read).toList();
+            final folded = _fold(value, operands, program);
+            if (folded != null) {
+              result = FlowValue.constant(folded);
+            } else {
+              switch (value) {
+                case LoadField()
+                    when operands.single.objects.isEmpty &&
+                        operands.single.unknownTypes.isEmpty &&
+                        operands.single.addresses.isEmpty:
+                  // Constants and their type-layout views are immutable. No
+                  // caller slot or previously solved mutable fact is read.
+                  result = proofState.boundValueOf(value, operands);
+                case ReferenceAddress():
+                  result = _referenceAddress(operands.single);
+                case TypeView() ||
+                    UncheckedCast() ||
+                    PointerAddress() ||
+                    PointerFromAddress():
+                  result = operands.single;
+                case IntBinary():
+                  result =
+                      (value.operator == .add || value.operator == .subtract) &&
+                          operands.any(
+                            (operand) => operand.addresses.isNotEmpty,
+                          )
+                      ? _addressArithmetic(value, operands)
+                      : _integerOperation(value, operands)?.value;
+                case ReadNativeContext() ||
+                    NativeDataAddress() ||
+                    ModuleObjectReference() ||
+                    NativeSize() ||
+                    NativeFieldOffset():
+                  result = proofState
+                      .transfer(
+                        value,
+                        operands,
+                        allocate: (_) => throw StateError(
+                          'An access proof cannot allocate.',
+                        ),
+                        repeated: false,
+                        invoke: (_, _, _) =>
+                            throw StateError('An access proof cannot invoke.'),
+                        call: (_, _, _) =>
+                            throw StateError('An access proof cannot call.'),
+                      )!
+                      .value;
+                default:
+                  break;
+              }
+            }
+          }
+          return values[value] = result ?? FlowValue.unknown(value.type);
+        }
+
+        final reached = <Block>{};
+        final pending = [body.entry];
+        final operations = <Instruction>[];
+        while (pending.isNotEmpty) {
+          final block = pending.removeLast();
+          if (!reached.add(block)) continue;
+          operations.addAll(block.instructions);
+          if (block.end case Invoke(:final operation)) {
+            operations.add(operation);
+          }
+          var edges = block.successors;
+          if (block.end case Branch(
+            :final condition,
+            :final ifTrue,
+            :final ifFalse,
+          )) {
+            if (read(condition).constant case ScalarConstant(
+              value: bool value,
+            )) {
+              edges = [value ? ifTrue : ifFalse];
+            }
+          }
+          pending.addAll(edges.map((edge) => edge.target));
+        }
+        return _localStorageAccess(
+          body,
+          operations: operations,
+          read: read,
+          invoke: (callee, arguments) => visit(callee, arguments, proofState),
+          boundedWrite: (operation) => proofState.boundsNativeWrite(
+            operation,
+            operation.inputs.map(read).toList(),
+          ),
+        ).access;
+      } finally {
+        active.remove(target);
+      }
+    }
+
+    return visit(body.target, arguments, input);
+  }
+
+  ({FlowStorageAccess? access, Set<FunctionTarget> calls, bool allocates})
+  _localStorageAccess(
+    IrCallable? body, {
+    Iterable<Instruction>? operations,
+    FlowValue Function(Value)? read,
+    FlowStorageAccess? Function(FunctionTarget, List<FlowValue>?)? invoke,
+    bool Function(Instruction)? boundedWrite,
+  }) {
+    final fields = <InstanceField>{}, globals = <GlobalVariable>{};
+    final data = <NativeData>{};
+    final modules = <ModuleObject>{};
+    final calls = <FunctionTarget>{};
+    var cells = false, memory = false, writes = false, exposed = false;
+    var context = false, rawWrites = false, opaque = false;
+    var allocates = false;
+    FlowStorageAccess getAccess() => (
+      fields: fields,
+      globals: globals,
+      data: data,
+      modules: modules,
+      context: context,
+      cells: cells,
+      memory: memory,
+      writes: writes,
+      exposed: exposed,
+      rawWrites: rawWrites,
+    );
+    void addCall(FunctionTarget target, List<FlowValue>? arguments) {
+      calls.add(target.implementation);
+      if (invoke == null) return;
+      final incoming = invoke(target.implementation, arguments);
+      if (incoming == null) {
+        opaque = true;
+        return;
+      }
+      fields.addAll(incoming.fields);
+      globals.addAll(incoming.globals);
+      data.addAll(incoming.data);
+      modules.addAll(incoming.modules);
+      context |= incoming.context;
+      cells |= incoming.cells;
+      memory |= incoming.memory;
+      writes |= incoming.writes;
+      exposed |= incoming.exposed;
+      rawWrites |= incoming.rawWrites;
+    }
+
+    if (body is IrExternal) {
+      if (body.effects.contains(Effect.callsUserCode)) {
+        return (access: null, calls: calls, allocates: true);
+      }
+      // Storage-reading or writing leaves may use capabilities escaped by an
+      // earlier call. A closed, non-capturing leaf with no storage effects has
+      // no such demand; its mere presence does not expose the caller's heap.
+      memory = exposed = body.capturesArguments ||
+          body.effects.contains(Effect.readsStorage) ||
+          body.effects.contains(Effect.writesStorage);
+      writes =
+          body.capturesArguments ||
+          body.effects.contains(Effect.writesStorage) &&
+              body.memory is! UnchangedMemory &&
+              body.memory is! ZeroedMemory;
+      rawWrites = body.memory is WrittenMemory || body.memory is ReleasedMemory ||
+          body.memory is NativeResultMemory;
+      return (access: getAccess(), calls: calls,
+          allocates: body.effects.contains(Effect.allocates));
+    }
+    if (body is! IrFunction || body.bodyKind != .synchronous) {
+      return (access: null, calls: calls, allocates: true);
+    }
+    FlowValue valueOf(Value value) =>
+        read?.call(value) ?? FlowValue.unknown(value.type);
+    bool virtualTargets(
+      FlowValue receiver,
+      MemberSelector selector,
+      List<FlowValue> positional,
+      Map<String, FlowValue> named, {
+      MemberEntryBinding? binding,
+      List<FlowValue> executionTypes = const [],
+    }) {
+      var found = false;
+      for (final type in _receiverTypes(receiver)) {
+        final lookup = program.lookupMember(type, selector);
+        final target = lookup.target;
+        if (target == null ||
+            lookup.unmodeledBoundary != null ||
+            lookup.unsupportedForwarder ||
+            !target.signature.acceptsShape(positional.length, named.keys)) {
+          return false;
+        }
+        final callee = program.implementationOf(target);
+        if (callee == null) return false;
+        if (binding != null) {
+          final entry = binding.entries[target];
+          if (entry == null || program.implementationOf(entry) == null) {
+            return false;
+          }
+          addCall(entry, read == null ? null : [
+            _receiverValue(receiver, type),
+            ...positional,
+            for (final name in binding.names) named[name]!,
+            ...executionTypes,
+          ]);
+          if (opaque) return false;
+          found = true;
+          continue;
+        }
+        addCall(
+          target,
+          read == null
+              ? null
+              : [
+                  _receiverValue(receiver, type),
+                  ...target.signature.bind<FlowValue>(
+                    positional,
+                    named,
+                    (index) => FlowValue.constant(callee.defaults[index]!),
+                  ),
+                ],
+        );
+        if (opaque) return false;
+        found = true;
+      }
+      return found;
+    }
+
+    for (final operation
+        in operations ??
+            [
+              for (final block in body.blocks) ...[
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ],
+            ]) {
+      if (opaque) return (access: null, calls: calls, allocates: true);
+      final inputs = operation.inputs.map(valueOf).toList();
+      // The real transfer folds before assigning effects. Reuse the same proof
+      // rather than suppressing a call based on its earlier solved effects.
+      if (read != null && _fold(operation, inputs, program) != null) continue;
+      switch (operation) {
+        case ReadNativeContext():
+          context = memory = true;
+        case BindNativeContext():
+          continue;
+        case ReferenceAddress():
+          // Observing identity retains the input capability, but does not read
+          // its fields or bytes. Later raw reads contribute their own demand.
+          continue;
+        case NativeDataAddress(:final declaration):
+          data.add(declaration);
+          memory = true;
+        case ModuleObjectReference(:final declaration):
+          modules.add(declaration);
+          continue;
+        case ModuleRootsAddress():
+          modules.addAll(
+            program.functions.expand((body) => body.moduleObjects),
+          );
+          memory = true;
+        case ManagedStorageAllocation(allocator: final target) ||
+            DirectCall(:final target) ||
+            CheckedTypeArgument(implementation: final target?):
+          addCall(target, inputs);
+          continue;
+        case InitializeObject(:final initializer):
+          addCall(initializer, inputs);
+          continue;
+        case Construct(
+          :final initializer,
+          :final instantiatedType,
+          :final callableStorage,
+        ):
+          addCall(initializer, [
+            FlowValue.unknown(instantiatedType),
+            ...callableStorage == null
+                ? inputs
+                : inputs.take(inputs.length - 1),
+          ]);
+        case InstanceCall(
           :final receiver,
           :final member,
           :final positional,
           :final named,
-        )) {
-          targets = [];
-          for (final type in _receiverTypes(FlowValue.unknown(receiver.type))) {
-            final lookup = program.lookupMember(type, member.selector);
-            final target = lookup.target;
-            if (target == null ||
-                lookup.unmodeledBoundary != null ||
-                lookup.unsupportedForwarder ||
-                !target.signature.acceptsShape(positional.length, named.keys)) {
-              return null;
-            }
-            targets.add(target);
-          }
-          if (targets.isEmpty) return null;
-        }
-        if (targets != null) {
-          for (final target in targets) {
-            final callee = program.implementationOf(target);
-            if (callee is IrExternal &&
-                callee.memory is UnchangedMemory &&
-                !callee.capturesArguments &&
-                callee.effects.every(
-                  (effect) => effect == .readsStorage || effect == .mayThrow,
-                )) {
-              continue;
-            }
-            final access = callee is IrFunction ? _accessFor(callee) : null;
-            if (access == null) return null;
-            fields.addAll(access.fields);
-            globals.addAll(access.globals);
-            cells |= access.cells;
-            memory |= access.memory;
-            writes |= access.writes;
+          :final entryBinding,
+          :final executionTypes,
+        ):
+          if (!virtualTargets(
+            valueOf(receiver),
+            member.selector,
+            positional.map(valueOf).toList(),
+            {
+              for (final entry in named.entries)
+                entry.key: valueOf(entry.value),
+            },
+            binding: entryBinding,
+            executionTypes: executionTypes.map(valueOf).toList(),
+          )) {
+            return (access: null, calls: calls, allocates: true);
           }
           continue;
-        }
-        if (operation.effects.any(
-          (effect) =>
-              effect != .readsStorage &&
-              effect != .writesStorage &&
-              effect != .mayThrow,
-        )) {
-          return null;
-        }
-        final mutates = operation.effects.contains(Effect.writesStorage);
-        writes |= mutates;
-        if (!mutates && !operation.effects.contains(Effect.readsStorage)) {
+        case FunctionCall(entryBinding: final binding?):
+          // The storage footprint can use registered entries, but this local
+          // proof has not established that all dynamic origins are covered.
+          allocates = true;
+          for (final target in binding.entries.values) {
+            addCall(target, null);
+          }
+          memory = true;
           continue;
-        }
-        switch (operation) {
-          case LoadField(:final field) || StoreField(:final field):
-            fields.add(field);
-          case LoadGlobal(:final global) || StoreGlobal(:final global):
-            globals.add(global);
-          case ReadCell() || WriteCell():
-            cells = true;
-          case LoadNative() || LoadObjectData() || LoadObjectReference():
-            memory = true;
-          case ReferenceAddress() || ReferenceFromAddress():
-            break;
-          default:
-            return null;
-        }
+        case BindMethod(entryBinding: != null):
+          // The actual producer can read or write state before returning its
+          // closure. Until its complete target footprint is proven here, keep
+          // all incoming storage rather than using the source tear-off shape.
+          return (access: null, calls: calls, allocates: true);
+        case FunctionCall(target: final target?):
+          allocates = true;
+          // Hidden capture values remain unknown to this input-only proof.
+          addCall(target, null);
+          memory = true;
+          continue;
+        case LoadGlobal(:final global):
+          globals.add(global);
+          if (global.initializer case final initializer?) {
+            addCall(initializer, const []);
+            writes = true;
+          }
+          continue;
+        case StoreGlobal(:final global):
+          globals.add(global);
+          writes = true;
+        case LoadField(:final field):
+          fields.add(field);
+          if (field.initializer case final initializer?) {
+            addCall(initializer, inputs);
+            writes = true;
+          }
+          continue;
+        case StoreField(:final field) || InitializeStorageField(:final field):
+          fields.add(field);
+          writes = true;
+        case ReadCell(cell: Value(type: CellType(isLate: true))):
+          return (access: null, calls: calls, allocates: true);
+        case ReadCell() || CopyCell():
+          cells = true;
+        case ObjectRuntimeType(direct: true) || TypeTest() || TypeCast():
+          memory |= inputs.any((value) =>
+              value.objects.any((object) => object.callableStorage != null) ||
+              value.unknownTypes.any((type) => type is FunctionType ||
+                  type.accepts(ValueType.function)));
+        case ReadFunctionEnvironment() || ReadFunctionTypeArgument():
+          memory = true;
+        case WriteCell():
+          cells = writes = true;
+        case LoadNative() ||
+            LoadObjectData() ||
+            LoadObjectReference() ||
+            StringLength() ||
+            StringCodeUnitAt() ||
+            ReferenceFromAddress() ||
+            AllocatedObject() ||
+            InstantiateFunction() ||
+            InstantiateFunctionFrom():
+          memory = true;
+        case StoreNative() ||
+            StoreObjectData() ||
+            StoreObjectReference() ||
+            CopyNative():
+          memory = writes = true;
+          rawWrites |= boundedWrite == null || !boundedWrite(operation);
+        default:
+          if (operation.implicitMember case final member?) {
+            if (!virtualTargets(
+              read == null ? FlowValue.unknown(member.receiver) : inputs.first,
+              member.selector,
+              inputs.skip(1).toList(),
+              const {},
+            )) {
+              return (access: null, calls: calls, allocates: true);
+            }
+            continue;
+          }
+          if (operation.effects.contains(Effect.callsUserCode)) {
+            return (access: null, calls: calls, allocates: true);
+          }
+          memory |=
+              operation.effects.contains(Effect.readsStorage) ||
+              operation.effects.contains(Effect.writesStorage);
+          writes |= operation.effects.contains(Effect.writesStorage);
+      }
+      allocates |= operation.effects.contains(Effect.allocates);
+      if (allocationFailure case final failure?
+          when operation.effects.contains(Effect.allocates)) {
+        addCall(failure, const []);
       }
     }
-    return _storageAccess[body.target] = (
-      fields: fields,
-      globals: globals,
-      cells: cells,
-      memory: memory,
-      writes: writes,
-    );
+    return (access: opaque ? null : getAccess(), calls: calls,
+        allocates: opaque || allocates);
   }
 
   void _evaluate(_Activation activation) {
@@ -802,11 +1366,16 @@ final class ProgramFlow(
         '${body.target.library}::${body.target.name}.',
       );
     }
+    // Recursive supply may grow activation.input while this body is evaluated.
+    // Each published exit remains paired with the entry actually analyzed.
+    final entryState = activation.input!.copy();
     // Local snapshots belong to this evaluation; only call summaries propagate.
     activation.before.clear();
     activation.after.clear();
     activation.thrown.clear();
     activation.edgeStates.clear();
+    activation.environmentReads.clear();
+    activation.storageViews.clear();
     final escapes =
         !_nativeLookups.contains(activation) &&
         (_escapingActivations.contains(activation) ||
@@ -817,7 +1386,7 @@ final class ProgramFlow(
         !block.parameters.contains(source.value) &&
             activation.dominance.atEntry(source.value, block);
     final incoming = <Block, FlowState>{
-      body.entry: activation.input!.copy()
+      body.entry: entryState.copy()
         ..retainSources((source) => availableAt(source, body.entry)),
     };
     final incomingRanges = <Block, Map<Value, FlowIntegerRange>>{
@@ -843,7 +1412,9 @@ final class ProgramFlow(
       final proof = loop.prove(
         (value) => value is Constant
             ? FlowValue.constant(value).integers
-            : evaluated.contains(value)
+            : evaluated.contains(value) &&
+                (activation.values[value]?.managedBackings.isEmpty ?? false) &&
+                !(activation.values[value]?.hasUnknownBacking ?? false)
             ? activation.values[value]?.integers
             : null,
         (operation) {
@@ -875,7 +1446,8 @@ final class ProgramFlow(
         value,
         incoming,
         widen: widen,
-        bound: loopRange(value, loops.owners[value] ?? body.entry),
+        bound: incoming.managedBackings.isEmpty && !incoming.hasUnknownBacking
+            ? loopRange(value, loops.owners[value] ?? body.entry) : null,
       )) {
         return false;
       }
@@ -892,6 +1464,7 @@ final class ProgramFlow(
     var summaryChanged = false;
 
     FlowValue constrained(FlowValue value) {
+      if (value.managedBackings.isNotEmpty || value.hasUnknownBacking) return value;
       for (final source in value.sources) {
         if (!identical(source.activation, activation)) continue;
         if (ranges[source.value] case final range?) {
@@ -911,8 +1484,11 @@ final class ProgramFlow(
         case TestedValue(:final test, :final outcome):
           return read(test.operand)
               .check(
-                test.testedType.substitute(activation.environment),
+                test.testedType.substituteForFlow(
+                  activation.executionEnvironment,
+                ),
                 negated: outcome == test.negated,
+                runtimeTypes: true,
               )
               .value;
         case UnwindValue() || CallFrameValue():
@@ -924,6 +1500,13 @@ final class ProgramFlow(
               activation.values[value] ?? const FlowValue.bottom(),
             ),
           );
+          if (known.managedBackings.isNotEmpty || known.hasUnknownBacking) {
+            // A carrier can be changed through an actual raw capability. Whole
+            // SSA replacement facts must cover every observed payload, while
+            // this use consumes the current storage and no stale numeric range.
+            mergeValue(value, known);
+            return known;
+          }
           final bounded = switch (loopRange(value, readingBlock)) {
             final range? => known.restrictIntegers(range),
             null => known,
@@ -1039,6 +1622,7 @@ final class ProgramFlow(
       FlowValue stackTrace, {
       bool allocationFailureOnly = false,
     }) {
+      state = state.copy(nativeContext: entryState.nativeContext);
       if (!allocationFailureOnly && !activation.hasSemanticFailure) {
         activation.hasSemanticFailure = true;
         summaryChanged = true;
@@ -1054,12 +1638,16 @@ final class ProgramFlow(
           joinedTrace != activation.stackTrace;
       activation.exception = joinedException;
       activation.stackTrace = joinedTrace;
-      if (activation.exceptional == null) {
-        activation.exceptional = state.copy();
+      if (activation.exceptionalSummary == null) {
+        activation.exceptionalSummary = _StateSummary(entryState, state);
         summaryChanged = true;
       } else {
         summaryChanged =
-            activation.exceptional!.join(state, widen: activation.recursive) ||
+            activation.exceptionalSummary!.join(
+              entryState,
+              state,
+              widen: activation.recursive,
+            ) ||
             summaryChanged;
       }
     }
@@ -1074,6 +1662,9 @@ final class ProgramFlow(
       FlowResult evaluate(Instruction operation) {
         point = state!;
         activation.before[operation] = state.copy();
+        if (body.typeBindings.isNotEmpty) {
+          body.typeInputsOf(operation).forEach(read);
+        }
         var result = _operation(
           activation,
           block,
@@ -1113,13 +1704,21 @@ final class ProgramFlow(
             ),
           );
         }
-        final type = operation.type.substitute(activation.environment);
+        final type = operation.type.substituteForFlow(
+          activation.executionEnvironment,
+        );
         var bounded = result.value;
         if (bounded.types.any((actual) => !type.accepts(actual))) {
           // Caller bounds also constrain unresolved receiver type arguments.
           bounded = bounded.check(type).value;
         }
         bounded = constrained(bounded);
+        if ((program.executionShapes ?? ExecutionShapes.defaults)
+                .shapeOf(body, operation).isReference &&
+            ExecutionShapes.forType(type).isScalar &&
+            bounded.unknownTypes.isNotEmpty && bounded.managedBackings.isEmpty) {
+          bounded = bounded.withManagedBackings(const [], unknown: true);
+        }
         if (bounded != result.value) {
           result = FlowResult(
             value: bounded,
@@ -1134,7 +1733,9 @@ final class ProgramFlow(
         mergeValue(operation, result.value.withSource(operation, activation));
         ranges.remove(operation);
         if (result.value.integers case final range?
-            when range != FlowIntegerRange.full) {
+            when range != FlowIntegerRange.full &&
+                result.value.managedBackings.isEmpty &&
+                !result.value.hasUnknownBacking) {
           ranges[operation] = range;
         }
         if (result.normal != null) {
@@ -1180,6 +1781,7 @@ final class ProgramFlow(
       switch (block.end) {
         case Return(:final value):
           final returned = value == null ? _null : read(value);
+          state = state.copy(nativeContext: entryState.nativeContext);
           if (escapes) {
             state.escape([returned, ?_constructedReturns[activation]]);
             _admitEscaped(state);
@@ -1190,12 +1792,16 @@ final class ProgramFlow(
           );
           summaryChanged |= joined != activation.returned;
           activation.returned = joined;
-          if (activation.normal == null) {
-            activation.normal = state.copy();
+          if (activation.normalSummary == null) {
+            activation.normalSummary = _StateSummary(entryState, state);
             summaryChanged = true;
           } else {
             summaryChanged =
-                activation.normal!.join(state, widen: activation.recursive) ||
+                activation.normalSummary!.join(
+                  entryState,
+                  state,
+                  widen: activation.recursive,
+                ) ||
                 summaryChanged;
           }
         case final Jump jump:
@@ -1217,7 +1823,9 @@ final class ProgramFlow(
               if (condition is! TypeTest) return state!;
               return state!.copy()..refineType(
                 read(condition.operand).sources,
-                condition.testedType.substitute(activation.environment),
+                condition.testedType.substituteForFlow(
+                  activation.executionEnvironment,
+                ),
                 negated: outcome == condition.negated,
               );
             }
@@ -1292,6 +1900,55 @@ final class ProgramFlow(
     if (summaryChanged) _pending.addAll(activation.readers);
   }
 
+  // Pruning dead allocation instances is needed at a repeated allocation, not
+  // at every syntactic call. A selected call target uses the fixed graph's
+  // transitive allocation proof; incomplete or unknown calls remain conservative.
+  FlowState _allocationInput(
+    _Activation activation,
+    Block block,
+    Instruction operation,
+    List<FlowValue> inputs,
+    FlowState state, {
+    FlowValue Function(Value)? read,
+  }) {
+    if (!_loopBlocks(activation.body).contains(block) ||
+        _owners[operation] != activation.body.target) {
+      return state;
+    }
+    final liveness = _liveness.putIfAbsent(activation.body.target, () {
+      final body = activation.body as IrFunction;
+      return ValueLiveness.source(body, calls: {
+        for (final block in body.blocks)
+          for (final instruction in [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ])
+            if (instruction is AllocatedObject ||
+                instruction.effects.contains(Effect.allocates)) instruction,
+      });
+    });
+    FlowValue retained(Value value) {
+      if (read != null) return read(value);
+      if (value is Constant) return FlowValue.constant(value);
+      if (value case TestedValue(:final test, :final outcome)) {
+        return retained(test.operand).check(
+          test.testedType.substituteForFlow(activation.executionEnvironment),
+          negated: outcome == test.negated,
+          runtimeTypes: true,
+        ).value;
+      }
+      return state.resolveValue(
+          activation.values[value] ?? FlowValue.unknown(value.type));
+    }
+    return state.project([
+      // The caller can retain aliases detached by this callee. SSA facts may
+      // overapproximate a path here; retaining extra capabilities is safe.
+      ...activation.input!.allocations,
+      ...liveness.acrossCalls[operation]!.map(retained),
+      ...inputs,
+    ]);
+  }
+
   FlowResult _operation(
     _Activation activation,
     Block block,
@@ -1301,7 +1958,32 @@ final class ProgramFlow(
     FlowValue Function(Value) read,
   ) {
     if (inputs.any((value) => value.isBottom)) return _unreachable;
-    final resultType = operation.type.substitute(activation.environment);
+    if (operation.requiredStorageView case final template?) {
+      final expected = template.mapTypes(
+        (type) => type.substituteForFlow(activation.executionEnvironment),
+      );
+      // Raw slot copies require the capability on both source and destination.
+      final receivers = operation is InitializeStorageField ? inputs : inputs.take(1);
+      activation.storageViews[operation] = receivers.every(
+        (value) => value.objects.isNotEmpty &&
+            value.unknownTypes.isEmpty &&
+            value.constants.isEmpty &&
+            value.addresses.isEmpty &&
+            value.objects.every((object) => object.storageView == expected),
+      );
+      final read = switch (operation) {
+        LoadField(:final field) => (inputs.first, field),
+        InitializeStorageField(:final field) => (inputs.last, field),
+        _ => null,
+      };
+      if (read != null && !read.$1.objects.every(
+          (object) => state.hasIntactSlot(object, read.$2))) {
+        activation.storageViews[operation] = false;
+      }
+    }
+    final resultType = operation.type.substituteForFlow(
+      activation.executionEnvironment,
+    );
     final folded = _fold(operation, inputs, program);
     if (folded != null) {
       activation.operationEffects[operation] = const {};
@@ -1310,37 +1992,23 @@ final class ProgramFlow(
         normal: state.copy(),
       );
     }
-    if (_loopBlocks(activation.body).contains(block) &&
+    if (!_deferredAllocationProjection(operation) &&
         (operation is AllocatedObject ||
             operation.effects.contains(Effect.allocates))) {
-      final liveness = _liveness.putIfAbsent(activation.body.target, () {
-        final body = activation.body as IrFunction;
-        return ValueLiveness.source(
-          body,
-          calls: {
-            for (final block in body.blocks)
-              for (final instruction in [
-                ...block.instructions,
-                if (block.end case Invoke(:final operation)) operation,
-              ])
-                if (instruction is AllocatedObject ||
-                    instruction.effects.contains(Effect.allocates))
-                  instruction,
-          },
-        );
-      });
-      state = state.project([
-        // A caller can retain old aliases even after this body detaches them.
-        ...activation.input!.allocations,
-        ...liveness.acrossCalls[operation]!.map(read),
-        ...inputs,
-      ]);
+      state = _allocationInput(activation, block, operation, inputs, state,
+          read: read);
     }
-    FlowObject allocate(Instruction site) => FlowObject(
-      site,
-      activation,
-      type: site.type.substitute(activation.environment),
-    );
+    FlowObject allocate(Instruction site) {
+      final type = site.type.substituteForFlow(activation.executionEnvironment);
+      final view = switch (site) {
+        Construct(:final storageView) || NewPayload(:final storageView) => storageView,
+        ManagedStorageAllocation(:final storageView) => storageView,
+        _ => null,
+      };
+      return FlowObject(site, activation, type: type,
+          cellStorage: type is ClassType ? _cellStorages[type.declaration] : null,
+          storageView: view?.mapTypes((value) => value.substituteForFlow(activation.executionEnvironment)));
+    }
     FlowResult invoke(
       FunctionTarget target,
       List<FlowValue> args,
@@ -1357,7 +2025,7 @@ final class ProgramFlow(
       inputs,
       resultType: resultType,
       allocate: allocate,
-      repeated: false,
+      repeated: operation is NativeLocalStorage && activation.recursive,
       invoke: invoke,
       call: call,
     );
@@ -1374,6 +2042,31 @@ final class ProgramFlow(
       return stored;
     }
     switch (operation) {
+      case MaterializedValue():
+        activation.operationEffects[operation] = const {};
+        final backing = inputs.last.carrierReferences;
+        return FlowResult(
+          value: inputs.first.withManagedBackings(
+            backing.objects,
+            unknown: backing.unknownTypes.isNotEmpty ||
+                backing.constants.isNotEmpty || backing.addresses.isNotEmpty,
+          ).withSources(const []),
+          normal: state.copy(),
+        );
+      case ConstantCarrier():
+        activation.operationEffects[operation] = const {};
+        return FlowResult(value: inputs.single, normal: state.copy());
+      case FunctionEntryTableAddress(:final target):
+        activation.operationEffects[operation] = const {};
+        return FlowResult(
+          value: FlowValue.address(FlowAddress(target, 0)),
+          normal: state.copy(),
+        );
+      case StackMapAddress():
+        return FlowResult(
+          value: FlowValue.address(FlowAddress(FlowMetadata.stackMaps, 0)),
+          normal: state.copy(),
+        );
       case MakeInvocation():
         throw StateError('Normalize Invocation before program flow.');
       case InitializeObject(:final initializer):
@@ -1386,13 +2079,88 @@ final class ProgramFlow(
           inputs,
           state,
         );
-      case DirectCall(:final target, :final ownerType, :final typeArguments):
+      case CheckedTypeArgument(
+        :final parameter,
+        :final environment,
+        :final implementation,
+      ):
+        if (implementation != null) {
+          activation.operationEffects[operation] = const {};
+          return _invoke(
+            activation,
+            block,
+            operation,
+            implementation,
+            inputs,
+            state,
+            resultSource: FlowSource(operation, activation),
+          );
+        }
+        final actual = inputs.first.constant;
+        final raw = <TypeParameterType, ValueType>{};
+        for (final (index, key) in environment.keys.indexed) {
+          if (inputs[index + 1].constant case TypeConstant(
+            :final representedType,
+          )) {
+            raw[key] = representedType;
+          }
+        }
+        final proven =
+            actual is TypeConstant && raw.length == environment.length;
+        final succeeds =
+            !proven ||
+            parameter.bound.substitute(raw).accepts(actual.representedType);
+        activation.operationEffects[operation] = {
+          if (!proven || !succeeds) Effect.mayThrow,
+        };
+        return FlowResult(
+          value: succeeds ? inputs.first : const FlowValue.bottom(),
+          normal: succeeds ? state.copy() : null,
+          exceptional: !proven || !succeeds ? state.copy() : null,
+          exception: !proven || !succeeds
+              ? _typeError
+              : const FlowValue.bottom(),
+        );
+      case ManagedStorageAllocation(:final allocator, :final storageView):
+        if (allocator != managedAllocator) {
+          throw StateError('Invariant storage requires the bound managed allocator.');
+        }
+        final descriptor = inputs[1];
+        if (descriptor.addresses.isEmpty || descriptor.unknownTypes.isNotEmpty ||
+            descriptor.constants.isNotEmpty || descriptor.objects.isNotEmpty ||
+            descriptor.addresses.any((address) => address.offset != 0 ||
+                address.base != storageView.storageType.declaration)) {
+          throw StateError('Managed allocation descriptor does not match its storage view.');
+        }
+        activation.storageViews[operation] = true;
+        activation.operationEffects[operation] = const {};
+        final actual = invoke(allocator, inputs, state);
+        final normal = actual.normal?.copy();
+        final object = allocate(operation);
+        normal?.acceptManagedAllocation(object, inputs.last,
+          repeated: activation.repeated || (_cyclic[activation.body.target]?.contains(block) ?? false));
+        return FlowResult(
+          value: normal == null ? const FlowValue.bottom() : FlowValue.object(object),
+          normal: normal, exceptional: actual.exceptional,
+          exception: actual.exception, stackTrace: actual.stackTrace,
+          allocationFailureOnly: actual.allocationFailureOnly,
+        );
+      case DirectCall(
+        :final target,
+        :final ownerType,
+        :final typeArguments,
+        :final lexicalEnvironment,
+      ):
         final environment = _environment(
           target,
           ownerType,
           typeArguments,
           activation,
         );
+        environment.addAll({
+          for (final entry in lexicalEnvironment.entries)
+            entry.key: entry.value.substitute(activation.executionEnvironment),
+        });
         activation.operationEffects[operation] = const {};
         return _invoke(
           activation,
@@ -1433,6 +2201,7 @@ final class ProgramFlow(
           named.map((name, value) => MapEntry(name, read(value))),
           operation.typeArguments,
           state,
+          executionTypes: operation.executionTypes.map(read).toList(),
           resultSource: FlowSource(operation, activation),
         );
       case DynamicDispatch(
@@ -1465,6 +2234,9 @@ final class ProgramFlow(
           final target = direct
               ? method
               : program.lookupMember(type, method.selector).target;
+          if (target != null && (target.isAbstract || program.implementationOf(target) == null)) {
+            throw StateError('Method extraction requires its actual source body.');
+          }
           result = _joinResult(
             result,
             target == null
@@ -1481,6 +2253,7 @@ final class ProgramFlow(
                     type,
                     read(receiver),
                     state,
+                    executionTypes: operation.executionTypes.map(read).toList(),
                   ),
           );
         }
@@ -1491,6 +2264,22 @@ final class ProgramFlow(
                 normal: state.copy(),
                 exceptional: state.copy(),
               );
+      case final ReadFunctionTypeArgument argumentRead:
+        final result = _readTypeArgument(
+          argumentRead,
+          read(argumentRead.function),
+          state,
+        );
+        activation.environmentReads[operation] = result.proven;
+        return FlowResult(value: result.value, normal: state.copy());
+      case final ReadFunctionEnvironment environmentRead:
+        final result = _readEnvironment(
+          environmentRead,
+          read(environmentRead.function),
+          state,
+        );
+        activation.environmentReads[operation] = result.proven;
+        return FlowResult(value: result.value, normal: state.copy());
       case InstantiateFunction(:final function, :final typeArguments):
         return _instantiate(
           activation,
@@ -1498,7 +2287,7 @@ final class ProgramFlow(
           read(function),
           [
             for (final type in typeArguments)
-              type.substitute(activation.environment),
+              type.substitute(activation.executionEnvironment),
           ],
           state,
           repeated: false,
@@ -1532,25 +2321,11 @@ final class ProgramFlow(
           normal: state.copy(),
         );
       case ReferenceAddress():
-        var value = const FlowValue.bottom();
-        final input = inputs.single;
-        for (final constant in input.constants) {
-          value = value.join(
-            constant.type == .nullType
-                ? FlowValue.constant(const Constant.integer(0))
-                : FlowValue.address(FlowAddress(constant, 0)),
-          );
-        }
-        for (final object in input.objects) {
-          value = value.join(FlowValue.address(FlowAddress(object, 0)));
-        }
-        if (input.unknownTypes.isNotEmpty || input.addresses.isNotEmpty) {
-          value = value.join(
-            FlowValue.unknown(.integer).withReferences([input]),
-          );
-        }
         activation.operationEffects[operation] = const {Effect.readsStorage};
-        return FlowResult(value: value, normal: state.copy());
+        return FlowResult(
+          value: _referenceAddress(inputs.single),
+          normal: state.copy(),
+        );
       case PointerFromAddress() || PointerAddress():
         final input = inputs.single;
         var value = const FlowValue.bottom();
@@ -1627,6 +2402,30 @@ final class ProgramFlow(
         );
       case ReferenceFromAddress():
         final input = inputs.single;
+        if (ExecutionShapes.forType(resultType).isScalar) {
+          var scalar = const FlowValue.bottom();
+          for (final address in input.addresses) {
+            scalar = scalar.join(switch (address) {
+              FlowAddress(base: final FlowObject backing, offset: 0) =>
+                FlowValue.unknown(resultType).withManagedBackings([backing]),
+              FlowAddress(base: final ScalarConstant constant, offset: 0)
+                  when resultType.accepts(constant.type) =>
+                FlowValue.constant(constant),
+              _ => FlowValue.unknown(resultType)
+                  .withManagedBackings(const [], unknown: true),
+            });
+          }
+          if (input.unknownTypes.isNotEmpty || input.objects.isNotEmpty ||
+              input.constants.isNotEmpty || scalar.isBottom) {
+            scalar = scalar.join(FlowValue.unknown(resultType)
+                .withManagedBackings(const [], unknown: true));
+          }
+          activation.operationEffects[operation] = const {Effect.readsStorage};
+          return FlowResult(
+            value: scalar.withReferences([input.references]),
+            normal: state.copy(),
+          );
+        }
         var value = const FlowValue.bottom();
         for (final address in input.addresses) {
           value = value.join(
@@ -1672,8 +2471,25 @@ final class ProgramFlow(
           value: _addressArithmetic(operation, inputs),
           normal: state.copy(),
         );
+      case ObjectRuntimeType(direct: true):
+        activation.operationEffects[operation] = operation.effects;
+        return FlowResult(
+          value: _runtimeTypeValue(inputs.single, state),
+          normal: state.copy(),
+        );
       case ReifyType(:final template):
-        final type = template.substitute(activation.environment);
+        if (activation.body case IrFunction(:final typeBindings)) {
+          for (final binding in typeBindings) {
+            if (template == binding.parameter) {
+              activation.operationEffects[operation] = const {};
+              return FlowResult(
+                value: read(binding.value),
+                normal: state.copy(),
+              );
+            }
+          }
+        }
+        final type = template.substitute(activation.executionEnvironment);
         if (type.freeTypeParameters.isEmpty) {
           activation.operationEffects[operation] = const {};
           return FlowResult(
@@ -1687,8 +2503,11 @@ final class ProgramFlow(
           normal: state.copy(),
         );
       case TypeTest(:final testedType, :final negated):
-        final expected = testedType.substitute(activation.environment);
-        final checked = inputs.single.check(expected);
+        final expected = testedType.substituteForFlow(
+          activation.executionEnvironment,
+        );
+        final checked = inputs.single.check(expected, runtimeTypes: true,
+            runtimeTypeOf: (object) => _callableRuntimeType(object, state));
         final matches = !checked.mayFail
             ? true
             : checked.value.isBottom
@@ -1712,6 +2531,8 @@ final class ProgramFlow(
       case TypeCast() || NullCheck():
         final checked = inputs.single.check(
           operation is NullCheck ? ValueType.object : resultType,
+          runtimeTypes: true,
+          runtimeTypeOf: (object) => _callableRuntimeType(object, state),
         );
         activation.operationEffects[operation] = {
           if (checked.mayFail) Effect.mayThrow,
@@ -1722,6 +2543,9 @@ final class ProgramFlow(
           exceptional: checked.mayFail ? state.copy() : null,
           exception: _typeError,
         );
+      case CellReference() || CallableReference() || CellStorageView() || CellStorageReference():
+        activation.operationEffects[operation] = const {};
+        return FlowResult(value: inputs.single, normal: state.copy());
       case TypeView() || UncheckedCast():
         final value = inputs.single.check(resultType).value;
         activation.operationEffects[operation] = operation.effects;
@@ -1731,7 +2555,9 @@ final class ProgramFlow(
         );
       default:
         if (operation is Equals &&
-            inputs.first.types.every(ValueType.typeType.accepts)) {
+            inputs.first.runtimeTypes.every(
+              (type) => type == TypeMetadata.type,
+            )) {
           activation.operationEffects[operation] = const {};
           return FlowResult(
             value: FlowValue.unknown(.boolean),
@@ -1794,6 +2620,7 @@ final class ProgramFlow(
             inputs,
             state,
             resultType,
+            accessesProgramState: true,
           );
         }
         final next = state.copy();
@@ -1827,6 +2654,7 @@ final class ProgramFlow(
     FlowState state, {
     bool checkAllArguments = false,
     FlowSource? resultSource,
+    List<FlowValue> executionTypes = const [],
   }) {
     var result = _unreachable;
     var unresolved = false;
@@ -1841,7 +2669,7 @@ final class ProgramFlow(
         functions = functions.join(FlowValue.constant(constant));
       }
       for (final object in receiver.objects.where(
-        (object) => object.type is FunctionType,
+        (object) => object.type is FunctionType || object.callableStorage != null,
       )) {
         functions = functions.join(FlowValue.object(object));
       }
@@ -1884,6 +2712,14 @@ final class ProgramFlow(
           privateScope: selector.privateScope,
         )).target;
         if (method != null) {
+          if (operation case DynamicDispatch(methodBindings: final bindings)
+              when bindings.containsKey(method)) {
+            final implementation = bindings[method]!;
+            result = _joinResult(result, _invoke(activation, block, operation,
+                implementation, [_receiverValue(receiver, type)], state,
+                resultSource: resultSource));
+            continue;
+          }
           result = _joinResult(
             result,
             _bindAtType(
@@ -1979,6 +2815,19 @@ final class ProgramFlow(
         }
         continue;
       }
+      if (operation is InstanceCall) {
+        (activation.callableSources[operation] ??= {}).add(target);
+        final binding = operation.entryBinding;
+        final entry = binding?.entries[target];
+        if (entry != null) {
+          result = _joinResult(result, _invoke(activation, block, operation,
+            entry, [_receiverValue(receiver, type), ...positional,
+              for (final name in binding!.names) named[name]!, ...executionTypes],
+            state, resultSource: resultSource));
+          continue;
+        }
+        (activation.pendingExecution[operation] ??= {}).add(target);
+      }
       final arguments = target.signature.bind<FlowValue>(
         positional,
         named,
@@ -1991,7 +2840,7 @@ final class ProgramFlow(
                     (parameter) => parameter.defaultType ?? parameter.bound,
                   )
                 : typeArguments)
-          argument.substitute(activation.environment),
+          argument.substitute(activation.executionEnvironment),
       ];
       try {
         target.signatureFor(type).instantiate(appliedTypes);
@@ -2016,7 +2865,8 @@ final class ProgramFlow(
       );
       if (target.requiresResultCheck && invoked.normal != null) {
         final checked = invoked.value.check(
-          operation.type.substitute(activation.environment),
+          operation.type.substituteForFlow(activation.executionEnvironment),
+          runtimeTypes: true,
         );
         result = _joinResult(
           result,
@@ -2050,7 +2900,8 @@ final class ProgramFlow(
           operation,
           [receiver, ...positional, ...named.values],
           state,
-          operation.type.substitute(activation.environment),
+          operation.type.substituteForFlow(activation.executionEnvironment),
+          accessesProgramState: true,
         ),
       );
     }
@@ -2064,12 +2915,30 @@ final class ProgramFlow(
     FunctionTarget target,
     ClassType receiverType,
     FlowValue receiver,
-    FlowState state,
+    FlowState state, {
+    List<FlowValue> executionTypes = const [],
+  }
   ) {
-    final actual = target.reifiedSignature.substitute(
-      target.environmentFor(receiverType),
-    );
-    final expected = site.type.substitute(activation.environment);
+    if (site is BindMethod) {
+      (activation.callableSources[site] ??= {}).add(target);
+      final entry = site.entryBinding?.entries[target];
+      if (entry != null) {
+        if (program.implementationOf(entry) is! IrFunction) {
+          throw StateError('A method producer requires its actual ordinary body.');
+        }
+        return _invoke(activation, block, site, entry, [
+          _receiverValue(receiver, receiverType),
+          ...executionTypes,
+        ], state, resultSource: FlowSource(site, activation));
+      }
+      (activation.pendingExecution[site] ??= {}).add(target);
+    }
+    final actual = target.reifiedSignature
+        .substitute(target.environmentFor(receiverType))
+        .reify();
+    final expected = site.type
+        .substitute(activation.executionEnvironment)
+        .runtimeCheckType;
     final unresolved =
         actual.freeTypeParameters.isNotEmpty ||
         expected.freeTypeParameters.isNotEmpty;
@@ -2180,6 +3049,7 @@ final class ProgramFlow(
                 constructorSignature: constant.constructorSignature,
                 constructorAlias: constant.constructorAlias,
                 constructorTypeArguments: constant.constructorTypeArguments,
+                invocationEntry: constant.invocationEntry,
               ),
             ),
           );
@@ -2203,7 +3073,9 @@ final class ProgramFlow(
     }
     if (function.unknownTypes.isNotEmpty) {
       value = value.join(
-        FlowValue.unknown(site.type.substitute(activation.environment)),
+        FlowValue.unknown(
+          site.type.substituteForFlow(activation.executionEnvironment),
+        ),
       );
       mayFail = true;
     }
@@ -2227,10 +3099,12 @@ final class ProgramFlow(
   ) => {
     if (owner != null)
       ...target.environmentFor(
-        owner.substitute(caller.environment) as ClassType,
+        owner.substitute(caller.executionEnvironment) as ClassType,
       ),
     for (final (index, type) in arguments.indexed)
-      target.typeParameters[index]: type.substitute(caller.environment),
+      target.typeParameters[index]: type.substitute(
+        caller.executionEnvironment,
+      ),
   };
 
   FlowResult _call(
@@ -2244,13 +3118,15 @@ final class ProgramFlow(
     List<ValueType>? typeArguments,
     bool checkAllArguments = false,
     FlowSource? resultSource,
+    FlowValue? invocationEnvironment,
+    List<FlowValue>? descriptorArguments,
   }) {
     FlowResult result = _unreachable;
     final appliedArguments = [
       for (final type
           in typeArguments ??
               (site is FunctionCall ? site.typeArguments : const <ValueType>[]))
-        type.substitute(activation.environment),
+        type.substitute(activation.executionEnvironment),
     ];
     bool accepts(FlowValue receiver, FunctionType signature) {
       if (signature.acceptsShape(positional.length, named.keys) &&
@@ -2289,15 +3165,88 @@ final class ProgramFlow(
           (index) => FlowValue.constant(body!.defaults[index]!),
         );
 
+    FlowResult? entryFor(FunctionTarget source, FlowValue receiver) {
+      (activation.callableSources[site] ??= {}).add(source);
+      final binding = switch (site) {
+        FunctionCall(:final entryBinding) || DynamicDispatch(:final entryBinding) => entryBinding,
+        _ => null,
+      };
+      final entry = binding?.entries[source];
+      if (entry == null) {
+        // This is a known semantic call, with an actual source body and input
+        // state. It is not an unknown external invocation. Keep analyzing that
+        // source while the implementation owner fulfills this explicit demand;
+        // final preparation must reject any demand left unfulfilled.
+        (activation.pendingExecution[site] ??= {}).add(source);
+        return null;
+      }
+      final result = _invoke(
+        activation,
+        block,
+        site,
+        entry,
+        [
+          invocationEnvironment ?? receiver,
+          ...positional,
+          for (final name in binding!.shape.named.keys) named[name]!,
+          for (final argument in switch (site) {
+            FunctionCall(:final typeArguments) || DynamicDispatch(:final typeArguments) => typeArguments,
+            _ => const <ValueType>[],
+          })
+            if (argument.substitute(activation.executionEnvironment)
+                case final type when type.freeTypeParameters.isEmpty)
+              FlowValue.constant(TypeConstant(type))
+            else
+              FlowValue.unknown(TypeMetadata.type),
+        ],
+        state,
+        resultSource: resultSource,
+      );
+      return result;
+    }
+
     for (final constant in function.constants.whereType<FunctionConstant>()) {
+      final actualSource = constant.invocationEntry ?? constant.target.implementation;
+      (activation.callableSources[site] ??= {}).add(actualSource);
+      if (site is DynamicDispatch && site.entryBinding != null) {
+        if (entryFor(actualSource, FlowValue.constant(constant)) case final invoked?) {
+          result = _joinResult(result, invoked);
+          continue;
+        }
+      }
       final signature = constant.type as FunctionType;
+      if (descriptorArguments != null &&
+          descriptorArguments.length != signature.typeParameters.length) {
+        activation.unknownCalls.add(site);
+        continue;
+      }
       if (!accepts(FlowValue.constant(constant), signature)) continue;
-      final effective = appliedArguments.isEmpty && checkAllArguments
+      final effective = descriptorArguments != null
+          ? [for (final (index, descriptor) in descriptorArguments.indexed)
+              switch (descriptor.constant) {
+                TypeConstant(:final representedType) => representedType,
+                _ => signature.typeParameters[index],
+              }]
+          : appliedArguments.isEmpty && checkAllArguments
           ? [
               for (final parameter in signature.typeParameters)
                 parameter.defaultType ?? parameter.bound,
             ]
           : appliedArguments;
+      // The source is known even when its generic argument check must fail.
+      // A mapped entry owns that check, so it must execute before resolving the
+      // source's validated generic signature.
+      if (constant.target.kind != .initializer &&
+              constant.target.kind != .factory ||
+          constant.invocationEntry != null) {
+        final source =
+            constant.invocationEntry ?? constant.target.implementation;
+        if (entryFor(source, FlowValue.constant(constant))
+            case final invoked?) {
+          result = _joinResult(result, invoked);
+          continue;
+        }
+      }
       late final ({
         FunctionTarget target,
         ClassType? owner,
@@ -2315,6 +3264,10 @@ final class ProgramFlow(
         continue;
       }
       final (:target, :owner, typeArguments: genericArguments) = binding;
+      if (entryFor(target, FlowValue.constant(constant)) case final invoked?) {
+        result = _joinResult(result, invoked);
+        continue;
+      }
       final body = program.implementationOf(target);
       final arguments = bind(target, body);
       final environment = _environment(
@@ -2333,7 +3286,7 @@ final class ProgramFlow(
           FlowObject(
             site,
             activation,
-            type: owner!.substitute(activation.environment),
+            type: owner!.substituteForFlow(activation.executionEnvironment),
           ),
           target,
           arguments,
@@ -2365,9 +3318,65 @@ final class ProgramFlow(
       result = _joinResult(result, invoked);
     }
     for (final object in function.objects) {
-      final signature = object.type as FunctionType;
+      if (object.site is InstantiateFunction || object.site is InstantiateFunctionFrom) {
+        final origin = state.capturesOf(object);
+        if (origin == null) { activation.unknownCalls.add(site); continue; }
+        result = _joinResult(result, _call(activation, block, site, origin.single,
+            positional, named, state,
+            typeArguments: _creator(object).instantiations[_original(object)]!,
+            checkAllArguments: checkAllArguments, resultSource: resultSource,
+            invocationEnvironment: invocationEnvironment ?? FlowValue.object(object)));
+        continue;
+      }
+      final sources = switch (object.site) {
+        MakeClosure(:final target) => {target},
+        BindMethod() || DynamicDispatch() =>
+          _creator(object).boundMethods[_original(object)] ?? <FunctionTarget>{},
+        _ => <FunctionTarget>{},
+      };
+      var invokedEveryEntry = sources.isNotEmpty;
+      for (final source in sources) {
+        if (entryFor(source, FlowValue.object(object)) case final invoked?) {
+          result = _joinResult(result, invoked);
+        } else {
+          invokedEveryEntry = false;
+        }
+      }
+      if (invokedEveryEntry) continue;
+      if (object.callableStorage case final storage? when storage.origin != null) {
+        final origin = state.storedFieldOf(object, storage.origin!);
+        final arguments = _storedArguments(object, state);
+        if (origin == null || arguments == null) {
+          activation.unknownCalls.add(site);
+          continue;
+        }
+        result = _joinResult(result, _call(activation, block, site, origin,
+            positional, named, state, descriptorArguments: arguments,
+            checkAllArguments: checkAllArguments, resultSource: resultSource,
+            invocationEnvironment: invocationEnvironment ?? FlowValue.object(object)));
+        continue;
+      }
+      if (object.callableStorage?.source case final source?
+          when _provesStoredCallable(object, state, source)) {
+        if (entryFor(source, FlowValue.object(object)) case final invoked?) {
+          result = _joinResult(result, invoked);
+          continue;
+        }
+      }
+      final signature = object.callableStorage?.signature ?? object.type as FunctionType;
+      if (descriptorArguments != null &&
+          descriptorArguments.length != signature.typeParameters.length) {
+        activation.unknownCalls.add(site);
+        continue;
+      }
       if (!accepts(FlowValue.object(object), signature)) continue;
-      final effective = appliedArguments.isEmpty && checkAllArguments
+      final effective = descriptorArguments != null
+          ? [for (final (index, descriptor) in descriptorArguments.indexed)
+              switch (descriptor.constant) {
+                TypeConstant(:final representedType) => representedType,
+                _ => signature.typeParameters[index],
+              }]
+          : appliedArguments.isEmpty && checkAllArguments
           ? signature.defaultTypeArguments
           : appliedArguments;
       try {
@@ -2386,24 +3395,52 @@ final class ProgramFlow(
         continue;
       }
       switch (object.site) {
-        case InstantiateFunction() || InstantiateFunctionFrom():
-          final creator = _creator(object);
+        case Construct(callableStorage: final storage?) ||
+            AllocatedObject(callableStorage: final storage?):
+          final target = storage.source;
+          if (target == null) throw StateError('Unresolved callable wrapper.');
+          if (!_provesStoredCallable(object, state, target)) {
+            activation.unknownCalls.add(site);
+            continue;
+          }
+          if (entryFor(target, FlowValue.object(object)) case final invoked?) {
+            result = _joinResult(result, invoked);
+            continue;
+          }
+          final body = program.implementationOf(target)!;
+          final environment = <TypeParameterType, ValueType>{
+            for (final (i, parameter) in storage.parameters.indexed)
+              parameter: switch (state
+                  .storedFieldOf(object, storage.descriptors[i])
+                  ?.constant) {
+                TypeConstant(:final representedType) => representedType,
+                _ => parameter,
+              },
+            ..._environment(target, null, effective, activation),
+          };
           result = _joinResult(
             result,
-            _call(
+            _invoke(
               activation,
               block,
               site,
-              captures.single,
-              positional,
-              named,
+              target,
+              [
+                if (target.kind == .closure) FlowValue.object(object),
+                ...captures,
+                ...bind(target, body),
+              ],
               state,
-              typeArguments: creator.instantiations[_original(object)]!,
+              environment: environment,
               checkAllArguments: checkAllArguments,
               resultSource: resultSource,
             ),
           );
         case MakeClosure(:final target):
+          if (entryFor(target, FlowValue.object(object)) case final invoked?) {
+            result = _joinResult(result, invoked);
+            continue;
+          }
           final body = program.implementationOf(target)!;
           final arguments = bind(target, body);
           result = _joinResult(
@@ -2416,7 +3453,7 @@ final class ProgramFlow(
               [FlowValue.object(object), ...captures, ...arguments],
               state,
               environment: {
-                ..._creator(object).environment,
+                ..._creator(object).executionEnvironment,
                 ..._environment(target, null, effective, activation),
               },
               checkAllArguments: checkAllArguments,
@@ -2428,6 +3465,11 @@ final class ProgramFlow(
           for (final target
               in creator.boundMethods[_original(object)] ??
                   <FunctionTarget>{}) {
+            if (entryFor(target, FlowValue.object(object))
+                case final invoked?) {
+              result = _joinResult(result, invoked);
+              continue;
+            }
             final body = program.implementationOf(target)!;
             final arguments = bind(target, body);
             result = _joinResult(
@@ -2465,7 +3507,8 @@ final class ProgramFlow(
           site,
           [function, ...positional, ...named.values],
           state,
-          site.type.substitute(activation.environment),
+          site.type.substituteForFlow(activation.executionEnvironment),
+          accessesProgramState: true,
         ),
       );
     }
@@ -2482,9 +3525,18 @@ final class ProgramFlow(
     Set<Effect>? effects,
     ExternalMemory memory = const .arbitrary(),
     bool capturesArguments = true,
+    // An unknown Dart invocation can name module storage without receiving it
+    // as an argument. Explicit external leaves keep their own memory contract.
+    bool accessesProgramState = false,
     FlowValue? returned,
+    bool allocationProjected = false,
   }) {
     effects ??= operation.effects;
+    if (!allocationProjected && _deferredAllocationProjection(operation) &&
+        (effects.contains(Effect.allocates) ||
+            effects.contains(Effect.callsUserCode))) {
+      state = _allocationInput(activation, block, operation, inputs, state);
+    }
     activation.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
     var next = state.copy();
     if (memory case NativeResultMemory(:final type, :final arguments)) {
@@ -2495,15 +3547,24 @@ final class ProgramFlow(
             ? FlowValue.unknown(.integer)
             : FlowValue.constant(Constant.integer(bytes)),
       );
-      // The C implementation can only capture or mutate its source arguments.
+      // The native implementation receives only its source arguments. In
+      // particular a copied-out result does not retain its local destination.
       inputs = inputs.sublist(1);
       memory = arguments;
     }
-    if (capturesArguments) next.escape(inputs);
+    if (capturesArguments || accessesProgramState) {
+      next.escape([
+        if (capturesArguments) ...inputs,
+        if (accessesProgramState) next.programValues,
+      ]);
+    }
     if (effects.contains(Effect.writesStorage)) {
       switch (memory) {
         case ArbitraryMemory():
-          next.invalidate([...inputs, next.exposedValues]);
+          next.invalidate([
+            ...inputs,
+            next.exposedValues,
+          ], globals: accessesProgramState);
         case WrittenMemory(:final addressParameter, :final lengthParameter) ||
             ReleasedMemory(:final addressParameter, :final lengthParameter):
           next = next.overwriteNative(
@@ -2522,6 +3583,7 @@ final class ProgramFlow(
         ..._escapingActivations,
         for (final target in _openEntries) _roots[target]!,
       }) {
+        _ancestry.link(activation.body.target, callback.body.target);
         callback.readers.add(activation);
         _supply(callback, callback.arguments, next.project(callback.arguments));
         if (callback.normal != null) {
@@ -2561,6 +3623,285 @@ final class ProgramFlow(
     );
   }
 
+  ({FlowValue value, bool proven}) _readTypeArgument(
+    ReadFunctionTypeArgument operation,
+    FlowValue function,
+    FlowState state,
+  ) {
+    var result = const FlowValue.bottom(), proven = !function.isBottom;
+    final visited = <FlowObject>{};
+    void add(ValueType? type) {
+      result = result.join(
+        type == null || type.freeTypeParameters.isNotEmpty
+            ? FlowValue.unknown(TypeMetadata.type)
+            : FlowValue.constant(TypeConstant(type)),
+      );
+    }
+
+    bool matchesOrigin(FlowValue value, [Set<FlowObject>? seen]) {
+      if (value.isBottom ||
+          value.unknownTypes.isNotEmpty ||
+          value.addresses.isNotEmpty) {
+        return false;
+      }
+      for (final constant in value.constants) {
+        if (constant is! FunctionConstant ||
+            (constant.invocationEntry ?? constant.target.implementation) !=
+                operation.source) {
+          return false;
+        }
+      }
+      seen = {...?seen};
+      for (final object in value.objects) {
+        if (!seen.add(object)) return false;
+        if (object.callableStorage case final storage?) {
+          if (storage.origin != null) {
+            final captures = state.capturesOf(object);
+            if (captures == null || !matchesOrigin(captures.single, seen)) {
+              return false;
+            }
+          } else if (!_provesStoredCallable(object, state, operation.source)) {
+            return false;
+          }
+          continue;
+        }
+        if (object.site is InstantiateFunction ||
+            object.site is InstantiateFunctionFrom) {
+          final captures = state.capturesOf(object);
+          if (captures == null || !matchesOrigin(captures.single, seen)) {
+            return false;
+          }
+        } else {
+          final sources = object.site is MakeClosure
+              ? {(object.site as MakeClosure).target}
+              : _creator(object).boundMethods[_original(object)] ??
+                    const <FunctionTarget>{};
+          if (sources.length != 1 || sources.single != operation.source) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    void visit(FlowValue value) {
+      if (value.unknownTypes.isNotEmpty || value.addresses.isNotEmpty) {
+        proven = false;
+        result = result.join(FlowValue.unknown(TypeMetadata.type));
+      }
+      for (final constant in value.constants) {
+        if (constant is! FunctionConstant ||
+            (constant.invocationEntry ?? constant.target.implementation) !=
+                operation.source) {
+          throw StateError('Callable type environment origin is not proven.');
+        }
+        final index = operation.source.typeParameters.indexOf(
+          operation.parameter,
+        );
+        if (index >= 0) {
+          if (constant.typeArguments == null) {
+            throw StateError(
+              'An uninstantiated function has no bound type argument.',
+            );
+          }
+          add(constant.typeArguments![index]);
+        } else {
+          add(constant.ownerType?.typeEnvironment[operation.parameter]);
+        }
+      }
+      for (final object in value.objects) {
+        if (!visited.add(object)) continue;
+        final captures = state.capturesOf(object);
+        if (captures == null) {
+          throw StateError('Callable environment has no storage.');
+        }
+        final own = operation.source.typeParameters.indexOf(
+          operation.parameter,
+        );
+        if (object.callableStorage case final storage?) {
+          if (storage.origin != null) {
+            if (!matchesOrigin(captures.single)) {
+              throw StateError(
+                'Instantiated callable type environment origin is not proven.',
+              );
+            }
+            if (own < 0) {
+              visit(captures.single);
+            } else {
+              var list = state.storedFieldOf(object, storage.arguments);
+              if (list == null) {
+                throw StateError('Missing callable type arguments.');
+              }
+              for (var index = 0; index < own; index++) {
+                list = _boundField(list!, TypeMetadata.tail, state);
+              }
+              result = result.join(
+                _boundField(list!, TypeMetadata.head, state),
+              );
+            }
+          } else {
+            if (!_provesStoredCallable(object, state, operation.source)) {
+              throw StateError(
+                'Callable type environment origin is not proven.',
+              );
+            }
+            final index = storage.parameters.indexOf(operation.parameter);
+            if (index < 0) {
+              throw StateError(
+                'An uninstantiated function has no bound type argument.',
+              );
+            }
+            final descriptor = state.storedFieldOf(
+              object,
+              storage.descriptors[index],
+            );
+            if (descriptor == null) {
+              throw StateError('Missing captured type descriptor.');
+            }
+            result = result.join(descriptor);
+          }
+          continue;
+        }
+        if (object.site is InstantiateFunction ||
+            object.site is InstantiateFunctionFrom) {
+          if (!matchesOrigin(captures.single)) {
+            throw StateError(
+              'Instantiated callable type environment origin is not proven.',
+            );
+          }
+          if (own >= 0) {
+            add(_creator(object).instantiations[_original(object)]![own]);
+          } else {
+            visit(captures.single);
+          }
+          continue;
+        }
+        final sources = object.site is MakeClosure
+            ? {(object.site as MakeClosure).target}
+            : _creator(object).boundMethods[_original(object)] ??
+                  const <FunctionTarget>{};
+        if (sources.length != 1 || sources.single != operation.source) {
+          throw StateError('Callable type environment origin is not proven.');
+        }
+        if (own >= 0) {
+          throw StateError(
+            'An uninstantiated function has no bound type argument.',
+          );
+        }
+        if (object.site is MakeClosure) {
+          add(_creator(object).executionEnvironment[operation.parameter]);
+        } else {
+          var found = false;
+          for (final type in _receiverTypes(captures.single)) {
+            final actual = type.asInstanceOf(operation.source.owner!);
+            if (actual == null) continue;
+            found = true;
+            add(actual.typeEnvironment[operation.parameter]);
+          }
+          if (!found) add(null);
+        }
+      }
+    }
+
+    visit(function);
+    return (value: result, proven: proven);
+  }
+
+  ({FlowValue value, bool proven}) _readEnvironment(
+    ReadFunctionEnvironment operation,
+    FlowValue function,
+    FlowState state,
+  ) {
+    var result = const FlowValue.bottom(), proven = !function.isBottom;
+    final visited = <FlowObject>{};
+    void visit(FlowValue value) {
+      if (value.unknownTypes.isNotEmpty || value.addresses.isNotEmpty) {
+        proven = false;
+        result = result.join(
+          FlowValue.unknown(operation.type).withReferences([value.references]),
+        );
+      }
+      if (value.constants.isNotEmpty) {
+        throw StateError('A static function has no captured environment.');
+      }
+      for (final object in value.objects) {
+        if (!visited.add(object)) continue;
+        final captures = state.capturesOf(object);
+        if (captures == null) {
+          throw StateError('Callable environment has no capture storage.');
+        }
+        if (object.callableStorage case final storage?) {
+          if (storage.origin != null) {
+            visit(captures.single);
+            continue;
+          }
+          if (!_provesStoredCallable(object, state, operation.source)) {
+            throw StateError('Callable environment origin is not proven.');
+          }
+          result = result.join(
+            operation.capture != null
+                ? captures[operation.capture!]
+                : operation.source.kind == .closure
+                ? FlowValue.object(object)
+                : captures.single,
+          );
+          continue;
+        }
+        if (object.site is InstantiateFunction ||
+            object.site is InstantiateFunctionFrom) {
+          visit(captures.single);
+          continue;
+        }
+        final sources = object.site is MakeClosure
+            ? {(object.site as MakeClosure).target}
+            : _creator(object).boundMethods[_original(object)] ??
+                  const <FunctionTarget>{};
+        if (sources.length != 1 || sources.single != operation.source) {
+          throw StateError('Callable environment origin is not proven.');
+        }
+        result = result.join(
+          operation.capture != null
+              ? captures[operation.capture!]
+              : operation.source.kind == .closure
+              ? FlowValue.object(object)
+              : captures.single,
+        );
+      }
+    }
+
+    visit(function);
+    return (value: result, proven: proven);
+  }
+
+  bool _provesStoredCallable(
+    FlowObject object,
+    FlowState state,
+    FunctionTarget source,
+  ) {
+    final storage = object.callableStorage;
+    if (storage == null || storage.source != source) return false;
+    final table = state.storedFieldOf(object, storage.entries);
+    return table != null &&
+        table.addresses.isNotEmpty &&
+        table.objects.isEmpty &&
+        table.constants.isEmpty &&
+        table.unknownTypes.isEmpty &&
+        table.addresses.every(
+          (address) => address.base == source && address.offset == 0,
+        );
+  }
+
+  FlowValue _boundField(
+    FlowValue receiver,
+    InstanceField field,
+    FlowState state,
+  ) =>
+      state.boundValueOf(
+        LoadField(field, Block([field.owner]).parameters.single),
+        [receiver],
+      ) ??
+      FlowValue.unknown(field.type);
+
   void _publishExternal(FlowState state) {
     final exposed = state.project(const []);
     final changed = _externalState == null
@@ -2574,6 +3915,23 @@ final class ProgramFlow(
     }) {
       _supply(callback, callback.arguments, _externalState!);
     }
+  }
+
+  List<FlowValue>? _storedArguments(FlowObject object, FlowState state) {
+    final storage = object.callableStorage!;
+    var list = state.storedFieldOf(object, storage.arguments);
+    final seen = <FlowValue>{};
+    final values = <FlowValue>[];
+    while (list != null && seen.add(list)) {
+      if (list.constant case ScalarConstant(value: null)) return values;
+      if (list.unknownTypes.isNotEmpty || list.constants.isNotEmpty ||
+          list.objects.isEmpty) {
+        return null;
+      }
+      values.add(_boundField(list, TypeMetadata.head, state));
+      list = _boundField(list, TypeMetadata.tail, state);
+    }
+    return null;
   }
 
   void _admitEscaped(
@@ -2626,7 +3984,7 @@ final class ProgramFlow(
       ) => callback == null
           ? [
               for (final type in target.signature.parameters)
-                FlowValue.unknown(type.substitute(environment)),
+                FlowValue.unknown(type.substituteForFlow(environment)),
             ]
           : target.signature.bind<FlowValue>(
               callback.dartSignature.parameters.map(FlowValue.unknown).toList(),
@@ -2740,6 +4098,49 @@ final class ProgramFlow(
         if (!visited.add((object, _typeKey(typeArguments), callback))) continue;
         final captures = state.capturesOf(object);
         if (captures == null) continue;
+        if (object.callableStorage case final storage?) {
+          if (storage.source case final target?) {
+            if (!_provesStoredCallable(object, state, target)) continue;
+            final environment = <TypeParameterType, ValueType>{
+              for (final (index, parameter) in storage.parameters.indexed)
+                parameter: switch (state.storedFieldOf(object,
+                    storage.descriptors[index])?.constant) {
+                  TypeConstant(:final representedType) => representedType,
+                  _ => parameter,
+                },
+              for (final (index, parameter) in target.typeParameters.indexed)
+                parameter: index < typeArguments.length
+                    ? typeArguments[index] : parameter,
+            };
+            admit(callback == null ? identity ?? object : (identity, object),
+                target, [
+                  if (target.kind == .closure) FlowValue.object(object),
+                  ...captures,
+                  ...parameters(target, environment),
+                ], environment: environment, native: callback != null);
+          } else {
+            // These are the actual descriptor fields produced by the checked
+            // runtime instantiation. Unknown descriptors keep their own binder
+            // symbolic when the original source is admitted below.
+            final types = <ValueType>[];
+            var list = state.storedFieldOf(object, storage.arguments);
+            final seen = <FlowValue>{};
+            while (list != null && seen.add(list) &&
+                list.constant is! ScalarConstant) {
+              final head = _boundField(list, TypeMetadata.head, state);
+              if (head.constant case TypeConstant(:final representedType)) {
+                types.add(representedType);
+              } else {
+                types.clear();
+                break;
+              }
+              list = _boundField(list, TypeMetadata.tail, state);
+            }
+            visit(captures.single, typeArguments: types,
+                identity: identity ?? object, callback: callback);
+          }
+          continue;
+        }
         final creator = _creator(object);
         if (creator.instantiations[_original(object)] case final arguments?) {
           visit(
@@ -2752,7 +4153,7 @@ final class ProgramFlow(
         }
         if (object.site case MakeClosure(:final target)) {
           final environment = {
-            ...creator.environment,
+            ...creator.executionEnvironment,
             for (final (i, type) in typeArguments.indexed)
               target.typeParameters[i]: type,
           };
@@ -2806,7 +4207,7 @@ final class ProgramFlow(
   Iterable<ClassType> _receiverTypes(FlowValue value) sync* {
     final seen = <ClassType>{};
     for (final type in [
-      ...value.constants.map((constant) => constant.type),
+      ...value.constants.map((constant) => constant.provenValueType),
       ...value.objects.map((object) => object.type),
       ...value.addresses.map((address) => address.type),
     ]) {
@@ -2854,9 +4255,19 @@ final class ProgramFlow(
       : _cyclic.putIfAbsent(body.target, () => cyclicBlocks(body.blocks));
 }
 
+bool _deferredAllocationProjection(Instruction operation) =>
+    operation.implicitMember != null || switch (operation) {
+  DirectCall() || InstanceCall() || FunctionCall() || DynamicDispatch() ||
+  InitializeObject() || LoadGlobal() || LoadField() || ReadCell() ||
+  CheckedTypeArgument(implementation: != null) => true,
+  _ => false,
+};
+
 /// Immutable queries over the converged activations of one graph.
-final class ProgramFlowFacts._(final ProgramFlow _flow) {
+final class ProgramFlowFacts._(final ProgramFlow _flow)
+    implements ProgramCallFacts {
   /// The exact verified graph used to establish these facts.
+  @override
   final IrProgram program = _flow.program;
 
   /// Actual invocations, without promoting retained bodies to roots.
@@ -2887,6 +4298,74 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     return Set.unmodifiable(_flow._openEntries);
   }
 
+  @override
+  bool coversEntry(FunctionTarget target) {
+    _check();
+    target = target.implementation;
+    if (!_flow._definitions.contains(target)) return false;
+    return [
+      ?_flow._roots[target],
+      for (final activation in _flow._escapingActivations)
+        if (activation.body.target == target &&
+            !_flow._nativeLookups.contains(activation))
+          activation,
+    ].any(
+      (activation) => activation.arguments.indexed.every((entry) {
+        final actual = entry.$2.withSources(const []);
+        return actual.join(
+              FlowValue.unknown(
+                target.parameterTypes[entry.$1],
+                external: actual.externalUnknownTypes.contains(
+                  target.parameterTypes[entry.$1],
+                ),
+              ),
+            ) ==
+            actual;
+      }),
+    );
+  }
+
+  @override
+  bool allows(Value receiver, ClassType actual) {
+    _check();
+    // New representation helpers have no execution facts yet. The explicit
+    // structural-consumer fallback is a static bound, never a solved input.
+    if (!owns(receiver)) return receiver.unviewedType.mayHaveInstance(actual);
+    return valueOf(receiver).mayHaveInstance(actual);
+  }
+
+  /// Nominal receivers admitted by actual source value facts in this graph.
+  ///
+  /// Unreached values contribute no classes. This query creates neither entry
+  /// roots nor executable targets; unresolved receiver bounds remain broad.
+  Set<ClassType> receiverClassesOf(Value receiver) {
+    _check();
+    return Set.unmodifiable(_flow._receiverTypes(valueOf(receiver)));
+  }
+
+  @override
+  Set<FunctionTarget> executionTargetsOf(Instruction operation) =>
+      targetsOf(operation);
+
+  /// Whether every reached execution has the allocation's invariant slot view.
+  bool provesStorageView(Instruction operation) {
+    _check();
+    final reached = _activations.where((a) => a.before.containsKey(operation));
+    return reached.isNotEmpty && reached.every((a) => a.storageViews[operation] == true);
+  }
+
+  /// Whether every actual input proves the environment's source identity.
+  bool provesFunctionEnvironment(Instruction operation) {
+    _check();
+    final reached = _activations
+        .where((activation) => activation.before.containsKey(operation))
+        .toList();
+    return reached.isNotEmpty &&
+        reached.every(
+          (activation) => activation.environmentReads[operation] == true,
+        );
+  }
+
   /// Entry returns visible to an unknown outside consumer.
   Set<FunctionTarget> get escapingReturns {
     _check();
@@ -2894,12 +4373,33 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
   }
 
   /// Bodies and imports reached by executable calls.
+  @override
   Set<FunctionTarget> get definitions {
     _check();
     return Set.unmodifiable(_flow._definitions);
   }
 
+  /// Known source calls whose actual execution entry still needs realization.
+  ///
+  /// Their semantic bodies have been analyzed with their real inputs. This is
+  /// a lowering obligation, never permission to emit the source as an adapter
+  /// or to retain an arbitrary target as an additional root.
+  Map<Instruction, Set<FunctionTarget>> get pendingExecutionCalls {
+    _check();
+    final pending = <Instruction, Set<FunctionTarget>>{};
+    for (final activation in _activations) {
+      for (final entry in activation.pendingExecution.entries) {
+        (pending[entry.key] ??= {}).addAll(entry.value);
+      }
+    }
+    return Map.unmodifiable({
+      for (final entry in pending.entries)
+        entry.key: Set<FunctionTarget>.unmodifiable(entry.value),
+    });
+  }
+
   /// Verifies graph identity and rejects facts invalidated by new inputs.
+  @override
   void checkProgram(IrProgram program) {
     _check();
     if (!identical(this.program, program)) {
@@ -2913,11 +4413,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     }
   }
 
-  Iterable<_Activation> get _activations sync* {
-    yield* _flow._roots.values;
-    yield* _flow._calls;
-    yield* _flow._escapedCalls.values;
-  }
+  Iterable<_Activation> get _activations => _flow._activeContexts;
 
   /// Opaque activation identities for context-specific queries.
   Iterable<Object> activationsOf(FunctionTarget target) {
@@ -3008,8 +4504,11 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
         result = result.join(
           valueOf(value.test.operand, activation: item)
               .check(
-                value.test.testedType.substitute(item.environment),
+                value.test.testedType.substituteForFlow(
+                  item.executionEnvironment,
+                ),
                 negated: value.outcome == value.test.negated,
+                runtimeTypes: true,
               )
               .value,
         );
@@ -3076,7 +4575,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
   bool reachesEdge(Jump edge, {Object? activation}) =>
       _at(edge, activation).any((item) => item.edges.contains(edge));
 
-  /// Resolved source targets; unknown alternatives are reported separately.
+  /// Actual executable targets; unknown alternatives are reported separately.
   Set<FunctionTarget> targetsOf(Instruction operation, {Object? activation}) =>
       Set.unmodifiable(
         _at(
@@ -3084,6 +4583,17 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
           activation,
         ).expand((item) => item.targets[operation] ?? const <FunctionTarget>{}),
       );
+
+  /// Language callable implementations before an explicit execution binding.
+  ///
+  /// Use [targetsOf] for semantic rewrites: adapters can have observable effects.
+  Set<FunctionTarget> sourceTargetsOf(Instruction operation) {
+    _check();
+    return Set.unmodifiable({
+      for (final activation in _activations)
+        ...?activation.callableSources[operation],
+    });
+  }
 
   /// Bodies whose exceptions can leave this operation, including allocation
   /// failure reporting that has no explicit source call.
@@ -3176,9 +4686,6 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
     final callees = activation.calls[operation] ?? const <_Activation>{};
     var localAddress = false;
     if (stableInitialization && operation is ReferenceAddress) {
-      late final incomingIdentities = activation.input!.allocationIdentities(
-        activation.arguments,
-      );
       final value = operation.object is Constant
           ? FlowValue.constant(operation.object as Constant)
           : activation.values[operation.object];
@@ -3187,7 +4694,9 @@ final class ProgramFlowFacts._(final ProgramFlow _flow) {
           !value.isBottom &&
           value.unknownTypes.isEmpty &&
           value.addresses.isEmpty &&
-          value.objects.every((object) => !incomingIdentities.contains(object));
+          value.objects.every(
+            (object) => !activation.incomingIdentities.contains(object),
+          );
     }
     // Pure initialization may wait until a later read, even for writable storage.
     final binding =
@@ -3349,6 +4858,53 @@ final class _ContextKey(
   );
 }
 
+final class _AccessPlan(IrFunction body) {
+  final parameters = <BlockParameter, Block>{};
+  final incoming = <Block, List<Jump>>{};
+  bool bindsContext = false;
+
+  this {
+    for (final block in body.blocks) {
+      bindsContext |=
+          block.instructions.any(
+            (operation) => operation is BindNativeContext,
+          ) ||
+          block.end is Invoke &&
+              (block.end as Invoke).operation is BindNativeContext;
+      for (final parameter in block.parameters) {
+        parameters[parameter] = block;
+      }
+      for (final edge in block.successors) {
+        (incoming[edge.target] ??= []).add(edge);
+      }
+    }
+  }
+}
+
+/// Transitive reachability between the actual functions discovered in one
+/// graph. It rules out impossible recursion before traversing activations.
+/// Retiring a call can leave a candidate path here; the activation walk still
+/// proves the concrete cycle, including callback identity, before any join.
+final class _CallAncestry {
+  final _parents = <FunctionTarget, Set<FunctionTarget>>{};
+  final _descendants = <FunctionTarget, Set<FunctionTarget>>{};
+
+  bool mayHaveAncestor(FunctionTarget child, FunctionTarget ancestor) =>
+      child == ancestor || (_parents[child]?.contains(ancestor) ?? false);
+
+  void link(FunctionTarget parent, FunctionTarget child) {
+    if (_parents[child]?.contains(parent) ?? false) return;
+    final upstream = {parent, ...?_parents[parent]};
+    final downstream = {child, ...?_descendants[child]};
+    for (final target in downstream) {
+      (_parents[target] ??= {}).addAll(upstream);
+    }
+    for (final source in upstream) {
+      (_descendants[source] ??= {}).addAll(downstream);
+    }
+  }
+}
+
 final class _CallSite(
   final _Activation caller,
   final Instruction operation,
@@ -3356,24 +4912,162 @@ final class _CallSite(
 ) {
   final contexts = <_ContextKey, _CallInput>{};
   final joined = <_ContextKey>{};
-  final allocations = <FlowObject, FlowObject>{};
+  final allocations = <Object, FlowObject>{};
   bool recursive = false;
 }
 
 /// A call site's joined input, independent of other users of a shared summary.
-final class _CallInput(List<FlowValue> arguments, final FlowState state) {
+final class _CallInput(List<FlowValue> arguments, FlowState input) {
   final List<FlowValue> arguments = List.of(arguments);
+  final FlowState state = input.copy(resetWrites: true);
+  final _normalized = <FlowObject, FlowObject>{};
+  final originals = <FlowObject, FlowObject>{};
+  Set<FlowObject>? _incoming;
+  Set<FlowObject> get incomingIdentities =>
+      _incoming ??= state.allocationIdentities(arguments);
+  ({List<FlowValue> arguments, FlowState state})? _prepared;
+  bool _private = true;
+  int _nextIdentity = 0;
   _Activation? activation;
 
   void join(List<FlowValue> incoming, FlowState input) {
+    var changed = false;
     for (final (index, value) in incoming.indexed) {
-      arguments[index] = arguments[index].join(value);
+      final joined = arguments[index].join(value);
+      changed |= joined != arguments[index];
+      arguments[index] = joined;
     }
-    state.join(input);
+    changed = state.join(input.copy(resetWrites: true)) || changed;
+    if (changed) {
+      _incoming = null;
+      _prepared = null;
+    }
+  }
+
+  ({List<FlowValue> arguments, FlowState state, bool reset}) prepare(
+    FunctionTarget target,
+    Map<(FunctionTarget, int), _InputIdentity> identities, {
+    required bool private,
+  }) {
+    if (!_private) return (arguments: arguments, state: state, reset: false);
+    if (_prepared case final ready? when private) {
+      return (arguments: ready.arguments, state: ready.state, reset: false);
+    }
+    final anchors = state.anchoredIdentities();
+    final reset =
+        _private &&
+        (!private || _normalized.keys.any(anchors.contains)) &&
+        _normalized.isNotEmpty;
+    if (!private || reset) {
+      _private = false;
+      _normalized.clear();
+      originals.clear();
+      _prepared = null;
+    }
+    if (!_private) return (arguments: arguments, state: state, reset: reset);
+    final positions = <FlowObject, int>{};
+    for (final (index, argument) in arguments.indexed) {
+      for (final object in [
+        ...argument.objects,
+        for (final address in argument.addresses)
+          if (address.base case final FlowObject object)
+            object
+          else if (address.base case FlowRegion(:final allocation))
+            allocation,
+      ]) {
+        positions.putIfAbsent(object, () => index);
+      }
+    }
+    final objects =
+        incomingIdentities
+            .where(
+              (object) =>
+                  !anchors.contains(object) && !_normalized.containsKey(object),
+            )
+            .toList()
+          ..sort((left, right) {
+            var order = (positions[left] ?? arguments.length).compareTo(
+              positions[right] ?? arguments.length,
+            );
+            if (order == 0) {
+              order = identityHashCode(left.site)
+                  .compareTo(identityHashCode(right.site));
+            }
+            if (order == 0) {
+              order = left.type.hashCode.compareTo(right.type.hashCode);
+            }
+            if (order == 0) {
+              order = (left.variant?.hashCode ?? 0).compareTo(
+                right.variant?.hashCode ?? 0,
+              );
+            }
+            return order == 0 ? left.hashCode.compareTo(right.hashCode) : order;
+          });
+    final reserved = {...incomingIdentities, ...originals.keys, ...anchors};
+    for (final object in objects) {
+      FlowObject renamed;
+      do {
+        final index = _nextIdentity++;
+        renamed = FlowObject(
+          object.site,
+          identities.putIfAbsent((
+            target,
+            index,
+          ), () => _InputIdentity(target, index)),
+          type: object.type,
+          variant: object.variant,
+          cellStorage: object.cellStorage,
+          storageView: object.storageView,
+        );
+      } while (reserved.contains(renamed));
+      reserved.add(renamed);
+      _normalized[object] = renamed;
+      originals[renamed] = object;
+      (renamed.activation as _InputIdentity).origins
+          .putIfAbsent(renamed, () => {})
+          .add(object);
+    }
+    final ready = (
+      arguments: [
+        for (final value in arguments)
+          value.mapObjects((object) => _normalized[object] ?? object),
+      ],
+      state: state.mapObjects(_normalized),
+    );
+    _prepared = ready;
+    return (arguments: ready.arguments, state: ready.state, reset: false);
   }
 }
 
-final class _AllocationContext(final FlowObject original, final _CallSite site);
+/// One formal allocation identity; the original instruction and type remain intact.
+final class _InputIdentity(final FunctionTarget target, final int index) {
+  // Demand can cross a shared input boundary in either direction. Keep each
+  // exact binding; sharing a formal never identifies its different callers.
+  final origins = <FlowObject, Set<FlowObject>>{};
+}
+
+final class _AllocationContext(
+  final FlowObject original,
+  final _CallSite site,
+) {
+  final Set<FlowObject> origins = {original};
+}
+
+// A call-site's new allocation survives a change of summary precision. Nested
+// source calls remain distinct; callable capabilities retain their creator.
+Object _allocationKey(FlowObject object) {
+  if (object.type is FunctionType || object.variant != null) return object;
+  final origin = switch (object.activation) {
+    _Activation(:final body) => body.target,
+    _AllocationContext(:final original, :final site) => (
+      _allocationKey(original),
+      site.operation,
+      site.target,
+    ),
+    final identity => identity,
+  };
+  return (object.site, object.type, object.variant, object.storageView, origin);
+}
 
 FlowObject _original(FlowObject object) {
   while (object.activation is _AllocationContext) {
@@ -3386,18 +5080,45 @@ _Activation _creator(FlowObject object) =>
     _original(object).activation as _Activation;
 
 bool _mayAliasAcrossSummaries(FlowObject left, FlowObject right) {
+  final visited = <(FlowObject, FlowObject)>{};
+
   bool descendsFrom(FlowObject value, FlowObject ancestor) {
-    while (value != ancestor) {
-      if (value.activation case _AllocationContext(:final original)) {
-        value = original;
-      } else {
-        return false;
+    final pending = [value], seen = <FlowObject>{};
+    while (pending.isNotEmpty) {
+      final current = pending.removeLast();
+      if (current == ancestor) return true;
+      if (!seen.add(current)) continue;
+      if (current.activation case _AllocationContext(:final origins)) {
+        pending.addAll(origins);
       }
     }
-    return true;
+    return false;
   }
 
-  return descendsFrom(left, right) || descendsFrom(right, left);
+  Iterable<FlowObject> inputOrigins(FlowObject value) sync* {
+    final pending = [value], seen = <FlowObject>{};
+    while (pending.isNotEmpty) {
+      final current = pending.removeLast();
+      if (!seen.add(current)) continue;
+      switch (current.activation) {
+        case _InputIdentity(:final origins):
+          yield* origins[current] ?? const <FlowObject>{};
+        case _AllocationContext(:final origins):
+          pending.addAll(origins);
+        default:
+          break;
+      }
+    }
+  }
+
+  bool overlaps(FlowObject a, FlowObject b) {
+    if (!visited.add((a, b))) return false;
+    if (descendsFrom(a, b) || descendsFrom(b, a)) return true;
+    return inputOrigins(a).any((origin) => overlaps(origin, b)) ||
+        inputOrigins(b).any((origin) => overlaps(a, origin));
+  }
+
+  return overlaps(left, right);
 }
 
 bool _equivalent(FlowValue left, FlowValue right) =>
@@ -3411,7 +5132,7 @@ Set<Object>? _callableOrigins(FlowValue value) {
   final origins = <Object>{};
   for (final constant in value.constants) {
     if (constant is! FunctionConstant) return null;
-    origins.add(constant.target.implementation);
+    origins.add(constant.invocationEntry ?? constant.target.implementation);
   }
   for (final object in value.objects) {
     if (object.type is! FunctionType) return null;
@@ -3423,8 +5144,23 @@ Set<Object>? _callableOrigins(FlowValue value) {
   return origins.isEmpty ? null : origins;
 }
 
+final class _StateSummary(FlowState before, FlowState after) {
+  final FlowState entry = before.copy();
+  final FlowState exit = after.copy();
+
+  bool join(FlowState before, FlowState after, {required bool widen}) {
+    final changed = entry.join(before, widen: widen);
+    return exit.join(after, widen: widen) || changed;
+  }
+}
+
 final class _Activation(final IrCallable body) {
   _ContextKey? inputKey;
+  // Caller-owned identities are stable across applications of this input
+  // version. _supply invalidates the closure whenever arguments or state grow.
+  Set<FlowObject>? _incomingIdentities;
+  Set<FlowObject> get incomingIdentities =>
+      _incomingIdentities ??= input!.allocationIdentities(arguments);
   bool shareInput = true;
   late final dominance = ValueDominance(body as IrFunction);
   late final Set<Jump> backEdges = switch (body) {
@@ -3435,6 +5171,8 @@ final class _Activation(final IrCallable body) {
     for (final _ in body.target.parameterTypes) const FlowValue.bottom(),
   ];
   final values = <Value, FlowValue>{};
+  final environmentReads = <Instruction, bool>{};
+  final storageViews = <Instruction, bool>{};
   final edgeStates = <Jump, FlowState>{};
   final before = <Instruction, FlowState>{};
   final after = <Instruction, FlowState>{};
@@ -3445,6 +5183,8 @@ final class _Activation(final IrCallable body) {
   final blocks = <Block>{};
   final edges = <Jump>{};
   final targets = <Instruction, Set<FunctionTarget>>{};
+  final callableSources = <Instruction, Set<FunctionTarget>>{};
+  final pendingExecution = <Instruction, Set<FunctionTarget>>{};
   final calls = <Instruction, Set<_Activation>>{};
   final allocationCalls = <Instruction, DirectCall>{};
   final callSites = <_CallSite>{};
@@ -3458,9 +5198,28 @@ final class _Activation(final IrCallable body) {
   final boundMethods = <FlowObject, Set<FunctionTarget>>{};
   final instantiations = <FlowObject, List<ValueType>>{};
   final environment = <TypeParameterType, ValueType>{};
+  Map<TypeParameterType, ValueType> get executionEnvironment {
+    final function = body;
+    if (function is! IrFunction || function.typeBindings.isEmpty) {
+      return environment;
+    }
+    return {
+      ...environment,
+      for (final binding in function.typeBindings)
+        binding.parameter: switch (binding.value is Constant
+            ? binding.value
+            : values[binding.value]?.constant) {
+          TypeConstant(:final representedType) => representedType,
+          _ => binding.parameter,
+        },
+    };
+  }
+
   FlowState? input;
-  FlowState? normal;
-  FlowState? exceptional;
+  _StateSummary? normalSummary;
+  _StateSummary? exceptionalSummary;
+  FlowState? get normal => normalSummary?.exit;
+  FlowState? get exceptional => exceptionalSummary?.exit;
   FlowValue returned = const FlowValue.bottom();
   FlowValue exception = const FlowValue.bottom();
   FlowValue stackTrace = const FlowValue.bottom();
@@ -3538,6 +5297,56 @@ FlowResult _joinResult(FlowResult left, FlowResult right) {
     stackTrace: left.stackTrace.join(right.stackTrace),
     effects: {...left.effects, ...right.effects},
   );
+}
+
+FlowStorageAccess _emptyStorageAccess() => (
+  fields: <InstanceField>{},
+  globals: <GlobalVariable>{},
+  data: <NativeData>{},
+  modules: <ModuleObject>{},
+  context: false,
+  cells: false,
+  memory: false,
+  writes: false,
+  exposed: false,
+  rawWrites: false,
+);
+
+// A static bound is not an object's runtime class. Only concrete constants,
+// exact allocation types, and closed scalar representations establish metadata.
+ValueType? _callableRuntimeType(FlowObject object, FlowState state) =>
+    switch (state.callableRuntimeTypeOf(object)?.constant) {
+      TypeConstant(:final representedType) => representedType,
+      _ => null,
+    };
+
+FlowValue _runtimeTypeValue(FlowValue input, FlowState state) {
+  FlowValue known(ValueType type) {
+    final actual = type.reify();
+    return actual.freeTypeParameters.isEmpty
+        ? FlowValue.constant(TypeConstant(actual))
+        : FlowValue.unknown(TypeMetadata.type);
+  }
+
+  FlowValue scalar(ValueType type) =>
+      type == ValueType.integer ||
+          type == ValueType.floating ||
+          type == ValueType.boolean ||
+          type == ValueType.nullType
+      ? known(type)
+      : FlowValue.unknown(TypeMetadata.type);
+
+  return FlowValue.joined([
+    for (final constant in input.constants) known(constant.runtimeValueType),
+    for (final object in input.objects)
+      object.callableStorage != null
+          ? state.callableRuntimeTypeOf(object) ?? FlowValue.unknown(TypeMetadata.type)
+          : object.type is ClassType || object.type is FunctionType
+          ? known(object.type)
+          : FlowValue.unknown(TypeMetadata.type),
+    for (final address in input.addresses) scalar(address.type),
+    for (final bound in input.unknownTypes) scalar(bound),
+  ]);
 }
 
 Object? _typeKey(Iterable<ValueType> types) =>
@@ -3811,6 +5620,25 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
   return null;
 }
 
+FlowValue _referenceAddress(FlowValue input) {
+  final carrier = input.carrierReferences;
+  var value = const FlowValue.bottom();
+  for (final constant in carrier.constants) {
+    value = value.join(
+      constant.type == .nullType
+          ? FlowValue.constant(const Constant.integer(0))
+          : FlowValue.address(FlowAddress(constant, 0)),
+    );
+  }
+  for (final object in carrier.objects) {
+    value = value.join(FlowValue.address(FlowAddress(object, 0)));
+  }
+  if (carrier.unknownTypes.isNotEmpty || carrier.addresses.isNotEmpty) {
+    value = value.join(FlowValue.unknown(.integer).withReferences([carrier]));
+  }
+  return value;
+}
+
 FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
   final left = inputs[0], right = inputs[1];
   final subtract = operation.operator == .subtract;
@@ -3880,6 +5708,20 @@ Constant? _fold(
   List<FlowValue> inputs,
   IrProgram program,
 ) {
+  // Dart's null equality never dispatches a user operator. A non-null bound
+  // therefore decides this branch even when the other identity is unknown.
+  if (operation is Equals || operation is Identical) {
+    for (final (nullValue, other) in [
+      (inputs.first, inputs.last),
+      (inputs.last, inputs.first),
+    ]) {
+      if (nullValue.constant == const Constant.nullValue() &&
+          !other.isBottom &&
+          other.types.every((type) => !type.mayBeNull)) {
+        return Constant.boolean(operation is Equals && operation.negated);
+      }
+    }
+  }
   if (operation is Identical) {
     if (_equivalent(inputs.first, inputs.last)) {
       return const Constant.boolean(true);
@@ -4007,7 +5849,9 @@ Constant? _fold(
         result = constants[0]!.structuralKey == constants[1]!.structuralKey;
       case TypeTest(:final testedType, :final negated)
           when testedType.freeTypeParameters.isEmpty:
-        result = testedType.accepts(constants.single!.type) != negated;
+        final checked = FlowValue.constant(constants.single!)
+            .check(testedType, runtimeTypes: true);
+        result = (!checked.mayFail) != negated;
       case RecordGet(slot: final index) when constants.single is RecordConstant:
         return (constants.single as RecordConstant).fields[index];
       case CollectionLength()

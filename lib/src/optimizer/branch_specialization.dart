@@ -17,18 +17,25 @@ final class const ProgramBranchSpecialization({final int maxCodeGrowth = 64})
   @override
   ProgramTransform bind() {
     RangeError.checkNotNegative(maxCodeGrowth, 'maxCodeGrowth');
-    final remaining = <FunctionTarget, int>{};
+    final budget = ProgramExpansionBudget(maxCodeGrowth);
     return ProgramTransform((facts) {
       facts.checkProgram(facts.program);
       var changed = false;
       final functions = <IrFunction>[];
       for (final function in facts.program.functions) {
         var rewritten = function;
-        final budget = remaining[function.target] ?? maxCodeGrowth;
-        if (budget > 0 && facts.definitions.contains(function.target)) {
+        if (maxCodeGrowth > 0 && facts.definitions.contains(function.target)) {
           final dominance = ValueDominance(function);
           final candidates =
-              <({Block header, Set<Block> region, Jump edge, int cost})>[];
+              <
+                ({
+                  Block header,
+                  Set<Block> region,
+                  Jump edge,
+                  int cost,
+                  Object key,
+                })
+              >[];
           for (final header in function.blocks) {
             if (header.end case Branch(condition: final TypeTest test)
                 when test.operand is BlockParameter &&
@@ -49,7 +56,6 @@ final class const ProgramBranchSpecialization({final int maxCodeGrowth = 64})
                     block.instructions.length +
                     1,
               );
-              if (cost > budget) continue;
               final slot = header.parameters.indexOf(
                 test.operand as BlockParameter,
               );
@@ -60,14 +66,20 @@ final class const ProgramBranchSpecialization({final int maxCodeGrowth = 64})
                     continue;
                   }
                   final value = _incoming(facts, owner, edge.arguments[slot]);
-                  final checked = value.check(test.testedType);
+                  final checked = value.check(
+                    test.testedType,
+                    runtimeTypes: true,
+                  );
                   if (!value.isBottom &&
                       (!checked.mayFail || checked.value.isBottom)) {
+                    final key = regionExpansionKey(function, header, {edge});
+                    if (!budget.permits(function.target, key, cost)) continue;
                     candidates.add((
                       header: header,
                       region: region,
                       edge: edge,
                       cost: cost,
+                      key: key,
                     ));
                   }
                 }
@@ -82,8 +94,9 @@ final class const ProgramBranchSpecialization({final int maxCodeGrowth = 64})
               selected.header,
               selected.region,
               {selected.edge},
+              executionShapes: facts.program.executionShapes,
             );
-            remaining[function.target] = budget - selected.cost;
+            budget.charge(function.target, selected.key, selected.cost);
             changed = true;
           }
         }
@@ -94,6 +107,8 @@ final class const ProgramBranchSpecialization({final int maxCodeGrowth = 64})
               facts.program.classes,
               functions,
               globals: facts.program.globals,
+              nativeBoundaries: facts.program.nativeBoundaries,
+              executionShapes: facts.program.executionShapes,
               externals: facts.program.externals,
             )
           : facts.program;

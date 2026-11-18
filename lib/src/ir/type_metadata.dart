@@ -11,6 +11,20 @@ abstract final class TypeMetadata() {
   static final list = ClassType(null, '_TypeArguments');
   static final functionShape = ClassType(null, '_FunctionShape');
   static final namedParameter = ClassType(null, '_NamedParameter');
+
+  /// One nominal declaration's projection, taking a requested shape and slot.
+  /// A negative slot requests the whole view; nonnegative slots read arguments.
+  static final projectorSignature = FunctionType(type.nullable, [
+    type,
+    ValueType.integer,
+    ValueType.integer,
+  ]);
+  static final projector = InstanceField(
+    type,
+    'projector',
+    projectorSignature.nullable,
+    isFinal: true,
+  );
   static final signature = InstanceField(
     type,
     'signature',
@@ -23,6 +37,10 @@ abstract final class TypeMetadata() {
     .integer,
     isFinal: true,
   );
+  static final appliedShape = InstanceField(functionShape, 'appliedShape',
+      .integer, isFinal: true);
+  static final appliedSignature = InstanceField(functionShape, 'appliedSignature',
+      functionShape.nullable, isFinal: true);
   static final positionalCount = InstanceField(
     functionShape,
     'positional',
@@ -103,6 +121,7 @@ abstract final class TypeMetadata() {
         parts,
         signature,
         className,
+        projector,
       ]),
       list: .unmodifiable([head, tail]),
       functionShape: .unmodifiable([
@@ -110,6 +129,8 @@ abstract final class TypeMetadata() {
         positionalCount,
         requiredCount,
         named,
+        appliedShape,
+        appliedSignature,
       ]),
       namedParameter: .unmodifiable([
         name,

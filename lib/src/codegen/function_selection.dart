@@ -8,6 +8,8 @@ import 'function_emitter.dart';
 import 'function_liveness.dart';
 import 'selected_function.dart';
 import 'native_invocation.dart';
+import 'indirect_invocation.dart';
+import 'callable_table_address.dart';
 import 'reference_equality.dart';
 import 'storage_access.dart';
 import 'type_values.dart';
@@ -27,6 +29,8 @@ final class FunctionSelection<R>(
   final exceptionRegister = emitter.exceptionRegister;
   final traceRegister = emitter.traceRegister;
   final failureRegister = emitter.failureRegister;
+  late final R contextRegister;
+  bool bindsContext = false;
   final negationNeedsTemporary = emitter.negationNeedsTemporary;
   final binaries =
       <
@@ -50,15 +54,14 @@ final class FunctionSelection<R>(
           CallLayout<R> layout,
           FunctionTarget? target,
           List<Value> arguments,
-          List<ValueType>? parameterTypes,
+          List<ExecutionShape>? parameterShapes,
           Map<RegisterBank, R> stackScratch,
           R? addressRegister,
-          R? parkRegister,
           Jump? onThrow,
         })
       >{};
   final constantTests = <TypeTest, bool>{};
-  final cells = <NewCell>{};
+  final nativeStorage = <NativeLocalStorage, NativeStorage>{};
   late final CallLayout<R> entry;
   late final FunctionLiveness liveness;
 
@@ -78,8 +81,8 @@ final class FunctionSelection<R>(
     // Internal booleans use integer locations; exported booleans remain rejected.
     entry = convention.classify(
       NativeSignature.types(
-        layouts.callType(layouts.returnType(body.target)),
-        layouts.entryTypes(body.target).map(layouts.callType),
+        layouts.shapeCallType(layouts.resultShape(body.target)),
+        layouts.entryShapes(body.target).map(layouts.shapeCallType),
       ),
     );
     for (final block in body.blocks) {
@@ -98,14 +101,26 @@ final class FunctionSelection<R>(
         if (instruction is ReferenceAddress ||
             instruction is ReferenceFromAddress ||
             instruction is AllocatedObject) {
-          final type = instruction is ReferenceAddress
-              ? instruction.object.type
-              : instruction.type;
-          if (layouts.representation(type) != .reference) {
+          final value = instruction is ReferenceAddress
+              ? instruction.object
+              : instruction;
+          if (!body.shapeOf(value).isReference) {
             throw UnsupportedError(
               'Memory access requires a reference representation.',
             );
           }
+        }
+        final memoryObject = switch (instruction) {
+          LoadObjectData(:final object) ||
+          StoreObjectData(:final object) ||
+          LoadObjectReference(:final object) ||
+          StoreObjectReference(:final object) => object,
+          _ => null,
+        };
+        if (memoryObject != null && !body.shapeOf(memoryObject).isReference) {
+          throw StateError(
+            'Managed memory requires a proven reference carrier.',
+          );
         }
         if (body.aliases.contains(instruction)) continue;
         if (instruction is Instruction) {
@@ -121,36 +136,8 @@ final class FunctionSelection<R>(
           }
         }
         switch (instruction) {
-          case NewCell(
-            type: final CellType type,
-            :final initializer,
-            :final initial,
-          ):
-            if (type.isLate || initializer != null) {
-              throw UnsupportedError(
-                'Native local storage requires a non-late value.',
-              );
-            }
-            layouts.representation(type.content);
-            if (initial != null) {
-              layouts.checkTransfer(
-                body.inputsOf(instruction).single.type,
-                type.content,
-                constant: initial is ScalarConstant,
-              );
-            }
-            cells.add(instruction);
-          case ReadCell(:final cell) || WriteCell(:final cell):
-            if (cell is! NewCell) {
-              throw UnsupportedError('Native local storage cannot be aliased.');
-            }
-            if (instruction case WriteCell(:final value)) {
-              layouts.checkTransfer(
-                body.inputsOf(instruction).last.type,
-                (cell.type as CellType).content,
-                constant: value is ScalarConstant,
-              );
-            }
+          case NewCell() || CopyCell() || ReadCell() || WriteCell():
+            throw StateError('Cell storage must be lowered before selection.');
           case NativeInvocation(:final signature):
             _selectCall(
               instruction,
@@ -158,9 +145,56 @@ final class FunctionSelection<R>(
               body.inputsOf(instruction).skip(1).toList(),
               block,
             );
+          case IndirectInvocation(
+            :final signature,
+            :final execution,
+            :final arguments,
+          ):
+            for (final (index, argument) in arguments.indexed) {
+              layouts.checkShapeTransfer(
+                body.shapeOf(argument),
+                execution.parameters[index],
+              );
+            }
+            if (instruction.type != .never && signature.result != .never) {
+              layouts.checkShapeTransfer(
+                execution.result,
+                body.shapeOf(instruction),
+              );
+            }
+            _selectCall(
+              instruction,
+              convention.classify(
+                NativeSignature.types(
+                  layouts.shapeCallType(execution.result),
+                  execution.parameters.map(layouts.shapeCallType),
+                ),
+              ),
+              arguments,
+              block,
+              parameterShapes: execution.parameters,
+            );
+          case BindNativeContext():
+            if (!bindsContext) contextRegister = emitter.heapRegister;
+            bindsContext = true;
+          case ReadNativeContext():
+            break;
+          case NativeLocalStorage(:final storage):
+            final layout = layouts.nativeLayout.of(storage);
+            if (layout.size == 0) {
+              throw ArgumentError(
+                'Native local storage must have positive size.',
+              );
+            }
+            nativeStorage[instruction] = layout;
           case KeepAlive():
           case ObjectDescriptorAddress():
+          case StackMapAddress():
+          case ModuleRootsAddress():
           case NativeSymbolAddress():
+          case NativeDataAddress():
+          case CallableTableAddress():
+          case ModuleObjectReference():
           case FrameValue():
           case ReifyType():
           case DoubleBits():
@@ -168,28 +202,27 @@ final class FunctionSelection<R>(
           case ObjectRuntimeType():
             break;
           case ObjectHashCode(:final operand, direct: true):
-            if (layouts.representation(operand.type) != .reference) {
+            if (!body.shapeOf(operand).isReference) {
               throw UnsupportedError(
                 'Native identity hash requires a managed reference.',
               );
             }
           case LoadField(:final field) || StorageRead(:final field):
             _storage(field, body.inputsOf(instruction).first);
-            layouts.checkTransfer(field.type, body.typeOf(instruction));
-          case StoreField(:final field, :final value) ||
-              StorageWrite(:final field, :final value):
-            _storage(field, body.inputsOf(instruction).first);
-            layouts.checkTransfer(
-              body.typeOf(body.inputsOf(instruction).last),
-              field.type,
-              constant: value is ScalarConstant,
+            layouts.checkShapeTransfer(
+              layouts.slotShape(field),
+              body.shapeOf(instruction),
             );
-          case TypeView(:final operand, :final type) ||
-              UncheckedCast(:final operand, :final type):
-            layouts.checkTransfer(
-              operand.type,
-              type,
-              constant: operand is ScalarConstant,
+          case StoreField(:final field) || StorageWrite(:final field):
+            _storage(field, body.inputsOf(instruction).first);
+            layouts.checkShapeTransfer(
+              body.shapeOf(body.inputsOf(instruction).last),
+              layouts.slotShape(field),
+            );
+          case TypeView(:final operand) || UncheckedCast(:final operand):
+            layouts.checkShapeTransfer(
+              body.shapeOf(operand),
+              body.shapeOf(instruction),
             );
           case TypeTest(:final operand, :final negated):
             final kind = body.tests[instruction]!;
@@ -223,20 +256,20 @@ final class FunctionSelection<R>(
               AllocatedObject():
             break;
           case NumericNegate(:final type):
-            if (type != .floating) {
+            if (body.typeOf(instruction) != .floating) {
               throw UnsupportedError('Native numeric negation: $type');
             }
           case NumericToDouble(:final operand) ||
               NumericToInt(:final operand) ||
               NumericRoundToDouble(:final operand) ||
               NumericSquareRoot(:final operand):
-            if (!_number(operand.type)) {
+            if (!_number(body.typeOf(operand))) {
               throw UnsupportedError(
                 'Native numeric operand requires a known representation.',
               );
             }
           case NumericBinary(:final operator, :final left, :final right):
-            if (!_number(left.type) || !_number(right.type)) {
+            if (!_number(body.typeOf(left)) || !_number(body.typeOf(right))) {
               throw UnsupportedError(
                 'Native arithmetic requires known numeric representations in '
                 '${body.target.library}::${body.target.name}: '
@@ -250,12 +283,13 @@ final class FunctionSelection<R>(
               .greaterOrEqual => .greaterOrEqual,
               _ => null,
             };
-            if (comparison != null && left.type != right.type) {
+            if (comparison != null && body.typeOf(left) != body.typeOf(right)) {
               _mixed(instruction, comparison, left, right);
               break;
             }
             final floating =
-                instruction.type == .floating || left.type == .floating;
+                body.typeOf(instruction) == .floating ||
+                body.typeOf(left) == .floating;
             _binary(
               instruction,
               emitter,
@@ -273,8 +307,8 @@ final class FunctionSelection<R>(
               floatingInputs: operator == .divide,
             );
           case ReferenceEquality(:final left, :final right, :final negated):
-            if (layouts.representation(left.type) != .reference ||
-                layouts.representation(right.type) != .reference) {
+            if (!body.shapeOf(left).isReference ||
+                !body.shapeOf(right).isReference) {
               throw ArgumentError('Reference equality requires references.');
             }
             _binary(
@@ -297,19 +331,19 @@ final class FunctionSelection<R>(
             }
             if (!nullComparison &&
                 !typeLiteral &&
-                (!_scalar(left.type) || !_scalar(right.type))) {
+                (!_scalar(body.typeOf(left)) || !_scalar(body.typeOf(right)))) {
               throw UnsupportedError(
                 'Native equality requires supported scalar operands.',
               );
             }
-            if (_number(left.type) &&
-                _number(right.type) &&
-                left.type != right.type) {
+            if (_number(body.typeOf(left)) &&
+                _number(body.typeOf(right)) &&
+                body.typeOf(left) != body.typeOf(right)) {
               _mixed(instruction, negated ? .notEqual : .equal, left, right);
               break;
             }
             final comparable =
-                left.type == right.type ||
+                body.typeOf(left) == body.typeOf(right) ||
                 (nullComparison || typeLiteral) &&
                     layouts.representation(left.type) == .reference &&
                     layouts.representation(right.type) == .reference;
@@ -318,7 +352,7 @@ final class FunctionSelection<R>(
               emitter,
               left,
               right,
-              floatingInputs: comparable && left.type == .floating,
+              floatingInputs: comparable && body.typeOf(left) == .floating,
               comparison: comparable ? (negated ? .notEqual : .equal) : null,
               constant: comparable ? null : negated,
             );
@@ -344,16 +378,15 @@ final class FunctionSelection<R>(
       for (final instruction in calls.keys)
         instruction: Set<Value>.unmodifiable(
           liveness.acrossCalls[instruction]!.where(
-            (value) => layouts.isReference(body.typeOf(value)),
+            (value) => body.shapeOf(value).hasReferences,
           ),
         ),
     });
     for (final block in body.blocks) {
       if (body.ends[block] case Return(value: final value?)) {
-        layouts.checkTransfer(
-          body.typeOf(value),
-          layouts.returnType(body.target),
-          constant: value is ScalarConstant,
+        layouts.checkShapeTransfer(
+          body.shapeOf(value),
+          layouts.resultShape(body.target),
         );
       }
       for (final edge in body.successors(block)) {
@@ -362,10 +395,9 @@ final class FunctionSelection<R>(
           final stored = argument is TestedValue
               ? argument.test.operand
               : argument;
-          layouts.checkTransfer(
-            body.typeOf(stored),
-            body.typeOf(body.parametersOf(edge.target)[i]),
-            constant: stored is ScalarConstant,
+          layouts.checkShapeTransfer(
+            body.shapeOf(stored),
+            body.shapeOf(body.parametersOf(edge.target)[i]),
           );
         }
       }
@@ -378,32 +410,38 @@ final class FunctionSelection<R>(
     List<Value> inputs,
     Block block,
   ) {
-    final parameters = layouts.entryTypes(target);
+    final parameters = layouts.entryShapes(target);
     if (inputs.length != parameters.length) {
       throw StateError('Selected call arity does not match ${target.name}.');
     }
-    if (operation.type != .never && target.returnType != .never) {
-      layouts.checkTransfer(layouts.returnType(target), body.typeOf(operation));
+    if (operation is ManagedStorageAllocation) {
+      // A successful allocator call yields the raw word in the return register;
+      // its consumer owns a managed reference from this point (including GC).
+      if (target != operation.allocator || layouts.resultShape(target) != ExecutionShape.word ||
+          !body.shapeOf(operation).isReference) {
+        throw StateError('Invalid managed allocator ABI transfer.');
+      }
+    } else if (operation.type != .never && target.returnType != .never) {
+      layouts.checkShapeTransfer(
+        layouts.resultShape(target),
+        body.shapeOf(operation),
+      );
     }
     for (final (i, input) in inputs.indexed) {
-      layouts.checkTransfer(
-        body.typeOf(input),
-        parameters[i],
-        constant: input is ScalarConstant,
-      );
+      layouts.checkShapeTransfer(body.shapeOf(input), parameters[i]);
     }
     _selectCall(
       operation,
       convention.classify(
         NativeSignature.types(
-          layouts.callType(layouts.returnType(target)),
-          parameters.map(layouts.callType),
+          layouts.shapeCallType(layouts.resultShape(target)),
+          parameters.map(layouts.shapeCallType),
         ),
       ),
       inputs,
       block,
       target: target,
-      parameterTypes: parameters,
+      parameterShapes: parameters,
     );
   }
 
@@ -413,13 +451,13 @@ final class FunctionSelection<R>(
     List<Value> arguments,
     Block block, {
     FunctionTarget? target,
-    List<ValueType>? parameterTypes,
+    List<ExecutionShape>? parameterShapes,
   }) {
     final clobbered = layout.clobberedRegisters;
     final stackScratch = <RegisterBank, R>{};
     for (final (i, location) in layout.parameters.indexed) {
       if (location is! StackArgument) continue;
-      final kind = bank(parameterTypes?[i] ?? body.typeOf(arguments[i]));
+      final kind = shapeBank(parameterShapes?[i] ?? body.shapeOf(arguments[i]));
       stackScratch.putIfAbsent(
         kind,
         () => registers.firstWhere(
@@ -432,9 +470,9 @@ final class FunctionSelection<R>(
       layout: layout,
       target: target,
       arguments: List.unmodifiable(arguments),
-      parameterTypes: parameterTypes == null
+      parameterShapes: parameterShapes == null
           ? null
-          : List.unmodifiable(parameterTypes),
+          : List.unmodifiable(parameterShapes),
       stackScratch: Map.unmodifiable(stackScratch),
       addressRegister: target != null
           ? null
@@ -447,17 +485,11 @@ final class FunctionSelection<R>(
                     (location) => location.registers.contains(register),
                   ),
             ),
-      parkRegister: target != null
-          ? null
-          : registers.firstWhere(
-              (register) =>
-                  registerBanks[register] == .general &&
-                  register != failureRegister &&
-                  clobbered.contains(register),
-            ),
       onThrow: switch (body.ends[block]) {
         Invoke(operation: final invoked, :final onThrow)
-            when target != null && invoked == operation =>
+            when target != null && invoked == operation ||
+                operation is IndirectInvocation &&
+                    invoked == operation.origin =>
           onThrow,
         _ => null,
       },
@@ -465,8 +497,7 @@ final class FunctionSelection<R>(
   }
 
   void _storage(InstanceField field, Value receiver) {
-    if (field.isLate ||
-        layouts.representation(body.typeOf(receiver)) != .reference) {
+    if (field.isLate || !body.shapeOf(receiver).isReference) {
       throw StateError('Expected a checked field and a storage reference.');
     }
     layouts.fieldOffset(field);
@@ -519,7 +550,7 @@ final class FunctionSelection<R>(
     final inputs = body.inputsOf(instruction).toList();
     left = inputs.first;
     right = inputs.last;
-    if (left.type == .floating) {
+    if (body.typeOf(left) == .floating) {
       (left, right) = (right, left);
       comparison = switch (comparison) {
         .lessThan => .greaterThan,
@@ -539,6 +570,11 @@ final class FunctionSelection<R>(
   bool _number(ValueType type) => type == .integer || type == .floating;
 
   /// Selects the physical bank for an already supported value representation.
+  RegisterBank valueBank(Value value) => shapeBank(body.shapeOf(value));
+
+  RegisterBank shapeBank(ExecutionShape shape) =>
+      layouts.shapeRepresentation(shape) == .floating ? .floating : .general;
+
   RegisterBank bank(ValueType type) =>
       layouts.representation(type) == .floating ? .floating : .general;
 

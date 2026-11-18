@@ -5,6 +5,87 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('operand mapping visits supplied positions before named arguments', () {
+    final owner = ClassType(null, 'MappingReceiver');
+    final member = FunctionTarget(
+      null,
+      'invoke',
+      .integer,
+      [.integer, .integer, .integer],
+      owner: owner,
+      kind: .method,
+      namedParameters: {'last': true},
+    );
+    final target = FunctionTarget(
+      null,
+      'invoke',
+      .integer,
+      [.integer, .integer, .integer],
+      namedParameters: {'last': true},
+    );
+    final receiver = Block([owner]).parameters.single;
+    final shared = Block([ValueType.integer]).parameters.single;
+    const tail = Constant.integer(3);
+    final selector = (
+      kind: FunctionKind.method,
+      name: 'invoke',
+      privateScope: null,
+    );
+    final calls = <Instruction>[
+      InstanceCall(member, receiver, [shared, shared], {'last': tail}),
+      FunctionCall(FunctionConstant(target), [shared, shared], {'last': tail}),
+      DynamicDispatch(receiver, selector, [shared, shared], {'last': tail}),
+      MakeInvocation(selector, [shared, shared], {'last': tail}),
+    ];
+    for (final call in calls) {
+      final visited = <Value>[];
+      var occurrence = 0;
+      final copy = call.mapInputs((value) {
+        visited.add(value);
+        return identical(value, shared)
+            ? Constant.integer(++occurrence)
+            : value;
+      });
+      expect(
+        visited,
+        orderedEquals(call.inputs),
+        reason: '${call.runtimeType}',
+      );
+      expect(occurrence, 2);
+      final values = copy.inputs.whereType<Constant>().toList();
+      expect(
+        values.whereType<FunctionConstant>(),
+        hasLength(call is FunctionCall ? 1 : 0),
+      );
+      expect(values.whereType<ScalarConstant>().map((v) => v.value), [1, 2, 3]);
+    }
+  });
+
+  test('raw native mapping visits result storage before arguments', () {
+    final result = NativeCompoundType('MappingResult', [
+      NativeField('value', NativeScalarType(ffi.Int64)),
+    ]);
+    final operands = Block(List.filled(4, ValueType.integer)).parameters;
+    final call = RawNativeCall(
+      operands[0],
+      NativeSignature.types(result, [
+        NativeScalarType(ffi.Int64),
+        NativeScalarType(ffi.Int64),
+      ]),
+      operands.skip(2),
+      resultStorage: operands[1],
+    );
+    final visited = <Value>[];
+    final copy = call.mapInputs((value) {
+      visited.add(value);
+      return Constant.integer(visited.length);
+    }) as RawNativeCall;
+    expect(visited, orderedEquals(operands));
+    expect((copy.address as ScalarConstant).value, 1);
+    expect((copy.resultStorage as ScalarConstant).value, 2);
+    expect(copy.arguments.cast<ScalarConstant>().map((v) => v.value), [3, 4]);
+  });
+
   test(
     'native remapping retains leaf calls, nominal signatures and owners',
     () {

@@ -13,6 +13,51 @@ final _native = FunctionType(FfiTypes.int64, [FfiTypes.int64]);
 final _consume = FunctionTarget(_uri, 'consume', .voidType, [.integer]);
 
 void main() {
+  for (final exposed in [false, true]) {
+    test(
+      'entry coverage follows an actually escaped native wrapper ($exposed)',
+      () {
+        final target = FunctionTarget(_uri, 'target', .integer, [.integer]);
+        final callbackBody = Block(target.parameterTypes);
+        callbackBody.finish(Return(callbackBody.parameters.single));
+        final definition = StaticCallbackTarget(
+          target,
+          _native,
+          exceptionalReturn: const Constant.integer(-1),
+        );
+        final wrapper = FunctionTarget(_uri, 'nativeEntry', .integer, [
+          .integer,
+        ]);
+        final wrapperBody = Block(wrapper.parameterTypes);
+        wrapperBody.finish(
+          Return(wrapperBody.emit(DirectCall(target, wrapperBody.parameters))),
+        );
+        final root = FunctionTarget(_uri, 'root', .voidType, []);
+        final entry = Block();
+        final address = entry.emit(NativeCallbackAddress(definition));
+        if (exposed) entry.emit(DirectCall(_consume, [address]));
+        entry.finish(const Return());
+        final facts = ProgramFlow(
+          IrProgram(
+            [],
+            [
+              IrFunction(root, [entry]),
+              IrFunction(target, [callbackBody]),
+              IrFunction(wrapper, [wrapperBody]),
+            ],
+            externals: [IrExternal(_consume)],
+          ),
+          [(target: root, arguments: <FlowValue>[])],
+          nativeEntries: {definition: wrapper},
+        ).facts;
+        expect(facts.coversEntry(root), isTrue);
+        expect(facts.coversEntry(wrapper), exposed);
+        expect(facts.coversEntry(target), isFalse);
+        expect(facts.definitions.contains(target), exposed);
+      },
+    );
+  }
+
   for (final (stored, captured) in [
     (false, false),
     (false, true),
@@ -145,6 +190,7 @@ void main() {
       final facts = ProgramFlow(program, [
         (target: root.target, arguments: []),
       ]).facts;
+      expect(facts.coversEntry(lookup), isFalse);
       expect(
         facts.returnedBy(callback).constant?.structuralKey,
         const Constant.integer(48).structuralKey,

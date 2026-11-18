@@ -10,6 +10,7 @@ import 'package:dartc/object/elf.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
+import '../support/ir_interpreter.dart';
 
 import 'fixtures/aliases.dart';
 
@@ -37,19 +38,18 @@ void main() {
         Arm64CodeGenerator(const Target(.macos, .arm64)),
         X64CodeGenerator(const Target(.linux, .x64)),
       ]) {
+        final prepared = Compiler(generator.target)
+            .prepare(program, runtime: heapRuntime, roots: [function.target]);
         expect(
-          generator
-              .generate(
-                Compiler(generator.target).prepare(
-                  program,
-                  runtime: heapRuntime,
-                  roots: [function.target],
-                ),
-              )
-              .symbols
-              .map((s) => s.name),
-          contains('length'),
+          IrInterpreter(prepared.program, {}).run(
+            prepared.program.implementationOf(function.target) as IrFunction,
+            [],
+          ),
+          constant ? 1 : 0,
         );
+        expect(generator.generate(prepared).symbols.map((s) => s.name), [
+          'lengthOnly',
+        ]);
       }
     }
   });
@@ -70,7 +70,7 @@ void main() {
               .prepare(lowered.program, runtime: heapRuntime, roots: [entry]),
         );
         final names = module.symbols.map((symbol) => symbol.name);
-        expect(names, contains('[]'));
+        expect(names, ['listConstantOnly']);
         final t = TypeParameterType('T')..initializeBound(.object.nullable);
         final unused = ClassType(
           Uri.parse('memory:unreachable'),
@@ -182,7 +182,14 @@ void main() {
       ]) {
         final prepared = Compiler(generator.target)
             .prepare(program, runtime: heapRuntime, roots: [entry]);
-        expect(prepared.definitions, containsAll([entry, callee]));
+        expect(prepared.definitions, {entry});
+        expect(
+          IrInterpreter(
+            prepared.program,
+            {},
+          ).run(prepared.program.implementationOf(entry) as IrFunction, []),
+          42,
+        );
         final withSupport = Block();
         withSupport.emit(
           NumericRoundToDouble(const Constant.floating(1.5), .round),
@@ -205,7 +212,14 @@ void main() {
           runtime: heapRuntime,
           roots: [entry],
         );
-        expect(supported.definitions, containsAll([entry, callee]));
+        expect(supported.definitions, {entry});
+        expect(
+          IrInterpreter(
+            supported.program,
+            {},
+          ).run(supported.program.implementationOf(entry) as IrFunction, []),
+          3,
+        );
         expect(generator.generate(supported).sections, isNotEmpty);
         final exported = generator.generate(
           Compiler(generator.target).prepare(

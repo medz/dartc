@@ -1,10 +1,15 @@
 import 'package:dartc/interop.dart' show NativeCompoundType;
 
 import 'block.dart';
+import 'cell_storage.dart';
 import 'core_types.dart';
 import 'format.dart';
+import 'execution_shape.dart';
+import 'module_object.dart';
+import 'origin.dart';
 import 'signature.dart';
 import 'type.dart';
+import 'type_binding.dart';
 import 'value.dart';
 import 'verify.dart';
 
@@ -41,8 +46,14 @@ sealed class IrCallable(
   /// Instance slots referenced by instructions or embedded constants.
   Set<InstanceField> get fields => _references.fields;
 
+  /// Exact storage contracts used by internal cell capability views.
+  Set<CellStorage> get cellStorages => _references.cellStorages;
+
   /// Constant instances whose complete storage is checked against supplied classes.
   Set<ObjectConstant> get objects => _references.objects;
+
+  /// Module identities referenced by this body, with their initial bindings.
+  Set<ModuleObject> get moduleObjects => _references.moduleObjects;
 
   /// Function tear-offs referenced by the body or nested constant defaults.
   Set<FunctionConstant> get functionConstants => _references.functionConstants;
@@ -144,6 +155,44 @@ final class IrExternal(
   /// It does not promise termination or make unknown results constant.
   final Set<Effect> effects = .unmodifiable(effects);
 
+  /// Applies a native implementation's promises without discarding independent
+  /// memory, escape, failure or termination facts. Leaf calls cannot reenter;
+  /// only an explicit non-allocating contract also excludes allocation and throws.
+  IrExternal bindNative(
+    FunctionTarget entry, {
+    required bool isLeaf,
+    required bool isNonAllocating,
+    NativeCompoundType? resultStorage,
+  }) {
+    if (entry == target &&
+        !isLeaf &&
+        !isNonAllocating &&
+        resultStorage == null) {
+      return this;
+    }
+    return IrExternal(
+      entry,
+      defaults: entry == target ? defaults : const {},
+      effects: {
+        ...effects.difference({
+          if (isLeaf || isNonAllocating) Effect.callsUserCode,
+          if (isNonAllocating) ...[Effect.allocates, Effect.mayThrow],
+        }),
+        if (resultStorage != null) Effect.writesStorage,
+      },
+      memory: resultStorage == null
+          ? memory
+          : NativeResultMemory(
+              resultStorage,
+              effects.contains(Effect.writesStorage)
+                  ? memory
+                  : const ExternalMemory.unchanged(),
+            ),
+      capturesArguments: capturesArguments,
+      terminates: terminates,
+    );
+  }
+
   this {
     if (target.kind == .closure || target.kind == .fieldInitializer) {
       throw ArgumentError('Invalid external declaration ${target.name}.');
@@ -190,6 +239,11 @@ final class IrFunction(
   Iterable<Block> blocks, {
   super.defaults,
   Map<Object, SourceLocation> sourceLocations = const {},
+  Map<Object, IrOrigin> origins = const {},
+  Iterable<TypeBinding> typeBindings = const [],
+
+  /// Persistent physical choices for SSA values in this exact body.
+  final FunctionExecution? execution,
 
   /// Whether this graph returns directly or uses an async/generator activation.
   final FunctionBodyKind bodyKind = .synchronous,
@@ -203,12 +257,36 @@ final class IrFunction(
   /// The reachable blocks in the supplied order, starting with [entry].
   final List<Block> blocks = .unmodifiable(blocks);
 
+  /// Checked body-only reification; these binders never enter the public ABI.
+  final List<TypeBinding> typeBindings = .unmodifiable(typeBindings);
+
   /// Source positions and logical frames of instructions and terminators.
   ///
   /// A [Block] key locates its terminator; omitted entries have no source origin.
   final Map<Object, SourceLocation> sourceLocations = .unmodifiable(
     sourceLocations,
   );
+
+  /// Semantic identities retained across rewrites and contextual copies.
+  /// These are not Dart stack frames or source coordinates.
+  final Map<Object, IrOrigin> origins = .unmodifiable(origins);
+
+  /// The original semantic site and its inline/clone path.
+  IrOrigin originOf(Object site) => origins[site] ?? IrOrigin(target, site);
+
+  /// All site identities, including implicit identities in an original body.
+  /// Preserve these when the same graph is installed under a new entry target.
+  Map<Object, IrOrigin> get originBindings => Map.unmodifiable({
+    for (final block in blocks)
+      for (final site in <Object>[
+        block,
+        ...block.parameters,
+        ...block.instructions,
+        ...block.successors,
+        if (block.end case Invoke(:final operation)) operation,
+      ])
+        site: originOf(site),
+  });
 
   /// The local bodies that this graph can instantiate.
   Set<FunctionTarget> get closures => _references.closures;
@@ -219,15 +297,36 @@ final class IrFunction(
   /// The block whose parameters receive the function arguments.
   Block get entry => blocks.first;
 
-  /// Whether moving this body across a call boundary changes its frame reads.
+  /// Descriptor dependencies implicit in the types used by an operation.
+  Iterable<Value> typeInputsOf(Instruction operation) sync* {
+    for (final binding in typeBindings) {
+      if (!identical(binding.value, operation) &&
+          operation.referencedTypes.any(
+            (type) => type.freeTypeParameters.contains(binding.parameter),
+          )) {
+        yield binding.value;
+      }
+    }
+  }
+
+  /// Whether moving this body changes frame reads, storage or binding lifetime.
   bool get observesCallerFrame => blocks.any(
     (block) =>
         block.instructions.any(
           (operation) =>
-              operation is CaptureStackTrace || operation is FrameValue,
+              operation is CaptureStackTrace ||
+              operation is FrameValue ||
+              operation is NativeLocalStorage ||
+              operation is BindNativeContext,
         ) ||
         switch (block.end) {
-          Invoke(operation: CaptureStackTrace() || FrameValue()) => true,
+          Invoke(
+            operation: CaptureStackTrace() ||
+                FrameValue() ||
+                NativeLocalStorage() ||
+                BindNativeContext(),
+          ) =>
+            true,
           _ => false,
         },
   );
@@ -273,7 +372,23 @@ final class IrFunction(
       bodyKind: bodyKind,
       yieldType: yieldType,
       completionType: completionType,
+      typeBindings: this.typeBindings,
     );
+    execution?.checkValues(this);
+    if (origins.isNotEmpty) {
+      final owned = <Object>{
+        for (final block in this.blocks) ...[
+          block,
+          ...block.parameters,
+          ...block.instructions,
+          ...block.successors,
+          if (block.end case Invoke(:final operation)) operation,
+        ],
+      };
+      if (origins.keys.any((site) => !owned.contains(site))) {
+        throw ArgumentError('Semantic origins require owned graph sites.');
+      }
+    }
     if (sourceLocations.isNotEmpty) {
       final sites = <Object>{
         for (final block in this.blocks) ...[

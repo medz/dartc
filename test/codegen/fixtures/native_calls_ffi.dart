@@ -118,5 +118,20 @@ final class NativeCalls({
         )
       >('repeated');
 
+  late final localStorage = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'localStorage',
+      );
+
+  late final moduleStorage = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'moduleStorage',
+      );
+
+  late final contextBinding = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>(
+        'contextBinding',
+      );
+
   void close() => _library.close();
 }

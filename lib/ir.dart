@@ -28,6 +28,20 @@
 library;
 
 export 'src/ir/dominance.dart' show ValueDominance;
+export 'src/ir/origin.dart' show IrOrigin;
+export 'src/ir/call_entry.dart' show CallEntryShape, CallEntryBinding;
+export 'src/ir/member_entry.dart' show MemberEntryBinding;
+export 'src/ir/cell_storage.dart' show CellStorage;
+export 'src/ir/storage_view.dart' show StorageView;
+export 'src/ir/callable_storage.dart' show CallableStorage, FunctionStorage;
+export 'src/ir/type_binding.dart' show TypeBinding;
+export 'src/ir/native_data.dart' show NativeData, NativeContextOwner;
+export 'src/ir/execution_shape.dart'
+    show ExecutionComponent, ExecutionShape, ExecutionSignature,
+        ExecutionShapes, FunctionExecution, CaptureSlot;
+export 'src/ir/native_boundary_bindings.dart'
+    show NativeBoundaryBindings, NativeExportEntry, NativeImportEntry;
+export 'src/ir/module_object.dart' show ModuleObject;
 export 'src/ir/value_liveness.dart' show ValueLiveness;
 export 'src/ir/block.dart'
     show
@@ -78,26 +92,42 @@ export 'src/ir/type.dart'
         ValueType,
         TypeParameterType,
         NonNullableTypeParameterType,
-        PromotedTypeParameterType;
+        PromotedType,
+        PromotedTypeParameterType,
+        InstantiatedPromotionType;
 export 'src/ir/value.dart'
     show
         blockParameters,
         CaptureStackTrace,
         FrameValue,
         FrameValueKind,
+        ReadNativeContext,
+        BindNativeContext,
         CallFrameValue,
         ObjectDescriptorAddress,
+        StackMapAddress,
+        ModuleRootsAddress,
         InitializeObject,
         NativeCallbackTarget,
         StaticCallbackTarget,
         ClosureCallbackTarget,
         NativeCallbackAddress,
         NativeSymbolAddress,
+        NativeDataAddress,
+        FunctionEntryTableAddress,
+        CellReference,
+        InitializeStorageField,
+        CellStorageView,
+        CellStorageReference,
+        CallableReference,
+        ModuleObjectReference,
+        NativeLocalStorage,
         AwaitResult,
         LoadLibrary,
         CheckLibraryLoaded,
         TypeConstant,
         ReifyType,
+        CheckedTypeArgument,
         ObjectRuntimeType,
         ObjectHashCode,
         ObjectClassName,
@@ -125,6 +155,7 @@ export 'src/ir/value.dart'
         CopyCell,
         DirectCall,
         NativeCall,
+        RawNativeCall,
         DynamicDispatch,
         MakeInvocation,
         Equals,
@@ -134,6 +165,7 @@ export 'src/ir/value.dart'
         ReferenceAddress,
         ReferenceFromAddress,
         AllocatedObject,
+        ManagedStorageAllocation,
         NewPayload,
         NativeView,
         NativeAddress,
@@ -171,6 +203,8 @@ export 'src/ir/value.dart'
         IntegerRounding,
         NumericSquareRoot,
         MakeClosure,
+        ReadFunctionEnvironment,
+        ReadFunctionTypeArgument,
         MakeRecord,
         NewCell,
         ReadCell,
@@ -188,6 +222,10 @@ export 'src/ir/value.dart'
         TestedValue,
         TypeCast,
         TypeView,
+        MaterializeValue,
+        MaterializedValue,
+        ConstantCarrier,
+        ProjectValue,
         UncheckedCast,
         InstantiateFunctionFrom,
         TypeTest,

@@ -4,7 +4,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/codegen.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/layout.dart';
-import 'package:dartc/src/codegen/global_storage.dart';
+import 'package:dartc/src/codegen/constant_data.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -25,12 +25,7 @@ void main() {
     kind: .initializer,
   );
 
-  ({
-    GlobalStorage globals,
-    ProgramLayout layouts,
-    IrFunction get,
-    IrFunction set,
-  })
+  ({ModuleObject module, ProgramLayout layouts, IrFunction get, IrFunction set})
   accessors(GlobalVariable global) {
     final target = FunctionTarget(uri, 'replace', type, [type]);
     final entry = Block(target.parameterTypes);
@@ -39,28 +34,44 @@ void main() {
     entry.emit(read);
     entry.emit(write);
     entry.finish(Return(read));
-    final globals = GlobalStorage([
-      IrFunction(target, [entry]),
-    ], lateError: IrExternal(constructor));
-    final layouts = ProgramLayout([
-      globals.declaration,
-    ], nativeLayout: NativeLayout(const Target(.macos, .arm64)));
-    IrFunction body(Instruction access) => globals.functions.singleWhere(
-      (fn) => fn.target == globals.callFor(access),
+    final program = IrProgram(
+      [
+        IrClass(error, [], constructors: [constructor]),
+      ],
+      [
+        IrFunction(target, [entry]),
+        IrFunction(constructor, [
+          Block(constructor.parameterTypes)..finish(const Return()),
+        ]),
+        if (global.initializer case final init?)
+          IrFunction(init, [
+            Block()..finish(const Return(Constant.nullValue())),
+          ]),
+      ],
+      globals: [global],
     );
-    return (
-      globals: globals,
-      layouts: layouts,
-      get: body(read),
-      set: body(write),
+    final lowered = GlobalLowering(
+      lateError: program.implementationOf(constructor),
+    ).lower(program, [target]);
+    final replacement = lowered.implementationOf(target) as IrFunction;
+    final calls = replacement.entry.instructions
+        .whereType<DirectCall>()
+        .toList();
+    final get = lowered.implementationOf(calls.first.target) as IrFunction;
+    final set = lowered.implementationOf(calls.last.target) as IrFunction;
+    final module = {...get.moduleObjects, ...set.moduleObjects}.single;
+    final layouts = ProgramLayout(
+      lowered.classes,
+      nativeLayout: NativeLayout(const Target(.macos, .arm64)),
     );
+    return (module: module, layouts: layouts, get: get, set: set);
   }
 
   test('implicitly null globals need only one traced slot and one store', () {
-    final (:globals, :layouts, :get, :set) = accessors(
+    final (:module, :layouts, :get, :set) = accessors(
       GlobalVariable(uri, 'flag', type),
     );
-    final holder = layouts.storageOf(globals.declaration.type);
+    final holder = layouts.storageOf(module.type);
     expect(
       holder.layout.size,
       ObjectHeader.fieldsOffset + ObjectHeader.alignment,
@@ -70,7 +81,9 @@ void main() {
       ObjectHeader.typeOffset,
       holder.offsetOf(field),
     ]);
-    final bytes = ByteData.sublistView(globals.initialData(layouts));
+    final bytes = ByteData.sublistView(
+      ConstantData(layouts, 0).moduleObjectData(module).bytes,
+    );
     expect(bytes.lengthInBytes, holder.layout.size);
     expect(bytes.getUint64(holder.offsetOf(field), Endian.little), 0);
     final write = set.blocks
@@ -95,8 +108,8 @@ void main() {
           isLate: late,
           initializer: init,
         );
-        final (:globals, :layouts, :get, :set) = accessors(global);
-        final holder = layouts.storageOf(globals.declaration.type);
+        final (:module, :layouts, :get, :set) = accessors(global);
+        final holder = layouts.storageOf(module.type);
         final condition = get.entry.end as Branch;
         final bound = (condition.condition as LoadField).field;
         final value =
@@ -106,7 +119,9 @@ void main() {
           ObjectHeader.typeOffset,
           holder.offsetOf(value),
         ]);
-        final bytes = ByteData.sublistView(globals.initialData(layouts));
+        final bytes = ByteData.sublistView(
+          ConstantData(layouts, 0).moduleObjectData(module).bytes,
+        );
         expect(bytes.getUint64(holder.offsetOf(bound), Endian.little), 0);
         final stores = set.entry.instructions.whereType<StoreField>().toList();
         expect(stores.map((s) => s.field), [value, bound]);

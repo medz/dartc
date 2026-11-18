@@ -13,7 +13,7 @@ import 'package:test/test.dart';
 
 void main() {
   final library = Uri.parse('memory:liveness');
-  FunctionLiveness analyze(List<Block> blocks, ValueType result) {
+  ValueLiveness analyze(List<Block> blocks, ValueType result) {
     final target = FunctionTarget(
       library,
       'test',
@@ -21,6 +21,13 @@ void main() {
       blocks.first.parameters.map((p) => p.type),
     );
     final function = IrFunction(target, blocks);
+    if (blocks.any((block) => block.instructions.any((op) => op is NewCell))) {
+      return ValueLiveness.source(function, calls: {
+        for (final block in blocks)
+          for (final op in block.instructions)
+            if (op is DirectCall) op,
+      });
+    }
     final error = ClassType(library, 'LateError');
     final initialize = FunctionTarget(
       library,
@@ -36,9 +43,7 @@ void main() {
         Block(initialize.parameterTypes)..finish(const Return()),
       ]),
     );
-    final closures = ClosureStorage([
-      function,
-    ], lateFailure: instances.failure?.target);
+    final closures = ClosureStorage([function]);
     final body = FunctionRepresentation(
       function,
       ProgramLayout(
@@ -52,7 +57,6 @@ void main() {
       HeapPlan(),
     );
     return FunctionLiveness(body, body.inputsOf, {
-      ...body.boxes.keys,
       for (final block in body.blocks)
         for (final operation in body.instructions[block]!)
           if (operation is DirectCall || operation is NativeCall) operation,
@@ -196,7 +200,7 @@ void main() {
   });
 
   test(
-    'calls retain survivors, not results, consumed arguments or old locals',
+    'source cells retain their storage identity across overwrite calls',
     () {
       final callee = FunctionTarget(library, 'callee', .object, [.object]);
       final body = Block([.object, .object]);
@@ -206,7 +210,7 @@ void main() {
       final second = body.emit(DirectCall(callee, [first]));
       body.finish(Return(body.emit(ReadCell(cell))));
       final flow = analyze([body], .object);
-      expect(flow.acrossCalls[first], isEmpty);
+      expect(flow.acrossCalls[first], {cell});
       expect(flow.acrossCalls[second], {cell});
     },
   );
@@ -255,7 +259,7 @@ void main() {
   });
 
   test(
-    'overwriting a local kills its previous contents, not the written value',
+    'ordinary cell writes keep the storage identity and written value live',
     () {
       final entry = Block([ValueType.object.nullable]);
       final write = Block(), read = Block();
@@ -270,10 +274,10 @@ void main() {
       write.finish(Jump(read));
       read.finish(Return(read.emit(ReadCell(cell))));
       final flow = analyze([entry, write, read], ValueType.object.nullable);
-      expect(flow.liveIn[write], {entry.parameters.single});
+      expect(flow.liveIn[write], {entry.parameters.single, cell});
       expect(flow.liveOut[write], {cell});
       expect(flow.liveIn[read], {cell});
-      expect(flow.uses[write], {entry.parameters.single: 1});
+      expect(flow.uses[write], {entry.parameters.single: 1, cell: 1});
     },
   );
 }

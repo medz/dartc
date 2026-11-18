@@ -141,6 +141,16 @@ void main() {
     compare('forwardVoid', [42], () => Function.apply(dart.forwardVoid, [42]));
     compare('discard', [42], () => Function.apply(dart.discard, [42]));
   });
+  test('setter bodies discard results but preserve effects and exceptions', () {
+    for (final value in [-4, -2, 42]) {
+      compare('setterResults', [value], () => dart.setterResults(value));
+    }
+    // An independently called setter has no observable return payload. This
+    // guards against materializing its scalar expression as a boxed void value.
+    final setter = functions['effectValue']!;
+    expect(setter.target.kind, FunctionKind.staticSetter);
+    expect(runner.run(setter, [42]), isNull);
+  });
   test('loop-carried variables, branch joins and early returns match Dart', () {
     compare('literalBranch', [], dart.literalBranch);
     for (final flag in [false, true]) {

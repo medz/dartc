@@ -14,7 +14,168 @@ final _uri = Uri.parse('memory:program-optimizer');
 
 void main() {
   test(
-    'lowering waits for semantic convergence without renewing pass budgets',
+    'local normalization removes literal dead control flow before lowering',
+    () {
+      final root = FunctionTarget(_uri, 'literal', .boolean, [.object]);
+      final entry = Block(root.parameterTypes), live = Block(), dead = Block();
+      entry.finish(
+        Branch(const Constant.boolean(true), Jump(live), Jump(dead)),
+      );
+      live.finish(const Return(Constant.boolean(true)));
+      dead.finish(
+        Return(dead.emit(TypeTest(entry.parameters.single, ValueType.integer))),
+      );
+      final source = IrProgram([], [
+        IrFunction(root, [entry, live, dead]),
+      ]);
+      final normalized = const ProgramSimplification().bind().normalize(source);
+      final body = normalized.implementationOf(root) as IrFunction;
+      expect(
+        body.blocks.expand((b) => b.instructions).whereType<TypeTest>(),
+        isEmpty,
+      );
+      expect(IrInterpreter(normalized, {}).run(body, [7]), isTrue);
+      expect(IrInterpreter(normalized, {}).run(body, ['text']), isTrue);
+      expect(
+        const ProgramSimplification().bind().normalize(normalized),
+        same(normalized),
+      );
+    },
+  );
+
+  test(
+    'local normalization retains producer proofs through widening views',
+    () {
+      final root = FunctionTarget(_uri, 'view', .boolean, [.integer]);
+      final entry = Block(root.parameterTypes),
+          yes = Block([.integer]),
+          no = Block();
+      final view = entry.emit(TypeView(entry.parameters.single, .object));
+      final test = entry.emit(TypeTest(view, ValueType.integer));
+      entry.finish(Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)));
+      yes.finish(
+        Return(
+          yes.emit(Equals(yes.parameters.single, entry.parameters.single)),
+        ),
+      );
+      no.finish(const Return(Constant.boolean(false)));
+      final source = IrProgram([], [
+        IrFunction(root, [entry, yes, no]),
+      ]);
+      final normalized = const ProgramSimplification().bind().normalize(source);
+      final body = normalized.implementationOf(root) as IrFunction;
+      final narrowed = body.blocks
+          .expand((b) => b.instructions)
+          .whereType<TypeTest>()
+          .single;
+      expect(narrowed.operand, same(body.entry.parameters.single));
+      for (final value in [-7, 0, 42]) {
+        expect(IrInterpreter(normalized, {}).run(body, [value]), isTrue);
+      }
+      expect(
+        const ProgramSimplification().bind().normalize(normalized),
+        same(normalized),
+      );
+    },
+  );
+
+  test(
+    'local normalization preserves a narrowing proof and runtime dispatch',
+    () {
+      final root = FunctionTarget(_uri, 'runtimeTypeView', .typeType, [
+        .object,
+      ]);
+      final entry = Block(root.parameterTypes);
+      final narrowed = entry.emit(
+        UncheckedCast(entry.parameters.single, ValueType.integer),
+      );
+      final widened = entry.emit(TypeView(narrowed, .object));
+      entry.finish(Return(entry.emit(ObjectRuntimeType(widened))));
+      final source = IrProgram([], [
+        IrFunction(root, [entry]),
+      ]);
+      final normalized = const ProgramSimplification().bind().normalize(source);
+      final body = normalized.implementationOf(root) as IrFunction;
+      final operation = body.entry.instructions
+          .whereType<ObjectRuntimeType>()
+          .single;
+      expect(operation.direct, isFalse);
+      expect(operation.operand, isA<UncheckedCast>());
+      expect(operation.operand.type, ValueType.integer);
+      expect(
+        const ProgramSimplification().bind().normalize(normalized),
+        same(normalized),
+      );
+    },
+  );
+
+  test('implementation calls broaden shared bodies before specialization', () {
+    final helper = FunctionTarget(_uri, 'shared', .integer, [.integer]);
+    final body = Block(helper.parameterTypes);
+    body.finish(
+      Return(
+        body.emit(
+          IntBinary(.add, body.parameters.single, const Constant.integer(64)),
+        ),
+      ),
+    );
+    final global = GlobalVariable(_uri, 'observed', ValueType.integer.nullable);
+    final root = FunctionTarget(_uri, 'entry', .integer, []);
+    IrFunction entry({required bool lowered}) {
+      final block = Block();
+      block.emit(
+        StoreGlobal(
+          global,
+          block.emit(DirectCall(helper, [const Constant.integer(1)])),
+        ),
+      );
+      block.finish(
+        Return(
+          lowered
+              ? block.emit(DirectCall(helper, [const Constant.integer(2)]))
+              : const Constant.integer(2),
+        ),
+      );
+      return IrFunction(root, [block]);
+    }
+
+    final source = IrProgram(
+      [],
+      [
+        IrFunction(helper, [body]),
+        entry(lowered: false),
+      ],
+      globals: [global],
+    );
+    final result = ProgramOptimizer([
+      const ProgramSimplification(),
+      _Phase(.lowering, () {
+        var expanded = false;
+        return ProgramTransform((facts) {
+          if (expanded) return facts.program;
+          expanded = true;
+          return IrProgram(
+            [],
+            [
+              facts.program.implementationOf(helper) as IrFunction,
+              entry(lowered: true),
+            ],
+            globals: [global],
+          );
+        });
+      }),
+    ]).run(source, [(target: root, arguments: <FlowValue>[])]);
+    expect(
+      IrInterpreter(
+        result.program,
+        {},
+      ).run(result.program.implementationOf(root) as IrFunction, []),
+      66,
+    );
+  });
+
+  test(
+    'implementation closure precedes rewrites without renewing pass budgets',
     () {
       final root = FunctionTarget(_uri, 'phase', .integer, []);
       IrProgram returning(int value) => IrProgram([], [
@@ -53,10 +214,10 @@ void main() {
         final result = optimizer.run(returning(2), [
           (target: root, arguments: []),
         ]);
-        expect(observations, [0, 20]);
+        expect(observations, [2, 20, 18]);
         expect(expansions, compilation);
         expect(lowerings, compilation);
-        expect((result.returnedBy(root).constant as ScalarConstant).value, 20);
+        expect((result.returnedBy(root).constant as ScalarConstant).value, 18);
       }
     },
   );

@@ -3,23 +3,24 @@ import 'package:dartc/ir.dart';
 
 /// Native function-pointer adapters whose internal inputs are scalar values.
 final class NativeCalls() {
-  final signatures = <FunctionTarget, NativeSignature>{};
-  final _targets = <NativeSignature, FunctionTarget>{};
+  final entries =
+      <FunctionTarget, ({NativeSignature signature, bool isLeaf})>{};
+  final _targets =
+      <({NativeSignature signature, bool isLeaf}), FunctionTarget>{};
 
-  FunctionTarget target(NativeSignature signature) => _targets.putIfAbsent(
-    signature,
-    () {
-      ValueType raw(NativeTypeRef type) =>
-          type is NativePointerType || type is NativeCompoundType
-          ? .integer
-          : FfiTypes.valueType(type);
-      final target = FunctionTarget(null, 'nativeCall', raw(signature.result), [
-        ValueType.integer,
-        if (signature.result is NativeCompoundType) ValueType.integer,
-        ...signature.parameters.map(raw),
-      ]);
-      signatures[target] = signature;
-      return target;
-    },
-  );
+  FunctionTarget target(NativeSignature signature, {required bool isLeaf}) =>
+      _targets.putIfAbsent((signature: signature, isLeaf: isLeaf), () {
+        final target = FunctionTarget(
+          null,
+          'nativeCall',
+          FfiTypes.rawValueType(signature.result),
+          [
+            ValueType.integer,
+            if (signature.result is NativeCompoundType) ValueType.integer,
+            ...signature.parameters.map(FfiTypes.rawValueType),
+          ],
+        );
+        entries[target] = (signature: signature, isLeaf: isLeaf);
+        return target;
+      });
 }

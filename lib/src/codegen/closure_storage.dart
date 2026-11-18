@@ -1,231 +1,284 @@
 import 'package:dartc/ir.dart';
 
+import 'value_carrier.dart';
+import 'callable_implementations.dart';
+
 /// Assigns function-value storage, call entries and shared capture layouts.
 final class ClosureStorage(
   Iterable<IrCallable> selectedBodies, {
   Iterable<FunctionTarget> boundMethods = const [],
-  FunctionTarget? lateFailure,
+  Iterable<IrCallable>? definitions,
+  Iterable<FunctionConstant> storedFunctions = const [],
+  Iterable<IrClass> storageDeclarations = const [],
+  CallableImplementations? callableImplementations,
 }) {
-  final _base = ClassType(null, 'Closure');
-  late final tag = InstanceField(_base, 'target', .integer);
+  final implementations = callableImplementations ?? CallableImplementations();
+  final _base = FunctionStorage.type;
+  final entryTable = FunctionStorage.entries;
+
+  /// The original capture carrier, independent of language identity anchors.
+  final environment = FunctionStorage.environment;
+  final identity = FunctionStorage.identity;
+  final identityAnchor = FunctionStorage.anchor;
+  final identityArguments = FunctionStorage.arguments;
   final closures = <FunctionTarget, ClosureShape>{};
   final constants = <Object, ClosureShape>{};
   final methods = <FunctionTarget, ClosureShape>{};
-  final specializations = <ClosureShape, ClosureShape>{};
   final _identities = <Object, int>{};
-  final _cells = <CellType, CellShape>{};
   final _classes = <IrClass>[];
   final _functions = <IrFunction>[];
+  final _declarations = <FunctionTarget, IrCallable>{};
+  var _hasBase = false;
+  CallableStorage? _instantiated;
+
+  /// The already declared common wrapper, without creating storage on inspection.
+  CallableStorage? get instantiatedStorage => _instantiated;
+
+  /// One wrapper layout for every applied function, preserving its environment.
+  CallableStorage get instantiated {
+    if (_instantiated case final storage?) return storage;
+    _includeBase();
+    final owner = ClassType(null, 'InstantiatedFunction', superclass: _base);
+    final origin = InstanceField(owner, 'origin', .function, isFinal: true);
+    final initializer = _initialize(owner, [
+      origin,
+      identityArguments,
+    ], identityOrigin: origin);
+    final storage = _instantiated = CallableStorage(
+      type: owner,
+      initializer: initializer,
+      origin: origin,
+    );
+    _classes.add(
+      IrClass(
+        owner,
+        [origin],
+        constructors: [initializer],
+        callableStorage: storage,
+      ),
+    );
+    return storage;
+  }
 
   Iterable<IrClass> get classes => _classes;
   Iterable<IrFunction> get functions => _functions;
 
+  /// Refreshes declaration metadata without changing already materialized fields.
+  void registerDeclarations(Iterable<IrCallable> bodies) {
+    for (final body in bodies) {
+      _declarations[body.target] = body;
+    }
+  }
+
+  /// Demands only the actual closure's capture layout.
+  ClosureShape ensureClosure(FunctionTarget target) {
+    _includeBase();
+    return closures.putIfAbsent(
+      target,
+      () => _include(
+        target,
+        target.signature,
+        target.typeParameters,
+        _defaultsOf(target),
+      ),
+    );
+  }
+
+  /// Demands the selected method's receiver and descriptor storage.
+  ClosureShape ensureMethod(FunctionTarget target) {
+    _includeBase();
+    return methods.putIfAbsent(
+      target,
+      () => _include(
+        target,
+        target.reifiedSignature,
+        target.typeParameters,
+        _defaultsOf(target),
+      ),
+    );
+  }
+
   this {
     final bodies = selectedBodies.toList();
-    final definitions = {for (final body in bodies) body.target: body};
-    Map<int, Constant> defaultsOf(FunctionTarget target) =>
-        definitions[target]?.defaults ??
-        (throw ArgumentError('Missing callable definition: ${target.name}'));
-    final targets = <FunctionTarget>{};
-    final instantiations = <FunctionType>{};
-    void includeCell(ValueType type) {
-      if (type is! CellType || _cells.containsKey(type)) return;
-      final owner = ClassType(null, 'Cell${_cells.length}');
-      final value = InstanceField(owner, 'value', _stored(type.content));
-      final bound = type.isLate
-          ? InstanceField(owner, 'bound', .boolean)
-          : null;
-      final thunk = type.isLate
-          ? InstanceField(owner, 'thunk', FunctionType(value.type, []).nullable)
-          : null;
-      final fields = [value, ?bound, ?thunk];
-      final initializer = _initialize(owner, fields);
-      _cells[type] = CellShape(
-        owner,
-        value,
-        initializer,
-        lazy: bound == null || thunk == null
-            ? null
-            : (
-                bound: bound,
-                thunk: thunk,
-                initialize: _lateInitializer(thunk, value.type, lateFailure),
-              ),
-      );
-      _classes.add(IrClass(owner, fields, constructors: [initializer]));
+    _declarations.addAll({
+      for (final body in definitions ?? bodies) body.target: body,
+    });
+    for (final declaration in storageDeclarations) {
+      if (declaration.callableStorage case final storage?
+          when storage.source == null) {
+        if (_instantiated != null && !identical(_instantiated, storage)) {
+          throw StateError('Conflicting common function wrapper storage.');
+        }
+        _instantiated = storage;
+        _includeBase();
+        _classes.add(declaration);
+        final body = _declarations[storage.initializer];
+        if (body is! IrFunction) {
+          throw StateError('Missing callable initializer body.');
+        }
+        _functions.add(body);
+      }
+      if (declaration.callableStorage case final storage?
+          when storage.source != null) {
+        final source = storage.source!;
+        _includeBase();
+        final shape = ClosureShape(
+          target: source,
+          sourceTarget: source,
+          signature: storage.signature!,
+          typeArguments: source.typeParameters,
+          defaults: _defaultsOf(source),
+          type: storage.type,
+          initializer: storage.initializer,
+          identity: storage.declarationIdentity!,
+          captures: storage.captures,
+          parameters: storage.parameters,
+          environment: storage.descriptors,
+          storage: storage,
+        );
+        if (source.kind == .closure) closures[source] = shape;
+        if (source.kind.isVirtual) methods[source] = shape;
+        _identities[source] = storage.declarationIdentity!;
+        _classes.add(declaration);
+        if (storage.initializer case final initializer?) {
+          final body = _declarations[initializer];
+          if (body is! IrFunction) {
+            throw StateError('Missing callable initializer body.');
+          }
+          _functions.add(body);
+        }
+      }
     }
-
+    final targets = <FunctionTarget>{};
     for (final body in bodies) {
       if (body.target.kind == .closure) targets.add(body.target);
-      for (final type in body.target.parameterTypes) {
-        includeCell(type);
-      }
       for (final block in body is IrFunction ? body.blocks : <Block>[]) {
-        for (final parameter in block.parameters) {
-          includeCell(parameter.type);
-        }
         for (final operation in [
           ...block.instructions,
           if (block.end case Invoke(:final operation)) operation,
         ]) {
-          includeCell(operation.type);
-          for (final input in operation.inputs) {
-            includeCell(input.type);
-          }
           if (operation case MakeClosure(:final target)) targets.add(target);
-          if (operation
-              case InstantiateFunction(:final function) ||
-                  InstantiateFunctionFrom(:final function)) {
-            instantiations.add(function.type as FunctionType);
-          }
         }
       }
     }
     final values = {
+      for (final value in storedFunctions) value.structuralKey: value,
       for (final body in bodies)
         for (final value in body.functionConstants) value.structuralKey: value,
     };
     if (targets.isNotEmpty || values.isNotEmpty || boundMethods.isNotEmpty) {
-      _classes.add(IrClass(_base, [tag]));
+      _includeBase();
     }
     for (final target in targets) {
-      closures[target] = _include(
+      closures.putIfAbsent(
         target,
-        target.signature,
-        target.typeParameters,
-        defaultsOf(target),
-      );
-    }
-    for (final entry in values.entries) {
-      final value = entry.value;
-      final original =
-          value.constructorAlias == null &&
-              value.constructorSignature?.typeParameters.isNotEmpty == true
-          ? value.target.tearOffSignature(ownerType: value.ownerType)
-          : value.constructorSignature;
-      final signature = original == null
-          ? value.type as FunctionType
-          : value.typeArguments == null
-          ? original
-          : original.instantiate(value.typeArguments!);
-      var target = value.target.implementation;
-      var defaults = defaultsOf(target);
-      List<ValueType> arguments = value.typeArguments ?? target.typeParameters;
-      if (target.kind == .initializer || target.kind == .factory) {
-        final applied = value.target.resolveConstruction(
-          signature.result as ClassType,
-        );
-        final bridge = FunctionTarget(
-          null,
-          'constructor${constants.length}',
-          signature.result,
-          signature.parameters,
-          typeParameters: signature.typeParameters,
-          optionalPositional: signature.optionalPositional,
-          namedParameters: signature.namedParameters,
-        );
-        final block = Block(bridge.parameterTypes);
-        final destination = applied.target.signature;
-        final inputs = destination.bind<Value>(
-          block.parameters.take(signature.positionalCount).toList(),
-          {
-            for (final MapEntry(:key, :value) in signature.named.entries)
-              key: block.parameters[value.slot],
-          },
-          (i) => defaults[i]!,
-        );
-        // Redirects can expose fewer parameters and a different named order.
-        defaults = {
-          for (
-            var i = signature.requiredPositional;
-            i < signature.positionalCount;
-            i++
-          )
-            i: defaults[i]!,
-          for (final MapEntry(:key, :value) in signature.named.entries)
-            if (!value.required)
-              value.slot: defaults[destination.named[key]!.slot]!,
-        };
-        final call = applied.target.kind == .initializer
-            ? Construct(
-                applied.target,
-                inputs,
-                instantiatedType: applied.ownerType,
-              )
-            : DirectCall(applied.target, inputs, ownerType: applied.ownerType);
-        block.finish(Return(block.emit(call)));
-        _functions.add(IrFunction(bridge, [block], defaults: defaults));
-        target = bridge;
-        arguments = bridge.typeParameters;
-      } else if (value.constructorTypeArguments case final types?) {
-        arguments = [
-          for (final type in types)
-            type.substitute({
-              for (final (i, parameter)
-                  in value.constructorSignature!.typeParameters.indexed)
-                parameter:
-                    value.typeArguments?[i] ?? signature.typeParameters[i],
-            }),
-        ];
-      }
-      final constructor =
-          value.target.kind == .initializer || value.target.kind == .factory;
-      constants[entry.key] = _include(
-        target,
-        signature,
-        arguments,
-        defaults,
-        identity: (value.target, value.constructorAlias),
-        sourceTarget: value.target,
-        identityArguments:
-            constructor &&
-                value.constructorAlias == null &&
-                signature.typeParameters.isEmpty
-            ? (signature.result as ClassType).typeArguments
-            : value.typeArguments ?? const [],
-      );
-    }
-    for (final target in boundMethods) {
-      methods[target] = _include(
-        target,
-        target.reifiedSignature,
-        target.typeParameters,
-        defaultsOf(target),
-      );
-    }
-    for (final generic in all.toList()) {
-      if (!instantiations.any((view) => _callableAt(view, generic.signature))) {
-        continue;
-      }
-      final index = all.length;
-      final owner = ClassType(null, 'Closure$index', superclass: _base);
-      final origin = InstanceField(owner, 'origin', .object, isFinal: true);
-      final arguments = InstanceField(
-        owner,
-        'arguments',
-        TypeMetadata.list,
-        isFinal: true,
-      );
-      final initializer = _initialize(owner, [tag, origin, arguments]);
-      _classes.add(
-        IrClass(owner, [origin, arguments], constructors: [initializer]),
-      );
-      specializations[generic] = ClosureShape(
-        target: generic.target,
-        sourceTarget: generic.sourceTarget,
-        signature: generic.signature.instantiate(
-          generic.signature.typeParameters,
+        () => _include(
+          target,
+          target.signature,
+          target.typeParameters,
+          _defaultsOf(target),
         ),
-        typeArguments: generic.typeArguments,
-        defaults: generic.defaults,
-        tag: index,
-        type: owner,
-        initializer: initializer,
-        identity: generic.identity,
-        instantiation: FunctionInstantiation(generic, origin, arguments),
+      );
+    }
+    values.values.forEach(ensureConstant);
+    for (final target in boundMethods) {
+      methods.putIfAbsent(
+        target,
+        () => _include(
+          target,
+          target.reifiedSignature,
+          target.typeParameters,
+          _defaultsOf(target),
+        ),
       );
     }
   }
+
+  /// Declares the common prefix used by a checked entry.
+  void requirePrefix() => _includeBase();
+
+  void _includeBase() {
+    if (_hasBase) return;
+    _hasBase = true;
+    _classes.add(
+      IrClass(_base, [
+        entryTable,
+        environment,
+        identity,
+        identityAnchor,
+        identityArguments,
+      ]),
+    );
+  }
+
+  Map<int, Constant> _defaultsOf(FunctionTarget target) {
+    if (_declarations[target] case final body?) return body.defaults;
+    final signature = target.signature;
+    if (signature.optionalPositional == 0 &&
+        signature.named.values.every((parameter) => parameter.required)) {
+      return const {};
+    }
+    throw StateError('Missing callable defaults: ${target.name}');
+  }
+
+  /// Registers language storage without retaining an executable function body.
+  ///
+  /// Descriptor headers can discover constants after initial preparation. Each
+  /// carrier is new; existing layouts and demanded execution entries are fixed.
+  ClosureShape ensureConstant(FunctionConstant value) =>
+      constants.putIfAbsent(value.structuralKey, () {
+        _includeBase();
+        final original =
+            value.constructorAlias == null &&
+                value.constructorSignature?.typeParameters.isNotEmpty == true
+            ? value.target.tearOffSignature(ownerType: value.ownerType)
+            : value.constructorSignature;
+        final signature = original == null
+            ? value.type as FunctionType
+            : value.typeArguments == null
+            ? original
+            : original.instantiate(value.typeArguments!);
+        final constructor =
+            value.target.kind == .initializer || value.target.kind == .factory;
+        if (constructor && value.invocationEntry == null) {
+          throw StateError(
+            'Constructor function values must be lowered before storage.',
+          );
+        }
+        final target = value.invocationEntry ?? value.target.implementation;
+        final defaults = _defaultsOf(target);
+        List<ValueType> arguments =
+            value.typeArguments ??
+            (value.invocationEntry == null
+                ? target.typeParameters
+                : signature.typeParameters);
+        if (value.constructorTypeArguments case final types?
+            when value.invocationEntry == null) {
+          arguments = [
+            for (final type in types)
+              type.substitute({
+                for (final (i, parameter)
+                    in value.constructorSignature!.typeParameters.indexed)
+                  parameter:
+                      value.typeArguments?[i] ?? signature.typeParameters[i],
+              }),
+          ];
+        }
+        return _include(
+          target,
+          signature,
+          arguments,
+          defaults,
+          identity: (value.target, value.constructorAlias),
+          sourceTarget: value.target,
+          identityArguments:
+              constructor &&
+                  value.constructorAlias == null &&
+                  signature.typeParameters.isEmpty
+              ? (signature.result as ClassType).typeArguments
+              : value.typeArguments ?? const [],
+        );
+      });
 
   ClosureShape _include(
     FunctionTarget target,
@@ -244,26 +297,27 @@ final class ClosureStorage(
       for (final (i, type) in target.captures.indexed)
         InstanceField(owner, 'capture$i', _stored(type), isFinal: true),
     ];
-    final enclosing = <FunctionTarget>[];
-    for (var scope = target.enclosing; scope != null; scope = scope.enclosing) {
-      enclosing.add(scope);
-    }
-    final parameters = <TypeParameterType>{
-      if (target.kind.isVirtual) ...target.owner!.typeParameters,
-    };
-    for (final scope in enclosing.reversed) {
-      if (scope.kind.hasReceiver || scope.kind == .factory) {
-        parameters.addAll(scope.owner!.typeParameters);
-      }
-      parameters.addAll(scope.typeParameters);
-    }
+    final parameters = target.capturedTypeParameters;
     final environment = [
       for (var i = 0; i < parameters.length; i++)
         InstanceField(owner, 'type$i', TypeMetadata.type, isFinal: true),
     ];
     final fields = [...captures, ...environment];
+    final declarationIdentity = _identities.putIfAbsent(
+      identity ?? target,
+      () => _identities.values.fold(
+        0,
+        (next, value) => value >= next ? value + 1 : next,
+      ),
+    );
     final initializer = target.kind == .closure || target.kind.isVirtual
-        ? _initialize(owner, [tag, ...fields])
+        ? _initialize(
+            owner,
+            [entryTable, ...fields],
+            declarationIdentity: declarationIdentity,
+            anchorField: target.kind.isVirtual ? captures.single : null,
+            selfAnchor: target.kind == .closure,
+          )
         : null;
     final shape = ClosureShape(
       target: target,
@@ -271,75 +325,53 @@ final class ClosureStorage(
       signature: signature,
       typeArguments: typeArguments,
       defaults: defaults,
-      tag: index,
       type: owner,
       initializer: initializer,
       captures: captures,
       parameters: parameters.toList(),
       environment: environment,
-      identity: _identities.putIfAbsent(
-        identity ?? target,
-        () => _identities.length,
-      ),
+      identity: declarationIdentity,
       identityArguments: identityArguments,
+      storage: CallableStorage(
+        type: owner,
+        declarationIdentity: declarationIdentity,
+        source: target,
+        signature: signature,
+        initializer: initializer,
+        captures: captures,
+        parameters: parameters,
+        descriptors: environment,
+      ),
     );
-    _classes.add(IrClass(owner, fields, constructors: [?initializer]));
+    _classes.add(
+      IrClass(
+        owner,
+        fields,
+        constructors: [?initializer],
+        callableStorage: shape.storage,
+      ),
+    );
     return shape;
   }
 
-  CellShape cell(CellType type) =>
-      _cells[type] ?? (throw StateError('Uncollected native cell: $type'));
+  Iterable<ClosureShape> get all =>
+      closures.values.followedBy(constants.values).followedBy(methods.values);
 
-  Iterable<ClosureShape> get all => closures.values
-      .followedBy(constants.values)
-      .followedBy(methods.values)
-      .followedBy(specializations.values);
+  ValueType _stored(ValueType type) => switch (valueCarrier(type)) {
+    ValueType.integer => .integer,
+    ValueType.boolean => .boolean,
+    ValueType.floating => .floating,
+    _ => .object.nullable,
+  };
 
-  Iterable<ClosureShape> targetsFor(FunctionType view) =>
-      all.where((shape) => _callableAt(view, shape.signature));
-
-  bool _callableAt(FunctionType view, FunctionType actual) {
-    if (actual.typeParameters.length != view.typeParameters.length) {
-      return false;
-    }
-    if (actual.freeTypeParameters.isEmpty && view.freeTypeParameters.isEmpty) {
-      return view.accepts(actual);
-    }
-    // Free lexical types are unknown here; fixed slots can still rule a target out.
-    bool possible(ValueType expected, ValueType value) =>
-        expected.freeTypeParameters.isNotEmpty ||
-        value.freeTypeParameters.isNotEmpty ||
-        expected.accepts(value);
-    if (!possible(view.result, actual.result) ||
-        actual.requiredPositional > view.requiredPositional ||
-        actual.positionalCount < view.positionalCount) {
-      return false;
-    }
-    for (var i = 0; i < view.positionalCount; i++) {
-      if (!possible(actual.parameters[i], view.parameters[i])) return false;
-    }
-    for (final entry in view.named.entries) {
-      final parameter = actual.named[entry.key];
-      if (parameter == null ||
-          !possible(
-            actual.parameters[parameter.slot],
-            view.parameters[entry.value.slot],
-          )) {
-        return false;
-      }
-    }
-    return actual.named.entries.every(
-      (entry) =>
-          !entry.value.required || view.named[entry.key]?.required == true,
-    );
-  }
-
-  ValueType _stored(ValueType type) =>
-      type == .integer || type == .boolean || type == .floating
-      ? type
-      : ValueType.object.nullable;
-
-  FunctionTarget _initialize(ClassType owner, List<InstanceField> fields) {
+  FunctionTarget _initialize(
+    ClassType owner,
+    List<InstanceField> fields, {
+    int? declarationIdentity,
+    InstanceField? anchorField,
+    bool selfAnchor = false,
+    InstanceField? identityOrigin,
+  }) {
     final target = FunctionTarget(
       null,
       'new',
@@ -354,62 +386,74 @@ final class ClosureStorage(
         StoreField(field, entry.parameters.first, entry.parameters[i + 1]),
       );
     }
-    entry.finish(const Return());
-    _functions.add(IrFunction(target, [entry]));
-    return target;
-  }
-
-  FunctionTarget _lateInitializer(
-    InstanceField thunk,
-    ValueType result,
-    FunctionTarget? failure,
-  ) {
-    if (failure == null) {
-      throw UnsupportedError(
-        'Native late cells require the SDK LateError constructor.',
+    final receiver = entry.parameters.first;
+    if (identityOrigin != null) {
+      final original = entry.emit(
+        CallableReference(entry.parameters[1 + fields.indexOf(identityOrigin)]),
+      );
+      if (!fields.contains(entryTable)) {
+        entry.emit(
+          StoreField(
+            entryTable,
+            receiver,
+            entry.emit(LoadField(entryTable, original)),
+          ),
+        );
+      }
+      entry.emit(
+        StoreField(
+          environment,
+          receiver,
+          entry.emit(LoadField(environment, original)),
+        ),
+      );
+      entry.emit(
+        StoreField(
+          identity,
+          receiver,
+          entry.emit(LoadField(identity, original)),
+        ),
+      );
+      entry.emit(
+        StoreField(
+          identityAnchor,
+          receiver,
+          entry.emit(LoadField(identityAnchor, original)),
+        ),
+      );
+    } else if (declarationIdentity != null) {
+      entry.emit(StoreField(environment, receiver, receiver));
+      entry.emit(
+        StoreField(identity, receiver, Constant.integer(declarationIdentity)),
+      );
+      entry.emit(
+        StoreField(
+          identityAnchor,
+          receiver,
+          selfAnchor
+              ? receiver
+              : anchorField == null
+              ? const Constant.nullValue()
+              : entry.parameters[1 + fields.indexOf(anchorField)],
+        ),
+      );
+      entry.emit(
+        StoreField(identityArguments, receiver, const Constant.nullValue()),
       );
     }
-    final target = FunctionTarget(
-      null,
-      '${thunk.owner.name}.initialize',
-      result,
-      [thunk.type],
-    );
-    final entry = Block(target.parameterTypes),
-        missing = Block(),
-        evaluate = Block();
-    final value = entry.parameters.single;
-    entry.finish(
-      Branch(
-        entry.emit(Equals(value, const Constant.nullValue())),
-        Jump(missing),
-        Jump(evaluate),
-      ),
-    );
-    missing.finish(
-      Unreachable(
-        missing.emit(
-          DirectCall(failure, [
-            const Constant.string('Local has not been initialized.'),
-          ]),
-        ),
-      ),
-    );
-    evaluate.finish(
-      Return(evaluate.emit(FunctionCall(evaluate.emit(NullCheck(value)), []))),
-    );
-    _functions.add(IrFunction(target, [entry, missing, evaluate]));
+    entry.finish(const Return());
+    _functions.add(IrFunction(target, [entry]));
     return target;
   }
 }
 
 final class ClosureShape({
+  required final CallableStorage storage,
   required final FunctionTarget target,
   required final FunctionTarget sourceTarget,
   required final FunctionType signature,
   required final List<ValueType> typeArguments,
   required final Map<int, Constant> defaults,
-  required final int tag,
   required final ClassType type,
   required final FunctionTarget? initializer,
   final List<InstanceField> captures = const [],
@@ -421,19 +465,4 @@ final class ClosureShape({
 
   /// Closed arguments retained even when absent from the function signature.
   final List<ValueType> identityArguments = const [],
-  final FunctionInstantiation? instantiation,
-});
-
-final class FunctionInstantiation(
-  final ClosureShape generic,
-  final InstanceField origin,
-  final InstanceField arguments,
-);
-
-final class CellShape(
-  final ClassType type,
-  final InstanceField value,
-  final FunctionTarget initializer, {
-  final ({InstanceField bound, InstanceField thunk, FunctionTarget initialize})?
-  lazy,
 });

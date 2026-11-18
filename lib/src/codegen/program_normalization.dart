@@ -72,6 +72,8 @@ final class ProgramNormalization(
             ],
             functions,
             globals: program.globals,
+            nativeBoundaries: program.nativeBoundaries,
+            executionShapes: program.executionShapes,
             externals: externals,
           )
         : program;
@@ -192,6 +194,7 @@ final class ProgramNormalization(
         ? source
         : FunctionRewrite(
             source,
+            executionShapes: program.executionShapes,
             operations: operations,
             terminators: terminators,
             constants: _constant,
@@ -293,6 +296,8 @@ final class ProgramNormalization(
             if (program.implementationOf(target) != null)
               target: _getterCall(target, operation),
       },
+      operation.entryBinding,
+      operation.methodBindings,
     );
   }
 

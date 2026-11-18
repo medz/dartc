@@ -48,7 +48,7 @@ void main() {
     );
     final facts = flow.facts;
     final definitions = facts.definitions;
-    final prepared = preparation.prepare(facts) as PreparedProgram;
+    final prepared = preparation.prepare(facts);
     expect(flow.extend(instantiatedTypes: [extra]), isTrue);
     expect(flow.facts.definitions, definitions);
     expect(() => preparation.prepare(facts), throwsStateError);
@@ -56,7 +56,7 @@ void main() {
       () => Arm64CodeGenerator(target).generate(prepared),
       throwsStateError,
     );
-    final current = preparation.prepare(flow.facts) as PreparedProgram;
+    final current = preparation.prepare(flow.facts);
     expect(current.definitions, {entry});
     expect(
       Arm64CodeGenerator(target).generate(current).symbols.single.name,
@@ -104,13 +104,32 @@ void main() {
       IrFunction(forward, [forwarded]),
       IrFunction(recover, [called, caught]),
     ]);
+    final exported = FunctionTarget(uri, 'raises', .integer, []);
+    final exportedBody = Block()
+      ..finish(Throw.recorded(const Constant.integer(7), null));
+    expect(
+      () => Compiler(target).prepare(
+        IrProgram([], [
+          ...program.functions,
+          IrFunction(exported, [exportedBody]),
+        ]),
+        exports: {exported: NativeExport('raises', NativeSignature(Int64, []))},
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.message,
+          'message',
+          contains('entry lifecycle'),
+        ),
+      ),
+    );
     final preparation = _preparation(target, program, roots: [recover]);
     final flow = CallTypeFlow(
       preparation.program,
       preparation.roots,
       instantiatedTypes: preparation.instantiatedTypes,
     );
-    final prepared = preparation.prepare(flow.facts) as PreparedProgram;
+    final prepared = preparation.prepare(flow.facts);
     expect(prepared.definitions, {raise, forward, recover});
     expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
 
@@ -214,7 +233,7 @@ void main() {
         preparation.roots,
         instantiatedTypes: preparation.instantiatedTypes,
       ).facts,
-    ) as PreparedProgram;
+    );
     expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
   });
 
@@ -346,7 +365,9 @@ void main() {
       IrFunction(unused, [Block()..finish(Return(FunctionConstant(forward)))]),
     ]);
     final prepared = Compiler(target).prepare(input, roots: [entry]);
-    expect(prepared.definitions, {entry, forward});
+    expect(prepared.definitions, {entry});
+    final result = prepared.program.implementationOf(entry) as IrFunction;
+    expect(IrInterpreter(prepared.program, {}).run(result, []), 32);
     expect(Arm64CodeGenerator(target).generate(prepared).imports, isEmpty);
   });
 

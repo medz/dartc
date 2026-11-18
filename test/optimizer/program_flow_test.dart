@@ -1,4 +1,6 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart'
+    show FlowIntegerRange, ProgramSimplification;
 import 'package:dartc/src/optimizer/flow_value.dart';
 import 'package:dartc/src/optimizer/program_flow.dart';
 import 'package:test/test.dart';
@@ -9,6 +11,205 @@ import '../support/numeric_order.dart';
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  test('entry coverage requires independent full inputs, including ranges', () {
+    final entry = FunctionTarget(_uri, 'entry', .integer, [.integer]);
+    final internal = FunctionTarget(_uri, 'internal', .integer, [.integer]);
+    final head = Block(entry.parameterTypes);
+    head.finish(Return(head.emit(DirectCall(internal, head.parameters))));
+    final body = Block(internal.parameterTypes);
+    body.finish(Return(body.parameters.single));
+    final zero = FunctionTarget(_uri, 'zero', .integer, []);
+    final program = IrProgram([], [
+      IrFunction(entry, [head]),
+      IrFunction(internal, [body]),
+      IrFunction(zero, [Block()..finish(const Return(Constant.integer(0)))]),
+    ]);
+    final unknown = ProgramFlow(program, [
+      (target: entry, arguments: [FlowValue.unknown(.integer)]),
+      (target: zero, arguments: <FlowValue>[]),
+    ]).facts;
+    expect(unknown.coversEntry(entry), isTrue);
+    expect(unknown.coversEntry(zero), isTrue);
+    expect(unknown.definitions, contains(internal));
+    expect(unknown.coversEntry(internal), isFalse);
+    final exact = ProgramFlow(program, [
+      (
+        target: entry,
+        arguments: [FlowValue.constant(const Constant.integer(3))],
+      ),
+    ]).facts;
+    expect(exact.coversEntry(entry), isFalse);
+    final bounded = ProgramFlow(program, [
+      (
+        target: entry,
+        arguments: [FlowValue.integerRange(FlowIntegerRange(0, 9))],
+      ),
+    ]).facts;
+    expect(bounded.coversEntry(entry), isFalse);
+    final open = ProgramFlow(program, [], openEntries: [entry]).facts;
+    expect(open.coversEntry(entry), isTrue);
+    expect(open.coversEntry(internal), isFalse);
+  });
+
+  test(
+    'receiver selection uses actual facts and keeps unreachable SSA empty',
+    () {
+      final base = ClassType(_uri, 'Base');
+      final child = ClassType(_uri, 'Child', superclass: base);
+      final userType = ClassType(
+        _uri,
+        'UserType',
+        interfaces: [ValueType.typeType],
+      );
+      final root = FunctionTarget(_uri, 'root', base, []);
+      final entry = Block();
+      final allocated = entry.emit(NewPayload(base, const Constant.integer(0)));
+      entry.finish(Return(allocated));
+      final unused = FunctionTarget(_uri, 'unused', base, [base]);
+      final absent = Block(unused.parameterTypes);
+      absent.finish(Return(absent.parameters.single));
+      final program = IrProgram(
+        [IrClass(base, []), IrClass(child, []), IrClass(userType, [])],
+        [
+          IrFunction(root, [entry]),
+          IrFunction(unused, [absent]),
+        ],
+      );
+      final facts = ProgramFlow(program, [
+        (target: root, arguments: <FlowValue>[]),
+      ]).facts;
+      expect(facts.receiverClassesOf(allocated), {base});
+      expect(facts.receiverClassesOf(absent.parameters.single), isEmpty);
+      expect(facts.receiverClassesOf(TypeConstant(.integer)), {
+        TypeMetadata.type,
+      });
+      expect(
+        () => facts.receiverClassesOf(allocated).add(child),
+        throwsUnsupportedError,
+      );
+      final unknown = ProgramFlow(program, [], openEntries: [unused]).facts;
+      expect(unknown.receiverClassesOf(absent.parameters.single), {
+        base,
+        child,
+      });
+      expect(facts.allows(allocated, base), isTrue);
+      expect(facts.allows(allocated, child), isFalse);
+      expect(facts.allows(absent.parameters.single, base), isFalse);
+      expect(facts.allows(TypeConstant(.integer), TypeMetadata.type), isTrue);
+      expect(facts.allows(TypeConstant(.integer), userType), isFalse);
+      expect(
+        facts.allows(ObjectConstant(userType, {}), TypeMetadata.type),
+        isFalse,
+      );
+      final generated = Block([base]).parameters.single;
+      expect(facts.owns(generated), isFalse);
+      expect(facts.allows(generated, child), isTrue);
+    },
+  );
+
+  test(
+    'generic type-test facts retain promoted constraints before inlining',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final helper = FunctionTarget(
+        _uri,
+        'promotedTest',
+        .boolean,
+        [.object.nullable],
+        typeParameters: [t],
+      );
+      final body = Block(helper.parameterTypes);
+      final checked = body.emit(
+        TypeTest(
+          body.parameters.single,
+          PromotedTypeParameterType(t, ValueType.integer),
+        ),
+      );
+      body.finish(Return(checked));
+      final root = FunctionTarget(_uri, 'root', .boolean, [.object.nullable]);
+      final entry = Block(root.parameterTypes);
+      entry.finish(
+        Return(
+          entry.emit(
+            DirectCall(helper, entry.parameters, typeArguments: [.object]),
+          ),
+        ),
+      );
+      final program = IrProgram([], [
+        IrFunction(helper, [body]),
+        IrFunction(root, [entry]),
+      ]);
+      for (final (argument, expected) in [
+        (const Constant.integer(3), true),
+        (const Constant.string('other'), false),
+        (const Constant.nullValue(), false),
+      ]) {
+        final facts = ProgramFlow(program, [
+          (target: root, arguments: [FlowValue.constant(argument)]),
+        ]).facts;
+        expect(
+          facts.valueOf(checked).constant?.structuralKey,
+          Constant.boolean(expected).structuralKey,
+        );
+        expect(
+          facts.returnedBy(root).constant?.structuralKey,
+          Constant.boolean(expected).structuralKey,
+        );
+      }
+      final unknown = ProgramFlow(program, const [], openEntries: [root]).facts;
+      expect(unknown.valueOf(checked).constant, isNull);
+    },
+  );
+
+  test('generic casts and cell allocation keep the instantiated flow type', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final promoted = PromotedTypeParameterType(t, ValueType.integer);
+    final helper = FunctionTarget(
+      _uri,
+      'promotedCell',
+      .integer,
+      [.object.nullable],
+      typeParameters: [t],
+    );
+    final body = Block(helper.parameterTypes);
+    final cast = body.emit(TypeCast(body.parameters.single, promoted));
+    final cell = body.emit(NewCell(CellType(promoted), cast));
+    final read = body.emit(ReadCell(cell));
+    body.finish(Return(read));
+    final root = FunctionTarget(_uri, 'root', .integer, [.object.nullable]);
+    final entry = Block(root.parameterTypes);
+    entry.finish(
+      Return(
+        entry.emit(
+          DirectCall(helper, entry.parameters, typeArguments: [.object]),
+        ),
+      ),
+    );
+    final program = IrProgram([], [
+      IrFunction(helper, [body]),
+      IrFunction(root, [entry]),
+    ]);
+    final facts = ProgramFlow(program, [
+      (
+        target: root,
+        arguments: [FlowValue.constant(const Constant.integer(7))],
+      ),
+    ]).facts;
+    expect(facts.returnedBy(root).constant, const Constant.integer(7));
+    expect(
+      facts.valueOf(cell).objects.single.type,
+      CellType(PromotedType(ValueType.object, ValueType.integer)),
+    );
+    final failure = ProgramFlow(program, [
+      (
+        target: root,
+        arguments: [FlowValue.constant(const Constant.string('bad'))],
+      ),
+    ]).facts;
+    expect(failure.returnedBy(root).isBottom, isTrue);
+    expect(failure.returnedBy(helper).isBottom, isTrue);
+  });
+
   test('a missing called body is not an implicit external declaration', () {
     final missing = FunctionTarget(_uri, 'missing', .voidType, []);
     final root = FunctionTarget(_uri, 'root', .voidType, []);
@@ -54,12 +255,32 @@ void main() {
         final observed = entry.emit(LoadField(changed, object));
         final preserved = entry.emit(LoadField(untouched, object));
         entry.finish(Return(entry.emit(IntBinary(.add, observed, preserved))));
+        final oracle = FunctionTarget(_uri, 'caller', .integer, []);
+        final caller = Block();
+        final incoming = caller.emit(
+          NewPayload(type, const Constant.integer(0)),
+        );
+        caller.emit(StoreField(changed, incoming, const Constant.integer(5)));
+        caller.emit(StoreField(untouched, incoming, const Constant.integer(6)));
+        final called = caller.emit(DirectCall(root, [incoming]));
+        caller.finish(
+          Return(
+            caller.emit(
+              IntBinary(
+                .add,
+                called,
+                caller.emit(LoadField(changed, incoming)),
+              ),
+            ),
+          ),
+        );
         final program = IrProgram(
           [
             IrClass(type, [changed, untouched]),
           ],
           [
             IrFunction(root, [entry]),
+            IrFunction(oracle, [caller]),
             IrFunction(setter, [write]),
           ],
         );
@@ -68,11 +289,24 @@ void main() {
         ]).facts;
         expect(facts.valueOf(preserved).constant, const Constant.integer(7));
         if (unknown) {
-          expect(facts.valueOf(observed).constant, isNull);
+          // An entry argument cannot become this later private allocation.
+          expect(facts.valueOf(observed).constant, const Constant.integer(1));
         } else {
           expect(facts.valueOf(observed).constant, const Constant.integer(9));
         }
         expect(facts.callActivationsOf(second), facts.callActivationsOf(third));
+        for (final graph in [
+          program,
+          const ProgramSimplification().run(facts),
+        ]) {
+          expect(
+            IrInterpreter(
+              graph,
+              {},
+            ).run(graph.implementationOf(oracle) as IrFunction, []),
+            unknown ? 17 : 21,
+          );
+        }
       },
     );
   }
@@ -434,6 +668,7 @@ void main() {
     final facts = _flow(program, main).facts;
     expect(IrInterpreter(program, {}).run(main, []), 4);
     expect(facts.targetsOf(call), {add.target});
+    expect(facts.executionTargetsOf(call), {add.target});
     expect(facts.hasUnknownCall(call), isFalse);
     expect(facts.definitions, isNot(contains(other.target)));
     expect(

@@ -28,9 +28,10 @@ import 'permissions.dart';
 final class Compiler(final Target target, {final SdkSources? resources}) {
   /// Prepares checked IR for instruction selection on [target].
   ///
-  /// [roots], native exports and the process entry are independently callable.
-  /// Runtime sources are composed before analysis. Target dependencies extend
-  /// that analysis until every generated call and instance type is covered.
+  /// [roots] retain the Dart calling convention and a caller's valid activation.
+  /// Host calls enter through native exports, callbacks or the process entry.
+  /// Runtime sources are composed before analysis. Executable lowerings reenter
+  /// semantic optimization with their actual calls and the original roots.
   /// Rewritten IR must start here again with its actual roots.
   PreparedProgram prepare(
     IrProgram program, {
@@ -41,7 +42,20 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     ({FunctionTarget function, String symbol})? entryPoint,
     HeapRuntime? runtime,
   }) {
-    if (runtime != null && !identical(program, runtime.program)) {
+    // A complete checked graph is authoritative, including rewritten runtime
+    // bodies and globals already replaced by module storage. Partial inputs
+    // still compose strictly with the supplied source definitions.
+    final sourceTypes = program.classes.map((c) => c.type).toSet();
+    final completeRuntime =
+        runtime != null &&
+        runtime.program.classes.every((c) => sourceTypes.contains(c.type)) &&
+        runtime.program.functions.every(
+          (body) => program.implementationOf(body.target) is IrFunction,
+        ) &&
+        runtime.program.externals.every(
+          (body) => program.implementationOf(body.target) is IrExternal,
+        );
+    if (runtime != null && !completeRuntime) {
       final classes = {for (final c in program.classes) c.type: c};
       for (final declaration in runtime.program.classes) {
         final existing = classes[declaration.type];
@@ -78,6 +92,8 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       program = IrProgram(
         classes.values,
         functions.values,
+        nativeBoundaries: program.nativeBoundaries,
+        executionShapes: program.executionShapes,
         globals: {...program.globals, ...runtime.program.globals},
         externals: {
           for (final external in [
@@ -89,53 +105,127 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         }.values,
       );
     }
+    runtime = runtime?.rebind(program);
     program = ProgramNormalization(program, runtime: runtime).run();
-    if (runtime != null) {
-      program = StackTraceLowering(runtime.captureStackTrace).lower(program);
-    }
-    final boundaries = NativeBoundaries(
+    runtime = runtime?.rebind(program);
+    var boundaries = NativeBoundaries(
       program,
       roots: {...roots, if (entryPoint != null) entryPoint.function},
       imports: {
         for (final entry in imports.entries) entry.key: entry.value.signature,
       },
+      nonAllocatingImports: imports.entries
+          .where((entry) => entry.value.isNonAllocating)
+          .map((entry) => entry.key),
+      leafImports: imports.entries
+          .where((entry) => entry.value.isLeaf)
+          .map((entry) => entry.key),
       exports: exports,
     );
-    return _close(
-      ProgramPreparation(
-        target,
-        boundaries.program,
-        boundaries: boundaries,
-        imports: imports,
-        nativeSymbols: nativeSymbols,
-        entryPoint: entryPoint,
-        runtime: runtime,
-      ),
-    );
-  }
-
-  PreparedProgram _close(ProgramPreparation preparation) {
-    final flow = CallTypeFlow(
-      preparation.program,
-      preparation.roots,
-      instantiatedTypes: preparation.instantiatedTypes,
-    );
-    while (true) {
-      switch (preparation.prepare(flow.facts)) {
-        case final PreparedProgram prepared:
-          return prepared;
-        case PreparationDependencies(:final calls, :final instantiatedTypes):
-          if (!flow.extend(
-            unknownCalls: calls,
-            instantiatedTypes: instantiatedTypes,
-          )) {
-            throw StateError(
-              'Target preparation did not close its dependencies.',
-            );
-          }
+    if (runtime != null &&
+        (boundaries.exports.isNotEmpty ||
+            boundaries.callbacks.isNotEmpty ||
+            entryPoint != null)) {
+      boundaries = NativeBoundaries.withLifecycle(
+        boundaries,
+        runtime,
+        processEntry: entryPoint?.function,
+      );
+      if (entryPoint != null) {
+        entryPoint = (
+          function: boundaries.processEntry!,
+          symbol: entryPoint.symbol,
+        );
       }
     }
+    runtime = runtime?.rebind(boundaries.program);
+    final types = TypeImplementations(runtime: runtime?.types);
+    final callables = CallableImplementations(types: types);
+    final nativeViews = NativeViews(NativeLayout(target));
+    final facts = _optimize(
+      boundaries.program,
+      boundaries,
+      runtime,
+      types,
+      callables,
+      nativeViews,
+      openEntries: boundaries.roots,
+    );
+    return ProgramPreparation(
+      target,
+      facts.program,
+      boundaries: boundaries,
+      imports: imports,
+      nativeSymbols: nativeSymbols,
+      entryPoint: entryPoint,
+      runtime: runtime,
+      typeImplementations: types,
+      callableImplementations: callables,
+      nativeViews: nativeViews,
+    ).prepare(facts);
   }
+
+  ProgramFlowFacts _optimize(
+    IrProgram program,
+    NativeBoundaries boundaries,
+    HeapRuntime? runtime,
+    TypeImplementations types,
+    CallableImplementations callables,
+    NativeViews nativeViews, {
+    Iterable<FlowEntry> entries = const [],
+    Iterable<FunctionTarget> openEntries = const [],
+  }) =>
+      ProgramOptimizer([
+        const ProgramSimplification(),
+        const ProgramCallSpecialization(),
+        const ProgramStoragePromotion(),
+        const ProgramStorageElimination(),
+        const ProgramBranchSpecialization(),
+        const ProgramLoopSpecialization(),
+        const DirectCallInlining(),
+        const ConstructorTearOffLowering(),
+        GlobalLowering(),
+        NativeCallLowering(
+          managedContext: boundaries.runtimeContext,
+          failure: boundaries.publicationFailure,
+        ),
+        NativeViewLowering(nativeViews, copyBytes: runtime?.copyBytes),
+        TypeLowering(types, failure: runtime?.typeCheckFailure),
+        CellLowering(),
+        CallableLowering(callables),
+        MemberEntryLowering(types),
+        RepresentationLowering(),
+        if (runtime != null) ...[
+          StackTraceLowering(runtime.captureStackTrace),
+          AllocationLowering(
+            runtime,
+            managedContext: boundaries.runtimeContext,
+          ),
+        ],
+      ]).run(
+        program,
+        entries,
+        openEntries: openEntries,
+        nativeEntries: {
+          for (final entry in boundaries.callbacks.entries)
+            entry.key: entry.value.target,
+        },
+        allocationFailure: runtime?.allocationFailure,
+        managedAllocator: runtime?.allocate,
+        memoryLayoutFor: (program) {
+          final binding = runtime?.rebind(program);
+          types.rebind(binding?.types);
+          return ProgramLayout(
+            program.classes,
+            executionShapes: program.executionShapes,
+            functions: program.functions,
+            nativeLayout: NativeLayout(target),
+            typeRuntime: binding?.types,
+            typeImplementations: types,
+            nativeViews: nativeViews,
+          );
+        },
+      );
 
   /// Checks dependencies and returns the final bytes and C declarations.
   ///
@@ -196,7 +286,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     final (
       lowered,
       sources,
-      runtime,
+      sourceRuntime,
     ) = await AnalysisSession(
       paths,
       includeDependencies: true,
@@ -227,6 +317,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       );
     });
     final (program: _, :exports, :imports, :entryPoint, runtime: _) = lowered;
+    var runtime = sourceRuntime;
     var program = runtime.program;
     var entry = entryPoint;
     if (output is ExecutableOutput && entryPoint == null) {
@@ -260,6 +351,8 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
           IrFunction(entry, [block]),
         ],
         globals: program.globals,
+        nativeBoundaries: program.nativeBoundaries,
+        executionShapes: program.executionShapes,
         externals: program.externals,
       );
     }
@@ -268,82 +361,58 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       .x64 => X64CodeGenerator(target),
     };
     program = ProgramNormalization(program, runtime: runtime).run();
-    final boundaries = NativeBoundaries(
-      program,
-      roots: [
-        if (output is ExecutableOutput) ...[entry!, ?runtime.processExitCode],
-      ],
-      exports: exports,
-      imports: {
-        for (final declaration in imports.entries)
-          if (declaration.value.type case NativeFunctionType(:final signature)
-              when program.implementationOf(declaration.key) is IrExternal)
-            declaration.key: signature,
-      },
-    );
-    program = boundaries.program;
-    final roots = boundaries.roots;
-    program =
-        ProgramOptimizer([
-              const ProgramSimplification(),
-              const ProgramCallSpecialization(),
-              const ProgramStoragePromotion(),
-              const ProgramStorageElimination(),
-              const ProgramBranchSpecialization(),
-              const ProgramLoopSpecialization(),
-              const DirectCallInlining(),
-              StackTraceLowering(runtime.captureStackTrace),
-            ])
-            .run(
-              program,
-              [
-                if (output is ExecutableOutput) ...[
-                  (
-                    target: entry!,
-                    arguments: entry.parameterTypes
-                        .map(FlowValue.unknown)
-                        .toList(),
-                  ),
-                ],
-              ],
-              openEntries: [
-                ...boundaries.exports.keys,
-                if (output is ExecutableOutput) ?runtime.processExitCode,
-              ],
-              nativeEntries: {
-                for (final entry in boundaries.callbacks.entries)
-                  entry.key: entry.value.target,
-              },
-              allocationFailure: runtime.allocationFailure,
-              memoryLayoutFor: (program) => ProgramLayout(
-                program.classes,
-                functions: program.functions,
-                nativeLayout: NativeLayout(target),
-                typeRuntime: runtime.types,
-              ),
+    runtime = runtime.rebind(program);
+    final boundaries = NativeBoundaries.withLifecycle(
+      NativeBoundaries(
+        program,
+        roots: [if (output is ExecutableOutput) entry!],
+        exports: exports,
+        nonAllocatingImports: imports.entries
+            .where((entry) => runtime.nonAllocatingNatives.contains(entry.value) &&
+                program.implementationOf(entry.key) is IrExternal)
+            .map((entry) => entry.key),
+        leafImports: imports.entries
+            .where(
+              (entry) =>
+                  entry.value.isLeaf &&
+                  entry.value.type is NativeFunctionType &&
+                  program.implementationOf(entry.key) is IrExternal,
             )
-            .program;
-    final definitions = reachableDefinitions(
-      program,
-      roots,
-      instantiatedTypes: [
-        if (exports.values.any(
-              (export) => export.signature.parameters.any(
-                (type) => type is NativePointerType,
-              ),
-            ) ||
-            imports.values.any(
-              (import) => switch (import.type) {
-                NativeFunctionType(
-                  signature: NativeSignature(result: NativePointerType()),
-                ) =>
-                  true,
-                _ => false,
-              },
-            ))
-          FfiTypes.pointer,
-      ],
+            .map((entry) => entry.key),
+        imports: {
+          for (final declaration in imports.entries)
+            if (declaration.value.type case NativeFunctionType(:final signature)
+                when program.implementationOf(declaration.key) is IrExternal)
+              declaration.key: signature,
+        },
+      ),
+      runtime,
+      processEntry: output is ExecutableOutput ? entry : null,
     );
+    if (output is ExecutableOutput) entry = boundaries.processEntry!;
+    program = boundaries.program;
+    runtime = runtime.rebind(program);
+    final types = TypeImplementations(runtime: runtime.types);
+    final callables = CallableImplementations(types: types);
+    final nativeViews = NativeViews(NativeLayout(target));
+    final facts = _optimize(
+      program,
+      boundaries,
+      runtime,
+      types,
+      callables,
+      nativeViews,
+      entries: [
+        if (output is ExecutableOutput)
+          (
+            target: entry!,
+            arguments: entry.parameterTypes.map(FlowValue.unknown).toList(),
+          ),
+      ],
+      openEntries: [...boundaries.exports.keys, ?boundaries.cleanup],
+    );
+    program = facts.program;
+    final definitions = facts.definitions;
     final nativeImports = <FunctionTarget, NativeImport>{};
     final addresses = <NativeReference, String>{};
     final systemReferences = {
@@ -382,8 +451,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         }
         continue;
       }
-      if (runtime.primitives.containsKey(target) ||
-          target == runtime.types?.projection) {
+      if (runtime.primitives.containsKey(target)) {
         continue;
       }
       final reference = imports[boundaries.imports[target]?.source];
@@ -404,19 +472,20 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     }
     const entrySymbol = '.dartc.start';
     final object = generator.generate(
-      _close(
-        ProgramPreparation(
-          target,
-          program,
-          boundaries: boundaries,
-          imports: nativeImports,
-          nativeSymbols: addresses,
-          entryPoint: output is ExecutableOutput
-              ? (function: entry!, symbol: entrySymbol)
-              : null,
-          runtime: runtime,
-        ),
-      ),
+      ProgramPreparation(
+        target,
+        program,
+        boundaries: boundaries,
+        imports: nativeImports,
+        nativeSymbols: addresses,
+        entryPoint: output is ExecutableOutput
+            ? (function: entry!, symbol: entrySymbol)
+            : null,
+        runtime: runtime,
+        typeImplementations: types,
+        callableImplementations: callables,
+        nativeViews: nativeViews,
+      ).prepare(facts),
     );
     final ObjectFormat format = switch (target.operatingSystem) {
       .macos => MachO(target),

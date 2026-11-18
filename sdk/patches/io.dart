@@ -19,10 +19,7 @@ class _ProcessUtils {
   }
 
   @patch
-  static Never _exit(int status) {
-    _exitProcess(status);
-    throw StateError('Process termination returned');
-  }
+  static Never _exit(int status) => Memory.exitProcess(status);
 
   @patch
   static void _setExitCode(int status) => _exitStatus = status.toSigned(32);
@@ -41,11 +38,6 @@ class _ProcessUtils {
     }
   }
 }
-
-// FFI represents the non-returning C function with Void, not Dart Never.
-@SystemNative()
-@ffi.Native<ffi.Void Function(ffi.Int)>(symbol: '_Exit')
-external void _exitProcess(int status);
 
 @patch
 class _Platform {

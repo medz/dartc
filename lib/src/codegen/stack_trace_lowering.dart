@@ -3,8 +3,8 @@ import 'package:dartc/optimizer.dart';
 
 /// Expands retained stack snapshots into ordinary runtime calls.
 ///
-/// Semantic optimization converges before snapshots acquire runtime dependencies. Frame values are
-/// bound to this function's allocated frame during emission, never to host PCs.
+/// Runtime dependencies enter analysis before destructive specialization. Frame
+/// values bind to this function's allocated frame, never to host PCs.
 final class StackTraceLowering(final FunctionTarget capture)
     extends ProgramPass {
   @override
@@ -40,7 +40,7 @@ final class StackTraceLowering(final FunctionTarget capture)
       };
       final rewritten = operations.isEmpty
           ? function
-          : FunctionRewrite(function, operations: operations).run();
+          : FunctionRewrite(function, executionShapes: program.executionShapes, operations: operations).run();
       changed |= !identical(function, rewritten);
       functions.add(rewritten);
     }
@@ -49,6 +49,8 @@ final class StackTraceLowering(final FunctionTarget capture)
             program.classes,
             functions,
             globals: program.globals,
+            nativeBoundaries: program.nativeBoundaries,
+            executionShapes: program.executionShapes,
             externals: program.externals,
           )
         : program;

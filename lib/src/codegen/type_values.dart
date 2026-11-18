@@ -2,9 +2,36 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/runtime/contracts.dart';
 
 import 'type_runtime.dart';
+import 'value_carrier.dart';
 
 /// Materializes static type descriptions and templates using checked Dart entries.
-final class TypeValues([final TypeRuntime? runtime]) {
+final class TypeValues([TypeRuntime? runtime]) {
+  TypeRuntime? _binding = runtime;
+
+  /// Entry identities bound to the current graph consumed by this owner.
+  TypeRuntime? get runtime => _binding;
+
+  /// Adopts a new graph binding while keeping existing representation identities.
+  void rebind(TypeRuntime? current) {
+    final previous = _binding;
+    if (identical(previous, current)) return;
+    if (previous == null ||
+        current == null ||
+        previous.entries.length != current.entries.length ||
+        !previous.entries.indexed.every(
+          (entry) => identical(entry.$2, current.entries.elementAt(entry.$1)),
+        ) ||
+        [TypeMetadata.type, TypeMetadata.list].any(
+          (type) =>
+              !identical(previous.initializer(type), current.initializer(type)),
+        )) {
+      throw ArgumentError(
+        'Changed type entry identities require a new implementation owner.',
+      );
+    }
+    _binding = current;
+  }
+
   TypeRuntime get _runtime =>
       runtime ?? (throw UnsupportedError('Type runtime unavailable.'));
   FunctionTarget get _init => _runtime.initializer(TypeMetadata.type);
@@ -12,12 +39,65 @@ final class TypeValues([final TypeRuntime? runtime]) {
   FunctionTarget entry(RuntimeRole role) => _runtime.entry(role);
 
   final _shapes = <Object, int>{};
+  final _shapeKeys = <Object>[];
+  final _descriptorFunctions = <FunctionTarget, FunctionConstant>{};
+
+  /// Function values held by materialized descriptors, without a call demand.
+  /// Storage consumers must not turn these values into executable entry roots.
+  Iterable<FunctionConstant> get descriptorFunctions =>
+      _descriptorFunctions.values;
+  FunctionTarget Function(ClassType)? _projector;
+  ClassType? Function()? _recordStorage;
+
+  /// Binds descriptor code to the same compilation's projection owner.
+  void bindProjectors(
+    FunctionTarget Function(ClassType) projector,
+    ClassType? Function() recordStorage,
+  ) {
+    if (_projector != null) {
+      throw StateError('Type descriptors already have a projection owner.');
+    }
+    _projector = projector;
+    _recordStorage = recordStorage;
+  }
+
+  Constant _projection(TypeKind kind, int shape) {
+    if (runtime == null || kind != .nominal && kind != .record) {
+      return const Constant.nullValue();
+    }
+    final declaration = kind == .record
+        ? _recordStorage?.call()
+        : _shapeKeys[shape] as ClassType;
+    if (declaration == null || _projector == null) {
+      throw StateError(
+        'Type metadata requires its compilation projection owner.',
+      );
+    }
+    final target = _projector!(declaration);
+    return _descriptorFunctions.putIfAbsent(
+      target,
+      () => FunctionConstant(target),
+    );
+  }
+
+  final _typeConstants = <Object, TypeConstant>{};
+
+  /// Recovers the canonical source value of a closed metadata descriptor.
+  ///
+  /// Binder-dependent descriptions remain ordinary metadata objects. This map
+  /// belongs to the same owner as shape numbering and executable type bodies.
+  TypeConstant? canonicalTypeConstant(ObjectConstant value) =>
+      _typeConstants[value.structuralKey];
   final _templates =
       <
         ValueType,
         ({FunctionTarget target, List<TypeParameterType> parameters})
       >{};
   final _functions = <FunctionTarget, IrFunction>{};
+  var _revision = 0;
+
+  /// Increases when a shape, closed descriptor or executable template is required.
+  int get revision => _revision;
 
   List<IrClass> get classes => [
     for (final entry in TypeMetadata.fields.entries)
@@ -29,11 +109,12 @@ final class TypeValues([final TypeRuntime? runtime]) {
 
   /// Reads the built-in runtime type without invoking user overrides.
   Value runtimeTypeOf(Value receiver, List<Value> into) {
-    if (receiver.type == ValueType.integer ||
-        receiver.type == ValueType.floating ||
-        receiver.type == ValueType.boolean ||
-        receiver.type == ValueType.nullType) {
-      return constant(receiver.type);
+    final carrier = valueCarrier(receiver.type);
+    if (carrier == ValueType.integer ||
+        carrier == ValueType.floating ||
+        carrier == ValueType.boolean ||
+        carrier == ValueType.nullType) {
+      return constant(carrier);
     }
     final actual = ObjectRuntimeType(receiver, direct: true);
     final concrete = TypeReference(actual);
@@ -56,7 +137,7 @@ final class TypeValues([final TypeRuntime? runtime]) {
       );
 
   ObjectConstant constant(ValueType value) =>
-      _constant(value.normalize(), const []);
+      _constant(value.reify(), const []);
 
   ObjectConstant _constant(
     ValueType value,
@@ -64,13 +145,20 @@ final class TypeValues([final TypeRuntime? runtime]) {
   ) {
     final (kind, shape, children, nested) = _describe(value, scopes);
     final parts = children.map((t) => _constant(t, nested)).toList();
-    return _node(
+    final result = _node(
       kind,
       shape,
       parts,
       function: value is FunctionType ? value : null,
       record: value is RecordType ? value : null,
     );
+    if (value.freeTypeParameters.isEmpty) {
+      _typeConstants.putIfAbsent(result.structuralKey, () {
+        _revision++;
+        return TypeConstant(value);
+      });
+    }
+    return result;
   }
 
   ObjectConstant _node(
@@ -89,6 +177,7 @@ final class TypeValues([final TypeRuntime? runtime]) {
     }
     return ObjectConstant(TypeMetadata.type, {
       TypeMetadata.className: Constant.string(_label(kind, shape)),
+      TypeMetadata.projector: _projection(kind, shape),
       TypeMetadata.kind: Constant.integer(kind.index),
       TypeMetadata.shape: Constant.integer(shape),
       TypeMetadata.allowsNull: Constant.boolean(
@@ -111,6 +200,13 @@ final class TypeValues([final TypeRuntime? runtime]) {
     });
   }
 
+  Object _functionShape(FunctionType value, {int? binders}) {
+    final names = value.named.keys.toList()..sort();
+    return (binders ?? value.typeParameters.length, value.positionalCount,
+      value.requiredPositional, names.fold<Object?>(null,
+        (key, name) => (key, name, value.named[name]!.required)));
+  }
+
   ObjectConstant _signature(FunctionType value) {
     final names = value.named.keys.toList()..sort();
     Constant entries = const Constant.nullValue();
@@ -130,6 +226,11 @@ final class TypeValues([final TypeRuntime? runtime]) {
       TypeMetadata.positionalCount: Constant.integer(value.positionalCount),
       TypeMetadata.requiredCount: Constant.integer(value.requiredPositional),
       TypeMetadata.named: entries,
+      TypeMetadata.appliedShape: Constant.integer(value.typeParameters.isEmpty
+          ? 0 : id(_functionShape(value, binders: 0))),
+      TypeMetadata.appliedSignature: value.typeParameters.isEmpty
+          ? const Constant.nullValue()
+          : _signature(value.instantiate(value.typeParameters)),
     });
   }
 
@@ -149,14 +250,22 @@ final class TypeValues([final TypeRuntime? runtime]) {
       TypeMetadata.binderCount: const Constant.integer(0),
       TypeMetadata.positionalCount: Constant.integer(value.positionalCount),
       TypeMetadata.requiredCount: Constant.integer(value.positionalCount),
+      TypeMetadata.appliedShape: const Constant.integer(0),
+      TypeMetadata.appliedSignature: const Constant.nullValue(),
       TypeMetadata.named: entries,
     });
   }
 
-  int id(Object key) => _shapes.putIfAbsent(key, () => _shapes.length);
+  /// Gives [key] one identity for this compilation, including later expansions.
+  int id(Object key) => _shapes.putIfAbsent(key, () {
+    _revision++;
+    final result = _shapeKeys.length;
+    _shapeKeys.add(key);
+    return result;
+  });
 
   String _label(TypeKind kind, int shape) => kind == .nominal
-      ? (_shapes.keys.elementAt(shape) as ClassType).name
+      ? (_shapeKeys[shape] as ClassType).name
       : kind == .function
       ? 'Closure'
       : kind.name;
@@ -215,15 +324,7 @@ final class TypeValues([final TypeRuntime? runtime]) {
     }
     if (value is FunctionType) {
       final names = value.named.keys.toList()..sort();
-      final shape = (
-        value.typeParameters.length,
-        value.positionalCount,
-        value.requiredPositional,
-        names.fold<Object?>(
-          null,
-          (key, name) => (key, name, value.named[name]!.required),
-        ),
-      );
+      final shape = _functionShape(value);
       return (
         .function,
         id(shape),
@@ -259,23 +360,27 @@ final class TypeValues([final TypeRuntime? runtime]) {
 
   ({FunctionTarget target, List<TypeParameterType> parameters}) instantiate(
     ValueType template,
-  ) => _templates.putIfAbsent(template, () {
-    final parameters = _variablesIn(template);
-    final target = FunctionTarget(
-      null,
-      'reify${_templates.length}',
-      TypeMetadata.type,
-      [for (final _ in parameters) TypeMetadata.type],
-    );
-    final entry = Block(target.parameterTypes);
-    final environment = {
-      for (final (i, parameter) in parameters.indexed)
-        parameter: entry.parameters[i],
-    };
-    entry.finish(Return(build(entry, template, environment)));
-    _functions[target] = IrFunction(target, [entry]);
-    return (target: target, parameters: parameters);
-  });
+  ) {
+    template = template.reify();
+    return _templates.putIfAbsent(template, () {
+      final parameters = _variablesIn(template);
+      final target = FunctionTarget(
+        null,
+        'reify${_templates.length}',
+        TypeMetadata.type,
+        [for (final _ in parameters) TypeMetadata.type],
+      );
+      final entry = Block(target.parameterTypes);
+      final environment = {
+        for (final (i, parameter) in parameters.indexed)
+          parameter: entry.parameters[i],
+      };
+      entry.finish(Return(build(entry, template, environment)));
+      _functions[target] = IrFunction(target, [entry]);
+      _revision++;
+      return (target: target, parameters: parameters);
+    });
+  }
 
   Value build(
     Block block,
@@ -283,6 +388,7 @@ final class TypeValues([final TypeRuntime? runtime]) {
     Map<TypeParameterType, Value> environment, {
     Value Function(Value, int)? shift,
   }) {
+    template = template.reify();
     Value visit(ValueType value, List<List<TypeParameterType>> scopes) {
       if (environment[value] case final argument?) {
         final count = scopes.fold(0, (count, scope) => count + scope.length);
@@ -341,6 +447,7 @@ final class TypeValues([final TypeRuntime? runtime]) {
         childrenList,
         signature ?? const Constant.nullValue(),
         Constant.string(_label(kind, shape)),
+        _projection(kind, shape),
       ]),
     );
   }

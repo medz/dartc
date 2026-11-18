@@ -53,11 +53,9 @@ abstract final class Memory() {
   /// Copies live byte storage, preserving overlapping ranges.
   @RuntimeEntry(.copyBytes)
   @NonAllocating()
-  static void copyBytes(
-    Pointer<Uint8> destination,
-    Pointer<Uint8> source,
-    int count,
-  ) {
+  static void copyBytes(int destinationAddress, int sourceAddress, int count) {
+    final destination = Pointer<Uint8>.fromAddress(destinationAddress);
+    final source = Pointer<Uint8>.fromAddress(sourceAddress);
     if (destination.address <= source.address ||
         destination.address - source.address >= count) {
       for (var i = 0; i < count; i++) {
@@ -105,4 +103,8 @@ abstract final class Memory() {
   /// Stops execution after a broken memory invariant; the heap cannot resume.
   @Primitive(.fail)
   external static Never fail();
+
+  /// Terminates the process immediately without unwinding Dart frames.
+  @Primitive(.exitProcess)
+  external static Never exitProcess(int status);
 }

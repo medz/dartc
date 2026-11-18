@@ -15,7 +15,7 @@ abstract final class ObjectHeader() {
   /// The aligned allocation size, including inline payload.
   static const sizeOffset = 3 * alignment;
 
-  /// The owning heap page, or zero for control and constant storage.
+  /// The owning heap page, or zero for control, module and constant storage.
   static const pageOffset = 4 * alignment;
 
   /// The first instance field or boxed scalar payload.
@@ -53,8 +53,12 @@ abstract final class ObjectDescriptor() {
 abstract final class RuntimeContext() {
   static const heap = 0;
   static const bootstrap = 8;
-  static const initializing = 16;
+
+  /// The raw [RuntimePhase] governing allocation, collection and entry.
+  static const phase = 16;
   static const maps = 24;
+
+  /// An immutable [ModuleRootTable] address, or zero when there are no roots.
   static const globalRoots = 32;
   static const active = 40;
   static const controlCursor = 48;
@@ -64,6 +68,26 @@ abstract final class RuntimeContext() {
   static const suspendedSp = 8;
   static const suspendedPc = 16;
   static const entrySize = 24;
+}
+
+/// All mutable module objects, scanned independently of their heap-page owner.
+abstract final class ModuleRootTable() {
+  static const count = 0;
+  static const entries = 8;
+  static const entrySize = 8;
+}
+
+/// Integer phase encodings shared by native entry and ordinary runtime code.
+///
+/// Zeroed contexts start dormant. Control construction and collection cannot
+/// reenter Dart; managed execution can retain and reenter its existing heap.
+abstract final class RuntimePhase() {
+  static const dormant = 0;
+  static const bootstrap = 1;
+  static const managed = 2;
+  static const control = 3;
+  static const collecting = 4;
+  static const closed = 5;
 }
 
 /// A sorted return-PC index followed by shared, variable-length root records.

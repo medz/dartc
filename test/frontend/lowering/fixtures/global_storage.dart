@@ -498,3 +498,11 @@ Never throwingNeverRead() => throwingNever;
 
 late Never unboundNever;
 Never unboundNeverRead() => unboundNever;
+
+// A void return remains observable through dynamic invocation.
+void observableVoidGlobal = 42;
+void voidGlobalResult() => observableVoidGlobal;
+Object? observableVoidRead() {
+  dynamic f = voidGlobalResult;
+  return f();
+}

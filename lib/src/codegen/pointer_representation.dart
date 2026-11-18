@@ -22,7 +22,9 @@ final class PointerRepresentation._(
     final observed = <FunctionTarget>{};
     for (final function in functions) {
       observed.addAll(
-        function.functionConstants.map((v) => v.target.implementation),
+        function.functionConstants.map(
+          (value) => value.invocationEntry ?? value.target.implementation,
+        ),
       );
       for (final block in function.blocks) {
         for (final operation in [

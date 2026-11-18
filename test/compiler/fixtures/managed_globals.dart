@@ -172,6 +172,42 @@ int initialization(int mode) {
   }
 }
 
+void observableVoidGlobal = 42;
+void voidGlobalResult() => observableVoidGlobal;
+
+@Export<Int64 Function(Int64, Int64)>()
+int voidStorage(int mode, int value) {
+  if (mode == 1) {
+    // The stored void value is intentionally observed through a dynamic call.
+    // ignore: void_checks
+    observableVoidGlobal = value;
+  }
+  dynamic function = voidGlobalResult;
+  return function() as int;
+}
+
+int neverAttempts = 0;
+Never throwingNever = initializeNever();
+Never initializeNever() {
+  neverAttempts++;
+  throw 185;
+}
+
+late Never unboundNever;
+
+@Export<Int64 Function(Int64)>()
+int neverStorage(int mode) {
+  if (mode == 2) return neverAttempts;
+  try {
+    if (mode == 0) return throwingNever;
+    return unboundNever;
+  } on int catch (error) {
+    return error;
+  } on Error {
+    return -1;
+  }
+}
+
 void main() {
   if (graph(0) != 1 || graph(1) != 55) throw StateError('initial graph');
   for (var i = 1; i <= 3; i++) {

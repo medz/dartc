@@ -169,14 +169,10 @@ class _TypedListBase {
     if (!_writable)
       throw UnsupportedError('Cannot modify an unmodifiable list');
     Memory.copyBytes(
-      Pointer.fromAddress(
-        (_typedData as _NativeData)._address + offsetInBytes + start * width,
-      ),
-      Pointer.fromAddress(
-        (from._typedData as _NativeData)._address +
-            from.offsetInBytes +
-            skipCount * width,
-      ),
+      (_typedData as _NativeData)._address + offsetInBytes + start * width,
+      (from._typedData as _NativeData)._address +
+          from.offsetInBytes +
+          skipCount * width,
       count * width,
     );
     Memory.keepAlive(from);

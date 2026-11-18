@@ -6,6 +6,7 @@ import 'package:dartc/ir.dart';
 /// The unchanged function is returned by identity.
 final class FunctionRewrite(
   final IrFunction function, {
+  ExecutionShapes? executionShapes,
   final Map<Value, Value> replacements = const {},
 
   /// Rebinds immutable constants, including nested defaults, before their uses.
@@ -22,6 +23,9 @@ final class FunctionRewrite(
   /// Source sites for new instructions and blocks introduced by [terminators].
   /// Each origin belongs to the original function and preserves its inline chain.
   final Map<Object, Object> origins = const {},
+
+  /// Stable expansion contexts for introduced copies, separate from locations.
+  final Map<Object, Object> originContexts = const {},
 
   /// New block parameters, with a value supplied by each retained incoming edge.
   final Map<BlockParameter, ({Block block, Map<Jump, Value> incoming})> phis =
@@ -52,11 +56,66 @@ final class FunctionRewrite(
       >
       inlined =
       const {},
+
+  /// Typed implementations expanded at their source operation's execution site.
+  /// Unlike an existing callee, a new implementation observes this site's frame.
+  /// Arguments must dominate the operation; a pure CellStorageReference template
+  /// may expose a dominating cell's actual backing at this same site.
+  /// Results preserve the source type or use a checked [resultViews] contract.
+  final Map<
+        Instruction,
+        ({
+          IrFunction body,
+          List<Value> arguments,
+          Map<TypeParameterType, ValueType> environment,
+          Jump? handler,
+        })
+      >
+      lowered =
+      const {},
+
+  /// Restores a lowered storage result's precise internal language capability.
+  /// The helper returns its ordinary physical class. The view must be a pure
+  /// CellStorageView of exactly that result, with the source operation's type.
+  /// It cannot replace a language check or reinterpret arbitrary storage.
+  final Map<Instruction, Instruction Function(Value)> resultViews = const {},
 }) {
+  final ExecutionShapes shapes = executionShapes ?? ExecutionShapes.defaults;
+  late final _expansions = {...inlined, ...lowered};
   final _origins = <Object, Object>{};
   late final _blocks = _sourceBlocks();
 
   Terminator _end(Block block) => terminators[block] ?? block.end;
+
+  Value _refinement(
+    TestedValue original,
+    TypeTest test, {
+    Map<TypeParameterType, ValueType> environment = const {},
+  }) {
+    final expected = original.type.substituteForFlow(environment);
+    final refined = test.refinement(original.outcome);
+    if (refined != null && expected.accepts(refined.type)) return refined;
+    if (refined == null && expected.accepts(test.operand.type)) {
+      return test.operand;
+    }
+    throw ArgumentError(
+      'A rewritten test no longer proves its source refinement.',
+    );
+  }
+
+  Instruction _resultView(Instruction call, Value result) {
+    final view = resultViews[call]!(result);
+    if (view is! CellStorageView ||
+        view.type != call.type ||
+        view.effects.isNotEmpty ||
+        view.inputs.length != 1 ||
+        !identical(view.inputs.single, result)) {
+      throw ArgumentError(
+        'A lowered result requires its exact pure storage view.',
+      );
+    }
+    return view;
+  }
 
   List<Block> _sourceBlocks() {
     final owned = function.blocks.toSet();
@@ -85,15 +144,19 @@ final class FunctionRewrite(
     Set<Object> sites(Iterable<Block> blocks) => {
       for (final block in blocks) ...[
         block,
+        ...block.parameters,
         ...block.instructions,
+        ...block.successors,
         if (block.end case Invoke(:final operation)) operation,
       ],
     };
     final original = sites(function.blocks),
         introduced = {
           ...sites(blocks),
-          for (final end in terminators.values)
+          for (final end in terminators.values) ...[
+            ...end.successors,
             if (end case Invoke(:final operation)) operation,
+          ],
         };
     if (origins.entries.any(
       (entry) =>
@@ -123,7 +186,7 @@ final class FunctionRewrite(
         ],
     };
     var changed =
-        inlined.isNotEmpty ||
+        _expansions.isNotEmpty ||
         terminators.isNotEmpty ||
         added.values.any((values) => values.isNotEmpty);
     final blocks = <Block, Block>{
@@ -146,16 +209,62 @@ final class FunctionRewrite(
     final instructions = <Block, List<Instruction>>{};
     final discardedEffects = <Instruction>{};
     final constantViews = <(ValueType, Object), TypeView>{};
+    final referenceConstants = <Object, ConstantCarrier>{};
+    final executionValues = <Value, ExecutionShape>{
+      for (final entry
+          in function.execution?.values.entries ??
+              const <MapEntry<Value, ExecutionShape>>[])
+        ?values[entry.key]: entry.value,
+    };
+    // New entry parameters already have their caller's ABI, including a
+    // non-default carrier on an otherwise scalar or reference-typed value.
+    final entrySignature = shapes.entryOf(function.target);
+    for (final (index, original) in function.entry.parameters.indexed) {
+      final parameter = values[original];
+      final shape = entrySignature.parameters[index];
+      if (parameter != null && shape != ExecutionShapes.forType(parameter.type)) {
+        executionValues[parameter] = shape;
+      }
+    }
+    Instruction copyWithCarrier(Instruction operation) {
+      // Inlining can place the scalar producer itself at a former boxed
+      // return or argument. Projecting it would read a non-existent payload.
+      if (operation case ProjectValue(:final value, :final shape)
+          when shapes.shapeOf(null, value, values: executionValues) == shape) {
+        changed = true;
+        return TypeView(value, operation.type);
+      }
+      return operation;
+    }
     final localViews = <(Block, ValueType, Value), TypeView>{};
     final replacing = <Value>{};
     final copying = <Instruction>{};
     late Block current;
     final ends = <Block, Terminator>{};
     final locations = <Object, SourceLocation>{};
+    IrOrigin semanticOrigin(Object site) {
+      final source = _origins[site] ?? site;
+      final origin = function.originOf(source);
+      final context = originContexts[site];
+      return context == null ? origin : origin.copiedAt(context);
+    }
+
+    final semanticOrigins = <Object, IrOrigin>{
+      for (final entry in blocks.entries)
+        entry.value: semanticOrigin(entry.key),
+      for (final entry in values.entries)
+        entry.value: semanticOrigin(entry.key),
+    };
     final expansions = <Instruction, ({Block entry, Block exit})>{};
+    final typeBindings = <TypeBinding>[];
     late Value Function(Value) value;
     late Value Function(Value, Value) viewed;
-    late Jump Function(Jump, {bool collapsed}) jump;
+    late Jump Function(
+      Jump, {
+      bool collapsed,
+      ({Value condition, bool outcome})? proof,
+    })
+    jump;
 
     void locate(
       Object source,
@@ -163,15 +272,38 @@ final class FunctionRewrite(
       IrFunction owner, [
       Object? callSite,
     ]) {
+      var origin = owner.originOf(
+        identical(owner, function) ? _origins[source] ?? source : source,
+      );
+      if (originContexts[source] case final context?) {
+        origin = origin.copiedAt(context);
+      }
+      if (!identical(owner, function) && callSite != null) {
+        origin = origin.copiedAt(function.originOf(callSite));
+      }
+      semanticOrigins[copy] = origin;
       if (source is Instruction && copy is Instruction && owner == function) {
         instructionSources?[copy] = source;
+      }
+      if (source is Value && copy is Value) {
+        if (!(owner == function &&
+            source is Instruction &&
+            operations.containsKey(source))) {
+          if (owner.execution?.values[source] case final shape?) {
+            executionValues[copy] = shape;
+          }
+        }
       }
       final location =
           owner.sourceLocations[source] ??
           (identical(owner, function)
               ? owner.sourceLocations[_origins[source]]
               : null);
-      if (identical(owner, function)) {
+      if (identical(owner, function) ||
+          identical(owner.target, function.target.executionSource) &&
+              callSite != null && lowered.containsKey(callSite)) {
+        // Moving the source body to its own execution entry preserves its
+        // logical frame; it is not a nested invocation of the same member.
         if (location != null) locations[copy] = location;
       } else {
         locations[copy] = (location ?? SourceLocation(null)).inlinedAt(
@@ -191,14 +323,47 @@ final class FunctionRewrite(
       return Unreachable(proof);
     }
 
+    Value inputTemplate(
+      Value operand,
+      Instruction site,
+      Map<Instruction, Instruction> copies,
+    ) {
+      if (operand is Instruction && templates.contains(operand)) {
+        return copies.putIfAbsent(operand, () {
+          final result = operand.mapInputs(
+            (value) => inputTemplate(value, site, copies),
+          );
+          instructions[current]!.add(result);
+          locate(site, result, function);
+          return result;
+        });
+      }
+      return viewed(operand, value(operand));
+    }
+
     Value expand(Instruction call) {
-      final site = inlined[call]!;
+      final site = _expansions[call]!;
       final body = site.body;
-      final environment = site.environment;
+      final environment = {...site.environment};
+      for (final binding in body.typeBindings) {
+        environment[binding.parameter] = TypeParameterType(
+          binding.parameter.name,
+        );
+      }
+      for (final binding in body.typeBindings) {
+        (environment[binding.parameter]! as TypeParameterType).initializeBound(
+          binding.parameter.bound.substitute(environment),
+        );
+      }
       final live = ValueLiveness.source(body).liveIn[body.entry]!;
+      final viewedResult = resultViews.containsKey(call);
+      final resultType = viewedResult
+          ? body.target.returnType.substituteForFlow(environment)
+          : call.type;
       final handler = site.handler == null ? null : jump(site.handler!);
-      final allocation = call is Construct
-          ? NewPayload(call.instantiatedType, const Constant.integer(0))
+      final allocation = inlined.containsKey(call) && call is Construct
+          ? NewPayload(call.instantiatedType, const Constant.integer(0),
+              storageView: call.storageView)
           : null;
       final linear = body.blocks.length == 1 && body.entry.end is Return;
       final copiedBlocks = {
@@ -206,12 +371,19 @@ final class FunctionRewrite(
           block: Block(
             block == body.entry
                 ? [if (allocation != null && handler != null) call.type]
-                : block.parameters.map((p) => p.type.substitute(environment)),
+                : block.parameters.map(
+                    (p) => p.type.substituteForFlow(environment),
+                  ),
           ),
       };
       final entry = copiedBlocks[body.entry]!;
       final start = allocation != null && handler != null ? Block() : entry;
-      final join = linear ? null : Block([call.type]);
+      final join = linear ? null : Block([resultType]);
+      if (join != null) {
+        executionValues[join.parameters.single] = viewedResult
+            ? shapes.entryOf(body.target).result
+            : _shape(call);
+      }
       for (final block in {...copiedBlocks.values, start, ?join}) {
         instructions[block] = [];
       }
@@ -220,10 +392,15 @@ final class FunctionRewrite(
           for (final block in body.blocks)
             for (final operation in block.instructions)
               if (operation.mayThrow && operation.type != .never)
-                operation: Block([operation.type.substitute(environment)]),
+                operation: Block([
+                  operation.type.substituteForFlow(environment),
+                ]),
       };
       for (final block in resumed.values) {
         instructions[block] = [];
+      }
+      for (final entry in resumed.entries) {
+        executionValues[entry.value.parameters.single] = shapes.shapeOf(body, entry.key);
       }
       if (allocation != null) {
         locate(call, allocation, function);
@@ -248,11 +425,20 @@ final class FunctionRewrite(
             for (final (i, parameter) in block.parameters.indexed)
               parameter: copiedBlocks[block]!.parameters[i],
       };
+      for (final entry in locals.entries) {
+        semanticOrigins[entry.value] = body
+            .originOf(entry.key)
+            .copiedAt(function.originOf(call));
+        if (body.execution?.values[entry.key] case final shape?) {
+          executionValues[entry.value] = shape;
+        }
+      }
       if (receiver != null) locals[body.entry.parameters.first] = receiver;
       final copied = <Instruction, Instruction>{};
+      final arguments = <Instruction, Instruction>{};
       late Value Function(Value) read;
       Instruction clone(Instruction source) => copied.putIfAbsent(source, () {
-        final result = source.mapInputs(read, environment: environment);
+        final result = copyWithCarrier(source.mapInputs(read, environment: environment));
         locate(source, result, body, call);
         return result;
       });
@@ -267,14 +453,18 @@ final class FunctionRewrite(
           return resumed[source]?.parameters.single ?? clone(source);
         }
         if (source is TestedValue) {
-          return (clone(source.test) as TypeTest).refinement(source.outcome)!;
+          return _refinement(
+            source,
+            clone(source.test) as TypeTest,
+            environment: environment,
+          );
         }
         throw StateError('Unexpected value in an inlined graph.');
       };
       for (final (i, parameter)
           in body.entry.parameters.skip(allocation == null ? 0 : 1).indexed) {
-        final argument = value(site.arguments[i]);
-        final type = parameter.type.substitute(environment);
+        final argument = inputTemplate(site.arguments[i], call, arguments);
+        final type = parameter.type.substituteForFlow(environment);
         if (argument.type == type || !live.contains(parameter)) {
           locals[parameter] = argument;
         } else {
@@ -290,7 +480,7 @@ final class FunctionRewrite(
           if (argument is TestedValue && resumed.containsKey(argument.test)) {
             final cast = UncheckedCast(
               read(argument.test.operand),
-              argument.type.substitute(environment),
+              argument.type.substituteForFlow(environment),
             );
             casts.add(cast);
             arguments.add(cast);
@@ -300,12 +490,15 @@ final class FunctionRewrite(
           }
         }
         final next = Jump(copiedBlocks[source.target]!, arguments);
+        locate(source, next, body, call);
         if (casts.isEmpty) return next;
         // The invoked test's boolean crosses a block; narrow only on its selected edge.
         final narrowed = Block();
         instructions[narrowed] = casts;
         ends[narrowed] = next;
-        return Jump(narrowed);
+        final incoming = Jump(narrowed);
+        locate(source, incoming, body, call);
+        return incoming;
       }
 
       late Block exit;
@@ -358,8 +551,8 @@ final class FunctionRewrite(
             }
             if (linear) {
               exit = cursor;
-              if (returned.type != call.type) {
-                final view = TypeView(returned, call.type);
+              if (returned.type != resultType) {
+                final view = TypeView(returned, resultType);
                 locate(source, view, body, call);
                 instructions[cursor]!.add(view);
                 returned = view;
@@ -404,6 +597,22 @@ final class FunctionRewrite(
         exit = join!;
         result = join.parameters.single;
       }
+      if (viewedResult) {
+        final view = _resultView(call, result);
+        instructions[exit]!.add(view);
+        locate(call, view, function);
+        result = view;
+      }
+      for (final binding in body.typeBindings) {
+        final check = clone(binding.check) as CheckedTypeArgument;
+        // The implicit type dependency names the checkpoint, not an Invoke phi.
+        typeBindings.add(
+          binding.remap(
+            check,
+            binding.value is Constant ? binding.value : check,
+          ),
+        );
+      }
       expansions[call] = (entry: start, exit: exit);
       return result;
     }
@@ -415,19 +624,9 @@ final class FunctionRewrite(
       }
       final template = operations[original] ?? original;
       final inputs = <Instruction, Instruction>{};
-      Value input(Value operand) {
-        if (operand is Instruction && templates.contains(operand)) {
-          return inputs.putIfAbsent(operand, () {
-            final result = operand.mapInputs(input);
-            instructions[current]!.add(result);
-            locate(original, result, function);
-            return result;
-          });
-        }
-        return viewed(operand, value(operand));
-      }
-
-      final result = template.mapInputs(input);
+      final result = copyWithCarrier(template.mapInputs(
+        (value) => inputTemplate(value, original, inputs),
+      ));
       copying.remove(original);
       changed |= !identical(template, original);
       values[original] = result;
@@ -478,20 +677,27 @@ final class FunctionRewrite(
         final actual = value(replacement);
         replacing.remove(original);
         changed = true;
+        if (_shape(original).isReference &&
+            actual is Constant &&
+            ExecutionShapes.forType(actual.type).isScalar) {
+          return referenceConstants.putIfAbsent(actual.structuralKey, () {
+            final carrier = ConstantCarrier(actual);
+            instructions[blocks[function.entry]!]!.insert(0, carrier);
+            return carrier;
+          });
+        }
         return actual;
       }
       if (values[original] case final known?) return known;
       final Value result;
-      if (original is Instruction && inlined.containsKey(original)) {
+      if (original is Instruction && _expansions.containsKey(original)) {
         result = expand(original);
       } else if (original is Instruction) {
         result = copy(original);
       } else if (original is AwaitResult) {
         result = AwaitResult(original.type);
       } else if (original is TestedValue) {
-        result = (value(original.test) as TypeTest).refinement(
-          original.outcome,
-        )!;
+        result = _refinement(original, value(original.test) as TypeTest);
       } else {
         throw StateError('Unexpected value in an IR graph.');
       }
@@ -507,16 +713,48 @@ final class FunctionRewrite(
       return cast;
     }
 
-    jump = (edge, {collapsed = false}) {
+    jump = (edge, {collapsed = false, proof}) {
+      final arguments = [
+        for (final i in parameterSlots[edge.target]!) edge.arguments[i],
+        for (final parameter in added[edge.target]!)
+          phis[parameter]!.incoming[edge]!,
+      ];
+      for (final argument in arguments.whereType<TestedValue>()) {
+        if (proof == null ||
+            !identical(proof.condition, argument.test) ||
+            proof.outcome != argument.outcome) {
+          throw ArgumentError(
+            'A type refinement requires its matching branch outcome.',
+          );
+        }
+      }
+      // A lowered predicate keeps its language proof on the selected edge.
+      // Materialize that view inside the edge, never before the branch: an
+      // unchecked narrowing on the opposite path would erase valid executions.
+      if (!collapsed &&
+          arguments.whereType<TestedValue>().any(
+            (argument) => value(argument.test) is! TypeTest,
+          )) {
+        final source = current, refinedEdge = Block();
+        instructions[refinedEdge] = [];
+        current = refinedEdge;
+        ends[refinedEdge] = Jump(blocks[edge.target]!, [
+          for (final argument in arguments)
+            argument is TestedValue ? refined(argument) : value(argument),
+        ]);
+        current = source;
+        final next = Jump(refinedEdge);
+        locate(edge, next, function);
+        return next;
+      }
       Value argument(Value original) => collapsed && original is TestedValue
           ? refined(original)
           : value(original);
-      return Jump(blocks[edge.target]!, [
-        for (final i in parameterSlots[edge.target]!)
-          argument(edge.arguments[i]),
-        for (final parameter in added[edge.target]!)
-          argument(phis[parameter]!.incoming[edge]!),
+      final next = Jump(blocks[edge.target]!, [
+        for (final original in arguments) argument(original),
       ]);
+      locate(edge, next, function);
+      return next;
     };
 
     Terminator branchEnd(Branch branch) {
@@ -528,9 +766,23 @@ final class FunctionRewrite(
       if (condition case ScalarConstant(value: final bool takeTrue)) {
         changed = true;
         final edge = takeTrue ? branch.ifTrue : branch.ifFalse;
-        return jump(edge, collapsed: true);
+        return jump(
+          edge,
+          collapsed: true,
+          proof: (condition: branch.condition, outcome: takeTrue),
+        );
       }
-      return Branch(condition, jump(branch.ifTrue), jump(branch.ifFalse));
+      return Branch(
+        condition,
+        jump(
+          branch.ifTrue,
+          proof: (condition: branch.condition, outcome: true),
+        ),
+        jump(
+          branch.ifFalse,
+          proof: (condition: branch.condition, outcome: false),
+        ),
+      );
     }
 
     Terminator invokeEnd(Invoke invocation) {
@@ -635,7 +887,7 @@ final class FunctionRewrite(
       current = blocks[original]!;
       instructions[current] = [];
       void emit(Instruction operation) {
-        if (inlined.containsKey(operation)) {
+        if (_expansions.containsKey(operation)) {
           if (!expansions.containsKey(operation)) {
             values[operation] = expand(operation);
           }
@@ -643,7 +895,7 @@ final class FunctionRewrite(
           instructions[current]!.addAll(instructions.remove(fragment.entry)!);
           if (fragment.exit != fragment.entry) {
             ends[current] = ends.remove(fragment.entry)!;
-            final source = inlined[operation]!.body;
+            final source = _expansions[operation]!.body;
             locate(source.entry, current, source, operation);
             current = fragment.exit;
           }
@@ -673,7 +925,7 @@ final class FunctionRewrite(
         continue;
       }
       final terminal = _end(original);
-      if (terminal is Invoke && inlined.containsKey(terminal.operation)) {
+      if (terminal is Invoke && _expansions.containsKey(terminal.operation)) {
         emit(terminal.operation);
         ends[current] = terminal.onReturn == null
             ? impossible(value(terminal.operation), current)
@@ -742,6 +994,10 @@ final class FunctionRewrite(
         edge = Jump(next.target, next.arguments.map(bind));
       }
       changed |= !identical(edge, original);
+      if (!identical(edge, original)) {
+        semanticOrigins[edge] =
+            semanticOrigins[original] ?? function.originOf(original);
+      }
       return edge;
     }
 
@@ -828,6 +1084,8 @@ final class FunctionRewrite(
         instructions[block]!.addAll(instructions.remove(target)!);
         ends[block] = ends.remove(target)!;
         if (locations[target] case final location?) locations[block] = location;
+        if (semanticOrigins[target] case final origin?)
+          semanticOrigins[block] = origin;
         changed = true;
       }
     }
@@ -840,10 +1098,39 @@ final class FunctionRewrite(
       }
     }
     changed |= reachable.length != instructions.length;
+    for (final binding in function.typeBindings) {
+      if (binding.value is Constant) {
+        typeBindings.add(binding);
+        continue;
+      }
+      final mapped = values[binding.check];
+      final replacement = _replacement(binding.value);
+      if (mapped == null && identical(replacement, binding.value)) continue;
+      final check = mapped is CheckedTypeArgument
+          ? mapped
+          : (operations[binding.check] ?? binding.check).mapInputs(value)
+                as CheckedTypeArgument;
+      typeBindings.add(
+        binding.remap(
+          check,
+          identical(replacement, binding.value) ? check : value(replacement),
+        ),
+      );
+    }
     final used = <Value>{};
     void retain(Value operand) {
       if (!used.add(operand)) return;
-      if (operand is Instruction) operand.inputs.forEach(retain);
+      if (operand is Instruction) {
+        operand.inputs.forEach(retain);
+        for (final binding in typeBindings) {
+          if (!identical(binding.value, operand) &&
+              operand.referencedTypes.any(
+                (type) => type.freeTypeParameters.contains(binding.parameter),
+              )) {
+            retain(binding.value);
+          }
+        }
+      }
       if (operand is TestedValue) retain(operand.test);
     }
 
@@ -867,6 +1154,13 @@ final class FunctionRewrite(
         }
       }
       block.finish(ends[block]!);
+      // Edge metadata is semantic only; it never creates a source stack frame.
+      for (final edge in block.successors) {
+        semanticOrigins.putIfAbsent(
+          edge,
+          () => semanticOrigins[block] ?? function.originOf(block),
+        );
+      }
       if (block.end case Invoke(:final operation)) owned.add(operation);
     }
     final defaults = {
@@ -877,13 +1171,36 @@ final class FunctionRewrite(
     return IrFunction(
       function.target,
       reachable,
+      execution: function.execution == null && executionValues.isEmpty
+          ? null
+          : FunctionExecution({
+              for (final entry in executionValues.entries)
+                if (owned.contains(entry.key) ||
+                    reachable.any(
+                      (block) => block.parameters.contains(entry.key),
+                    ))
+                  entry.key: entry.value,
+            }),
       defaults: defaults,
+      typeBindings: typeBindings.where(
+        (binding) => binding.value is Constant || owned.contains(binding.value),
+      ),
       bodyKind: function.bodyKind,
       yieldType: function.yieldType,
       completionType: function.completionType,
       sourceLocations: {
         for (final e in locations.entries)
           if (owned.contains(e.key)) e.key: e.value,
+      },
+      origins: {
+        for (final entry in semanticOrigins.entries)
+          if (owned.contains(entry.key) ||
+              reachable.any(
+                (block) =>
+                    block.parameters.contains(entry.key) ||
+                    block.successors.contains(entry.key),
+              ))
+            entry.key: entry.value,
       },
     );
   }
@@ -896,6 +1213,27 @@ final class FunctionRewrite(
     final visited = <Value>{};
     var replacement = replacements[value];
     while (replacement != null && !identical(value, replacement)) {
+      Value carrier = value;
+      while (carrier is TypeView || carrier is UncheckedCast) {
+        carrier = carrier is TypeView
+            ? carrier.operand
+            : (carrier as UncheckedCast).operand;
+      }
+      if (carrier is ConstantCarrier &&
+          replacement is Constant &&
+          carrier.value.structuralKey == replacement.structuralKey) {
+        // This value already is the canonical physical representation of the
+        // proven scalar. Recreating it would prevent the rewrite fixed point.
+        break;
+      }
+      if (_shape(value) != _shape(replacement) &&
+          !(replacement is Constant &&
+              _shape(value).isReference &&
+              ExecutionShapes.forType(replacement.type).isScalar)) {
+        // A semantic equality cannot invent an allocating carrier conversion.
+        // Keep the producer until the explicit representation pass adapts it.
+        break;
+      }
       if (!visited.add(value)) throw ArgumentError('Cyclic SSA replacements.');
       if (value is TypeView &&
           (identical(value.operand, replacement) ||
@@ -910,6 +1248,9 @@ final class FunctionRewrite(
     }
     return value;
   }
+
+  ExecutionShape _shape(Value value) =>
+      shapes.shapeOf(function, value);
 
   ({
     Set<Block> blocks,
@@ -953,24 +1294,71 @@ final class FunctionRewrite(
 
       if (!owns(entry.key) ||
           !entry.key.type.accepts(entry.value.type) ||
-          inlined.containsKey(entry.key) ||
+          _expansions.containsKey(entry.key) ||
           !entry.value.inputs.every(available)) {
         throw ArgumentError(
           'Operation templates require available SSA inputs or pure input expressions.',
         );
       }
     }
-    if (inlined.isNotEmpty) {
+    if (resultViews.keys.any((call) => !lowered.containsKey(call))) {
+      throw ArgumentError(
+        'Storage result views require a lowered implementation.',
+      );
+    }
+    if (_expansions.isNotEmpty) {
+      if (inlined.keys.any(lowered.containsKey)) {
+        throw ArgumentError('An operation cannot be both inlined and lowered.');
+      }
       final dominance = ValueDominance(function);
-      for (final MapEntry(key: call, value: site) in inlined.entries) {
-        if (site.body.observesCallerFrame) {
+      for (final MapEntry(key: call, value: site) in _expansions.entries) {
+        if (call is CheckedTypeArgument &&
+            function.typeBindings.any(
+              (binding) => identical(binding.check, call),
+            )) {
+          throw ArgumentError(
+            'A checked binding must retain its semantic checkpoint.',
+          );
+        }
+        if (lowered.containsKey(call) &&
+            !resultViews.containsKey(call) &&
+            !call.type.accepts(
+              site.body.target.returnType.substituteForFlow(site.environment),
+            )) {
+          throw ArgumentError(
+            'A lowered implementation changes the result type.',
+          );
+        }
+        if (resultViews.containsKey(call)) {
+          if (site.body.target.requiresResultCheck) {
+            throw ArgumentError(
+              'Storage result views cannot replace a language result check.',
+            );
+          }
+          _resultView(
+            call,
+            Block([
+              site.body.target.returnType.substituteForFlow(site.environment),
+            ]).parameters.single,
+          );
+        }
+        if (inlined.containsKey(call) && site.body.observesCallerFrame) {
           throw ArgumentError(
             'Inlined bodies cannot observe their caller frame.',
           );
         }
+        if (inlined.containsKey(call) &&
+            call is FunctionCall &&
+            call.entryBinding != null &&
+            !call.entryBinding!.entries.values.contains(site.body.target)) {
+          throw ArgumentError(
+            'Inlining must retain the callable execution entry.',
+          );
+        }
         late final live = ValueLiveness.source(site.body)
             .liveIn[site.body.entry]!;
-        if ((call is! DirectCall &&
+        if ((!lowered.containsKey(call) &&
+                call is! DirectCall &&
                 call is! FunctionCall &&
                 call is! Construct) ||
             !owns(call) ||
@@ -982,6 +1370,16 @@ final class FunctionRewrite(
                     index >= site.body.entry.parameters.length ||
                     live.contains(site.body.entry.parameters[index]);
               }
+              if (lowered.containsKey(call) &&
+                  value is CellStorageReference &&
+                  !owns(value)) {
+                if (value.effects.isNotEmpty ||
+                    !dominance.before(value.cell, call)) {
+                  return true;
+                }
+                templates.add(value);
+                return false;
+              }
               return value is! Constant && !dominance.before(value, call);
             })) {
           throw ArgumentError(
@@ -992,24 +1390,27 @@ final class FunctionRewrite(
             case DirectCall(:final target) ||
                 Construct(initializer: final target) ||
                 FunctionCall(target: final target?)
-            when target.implementation != site.body.target) {
+            when !lowered.containsKey(call) &&
+                !(call is FunctionCall && call.entryBinding != null) &&
+                target.implementation != site.body.target) {
           throw ArgumentError(
             'Inlined body differs from the proven call target.',
           );
         }
-        if (call is Construct &&
+        if (inlined.containsKey(call) &&
+            call is Construct &&
             call.instantiatedType.freeTypeParameters.isNotEmpty) {
           throw ArgumentError(
             'Inlined construction requires its actual instance type.',
           );
         }
         final parameters = site.body.target.parameterTypes
-            .skip(call is Construct ? 1 : 0)
+            .skip(inlined.containsKey(call) && call is Construct ? 1 : 0)
             .toList();
         if (parameters.length != site.arguments.length ||
             parameters.indexed.any(
               (entry) => !entry.$2
-                  .substitute(site.environment)
+                  .substituteForFlow(site.environment)
                   .accepts(site.arguments[entry.$1].type),
             )) {
           throw ArgumentError('Inlined arguments violate the entry types.');
@@ -1045,7 +1446,9 @@ final class FunctionRewrite(
           replacement is! Constant &&
               !owns(replacement) &&
               !phis.containsKey(replacement) ||
-          !original.type.accepts(replacement.type)) {
+          !original.type.accepts(replacement.type) &&
+              !(original is CheckedTypeArgument &&
+                  replacement is TypeConstant)) {
         throw ArgumentError(
           'Replacement must belong to this function and preserve its type contract.',
         );
@@ -1055,7 +1458,7 @@ final class FunctionRewrite(
       ...discardable,
       ...nonReturning,
       ...nonThrowing,
-      ...inlined.keys,
+      ..._expansions.keys,
     ].any((value) => !owns(value))) {
       throw ArgumentError('A rewrite obligation belongs to another function.');
     }
@@ -1177,7 +1580,8 @@ final class FunctionRewrite(
         if (!identical(original, operand)) uses.add(operand);
         if (original is Instruction) {
           uses.addAll((operations[original] ?? original).inputs);
-          uses.addAll(inlined[original]?.arguments ?? const []);
+          uses.addAll(function.typeInputsOf(operations[original] ?? original));
+          uses.addAll(_expansions[original]?.arguments ?? const []);
         }
         if (original is BlockParameter) {
           uses.addAll(incoming[original] ?? const []);

@@ -21,7 +21,16 @@ abstract interface class Liveness() {
 /// Publishes roots while application execution is stopped.
 abstract interface class RootSet() {
   bool stop();
+
+  /// Visits roots and strong fields of permanent storage.
   void visit(ReferenceVisitor visitor);
+
+  /// Traces conditional fields of permanent storage at each fixed-point step.
+  void traceConditional(Liveness live, ReferenceVisitor visitor);
+
+  /// Clears weak fields of permanent storage before reclaiming managed objects.
+  void clearWeak(Liveness live);
+
   void resume();
   void close();
 }
@@ -288,6 +297,7 @@ final class Heap(
     int before;
     do {
       before = _markedCount;
+      roots.traceConditional(this, this);
       for (var page = _pages; page != null; page = page._next) {
         for (var slot = 0; slot < page.capacity; slot++) {
           if (page._marked & (1 << (slot & 63)) == 0) continue;
@@ -300,6 +310,7 @@ final class Heap(
   }
 
   void _clearWeakReferences() {
+    roots.clearWeak(this);
     for (var page = _pages; page != null; page = page._next) {
       for (var slot = 0; slot < page.capacity; slot++) {
         if (page._marked & (1 << (slot & 63)) == 0) continue;

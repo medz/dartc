@@ -31,6 +31,23 @@ void forwardVoid(int n) {
   return voidResult(n);
 }
 
+set effectValue(int value) => effects.tick(value + 1);
+
+class SetterBody() {
+  set value(int value) => effects.tick(value + 2);
+}
+
+extension SetterExtension on int {
+  set effect(int value) => effects.tick(value + this);
+}
+
+int setterResults(int n) {
+  final top = effectValue = n;
+  final instance = SetterBody().value = n;
+  final extension = 3.effect = n;
+  return top + instance + extension;
+}
+
 bool choose({required int first, required bool second}) => first < 3 && second;
 
 bool nestedArguments(int n, bool enabled) =>

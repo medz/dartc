@@ -62,6 +62,40 @@ final class FlowMemory {
   bool containsRange(FlowIntegerRange offsets, int size) =>
       contains(offsets.lower, size) && contains(offsets.upper, size);
 
+  /// Whether every possible byte comes from an explicit value or zeroing.
+  ///
+  /// An unknown scalar stored by the program is still a complete byte fact.
+  /// Forgotten bytes are different: their capabilities require a snapshot of
+  /// the surrounding storage at the read, before later writes replace it.
+  bool hasCompleteRead(FlowIntegerRange offsets, int size) {
+    if (!containsRange(offsets, size)) return false;
+    if (size == 0) return true;
+    if (offsets.constant case final offset? when size <= 8) {
+      for (var i = 0; i < size; i++) {
+        if (!_at(offset + i).known) return false;
+      }
+      return true;
+    }
+    // Copies and ranged loads can span huge zeroed allocations. Prove the
+    // covering interval from sparse facts instead of enumerating its bytes.
+    final lower = offsets.lower, upper = offsets.upper + size;
+    final ranges = <(int, int)>[..._zeroes];
+    for (final entry in _bytes.entries) {
+      if (entry.key < lower || entry.key >= upper) continue;
+      if (!entry.value.known) return false;
+      ranges.add((entry.key, entry.key + 1));
+    }
+    ranges.sort((a, b) => a.$1.compareTo(b.$1));
+    var covered = lower;
+    for (final (start, end) in ranges) {
+      if (end <= covered) continue;
+      if (start > covered) return false;
+      covered = end;
+      if (covered >= upper) return true;
+    }
+    return false;
+  }
+
   /// Joins possible reads in work proportional to sparse facts, not allocation size.
   FlowValue readRange(
     FlowIntegerRange offsets,
@@ -74,7 +108,7 @@ final class FlowMemory {
     final size = layout.of(storage).size;
     if (!containsRange(offsets, size)) {
       return FlowValue.unknown(FfiTypes.valueType(storage))
-          .withReferences([references]);
+          .withReferences([references.carrierReferences]);
     }
     var result = const FlowValue.bottom();
     for (final offset in _readStarts(offsets, size)) {
@@ -103,13 +137,12 @@ final class FlowMemory {
     return starts;
   }
 
-  FlowValue get references {
-    var value = _retained;
-    for (final byte in _bytes.values) {
-      value = value.join(byte.references);
-    }
-    return value;
-  }
+  // Byte facts are immutable. Every write, join and rename constructs another
+  // memory version, whose capability summary is derived from its own bytes.
+  late final FlowValue references = FlowValue.joined([
+    _retained,
+    for (final byte in _bytes.values) byte.references,
+  ]);
 
   _Byte _defaultAt(int offset) =>
       _zeroes.any((r) => r.$1 <= offset && offset < r.$2) ? _zero : _unknown;
@@ -121,7 +154,7 @@ final class FlowMemory {
     final size = layout.of(type).size;
     if (!contains(offset, size)) {
       return FlowValue.unknown(FfiTypes.valueType(type))
-          .withReferences([references]);
+          .withReferences([references.carrierReferences]);
     }
     final bytes = [for (var i = 0; i < size; i++) _at(offset + i)];
     final data = ByteData(size);
@@ -171,8 +204,11 @@ final class FlowMemory {
         )) {
       return first.value;
     }
-    return FlowValue.unknown(FfiTypes.valueType(type))
-        .withReferences([_retained, for (final byte in bytes) byte.value]);
+    return FlowValue.unknown(FfiTypes.valueType(type)).withReferences([
+      _retained.carrierReferences,
+      for (final byte in bytes)
+        byte.type == null ? byte.value.carrierReferences : byte.value,
+    ]);
   }
 
   /// Reads a complete traced slot; partial bytes never become a Dart value.
@@ -319,9 +355,22 @@ final class FlowMemory {
   FlowMemory invalidate() =>
       FlowMemory._(start, length, const [], const .empty(), references);
 
+  /// Keeps read-time capabilities when copied bytes have no complete encoding.
+  FlowMemory retainReferences(FlowValue value) {
+    final retained = _retained.join(value);
+    return retained == _retained
+        ? this
+        : FlowMemory._(start, length, _zeroes, _bytes, retained);
+  }
+
   FlowMemory map(FlowValue Function(FlowValue) transform) {
     final bytes = _bytes.mapValues(
-      (_, byte) => _Byte(transform(byte.value), byte.type, byte.index),
+      (_, byte) => _Byte(
+        transform(byte.value),
+        byte.type,
+        byte.index,
+        known: byte.known,
+      ),
     );
     final retained = transform(_retained);
     return identical(bytes, _bytes) && retained == _retained
@@ -396,26 +445,47 @@ final class _Byte(
   final FlowValue value,
   // A null native type denotes a traced reference fragment.
   final NativeTypeRef? type,
-  final int index,
-) {
+  final int index, {
+  final bool known = true,
+}) {
   FlowValue get references => type == null ? value : value.references;
 
   _Byte join(_Byte other, {bool widen = false}) {
     if (identical(this, other)) return this;
     if (type == other.type && index == other.index) {
-      return _Byte(value.join(other.value, widen: widen), type, index);
+      return _Byte(
+        value.join(other.value, widen: widen),
+        type,
+        index,
+        known: known && other.known,
+      );
     }
     if (type == null && other == _zero) {
-      return _Byte(value.join(_null, widen: widen), null, index);
+      return _Byte(
+        value.join(_null, widen: widen),
+        null,
+        index,
+        known: known && other.known,
+      );
     }
     if (this == _zero && other.type == null) {
-      return _Byte(_null.join(other.value, widen: widen), null, other.index);
+      return _Byte(
+        _null.join(other.value, widen: widen),
+        null,
+        other.index,
+        known: known && other.known,
+      );
     }
     return _Byte(
-      FlowValue.unknown(.integer)
-          .withReferences([references.join(other.references, widen: widen)]),
+      FlowValue.unknown(.integer).withReferences([
+        references.carrierReferences.join(
+          other.references.carrierReferences,
+          widen: widen,
+        ),
+      ]),
       _uint8,
       0,
+      known: known && other.known,
     );
   }
 
@@ -425,16 +495,17 @@ final class _Byte(
       other is _Byte &&
           type == other.type &&
           index == other.index &&
+          known == other.known &&
           value == other.value;
 
   @override
-  int get hashCode => Object.hash(value, type, index);
+  int get hashCode => Object.hash(value, type, index, known);
 }
 
 final _null = FlowValue.constant(const Constant.nullValue());
 final _uint8 = NativeScalarType(Uint8);
 final _zero = _Byte(.constant(const Constant.integer(0)), _uint8, 0);
-final _unknown = _Byte(.unknown(.integer), _uint8, 0);
+final _unknown = _Byte(.unknown(.integer), _uint8, 0, known: false);
 
 List<(int, int)> _coalesce(List<(int, int)> ranges) {
   final result = <(int, int)>[];

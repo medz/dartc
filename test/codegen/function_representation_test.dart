@@ -1,4 +1,6 @@
 import 'package:dartc/target.dart';
+import 'package:dartc/codegen.dart'
+    show RepresentationLowering, AllocationLowering, CallableImplementations, CallableLowering;
 import 'package:dartc/abi.dart';
 
 import 'dart:ffi' as ffi;
@@ -7,6 +9,8 @@ import 'package:dartc/interop.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
+import 'package:dartc/src/codegen/native_call_lowering.dart';
+import 'package:dartc/src/codegen/native_view_lowering.dart';
 import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/function_liveness.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
@@ -77,7 +81,24 @@ void main() {
               ..finish(const Return(Constant.integer(0))),
           ]),
       ];
-      final storage = ClosureStorage(bodies);
+      final original = IrProgram([], bodies);
+      final implementations = CallableImplementations();
+      final lowered = CallableLowering(implementations).run(
+        ProgramFlow(original, const [], openEntries: [outer]).facts,
+      );
+      final initialFacts = ProgramFlow(lowered, const [], openEntries: [outer]).facts;
+      final program = const ProgramCallSpecialization().run(initialFacts);
+      final facts = ProgramFlow(program, const [], openEntries: [outer]).facts;
+      final adapter = implementations.functions.single;
+      expect(
+        (program.implementationOf(outer)! as IrFunction).blocks
+            .expand((block) => block.instructions).whereType<DirectCall>()
+            .map((call) => call.target),
+        contains(adapter.target),
+      );
+      final storage = ClosureStorage(program.functions,
+          storageDeclarations: program.classes,
+          callableImplementations: implementations);
       final layout = ProgramLayout(
         storage.classes,
         closureStorage: storage,
@@ -85,35 +106,27 @@ void main() {
         typeRuntime: heapRuntime.types,
       );
       final body = FunctionRepresentation(
-        source,
+        adapter,
         layout,
         CheckedCasts(failure: heapRuntime.typeCheckFailure),
-        MemberCalls(IrProgram([], bodies), {}),
+        MemberCalls(program, facts.definitions, callTypes: facts),
         HeapPlan(),
       )..prune();
       final operations = body.instructions.values.expand((values) => values);
-      final call = operations
-          .whereType<FunctionCall>()
-          .where(body.invocations.containsKey)
-          .single;
-      expect(body.invocations[call], same(selected));
-      expect(body.invocations.values, isNot(contains(other)));
+      final call = operations.whereType<DirectCall>()
+          .singleWhere((call) => call.target == selected);
+      expect(body.callees, isNot(contains(other)));
       expect(body.ends.values.whereType<Branch>(), isEmpty);
       final capture = operations.whereType<StorageRead>().singleWhere(
         (read) => read.field == storage.closures[selected]!.captures.single,
       );
-      expect(capture.receiver, same(closure));
-      expect(body.inputsOf(call), [
-        closure,
-        capture,
-        const Constant.integer(7),
-      ]);
-      expect(
-        operations.whereType<StorageRead>().where(
-          (read) => read.field == storage.tag,
-        ),
-        isEmpty,
-      );
+      final input = body.inputsOf(call).toList();
+      expect(body.aliases, contains(input[1]));
+      expect(body.inputsOf(input[1]).single, same(capture));
+      expect(input.last, same(adapter.entry.parameters[1]));
+      expect(operations.whereType<StorageRead>().where(
+          (read) => read.field == FunctionStorage.entries), isEmpty);
+
     },
   );
 
@@ -188,66 +201,146 @@ void main() {
         ),
       );
       entry.finish(Return());
+      final lowered = NativeCallLowering()
+          .lower(
+            IrProgram([], [
+              IrFunction(target, [entry]),
+            ]),
+          )
+          .functions
+          .single;
       final body = FunctionRepresentation(
-        IrFunction(target, [entry]),
+        lowered,
         layouts,
         CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
-      final call = body.instructions[entry]!
-          .whereType<NativeInvocation>()
-          .single;
-      final flow = FunctionLiveness(body, body.inputsOf, {before, call});
-      expect(flow.acrossCalls[before], contains(owner));
-      expect(flow.acrossCalls[call], contains(owner));
+      final operations = body.instructions.values.expand((values) => values);
+      final call = operations.whereType<NativeInvocation>().single;
+      final prior = operations.whereType<DirectCall>().singleWhere(
+        (call) => call.target == before.target,
+      );
+      final actualOwner = lowered.entry.parameters.single;
+      final flow = FunctionLiveness(body, body.inputsOf, {prior, call});
+      expect(flow.acrossCalls[prior], contains(actualOwner));
+      expect(flow.acrossCalls[call], contains(actualOwner));
     },
   );
 
-  test('trusted casts omit checks while retaining scalar boxing', () {
-    for (final (source, result) in <(ValueType, ValueType)>[
-      (.object.nullable, FunctionType(.integer, [.integer])),
-      (.object, .integer),
-      (.object, .floating),
-      (.integer, .object),
-      (.floating, .object),
-    ]) {
-      final target = FunctionTarget(uri, 'view', result, [source]);
+  test('aggregate native calls retain distinct leaf and reentry contracts', () {
+    final packet = NativeCompoundType('Packet', [
+      NativeField('value', NativeScalarType(ffi.Int64)),
+    ]);
+    final packetType = ClassType(uri, 'Packet', nativeType: packet);
+    final signature = NativeSignature.types(NativeScalarType(ffi.Int64), [
+      packet,
+    ]);
+    final layout = ProgramLayout(
+      [],
+      typeRuntime: heapRuntime.types,
+      nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+    );
+    final targets = <bool, FunctionTarget>{};
+    for (final isLeaf in [true, false, true]) {
+      final target = FunctionTarget(uri, 'callPacket', .integer, [packetType]);
       final entry = Block(target.parameterTypes);
-      final cast = entry.emit(UncheckedCast(entry.parameters.single, result));
-      entry.finish(Return(cast));
-      final function = IrFunction(target, [entry]);
-      final checks = CheckedCasts(failure: heapRuntime.typeCheckFailure);
+      final symbol = entry.emit(
+        NativeSymbolAddress(
+          NativeReference(
+            'fixture',
+            'callPacket',
+            NativeFunctionType(signature),
+            isLeaf: isLeaf,
+          ),
+        ),
+      );
+      entry.finish(
+        Return(
+          entry.emit(
+            NativeCall.symbol(
+              symbol,
+              FunctionType(.integer, [packetType]),
+              entry.parameters,
+            ),
+          ),
+        ),
+      );
+      final nativeCalls = NativeCallLowering().lower(
+        IrProgram([], [
+          IrFunction(target, [entry]),
+        ]),
+      );
+      final lowered = NativeViewLowering(
+        layout.native,
+      ).lower(nativeCalls, [target]).implementationOf(target) as IrFunction;
       final body = FunctionRepresentation(
-        function,
-        layouts,
-        checks,
+        lowered,
+        layout,
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
         members,
         HeapPlan(),
       );
-      expect(
-        cast.effects,
-        source == ValueType.integer || source == ValueType.floating
-            ? {Effect.allocates}
-            : isEmpty,
+      final adapter = body.invocations.values.singleWhere(
+        layout.nativeCalls.entries.containsKey,
       );
-      expect(checks.functions, isEmpty);
-      expect(
-        body.boxes.containsKey(cast),
-        source != ValueType.object && source != ValueType.object.nullable,
-      );
-      expect(body.inputsOf(cast), [entry.parameters.single]);
-      final text = StringBuffer();
-      function.writeTo(text);
-      expect(text.toString(), contains('unchecked'));
+      expect(layout.nativeCalls.entries[adapter], (
+        signature: signature,
+        isLeaf: isLeaf,
+      ));
+      if (targets[isLeaf] case final previous?) expect(adapter, same(previous));
+      targets[isLeaf] = adapter;
     }
-    final cell = NewCell(CellType(.integer), const Constant.integer(1));
-    expect(() => UncheckedCast(cell, .object), throwsArgumentError);
-    expect(
-      () => UncheckedCast(const Constant.integer(1), cell.type),
-      throwsArgumentError,
-    );
+    expect(targets[true], isNot(same(targets[false])));
+    expect(layout.nativeCalls.entries, hasLength(2));
   });
+
+  test(
+    'trusted casts stay pure and actual return boundaries adapt carriers',
+    () {
+      for (final (source, result) in <(ValueType, ValueType)>[
+        (.object.nullable, FunctionType(.integer, [.integer])),
+        (.object, .integer),
+        (.object, .floating),
+        (.integer, .object),
+        (.floating, .object),
+      ]) {
+        final target = FunctionTarget(uri, 'view', result, [source]);
+        final entry = Block(target.parameterTypes);
+        final cast = entry.emit(UncheckedCast(entry.parameters.single, result));
+        entry.finish(Return(cast));
+        final normalized = _adapt(IrFunction(target, [entry]));
+        expect(cast.effects, isEmpty);
+        expect(_ops(normalized).whereType<TypeCast>(), isEmpty);
+        final materializes = _ops(normalized).whereType<MaterializeValue>();
+        expect(
+          materializes.length,
+          source == .integer || source == .floating ? 1 : 0,
+        );
+        final projects = _ops(normalized).whereType<ProjectValue>();
+        expect(
+          projects.length,
+          result == .integer || result == .floating ? 1 : 0,
+        );
+        final selected = _selectAdapted(normalized);
+        expect(
+          selected.instructions.values
+              .expand((ops) => ops)
+              .whereType<MaterializeValue>(),
+          isEmpty,
+        );
+        final text = StringBuffer();
+        normalized.writeTo(text);
+        expect(text.toString(), contains('unchecked'));
+      }
+      final cell = NewCell(CellType(.integer), const Constant.integer(1));
+      expect(() => UncheckedCast(cell, .object), throwsArgumentError);
+      expect(
+        () => UncheckedCast(const Constant.integer(1), cell.type),
+        throwsArgumentError,
+      );
+    },
+  );
 
   test('function null comparisons do not inspect method identities', () {
     final method = FunctionTarget(
@@ -363,7 +456,7 @@ void main() {
   );
 
   test(
-    'selected scalar returns are boxed before joining the semantic result',
+    'selected scalar return adaptation enters ordinary IR before selection',
     () {
       final face = ClassType(uri, 'Face');
       final type = ClassType(uri, 'Concrete', interfaces: [face]);
@@ -384,7 +477,7 @@ void main() {
         owner: type,
         kind: .method,
       );
-      final entry = Block(), done = Block([.number]), failed = Block();
+      final entry = Block(), done = Block([ValueType.number]), failed = Block();
       final original = InstanceCall(declaration, ObjectConstant(type, {}), []);
       entry.finish(
         Invoke(
@@ -395,50 +488,45 @@ void main() {
       );
       done.finish(Return(done.parameters.single));
       failed.finish(const Return(Constant.floating(0)));
-      final function = IrFunction(FunctionTarget(uri, 'caller', .number, []), [
-        entry,
-        done,
-        failed,
-      ]);
-      final program = IrProgram(
+      final target = FunctionTarget(uri, 'caller', .number, []);
+      var program = IrProgram(
         [
           IrClass(face, [], members: [declaration]),
           IrClass(type, [], members: [implementation]),
         ],
         [
-          function,
+          IrFunction(target, [entry, done, failed]),
           IrFunction(implementation, [
             Block(implementation.parameterTypes)
               ..finish(const Return(Constant.floating(1))),
           ]),
         ],
       );
-      final body = FunctionRepresentation(
-        function,
-        ProgramLayout(
-          program.classes,
-          nativeLayout: NativeLayout(const Target(.linux, .arm64)),
-        ),
-        CheckedCasts(failure: heapRuntime.typeCheckFailure),
-        MemberCalls(program, reachableDefinitions(program, [function.target])),
-        HeapPlan(),
+      program = RepresentationLowering().lower(program, [
+        target, implementation,
+      ]);
+      final facts = ProgramFlow(program, [
+        (target: target, arguments: []),
+      ]).facts;
+      final resolved = const ProgramCallSpecialization().run(facts);
+      final body = _adapt(
+        resolved.implementationOf(target) as IrFunction,
+        classes: resolved.classes,
+        companions: resolved.functions.where((f) => f.target != target),
       );
-      final selected = body.invocations.keys.single;
-      expect(body.invocations[selected], same(implementation));
-      expect(selected.type, ValueType.number);
-      expect(body.typeOf(selected), ValueType.floating);
-      expect(body.boxes.values.single, same(selected));
-      expect(body.boxes.keys.single.type, ValueType.number);
-      expect(body.aliases, {original});
-      expect((entry.end as Invoke).operation, same(original));
       expect(
-        body.ends.values
-            .whereType<Invoke>()
-            .where((end) => end.operation == selected)
-            .single
-            .onThrow
-            .target,
-        same(failed),
+        _ops(body)
+            .whereType<DirectCall>()
+            .any((op) => op.target == implementation),
+        isTrue,
+      );
+      expect(_ops(body).whereType<MaterializeValue>(), hasLength(1));
+      expect(_ops(body).whereType<InstanceCall>(), isEmpty);
+      expect((entry.end as Invoke).operation, same(original));
+      _selectAdapted(
+        body,
+        classes: resolved.classes,
+        companions: resolved.functions.where((f) => f.target != target),
       );
     },
   );
@@ -606,7 +694,7 @@ void main() {
     expect(second.target, same(first.target));
   });
 
-  test('an earlier boxed argument is live while the next one allocates', () {
+  test('an earlier managed argument is live across the next actual materialization', () {
     final accept = FunctionTarget(uri, 'accept', .voidType, [.object, .object]);
     final caller = FunctionTarget(uri, 'caller', .voidType, [
       .integer,
@@ -615,158 +703,135 @@ void main() {
     final entry = Block(caller.parameterTypes);
     final call = entry.emit(DirectCall(accept, entry.parameters));
     entry.finish(const Return());
-    final body = FunctionRepresentation(
-      IrFunction(caller, [entry]),
-      layouts,
-      CheckedCasts(failure: heapRuntime.typeCheckFailure),
-      members,
-      HeapPlan(),
-    );
-    final boxes = body.boxes.keys.toList();
-    final flow = FunctionLiveness(body, body.inputsOf, {...boxes, call});
+    final body = _adapt(IrFunction(caller, [entry]));
+    final boxes = _ops(body).whereType<MaterializeValue>().toList();
+    final invoked = _ops(body).whereType<DirectCall>().single;
+    final flow = ValueLiveness.source(body, calls: {...boxes, invoked});
     expect(boxes, hasLength(2));
-    expect(flow.acrossCalls[boxes.last], {boxes.first});
-    expect(flow.acrossCalls[call], isEmpty);
-    expect(body.inputsOf(call), boxes);
+    expect(flow.acrossCalls[boxes.last], contains(boxes.first));
+    expect(invoked.inputs, boxes);
     expect(entry.instructions, [call]);
+    _selectAdapted(body);
   });
 
-  test('edge conversions are conditional and unused conversions stay dead', () {
-    final target = FunctionTarget(uri, 'branch', .integer, [
-      .boolean,
-      .integer,
-    ]);
-    final entry = Block(target.parameterTypes),
-        taken = Block([.object]),
-        other = Block();
-    entry.finish(
-      Branch(
-        entry.parameters[0],
-        Jump(taken, [entry.parameters[1]]),
-        Jump(other),
-      ),
-    );
-    taken.finish(Return(const Constant.integer(1)));
-    other.finish(Return(const Constant.integer(0)));
-    final body = FunctionRepresentation(
-      IrFunction(target, [entry, taken, other]),
-      layouts,
-      CheckedCasts(failure: heapRuntime.typeCheckFailure),
-      members,
-      HeapPlan(),
-    );
-    final flow = FunctionLiveness(body, body.inputsOf, body.boxes.keys.toSet());
-    final branch = body.ends[entry] as Branch;
-    expect(branch.ifFalse.target, same(other));
-    expect(branch.ifTrue.target, isNot(same(taken)));
-    expect(body.boxes.keys, hasLength(1));
-    expect(flow.omitted, body.introduced);
-    expect(flow.acrossCalls, isEmpty);
-    expect(flow.liveIn[entry], {entry.parameters.first});
-  });
+  test(
+    'edge conversions stay conditional and retain actual allocation effects',
+    () {
+      final target = FunctionTarget(uri, 'branch', .integer, [
+        .boolean,
+        .integer,
+      ]);
+      final entry = Block(target.parameterTypes),
+          taken = Block([ValueType.object]),
+          other = Block();
+      entry.finish(
+        Branch(
+          entry.parameters[0],
+          Jump(taken, [entry.parameters[1]]),
+          Jump(other),
+        ),
+      );
+      taken.finish(const Return(Constant.integer(1)));
+      other.finish(const Return(Constant.integer(0)));
+      final body = _adapt(IrFunction(target, [entry, taken, other]));
+      final branch = body.entry.end as Branch;
+      expect(
+        branch.ifTrue.target.instructions.whereType<MaterializeValue>(),
+        hasLength(1),
+      );
+      expect(
+        branch.ifFalse.target.instructions.whereType<MaterializeValue>(),
+        isEmpty,
+      );
+      final rewritten = FunctionRewrite(body).run();
+      expect(_ops(rewritten).whereType<MaterializeValue>(), hasLength(1));
+      _selectAdapted(body);
+    },
+  );
 
-  test('shared edges keep separate physical conversion operands', () {
+  test('shared source edges keep their explicit conversion operands', () {
     final target = FunctionTarget(uri, 'sharedEdge', .object, [
       .boolean,
       .integer,
     ]);
-    final entry = Block(target.parameterTypes), done = Block([.object]);
+    final entry = Block(target.parameterTypes),
+        done = Block([ValueType.object]);
     final edge = Jump(done, [entry.parameters.last]);
     entry.finish(Branch(entry.parameters.first, edge, edge));
     done.finish(Return(done.parameters.single));
-    final body = FunctionRepresentation(
-      IrFunction(target, [entry, done]),
-      layouts,
-      CheckedCasts(failure: heapRuntime.typeCheckFailure),
-      members,
-      HeapPlan(),
-    );
-    final branch = body.ends[entry] as Branch;
+    final body = _adapt(IrFunction(target, [entry, done]));
+    final branch = body.entry.end as Branch;
     expect(branch.ifTrue.target, isNot(same(branch.ifFalse.target)));
     for (final edge in [branch.ifTrue, branch.ifFalse]) {
-      final transfer = body.ends[edge.target] as Jump;
-      expect(body.argumentsOf(transfer), [
-        body.instructions[edge.target]!.single,
-      ]);
+      final transfer = edge.target.end as Jump;
+      expect(transfer.arguments, [edge.target.instructions.single]);
     }
+    _selectAdapted(body);
   });
 
   test(
-    'invoke arguments and outcomes convert at their own execution points',
+    'invoke arguments and outcomes convert under their original handler',
     () {
       final target = FunctionTarget(uri, 'invoke', .object, [.integer]);
       final callee = FunctionTarget(uri, 'callee', .integer, [.object]);
-      final handle = FunctionTarget(uri, 'handle', .object, [
-        .object,
-        .stackTrace,
-        .object,
+      final entry = Block(target.parameterTypes),
+          success = Block([ValueType.object]);
+      final failure = Block([
+        ValueType.object,
+        ValueType.stackTrace,
+        ValueType.integer,
       ]);
-      final entry = Block(target.parameterTypes), success = Block([.object]);
-      final failure = Block([.object, .stackTrace, .object]);
-      final argument = entry.parameters.single;
-      final call = DirectCall(callee, [argument]);
-      final invoke = Invoke(
-        call,
-        onReturn: Jump(success, [call]),
-        onThrow: Jump(failure, [
-          UnwindValue.exception,
-          UnwindValue.stackTrace,
-          argument,
-        ]),
+      final call = DirectCall(callee, entry.parameters);
+      entry.finish(
+        Invoke(
+          call,
+          onReturn: Jump(success, [call]),
+          onThrow: Jump(failure, [
+            UnwindValue.exception,
+            UnwindValue.stackTrace,
+            entry.parameters.single,
+          ]),
+        ),
       );
-      entry.finish(invoke);
       success.finish(Return(success.parameters.single));
-      failure.finish(
-        Return(failure.emit(DirectCall(handle, failure.parameters))),
+      final failedBox = failure.emit(MaterializeValue(failure.parameters.last));
+      failure.emit(KeepAlive(failure.parameters.first));
+      failure.emit(KeepAlive(failure.parameters[1]));
+      failure.finish(Return(failedBox));
+      final body = _adapt(IrFunction(target, [entry, success, failure]));
+      final first = body.entry.end as Invoke;
+      expect(first.operation, isA<MaterializeValue>());
+      final invoked = body.blocks
+          .map((b) => b.end)
+          .whereType<Invoke>()
+          .singleWhere((end) => end.operation is DirectCall);
+      expect(invoked.onThrow.target, same(first.onThrow.target));
+      final materializations = _ops(body)
+          .whereType<MaterializeValue>()
+          .toList();
+      expect(materializations, hasLength(3));
+      final flow = ValueLiveness.source(body, calls: materializations.toSet());
+      final caught = body.blocks.singleWhere(
+        (b) =>
+            b.parameters.length == 3 &&
+            b.instructions.any((op) => op is MaterializeValue),
       );
-      final body = FunctionRepresentation(
-        IrFunction(target, [entry, success, failure]),
-        layouts,
-        CheckedCasts(failure: heapRuntime.typeCheckFailure),
-        members,
-        HeapPlan(),
-      );
-      final boxed = body.ends[entry] as Invoke;
-      final selected = body.ends[boxed.onReturn!.target] as Invoke;
-      expect(selected.operation, same(call));
-      expect((body.ends[boxed.onThrow.target] as Jump).target, same(failure));
-      final normalEdge = selected.onReturn!.target,
-          failedEdge = selected.onThrow.target;
-      final inputBox = body.instructions[entry]!.first;
-      final normalBox = body.instructions[normalEdge]!.single;
-      final failedBox = body.instructions[failedEdge]!.single;
-      final flow = FunctionLiveness(body, body.inputsOf, {
-        ...body.boxes.keys,
-        call,
-      });
-
-      expect(body.instructions[entry], [inputBox]);
-      expect(boxed.operation, same(inputBox));
-      expect(body.instructions[boxed.onReturn!.target], [call]);
-      expect(body.inputsOf(call), [inputBox]);
-      expect(body.successors(entry), [boxed.onReturn, boxed.onThrow]);
-      expect(selected.onReturn!.arguments, [call]);
-      expect(selected.onThrow.arguments, invoke.onThrow.arguments);
-      expect(flow.acrossCalls[call], {argument});
-      expect(flow.acrossCalls[normalBox], {argument});
+      final finalBox = caught.instructions.whereType<MaterializeValue>().single;
       expect(
-        flow.acrossCalls[failedBox],
-        failedEdge.parameters.take(2).toSet(),
+        flow.acrossCalls[finalBox],
+        containsAll(caught.parameters.take(2)),
       );
-      expect(flow.liveIn[entry], {argument});
-      expect(entry.instructions, isEmpty);
-      expect(entry.end, same(invoke));
-      expect(call.inputs, [argument]);
+      _selectAdapted(body);
     },
   );
 
-  test('boxing locals during unwind does not reenter the handler', () {
+  test('missing allocation scope on an unwind edge is explicitly rejected', () {
     final target = FunctionTarget(uri, 'ignored', .object, [.integer]);
     final callee = FunctionTarget(uri, 'callee', .voidType, [.object]);
     final entry = Block(target.parameterTypes);
     final done = Block()..finish(const Return(Constant.string('ok')));
-    final failed = Block([.object]);
-    failed.finish(Return(failed.parameters.single));
+    final failed = Block([ValueType.object])
+      ..finish(Return(const Constant.nullValue()));
     final call = DirectCall(callee, entry.parameters);
     entry.finish(
       Invoke(
@@ -775,20 +840,9 @@ void main() {
         onThrow: Jump(failed, entry.parameters),
       ),
     );
-    final body = FunctionRepresentation(
-      IrFunction(target, [entry, done, failed]),
-      layouts,
-      CheckedCasts(failure: heapRuntime.typeCheckFailure),
-      members,
-      HeapPlan(),
-    );
-    final invoked = body.ends.values.whereType<Invoke>().singleWhere(
-      (end) => end.operation == call,
-    );
-    expect(body.instructions[invoked.onThrow.target], hasLength(1));
     expect(
-      body.ends[invoked.onThrow.target],
-      isA<Jump>().having((edge) => edge.target, 'handler', same(failed)),
+      () => _adapt(IrFunction(target, [entry, done, failed])),
+      throwsStateError,
     );
   });
 
@@ -808,27 +862,66 @@ void main() {
     );
   });
 
-  test('boxing a thrown scalar keeps an existing trace alive', () {
+  test('materializing a thrown scalar keeps its existing trace alive', () {
     final target = FunctionTarget(uri, 'rethrow', .voidType, [
       .integer,
       .stackTrace,
     ]);
     final entry = Block(target.parameterTypes);
     entry.finish(Throw.recorded(entry.parameters.first, entry.parameters.last));
-    final body = FunctionRepresentation(
-      IrFunction(target, [entry]),
-      layouts,
-      CheckedCasts(failure: heapRuntime.typeCheckFailure),
-      members,
-      HeapPlan(),
-    );
-    final box = body.boxes.keys.single;
-    final flow = FunctionLiveness(body, body.inputsOf, {box});
-    final end = body.ends[entry] as Throw;
+    final body = _adapt(IrFunction(target, [entry]));
+    final box = _ops(body).whereType<MaterializeValue>().single;
+    final flow = ValueLiveness.source(body, calls: {box});
+    final end = body.entry.end as Throw;
     expect(end.exception, same(box));
-    expect(end.stackTrace, same(entry.parameters.last));
-    expect(flow.acrossCalls[box], {entry.parameters.last});
-    expect(flow.liveIn[entry], entry.parameters.toSet());
+    expect(end.stackTrace, same(body.entry.parameters.last));
+    expect(flow.acrossCalls[box], {body.entry.parameters.last});
     expect(entry.instructions, isEmpty);
+    _selectAdapted(body);
   });
+}
+
+Iterable<Instruction> _ops(IrFunction function) sync* {
+  for (final block in function.blocks) {
+    yield* block.instructions;
+    if (block.end case Invoke(:final operation)) yield operation;
+  }
+}
+
+IrFunction _adapt(
+  IrFunction function, {
+  Iterable<IrClass> classes = const [],
+  Iterable<IrFunction> companions = const [],
+}) {
+  final program = IrProgram(classes, [function, ...companions]);
+  return RepresentationLowering()
+          .lower(program, [function.target])
+          .implementationOf(function.target)
+      as IrFunction;
+}
+
+FunctionRepresentation _selectAdapted(
+  IrFunction function, {
+  Iterable<IrClass> classes = const [],
+  Iterable<IrFunction> companions = const [],
+}) {
+  var program = IrProgram(classes, [
+    function,
+    ...companions,
+  ], executionShapes: ExecutionShapes.defaults);
+  program = AllocationLowering(heapRuntime).lower(program, [function.target]);
+  final lowered = program.implementationOf(function.target) as IrFunction;
+  final layout = ProgramLayout(
+    program.classes,
+    executionShapes: program.executionShapes,
+    typeRuntime: heapRuntime.types,
+    nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+  );
+  return FunctionRepresentation(
+    lowered,
+    layout,
+    CheckedCasts(failure: heapRuntime.typeCheckFailure),
+    MemberCalls(program, reachableDefinitions(program, [function.target])),
+    HeapPlan(runtime: heapRuntime),
+  );
 }

@@ -212,6 +212,7 @@ final class FunctionLowering._(
       unsupported(context.unit, site, 'generator result type');
     }
     context.current = context.addBlock(_target.parameterTypes);
+    context.bindExecutionEntry(context.current!);
     final inputs = context.current!.parameters;
     if (_target.kind.hasReceiver || sourceParameterOffset != 0) {
       context.receiver = inputs.first;
@@ -256,6 +257,7 @@ final class FunctionLowering._(
       _target,
       context.blocks,
       sourceLocations: context.sourceLocations,
+      execution: context.execution,
       defaults: context.bindings.defaults(_target),
       bodyKind: switch ((context.isAsynchronous, _yieldType)) {
         (true, null) => .asynchronous,
@@ -270,14 +272,15 @@ final class FunctionLowering._(
 
   void _return(Value? value) {
     if (context.current == null) return;
+    // Assignment evaluates to its right-hand value, never the setter body's
+    // result. Ordinary void functions can expose their result via a dynamic
+    // call, so their expression bodies must retain the value.
+    if (element is SetterElement) value = null;
     if (_representationConstructor) value ??= context.receiver;
     if (value != null) {
-      value = context.normal(
-        value.type == .integer || value.type == .floating
-            ? context.cast(value, _bodyReturnType)
-            : context.convert(value, _bodyReturnType),
-      );
+      value = context.normal(context.convert(value, _bodyReturnType));
       if (value == null) return;
+      value = context.represent(value, _bodyReturnType);
     }
     context.retainFinalizables();
     if (_finally case final region?) {

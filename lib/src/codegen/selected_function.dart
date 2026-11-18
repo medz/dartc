@@ -1,7 +1,10 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/layout.dart' show ValueRepresentation;
 
 import 'double_bits.dart';
 import 'native_invocation.dart';
+import 'indirect_invocation.dart';
+import 'callable_table_address.dart';
 import 'program_layout.dart';
 import 'reference_equality.dart';
 import 'storage_access.dart';
@@ -14,6 +17,7 @@ base class SelectedFunction(
   final Block entry, {
   List<BlockParameter>? parameters,
   FunctionTarget? sourceTarget,
+  final IrFunction? sourceFunction,
 }) {
   final FunctionTarget sourceTarget = sourceTarget ?? target;
   final sourceLocations = <Object, SourceLocation>{};
@@ -33,15 +37,23 @@ base class SelectedFunction(
   final List<BlockParameter> entryParameters = parameters ?? entry.parameters;
   final operands = <Value, List<Value>>{};
   final edgeArguments = <Jump, List<Value>>{};
-  final boxes = <Instruction, Value>{};
   final introduced = <Instruction>{};
   final tests = <TypeTest, TypeTestKind>{};
   final invocations = <Instruction, FunctionTarget>{};
+
+  /// Actual analyzed targets of machine-indirect calls, without new roots.
+  final indirectInvocations = <IndirectInvocation, Set<FunctionTarget>>{};
+
+  Iterable<FunctionTarget> targetsOf(Value operation) =>
+      indirectInvocations[operation] ?? [?invocations[operation]];
+
+  Iterable<FunctionTarget> get callees => invocations.values.followedBy(
+    indirectInvocations.values.expand((targets) => targets),
+  );
   // Representation changes preserve the already analyzed argument flow.
   final callOrigins = <Instruction, Instruction>{};
   final aliases = <Instruction>{};
-  final resultTypes = <Value, ValueType>{};
-  final stackCells = <NewCell>{};
+  final resultShapes = <Value, ExecutionShape>{};
 
   List<BlockParameter> parametersOf(Block block) =>
       block == entry ? entryParameters : block.parameters;
@@ -54,16 +66,28 @@ base class SelectedFunction(
         TypeReference(:final operand) => [operand],
         ReferenceEquality(:final left, :final right) => [left, right],
         NativeInvocation(:final inputs) => inputs,
+        IndirectInvocation(:final inputs) => inputs,
+        CallableTableAddress() => const [],
         AllocatedObject(:final address) => [address],
         Instruction() => operation.inputs,
         _ => throw ArgumentError('Expected a selected operation.'),
       };
 
+  ExecutionShape shapeOf(Value value) {
+    if (resultShapes[value] case final shape?) return shape;
+    if (value is IndirectInvocation) return value.execution.result;
+    if (value is StorageRead) return layouts.slotShape(value.field);
+    if (value is BlockParameter && entryParameters.contains(value)) {
+      return layouts.entryShapes(target)[entryParameters.indexOf(value)];
+    }
+    return layouts.executionShapes.shapeOf(sourceFunction, value);
+  }
+
+  ValueRepresentation representationOf(Value value) =>
+      layouts.shapeRepresentation(shapeOf(value));
+
   ValueType typeOf(Value value) =>
-      resultTypes[value] ??
-      (stackCells.contains(value)
-          ? (value.type as CellType).content
-          : value.type);
+      layouts.carrierType(shapeOf(value), value.type);
 
   List<Value> argumentsOf(Jump edge) => edgeArguments[edge] ?? edge.arguments;
 
@@ -108,7 +132,6 @@ base class SelectedFunction(
         if (end is Invoke) end.operation,
     };
     invocations.removeWhere((value, _) => !retained.contains(value));
-    boxes.removeWhere((value, _) => !retained.contains(value));
     final retainedSites = <Object>{...reached, ...retained, ...retainedEnds};
     sourceLocations.removeWhere((key, _) => !retainedSites.contains(key));
     operands.removeWhere((value, _) => !retained.contains(value));
@@ -122,8 +145,7 @@ base class SelectedFunction(
     tests.removeWhere((value, _) => !retained.contains(value));
     callOrigins.removeWhere((value, _) => !retained.contains(value));
     aliases.removeWhere((value) => !retained.contains(value));
-    resultTypes.removeWhere((value, _) => !retained.contains(value));
-    stackCells.removeWhere((value) => !retained.contains(value));
+    resultShapes.removeWhere((value, _) => !retained.contains(value));
   }
 
   Iterable<Jump> successors(Block block) => ends[block]!.successors;

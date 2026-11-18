@@ -4,6 +4,117 @@ import 'package:dartc/src/optimizer/integer_range.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('external unknown provenance survives checks, aliases and joins', () {
+    expect(
+      FlowValue.unknown(.integer).asExternal().externalUnknownTypes,
+      isEmpty,
+    );
+    expect(
+      FlowValue.unknown(.boolean, external: true).externalUnknownTypes,
+      isEmpty,
+    );
+    expect(
+      FlowValue.unknown(
+        .object,
+        external: true,
+      ).check(.integer).value.externalUnknownTypes,
+      isEmpty,
+    );
+    final box = ClassType(null, 'Box');
+    final subtype = ClassType(null, 'Subtype', superclass: box);
+    final parameter = Block([box]).parameters.single;
+    final value = FlowValue.unknown(box)
+        .asExternal()
+        .withSource(parameter, Object());
+    expect(value.withSources(const []).externalUnknownTypes, {box});
+    expect(value.check(subtype).value.externalUnknownTypes, {subtype});
+    expect(value.check(box, runtimeTypes: true).value.externalUnknownTypes, {
+      box,
+    });
+    expect(value.join(FlowValue.unknown(.integer)).externalUnknownTypes, {box});
+    expect(value.join(FlowValue.unknown(box)).externalUnknownTypes, isEmpty);
+    final raw = FlowValue.unknown(.integer).withReferences([value]);
+    expect(raw.references.externalUnknownTypes, {box});
+    expect(raw.asExternal().references, raw.references);
+    expect(value.mapObjects((object) => object), value);
+  });
+
+  test('constant rebinding preserves facts and updates native references', () {
+    final owner = ClassType(null, 'Value');
+    final initializer = FunctionTarget(
+      null,
+      'new',
+      .voidType,
+      [],
+      owner: owner,
+      kind: .initializer,
+    );
+    final original = FunctionConstant(initializer);
+    final entry = FunctionTarget(null, 'entry', owner, []);
+    final replacement = original.withInvocationEntry(entry);
+    final parameter = Block([.integer]).parameters.single;
+    final activation = Object();
+    final input = FlowValue.address(FlowAddress(original, 8))
+        .join(FlowValue.constant(const Constant.integer(11)))
+        .withSource(parameter, activation);
+    final rebound = input.rebindConstants(
+      (value) => identical(value, original) ? replacement : value,
+    );
+    expect(rebound, input);
+    expect(rebound, isNot(same(input)));
+    expect(rebound.addresses.single.base, same(replacement));
+    expect(rebound.addresses.single.offset, 8);
+    expect(rebound.references.constants.single, same(replacement));
+    expect(rebound.sources, input.sources);
+    expect(rebound.rebindConstants((value) => value), same(rebound));
+    expect(
+      () =>
+          FlowValue.constant(const Constant.integer(11))
+              .rebindConstants((_) => const Constant.integer(12)),
+      throwsArgumentError,
+    );
+  });
+
+  test('runtime checks reify nominal arguments but retain scalar and record proofs', () {
+    final proof = PromotedType(ValueType.object, ValueType.integer);
+    final parameter = TypeParameterType('T')..initializeBound(.object.nullable);
+    final owner = ClassType(null, 'Box', typeParameters: [parameter]);
+    final type = owner.instantiate([proof]);
+    final object = FlowObject(
+      NewPayload(type, const Constant.integer(0)),
+      Object(),
+    );
+    final value = FlowValue.object(object);
+    expect(
+      value.check(owner.instantiate([ValueType.integer])).mayFail,
+      isFalse,
+    );
+    expect(
+      value
+          .check(owner.instantiate([ValueType.integer]), runtimeTypes: true)
+          .value
+          .isBottom,
+      isTrue,
+    );
+    expect(
+      value
+          .check(owner.instantiate([ValueType.object]), runtimeTypes: true)
+          .value
+          .objects,
+      {object},
+    );
+    expect(
+      FlowValue.unknown(proof).check(.integer, runtimeTypes: true).mayFail,
+      isFalse,
+    );
+    expect(
+      FlowValue.unknown(RecordType([proof], const {}))
+          .check(RecordType([ValueType.integer], const {}), runtimeTypes: true)
+          .mayFail,
+      isFalse,
+    );
+  });
+
   test('bulk alternatives agree with incremental joins and shared aliases', () {
     final parameter = Block([.integer]).parameters.single;
     final activation = Object();

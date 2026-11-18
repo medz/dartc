@@ -37,11 +37,7 @@ bool copyExecutableMacos(int destination, int source, int bytes) {
 @RuntimeEntry(.copyExecutableLinux)
 @NonAllocating()
 bool copyExecutableLinux(int destination, int source, int bytes) {
-  Memory.copyBytes(
-    Pointer.fromAddress(destination),
-    Pointer.fromAddress(source),
-    bytes,
-  );
+  Memory.copyBytes(destination, source, bytes);
   if (_protect(Pointer.fromAddress(destination), bytes, 5) != 0) return false;
   Memory.flushInstructions(destination, bytes);
   return true;

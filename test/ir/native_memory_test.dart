@@ -2,11 +2,72 @@ import 'dart:ffi' as ffi;
 
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
+import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
 import '../support/ir_interpreter.dart';
 
 void main() {
+  test(
+    'native local blocks retain identity and physical lifetime without GC',
+    () {
+      final type = NativeArrayType(.of(ffi.Uint8), 77);
+      for (final zero in [false, true]) {
+        final entry = Block();
+        final first = entry.emit(
+          NativeLocalStorage(type, zeroInitialize: zero),
+        );
+        final second = entry.emit(
+          NativeLocalStorage(type, zeroInitialize: zero),
+        );
+        entry.finish(Return(entry.emit(IntBinary(.subtract, first, second))));
+        final target = FunctionTarget(null, 'localBlocks', .integer, []);
+        final body = IrFunction(target, [entry]);
+        expect(first.type, ValueType.integer);
+        expect(first.inputs, isEmpty);
+        expect(first.effects, zero ? {Effect.writesStorage} : isEmpty);
+        expect(first.mayThrow, isFalse);
+        expect(body.observesCallerFrame, isTrue);
+        final clone = first.mapInputs(
+          (_) => throw StateError('No operands'),
+        ) as NativeLocalStorage;
+        expect(clone, isNot(same(first)));
+        expect(clone.declaration, same(first));
+        expect(second.declaration, isNot(same(first.declaration)));
+        expect(clone.storage, type);
+        expect(clone.zeroInitialize, zero);
+        final normalized = const ProgramSimplification().bind().normalize(
+          IrProgram([], [body]),
+        );
+        expect(
+          normalized.functions.single.blocks.single.instructions
+              .whereType<NativeLocalStorage>(),
+          hasLength(2),
+        );
+        final text = StringBuffer();
+        body.writeTo(text);
+        expect(text.toString(), contains('nativeLocalStorage'));
+      }
+      for (final type in [
+        NativeTypeRef.of(ffi.Void),
+        NativeFunctionType(NativeSignature(ffi.Void, [])),
+      ]) {
+        expect(() => NativeLocalStorage(type), throwsArgumentError);
+      }
+      final suspended = Block()..emit(NativeLocalStorage(.of(ffi.Int64)));
+      suspended.finish(const Return());
+      expect(
+        () => IrFunction(
+          FunctionTarget(null, 'asyncBlock', CoreTypes.futureOf(.nullType), []),
+          [suspended],
+          bodyKind: .asynchronous,
+          completionType: ValueType.nullType,
+        ),
+        throwsStateError,
+      );
+    },
+  );
+
   test(
     'native allocation contracts require integer size and address slots',
     () {
@@ -252,6 +313,23 @@ void main() {
     },
   );
 
+  test('copying native views require an explicit source address', () {
+    final type = ClassType(
+      null,
+      'CopySource',
+      nativeType: NativeCompoundType('CopySource', [
+        NativeField('value', .of(ffi.Int64)),
+      ]),
+    );
+    expect(() => NativeView(type, copy: true), throwsArgumentError);
+    expect(NativeView(type).address, isNull);
+    const address = Constant.integer(128);
+    expect(
+      NativeView(type, address: address, copy: true).address,
+      same(address),
+    );
+  });
+
   test('allocated references keep their identity and storage extent', () {
     final type = ClassType(null, 'Storage');
     final entry = Block([.integer, .integer]);
@@ -301,8 +379,13 @@ void main() {
       ValueType.integer,
       ValueType.floating,
       ValueType.boolean,
-      ValueType.voidType,
     ]) {
+      final backing = ReferenceFromAddress(address, type);
+      expect(backing.type, type);
+      expect(ExecutionShapes().shapeOf(null, backing), ExecutionShape.reference);
+      expect(backing.effects, {Effect.readsStorage});
+    }
+    for (final type in [ValueType.voidType, ValueType.never, CellType(.integer)]) {
       expect(() => ReferenceFromAddress(address, type), throwsArgumentError);
     }
     expect(() => ReferenceFromAddress(object, .object), throwsArgumentError);

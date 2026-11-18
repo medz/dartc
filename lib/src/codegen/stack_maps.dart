@@ -27,9 +27,10 @@ final class StackMaps() {
   int? finish(
     List<Section> sections,
     List<Symbol> symbols,
-    List<Relocation> relocations,
-  ) {
-    if (_entries.isEmpty) return null;
+    List<Relocation> relocations, {
+    bool required = false,
+  }) {
+    if (_entries.isEmpty && !required) return null;
     _entries.sort((a, b) => a.$1.compareTo(b.$1));
     for (var i = 1; i < _entries.length; i++) {
       if (_entries[i - 1].$1 == _entries[i].$1) {

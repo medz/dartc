@@ -9,6 +9,87 @@ import 'package:test/test.dart';
 import 'fixtures/native_calls_ffi.dart';
 
 void main() {
+  test(
+    'callee bindings restore the caller while preserving native memory writes',
+    () {
+      final library = NativeCalls();
+      addTearDown(library.close);
+      for (final value in [1, 41, -9, 65535]) {
+        expect(library.contextBinding(value), value * 2 + 7);
+      }
+    },
+  );
+
+  test(
+    'module native bytes initialize once and retain writes between entries',
+    () {
+      final library = NativeCalls();
+      addTearDown(library.close);
+      expect(library.moduleStorage(2), 5);
+      expect(library.moduleStorage(3), 7);
+      expect(library.moduleStorage(-5), 10);
+      expect(library.moduleStorage(0), 5);
+    },
+  );
+
+  test(
+    'native local bytes remain independent during nested native reentry',
+    () {
+      final library = NativeCalls();
+      addTearDown(library.close);
+      final active = <(int, int)>[];
+      final errors = <Object>[];
+      late NativeCallable<Int64 Function(Int64, Int64, Int64)> callback;
+      callback =
+          NativeCallable<Int64 Function(Int64, Int64, Int64)>.isolateLocal((
+            int bytes,
+            int word,
+            int depth,
+          ) {
+            try {
+              expect(word % 8, 0);
+              expect(word < bytes || word >= bytes + 77, isTrue);
+              for (final outer in active) {
+                expect(bytes, isNot(outer.$1));
+                expect(word, isNot(outer.$2));
+              }
+              final buffer = Pointer<Uint8>.fromAddress(bytes).asTypedList(77);
+              final slot = Pointer<Int64>.fromAddress(word);
+              expect(buffer, everyElement(0));
+              expect(slot.value, 0);
+              buffer.fillRange(0, buffer.length, depth + 1);
+              slot.value = 100 + depth;
+              active.add((bytes, word));
+              if (depth > 0) {
+                expect(
+                  library.localStorage(
+                    callback.nativeFunction.address,
+                    depth - 1,
+                  ),
+                  100 + 2 * (depth - 1),
+                );
+              }
+              active.removeLast();
+              expect(buffer, everyElement(depth + 1));
+              expect(slot.value, 100 + depth);
+              return depth;
+            } catch (error) {
+              errors.add(error);
+              return -1000;
+            }
+          }, exceptionalReturn: -2000);
+      addTearDown(callback.close);
+      for (final depth in [0, 3, 1, 0]) {
+        expect(
+          library.localStorage(callback.nativeFunction.address, depth),
+          100 + 2 * depth,
+        );
+      }
+      expect(errors, isEmpty);
+      expect(active, isEmpty);
+    },
+  );
+
   for (final (asset, indirect) in [
     ('codegen/native_calls', false),
     ('codegen/native_calls', true),

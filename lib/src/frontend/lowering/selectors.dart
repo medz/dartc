@@ -865,7 +865,7 @@ T? _structuralBound<T extends ValueType>(
   final base = type.nonNullable;
   if (base is T) return base;
   if (type is! TypeParameterType &&
-      type is! PromotedTypeParameterType &&
+      type is! PromotedType &&
       type is! NonNullableTypeParameterType) {
     return base == type ? null : _structuralBound<T>(base, active);
   }
@@ -873,9 +873,9 @@ T? _structuralBound<T extends ValueType>(
   if (!active.add(type)) return null;
   try {
     return switch (type) {
-      PromotedTypeParameterType(:final parameter, :final bound) =>
+      PromotedType(:final lexicalType, :final bound) =>
         _structuralBound<T>(bound, active) ??
-            _structuralBound<T>(parameter, active),
+            _structuralBound<T>(lexicalType, active),
       TypeParameterType(:final bound) => _structuralBound<T>(bound, active),
       NonNullableTypeParameterType(:final parameter) => _structuralBound<T>(
         parameter.bound,

@@ -1,5 +1,7 @@
 import 'package:dartc/interop.dart';
 
+import 'execution_shape.dart';
+
 /// A static SSA type. Source values carry Dart types; capture cells carry a storage type.
 sealed class const ValueType() {
   /// The declaring class of Null members; their receiver value has [nullType].
@@ -31,8 +33,8 @@ sealed class const ValueType() {
           final possible = visit(parameter.bound);
           active.remove(parameter);
           return possible;
-        case PromotedTypeParameterType(:final parameter, :final bound):
-          return visit(parameter) && visit(bound);
+        case PromotedType(:final lexicalType, :final bound):
+          return visit(lexicalType) && visit(bound);
         case FutureOrType(:final argument, :final futureType):
           return visit(argument) || visit(futureType);
         case RecordType():
@@ -53,11 +55,52 @@ sealed class const ValueType() {
     return visit(this);
   }
 
-  /// Normalizes a source type for runtime equality and constant identity.
+  /// Canonicalizes source type syntax while preserving flow constraints.
   ///
   /// Preserves declaration identity and default type metadata. Function
   /// binders are freshened without modifying this type or its static equality.
-  ValueType normalize() {
+  ValueType normalize() => _normalize(false);
+
+  /// Reifies a Dart type template without retaining value-level flow proofs.
+  ///
+  /// A promoted variable denotes its lexical type at runtime. A value-level
+  /// non-null assertion remains distinct from the promoted bound itself.
+  ValueType reify() => _normalize(true);
+
+  /// The runtime upper bound of a value, retaining proven outer constraints.
+  ///
+  /// Nominal arguments and function signatures are reified. Record fields
+  /// describe actual field values, so their own flow proofs remain useful.
+  ValueType get runtimeValueBound => _runtimeView(true);
+
+  /// A runtime test with outer flow constraints and reified type templates.
+  ValueType get runtimeCheckType => _runtimeView(false);
+
+  ValueType _runtimeView(bool recordValues) => switch (this) {
+    PromotedType(:final lexicalType, :final bound, :final isNonNullable) =>
+      PromotedType(
+        lexicalType._runtimeView(recordValues),
+        bound._runtimeView(recordValues),
+        isNonNullable: isNonNullable,
+      ),
+    _NullableType(:final base) => base._runtimeView(recordValues).nullable,
+    FutureOrType(:final argument) => ValueType.futureOr(
+      argument._runtimeView(recordValues),
+    ),
+    final RecordType type when recordValues => RecordType(
+      type.fields
+          .take(type.positionalCount)
+          .map((type) => type.runtimeValueBound),
+      {
+        for (final entry in type.slots.entries.skip(type.positionalCount))
+          entry.key: type.fields[entry.value].runtimeValueBound,
+      },
+    ),
+    CellType() => throw ArgumentError('Capture storage has no runtime type.'),
+    _ => reify(),
+  };
+
+  ValueType _normalize(bool erasePromotions) {
     ValueType visit(ValueType type, Map<TypeParameterType, ValueType> scope) {
       switch (type) {
         case TypeParameterType():
@@ -113,11 +156,24 @@ sealed class const ValueType() {
         case NonNullableTypeParameterType(:final parameter):
           final result = visit(parameter, scope);
           return object.accepts(parameter.bound) ? result : result.nonNullable;
-        case PromotedTypeParameterType(
-          :final parameter,
+        case PromotedType(
+          :final lexicalType,
           :final bound,
           :final isNonNullable,
         ):
+          // A flow proof is not a new reified type.
+          if (erasePromotions) {
+            final result = visit(lexicalType, scope);
+            return isNonNullable ? result.nonNullable : result;
+          }
+          if (lexicalType is! TypeParameterType) {
+            return PromotedType(
+              visit(lexicalType, scope),
+              visit(bound, scope),
+              isNonNullable: isNonNullable,
+            );
+          }
+          final parameter = lexicalType;
           final result = visit(parameter, scope),
               normalizedBound = visit(bound, scope);
           if (result == never ||
@@ -152,56 +208,75 @@ sealed class const ValueType() {
   }
 
   /// Substitutes free type variables simultaneously without capturing binders.
-  ValueType substitute(Map<TypeParameterType, ValueType> environment) {
+  ///
+  /// Dart type substitution erases a promotion when its binder is instantiated.
+  /// Use [substituteForFlow] for types belonging to an executable value graph.
+  ValueType substitute(Map<TypeParameterType, ValueType> environment) =>
+      _substitute(environment, false);
+
+  /// Substitutes executable value types without discarding proven refinements.
+  ///
+  /// Unlike reification, copying an SSA graph must preserve both the lexical
+  /// type and its tested bound, including after a binder becomes concrete.
+  ValueType substituteForFlow(Map<TypeParameterType, ValueType> environment) =>
+      _substitute(environment, true);
+
+  ValueType _substitute(
+    Map<TypeParameterType, ValueType> environment,
+    bool preservePromotions,
+  ) {
     if (environment.isEmpty) return this;
+    ValueType visit(ValueType type) =>
+        type._substitute(environment, preservePromotions);
     return switch (this) {
       final TypeParameterType type => environment[type] ?? type,
       // Renaming a lexical binder retains its static promotion. Instantiating
       // that binder erases the promoted bound, just as Dart's type substitution
       // does; runtime checks must test the promoted bound before this erasure.
-      PromotedTypeParameterType(
-        :final parameter,
-        :final bound,
-        :final isNonNullable,
-      ) =>
-        switch (environment[parameter] ?? parameter) {
-          final TypeParameterType replacement => PromotedTypeParameterType(
-            replacement,
-            bound.substitute(environment),
-            isNonNullable: isNonNullable,
-          ),
+      PromotedType(:final lexicalType, :final bound, :final isNonNullable) =>
+        switch (visit(lexicalType)) {
+          final replacement
+              when preservePromotions ||
+                  lexicalType is! TypeParameterType ||
+                  replacement is TypeParameterType =>
+            PromotedType(
+              replacement,
+              visit(bound),
+              isNonNullable: isNonNullable,
+            ),
           final replacement =>
             isNonNullable ? replacement.nonNullable : replacement,
         },
       NonNullableTypeParameterType(:final parameter) =>
         (environment[parameter] ?? parameter).nonNullable,
-      _NullableType(:final base) => base.substitute(environment).nullable,
-      FutureOrType(:final argument) => ValueType.futureOr(
-        argument.substitute(environment),
-      ),
+      _NullableType(:final base) => visit(base).nullable,
+      FutureOrType(:final argument) => ValueType.futureOr(visit(argument)),
       final ClassType type =>
         type.typeArguments.isEmpty
             ? type
-            : type.declaration.instantiate(
-                type.typeArguments.map((t) => t.substitute(environment)),
-              ),
-      CellType(:final content, :final isLate, :final isFinal) => CellType(
-        content.substitute(environment),
-        isLate: isLate,
-        isFinal: isFinal,
-      ),
+            : type.declaration.instantiate(type.typeArguments.map(visit)),
+      CellType(
+        :final content,
+        :final isLate,
+        :final isFinal,
+        :final slotShape,
+      ) =>
+        CellType(
+          visit(content),
+          isLate: isLate,
+          isFinal: isFinal,
+          slotShape: slotShape,
+        ),
       final RecordType type => RecordType(
-        type.fields
-            .take(type.positionalCount)
-            .map((t) => t.substitute(environment)),
+        type.fields.take(type.positionalCount).map(visit),
         {
           for (final e in type.slots.entries.skip(type.positionalCount))
-            e.key: type.fields[e.value].substitute(environment),
+            e.key: visit(type.fields[e.value]),
         },
       ),
       final FunctionType type =>
         type.freeTypeParameters.any(environment.containsKey)
-            ? type.rebind(environment)
+            ? type._rebind(environment, preservePromotions: preservePromotions)
             : type,
       _ => this,
     };
@@ -226,9 +301,8 @@ sealed class const ValueType() {
       }
       return switch (type) {
         TypeParameterType() => positive && scope.contains(type),
-        PromotedTypeParameterType(:final parameter, :final bound) =>
-          positive && scope.contains(parameter) ||
-              visit(bound, scope, positive),
+        PromotedType(:final lexicalType, :final bound) =>
+          visit(lexicalType, scope, positive) || visit(bound, scope, positive),
         NonNullableTypeParameterType(:final parameter) =>
           positive && scope.contains(parameter),
         _NullableType(:final base) => visit(base, scope, positive),
@@ -388,13 +462,9 @@ sealed class const ValueType() {
       }
     }
     return switch (this) {
-      PromotedTypeParameterType(
-        :final parameter,
-        :final bound,
-        :final isNonNullable,
-      ) =>
+      PromotedType(:final lexicalType, :final bound, :final isNonNullable) =>
         !isNonNullable &&
-            parameter._mayBeNull(active) &&
+            lexicalType._mayBeNull(active) &&
             bound._mayBeNull(active),
       FutureOrType(:final argument) => argument._mayBeNull(active),
       _NullableType() || DynamicType() => true,
@@ -417,10 +487,7 @@ sealed class const ValueType() {
   /// Whether Dart equality on this receiver uses a built-in value operation.
   bool get hasBuiltinEquality {
     final base = nonNullable;
-    return number.accepts(base) ||
-        base == boolean ||
-        base == string ||
-        base == typeType;
+    return number.accepts(base) || base == boolean || base == string;
   }
 
   /// Whether an operand of [type] can be passed here without a conversion.
@@ -436,22 +503,25 @@ sealed class const ValueType() {
     }
     // A promoted variable satisfies both its lexical type and its promoted
     // bound. Keep the target conjunction before projecting either source side.
-    if (this case PromotedTypeParameterType(
-      :final parameter,
+    if (this case PromotedType(
+      :final lexicalType,
       :final bound,
       :final isNonNullable,
     )) {
       return (!isNonNullable || !type.mayBeNull) &&
-          parameter._accepts(type, active) &&
+          lexicalType._accepts(type, active) &&
           bound._accepts(type, active);
     }
     if (this case NonNullableTypeParameterType(:final parameter)) {
       return !type.mayBeNull && parameter._accepts(type, active);
     }
-    if (type case PromotedTypeParameterType(:final parameter, :final bound)) {
+    if (type case PromotedType(:final lexicalType, :final bound)) {
       final nonNullable = !type.mayBeNull;
       return nonNullable && this == object ||
-          _accepts(nonNullable ? parameter.nonNullable : parameter, active) ||
+          _accepts(
+            nonNullable ? lexicalType.nonNullable : lexicalType,
+            active,
+          ) ||
           _accepts(nonNullable ? bound.nonNullable : bound, active);
     }
     // Split source unions first: their arms may use different target arms.
@@ -572,7 +642,13 @@ final class CellType(
 
   /// Whether a late cell permits only one successful binding.
   final bool isFinal = false,
+  ExecutionShape? slotShape,
 }) extends ValueType {
+  /// The fixed payload carrier of this storage capability.
+  /// Substituting its language content type never reinterprets existing storage.
+  final ExecutionShape slotShape =
+      slotShape ?? ExecutionShapes.forType(content);
+
   this {
     if (isFinal && !isLate) {
       throw ArgumentError('Only late capture storage has runtime finality.');
@@ -593,11 +669,11 @@ final class CellType(
       other is CellType &&
       other.content == content &&
       other.isLate == isLate &&
-      other.isFinal == isFinal;
+      other.isFinal == isFinal &&
+      other.slotShape == slotShape;
   @override
-  int get hashCode => isLate
-      ? Object.hash(CellType, content, isLate, isFinal)
-      : Object.hash(CellType, content);
+  int get hashCode =>
+      Object.hash(CellType, content, isLate, isFinal, slotShape);
 }
 
 /// A structural record type with positional slots followed by named slots in name order.
@@ -703,6 +779,12 @@ final class FunctionType._(
   FunctionType rebind(
     Map<TypeParameterType, ValueType> environment, {
     List<ValueType>? defaultTemplates,
+  }) => _rebind(environment, defaultTemplates: defaultTemplates);
+
+  FunctionType _rebind(
+    Map<TypeParameterType, ValueType> environment, {
+    List<ValueType>? defaultTemplates,
+    bool preservePromotions = false,
   }) {
     if (defaultTemplates != null &&
         defaultTemplates.length != typeParameters.length) {
@@ -714,15 +796,19 @@ final class FunctionType._(
       for (final (i, p) in typeParameters.indexed) p: fresh[i],
     };
     for (final (i, p) in fresh.indexed) {
-      p.initializeBound(typeParameters[i].bound.substitute(scoped));
+      p.initializeBound(
+        typeParameters[i].bound._substitute(scoped, preservePromotions),
+      );
     }
     for (final (i, p) in fresh.indexed) {
       if ((defaultTemplates?[i] ?? typeParameters[i].defaultType)
           case final defaultType?) {
-        p.initializeDefaultType(defaultType.substitute(scoped));
+        p.initializeDefaultType(
+          defaultType._substitute(scoped, preservePromotions),
+        );
       }
     }
-    final body = _bodyWith(scoped);
+    final body = _bodyWith(scoped, preservePromotions: preservePromotions);
     return FunctionType(
       body.result,
       body.parameters,
@@ -811,13 +897,15 @@ final class FunctionType._(
     return _bodyWith(environment);
   }
 
-  FunctionType _bodyWith(Map<TypeParameterType, ValueType> environment) =>
-      FunctionType(
-        result.substitute(environment),
-        parameters.map((t) => t.substitute(environment)),
-        optionalPositional: optionalPositional,
-        namedParameters: namedParameters,
-      );
+  FunctionType _bodyWith(
+    Map<TypeParameterType, ValueType> environment, {
+    bool preservePromotions = false,
+  }) => FunctionType(
+    result._substitute(environment, preservePromotions),
+    parameters.map((t) => t._substitute(environment, preservePromotions)),
+    optionalPositional: optionalPositional,
+    namedParameters: namedParameters,
+  );
 
   Map<TypeParameterType, ValueType>? _relate(
     FunctionType other, {
@@ -1229,8 +1317,8 @@ void sealTypes(Iterable<ValueType> roots) {
         type.parameters.forEach(visit);
       case RecordType():
         type.fields.forEach(visit);
-      case PromotedTypeParameterType(:final parameter, :final bound):
-        visit(parameter);
+      case PromotedType(:final lexicalType, :final bound):
+        visit(lexicalType);
         visit(bound);
       case NonNullableTypeParameterType(:final parameter):
         visit(parameter);
@@ -1266,39 +1354,80 @@ final class NonNullableTypeParameterType(final TypeParameterType parameter)
   int get hashCode => Object.hash(NonNullableTypeParameterType, parameter);
 }
 
-/// A flow-promoted lexical variable `parameter & bound`.
+/// A lexical type with an additional constraint proven by flow analysis.
 ///
 /// The bound supplies additional static evidence, not a new runtime type.
-/// Inference and runtime type arguments retain the original lexical parameter.
-final class PromotedTypeParameterType(
-  final TypeParameterType parameter,
-  final ValueType bound, {
+/// Inference and runtime type arguments retain the original lexical type.
+sealed class const PromotedType._() extends ValueType {
+  factory(
+    ValueType lexicalType,
+    ValueType bound, {
+    bool isNonNullable = false,
+  }) => lexicalType is TypeParameterType
+      ? PromotedTypeParameterType(
+          lexicalType,
+          bound,
+          isNonNullable: isNonNullable,
+        )
+      : InstantiatedPromotionType(
+          lexicalType,
+          bound,
+          isNonNullable: isNonNullable,
+        );
+
+  /// The source variable or its substituted value type.
+  ValueType get lexicalType;
+
+  /// The second constraint established by a successful runtime test.
+  ValueType get bound;
 
   /// An additional value-level non-null fact established by a null assertion.
-  final bool isNonNullable = false,
-}) extends ValueType {
-  this {
+  bool get isNonNullable;
+
+  @override
+  String get dartName =>
+      '${lexicalType.dartName} & ${bound.dartName}${isNonNullable ? ' & Object' : ''}';
+  @override
+  ValueType get nonNullable =>
+      !mayBeNull ? this : PromotedType(lexicalType, bound, isNonNullable: true);
+  @override
+  bool operator ==(Object other) =>
+      other is PromotedType &&
+      lexicalType == other.lexicalType &&
+      bound == other.bound &&
+      isNonNullable == other.isNonNullable;
+  @override
+  int get hashCode =>
+      Object.hash(PromotedType, lexicalType, bound, isNonNullable);
+}
+
+/// A source type variable with a proven additional constraint.
+final class PromotedTypeParameterType(
+  final TypeParameterType parameter,
+  @override final ValueType bound, {
+  @override final bool isNonNullable = false,
+}) extends PromotedType {
+  this : super._() {
     if (!isDartType(bound)) {
       throw ArgumentError('A promoted bound must be a Dart value type.');
     }
   }
 
   @override
-  String get dartName =>
-      '${parameter.dartName} & ${bound.dartName}${isNonNullable ? ' & Object' : ''}';
-  @override
-  ValueType get nonNullable => !mayBeNull
-      ? this
-      : PromotedTypeParameterType(parameter, bound, isNonNullable: true);
-  @override
-  bool operator ==(Object other) =>
-      other is PromotedTypeParameterType &&
-      identical(parameter, other.parameter) &&
-      bound == other.bound &&
-      isNonNullable == other.isNonNullable;
-  @override
-  int get hashCode =>
-      Object.hash(PromotedTypeParameterType, parameter, bound, isNonNullable);
+  ValueType get lexicalType => parameter;
+}
+
+/// A promotion retained when an executable graph instantiates its lexical type.
+final class InstantiatedPromotionType(
+  @override final ValueType lexicalType,
+  @override final ValueType bound, {
+  @override final bool isNonNullable = false,
+}) extends PromotedType {
+  this : super._() {
+    if (!isDartType(lexicalType) || !isDartType(bound)) {
+      throw ArgumentError('A promotion requires Dart value types.');
+    }
+  }
 }
 
 final class const _SpecialType(@override final String dartName)
@@ -1325,8 +1454,8 @@ Iterable<ValueType> typeDeclarationsIn(ValueType type) sync* {
   switch (type) {
     case TypeParameterType():
       yield type;
-    case PromotedTypeParameterType(:final parameter, :final bound):
-      yield parameter;
+    case PromotedType(:final lexicalType, :final bound):
+      yield* typeDeclarationsIn(lexicalType);
       yield* typeDeclarationsIn(bound);
     case NonNullableTypeParameterType(:final parameter):
       yield parameter;
@@ -1367,14 +1496,10 @@ int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {
       scope.containsKey(type)
           ? Object.hash(TypeParameterType, scope[type])
           : identityHashCode(type),
-    PromotedTypeParameterType(
-      :final parameter,
-      :final bound,
-      :final isNonNullable,
-    ) =>
+    PromotedType(:final lexicalType, :final bound, :final isNonNullable) =>
       Object.hash(
-        PromotedTypeParameterType,
-        _typeHash(parameter, scope),
+        PromotedType,
+        _typeHash(lexicalType, scope),
         _typeHash(bound, scope),
         isNonNullable,
       ),
@@ -1394,10 +1519,14 @@ int _typeHash(ValueType type, Map<TypeParameterType, int> scope) {
       identityHashCode(type.declaration),
       Object.hashAll(type.typeArguments.map((t) => _typeHash(t, scope))),
     ),
-    CellType(:final content, :final isLate, :final isFinal) =>
-      isLate
-          ? Object.hash(CellType, _typeHash(content, scope), isLate, isFinal)
-          : Object.hash(CellType, _typeHash(content, scope)),
+    CellType(:final content, :final isLate, :final isFinal, :final slotShape) =>
+      Object.hash(
+        CellType,
+        _typeHash(content, scope),
+        isLate,
+        isFinal,
+        slotShape,
+      ),
     RecordType() => Object.hash(
       RecordType,
       type.positionalCount,

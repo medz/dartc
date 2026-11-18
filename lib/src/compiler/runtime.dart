@@ -13,6 +13,7 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
   final annotations = lowered.runtime;
   final bodies = <IrFunction>[];
   final primitives = <FunctionTarget, MemoryPrimitive>{};
+  FunctionTarget? context;
   for (final external in program.externals) {
     final target = external.target;
     final operation = annotations.primitives[target];
@@ -86,8 +87,6 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
           throw ArgumentError('Invalid unchecked cast signature.');
         }
         value = block.emit(UncheckedCast(args.single, target.returnType));
-      case .typeProjection:
-        continue;
       case .typeView:
         if (target.kind != .function ||
             target.typeParameters.isNotEmpty ||
@@ -106,9 +105,20 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       case .fail:
         primitives[target] = .fail;
         continue;
-      case .context:
-        primitives[target] = .context;
+      case .exitProcess:
+        primitives[target] = .exitProcess;
         continue;
+      case .context:
+        if (target.kind != .function ||
+            target.typeParameters.isNotEmpty ||
+            target.signature != FunctionType(.integer, [])) {
+          throw ArgumentError('Invalid native context query signature.');
+        }
+        value = block.emit(ReadNativeContext());
+        if (context != null) {
+          throw ArgumentError('Multiple managed context queries.');
+        }
+        context = target;
       case .writeBytes:
         primitives[target] = .writeBytes;
         continue;
@@ -152,6 +162,8 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
   final supplied = bodies.map((body) => body.target).toSet();
   final allocate = annotations.entries[RuntimeRole.allocate],
       isOutOfMemory = annotations.entries[RuntimeRole.isOutOfMemory],
+      linkEntry = annotations.entries[RuntimeRole.linkEntry],
+      unlinkEntry = annotations.entries[RuntimeRole.unlinkEntry],
       release = annotations.entries[RuntimeRole.release],
       runEvents = annotations.entries[RuntimeRole.runEvents],
       copyBytes = annotations.entries[RuntimeRole.copyBytes],
@@ -159,6 +171,8 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       recordError = annotations.entries[RuntimeRole.recordError];
   if (allocate == null ||
       isOutOfMemory == null ||
+      linkEntry == null ||
+      unlinkEntry == null ||
       release == null ||
       runEvents == null ||
       copyBytes == null ||
@@ -186,26 +200,21 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
   final externals = <IrExternal>[];
   for (final external in program.externals) {
     if (supplied.contains(external.target)) continue;
-    final effects =
-        primitives[external.target]?.effects ??
-        (nativeContracts.containsKey(external.target) ||
-                (lowered.imports[external.target]?.isLeaf ?? false)
-            ? const {Effect.readsStorage, Effect.writesStorage}
-            : null);
+    final primitive = primitives[external.target];
     externals.add(
-      effects == null
-          ? external
-          : IrExternal(
+      primitive != null
+          ? IrExternal(
               external.target,
               defaults: external.defaults,
-              effects: effects,
-              terminates:
-                  primitives[external.target]?.terminates ??
-                  external.terminates,
-              memory: primitives[external.target]?.memory ?? external.memory,
-              capturesArguments: primitives.containsKey(external.target)
-                  ? false
-                  : external.capturesArguments,
+              effects: primitive.effects,
+              terminates: primitive.terminates,
+              memory: primitive.memory,
+              capturesArguments: false,
+            )
+          : external.bindNative(
+              external.target,
+              isLeaf: lowered.imports[external.target]?.isLeaf ?? false,
+              isNonAllocating: nativeContracts.containsKey(external.target),
             ),
     );
   }
@@ -213,17 +222,14 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     program.classes,
     [...program.functions, ...bodies],
     globals: program.globals,
+    nativeBoundaries: program.nativeBoundaries,
+      executionShapes: program.executionShapes,
     externals: externals,
   );
   return HeapRuntime(
     program,
-    types: TypeRuntime(
-      program,
-      annotations.entries,
-      annotations.primitives.entries
-          .singleWhere((entry) => entry.value == MemoryOperation.typeProjection)
-          .key,
-    ),
+    context: context,
+    types: TypeRuntime(program, annotations.entries),
     async: switch (annotations.entries) {
       {
         RuntimeRole.asyncCreate: final create,
@@ -264,6 +270,8 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
     allocate: allocate,
     allocationFailure: annotations.entries[RuntimeRole.allocationFailure],
     isOutOfMemory: isOutOfMemory,
+    linkEntry: linkEntry,
+    unlinkEntry: unlinkEntry,
     release: release,
     runEvents: runEvents,
     processExitCode: annotations.entries[RuntimeRole.processExitCode],

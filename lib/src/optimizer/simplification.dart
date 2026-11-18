@@ -17,6 +17,7 @@ final class const ProgramSimplification() extends ProgramPass {
       var changed = false;
       for (final function in program.functions) {
         final replacements = <Value, Value>{};
+        final operations = <Instruction, Instruction>{};
         final removed = <Instruction>{};
         final terminators = <Block, Terminator>{};
         final expressions = <Object, List<Instruction>>{};
@@ -25,7 +26,20 @@ final class const ProgramSimplification() extends ProgramPass {
         while (pending.isNotEmpty) {
           final block = pending.removeLast();
           if (!visited.add(block)) continue;
-          pending.addAll(block.successors.map((edge) => edge.target));
+          // These decisions hold for every legal invocation, before any call
+          // closure exists. Do not expand implementation bodies behind a
+          // syntactically unreachable edge.
+          if (block.end case Branch(
+            condition: ScalarConstant(value: final bool condition),
+            :final ifTrue,
+            :final ifFalse,
+          )) {
+            final selected = condition ? ifTrue : ifFalse;
+            terminators[block] = selected;
+            pending.add(selected.target);
+          } else {
+            pending.addAll(block.successors.map((edge) => edge.target));
+          }
           if (block.end case Branch(
             condition: final TypeTest test,
             :final ifTrue,
@@ -58,6 +72,30 @@ final class const ProgramSimplification() extends ProgramPass {
             ...block.instructions,
             if (block.end case Invoke(:final operation)) operation,
           ]) {
+            // A widening view changes a static interface, not the value being
+            // tested. Preserve the producer's proof before type lowering picks
+            // a runtime implementation from a broader declaration.
+            switch (operation) {
+              case TypeTest(:final operand, :final testedType, :final negated):
+                final input = _unviewed(operand);
+                if (!identical(input, operand)) {
+                  operations[operation] = TypeTest(
+                    input,
+                    testedType,
+                    negated: negated,
+                  );
+                }
+              case ObjectRuntimeType(:final operand, :final direct):
+                final input = _unviewed(operand);
+                if (!identical(input, operand)) {
+                  operations[operation] = ObjectRuntimeType(
+                    input,
+                    direct: direct,
+                  );
+                }
+              default:
+                break;
+            }
             if (operation case PointerAddress(
               pointer: final PointerFromAddress pointer,
             )) {
@@ -79,11 +117,14 @@ final class const ProgramSimplification() extends ProgramPass {
             }
           }
         }
-        final rewritten = replacements.isEmpty && terminators.isEmpty
+        final rewritten =
+            replacements.isEmpty && operations.isEmpty && terminators.isEmpty
             ? function
             : FunctionRewrite(
                 function,
+                executionShapes: program.executionShapes,
                 replacements: replacements,
+                operations: operations,
                 discardable: removed,
                 terminators: terminators,
               ).run();
@@ -95,6 +136,8 @@ final class const ProgramSimplification() extends ProgramPass {
               program.classes,
               functions,
               globals: program.globals,
+              nativeBoundaries: program.nativeBoundaries,
+              executionShapes: program.executionShapes,
               externals: program.externals,
             )
           : program;
@@ -126,9 +169,24 @@ final class const ProgramSimplification() extends ProgramPass {
             program.classes,
             functions,
             globals: program.globals,
+            nativeBoundaries: program.nativeBoundaries,
+            executionShapes: program.executionShapes,
             externals: program.externals,
           )
         : program;
+  }
+}
+
+Value _unviewed(Value value) {
+  while (true) {
+    final operand = switch (value) {
+      TypeView(:final operand) || UncheckedCast(:final operand)
+          when value.type.accepts(operand.type) =>
+        operand,
+      _ => null,
+    };
+    if (operand == null) return value;
+    value = operand;
   }
 }
 
@@ -291,6 +349,14 @@ IrFunction simplifyFunction(
       }
     }
   }
+  // Value equivalence is not a proof that an unchecked descriptor satisfies a
+  // binder's bound. Keep the semantic checkpoint while the body depends on it;
+  // complete literal evidence can still remove the check through the verifier.
+  for (final binding in function.typeBindings) {
+    if (binding.check.inputs.any((input) => input is! TypeConstant)) {
+      replacements.remove(binding.value);
+    }
+  }
   late final liveness = ValueLiveness.source(function);
   for (final loop in LoopRanges(function).loops) {
     final proof = loop.prove(
@@ -306,6 +372,7 @@ IrFunction simplifyFunction(
   }
   return FunctionRewrite(
     function,
+    executionShapes: facts.program.executionShapes,
     replacements: replacements,
     nonReturning: nonReturning,
     discardable: removable,

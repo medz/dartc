@@ -6,10 +6,10 @@ import 'program_pass.dart';
 
 /// Runs semantic passes with fresh facts after every program change.
 ///
-/// Semantic passes retain their supplied order and converge before lowerings.
-/// Each lowering reenters semantic optimization with the same pass instances and
-/// budgets. New implementation dependencies receive fresh facts before emission.
-/// Retained definitions never become new entry points.
+/// Keeps an unspecialized implementation graph while optimizing a candidate.
+/// New source-site realizations discard the entire candidate and its facts;
+/// roots, recursive bodies and shared callers are reanalyzed from that graph.
+/// Semantic passes retain their supplied order and compilation-wide budgets.
 final class ProgramOptimizer(Iterable<ProgramPass> passes) {
   /// The execution order, including each pass's convergence policy.
   final List<ProgramPass> passes = .unmodifiable(passes);
@@ -31,9 +31,10 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
     FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
     FunctionTarget? allocationFailure,
+    FunctionTarget? managedAllocator,
     Map<FunctionTarget, List<int?>> initialMemory = const {},
   }) {
-    final initial = [
+    var initial = [
       for (final entry in entries)
         (
           target: entry.target,
@@ -57,11 +58,24 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       nativeEntries: callbacks,
       memoryLayout: memoryLayoutFor?.call(input),
       allocationFailure: allocationFailure,
+      managedAllocator: managedAllocator,
       initialMemory: memory,
     ).facts;
     final stages = [
       for (final pass in passes) (kind: pass.kind, run: pass.bind()),
     ];
+    final realized = <Object, ProgramRealization>{};
+    List<ProgramRealization> discoverRealizations(ProgramTransform transform) {
+      final added = <ProgramRealization>[];
+      for (final recipe in transform.realizations) {
+        if (!realized.containsKey(recipe.key)) {
+          realized[recipe.key] = recipe;
+          added.add(recipe);
+        }
+      }
+      return added;
+    }
+
     IrProgram normalize(IrProgram input) {
       bool changed;
       do {
@@ -80,7 +94,18 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       final before = facts.program;
       final after = transform(facts);
       facts.checkProgram(before);
-      if (identical(before, after)) return false;
+      var changed = !identical(before, after);
+      for (var index = 0; index < initial.length; index++) {
+        final entry = initial[index];
+        final arguments = entry.arguments.map(transform.rebindEntry).toList();
+        if (arguments.indexed.any(
+          (argument) => !identical(argument.$2, entry.arguments[argument.$1]),
+        )) {
+          initial[index] = (target: entry.target, arguments: arguments);
+          changed = true;
+        }
+      }
+      if (!changed) return false;
       facts = analyze(normalize(after));
       return true;
     }
@@ -118,17 +143,102 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       } while (changed);
     }
 
-    optimize();
-    bool lowered;
-    do {
-      lowered = false;
-      for (final stage in stages) {
-        if (stage.kind == .lowering && apply(stage.run)) {
+    void closeImplementations() {
+      bool lowered;
+      do {
+        lowered = false;
+        final recipes = <ProgramRealization>[];
+        void flush() {
+          if (recipes.isEmpty) return;
+          final before = facts.program;
+          for (final stage in stages) {
+            stage.run.rebase(before);
+          }
+          var after = before;
+          for (final recipe in recipes) {
+            after = recipe.apply(after);
+          }
+          recipes.clear();
+          if (identical(before, after)) {
+            throw StateError(
+              'Canonical source recipes did not realize the requested implementation.',
+            );
+          }
           lowered = true;
-          optimize();
+          facts = analyze(normalize(after));
         }
+
+        for (final stage in stages) {
+          if (stage.kind != .lowering) continue;
+          if (!stage.run.isReplayable) {
+            flush();
+            lowered |= apply(stage.run);
+            continue;
+          }
+          // Every owner observes this same graph and its actual demand. Only
+          // canonical recipes are composed; no changed graph consumes facts
+          // from a previous member of the batch.
+          final before = facts.program;
+          final after = stage.run(facts);
+          facts.checkProgram(before);
+          final added = discoverRealizations(stage.run);
+          if (!identical(before, after)) {
+            if (added.isEmpty) {
+              throw StateError(
+                'An implementation change requires a new canonical source recipe.',
+              );
+            }
+            recipes.addAll(added);
+          }
+        }
+        flush();
+      } while (lowered);
+    }
+
+    closeImplementations();
+    var canonical = facts.program;
+    List<FlowEntry> savedEntries() => [
+      for (final entry in initial)
+        (target: entry.target, arguments: List.unmodifiable(entry.arguments)),
+    ];
+    var canonicalEntries = savedEntries();
+    while (true) {
+      optimize();
+      final recipes = <ProgramRealization>[];
+      for (final stage in stages) {
+        if (stage.kind != .lowering) continue;
+        // Discovery may create templates, but the changed candidate is never
+        // solved with bodies specialized before those calls existed.
+        final before = facts.program;
+        final after = stage.run(facts);
+        facts.checkProgram(before);
+        final added = discoverRealizations(stage.run);
+        if (identical(before, after)) continue;
+        if (added.isEmpty) {
+          throw StateError(
+            'An implementation change requires a new canonical source recipe. '
+            'Repeated or unmapped realization cannot reuse specialized bodies.',
+          );
+        }
+        recipes.addAll(added);
       }
-    } while (lowered);
-    return facts;
+      if (recipes.isEmpty) return facts;
+      for (final bound in stages) {
+        bound.run.rebase(canonical);
+      }
+      for (final recipe in recipes) {
+        canonical = recipe.apply(canonical);
+      }
+      // These are the original supplied entry values with identity-only
+      // rebinding, never invocation values collected from candidate facts.
+      initial = [
+        for (final entry in canonicalEntries)
+          (target: entry.target, arguments: List.of(entry.arguments)),
+      ];
+      facts = analyze(normalize(canonical));
+      closeImplementations();
+      canonical = facts.program;
+      canonicalEntries = savedEntries();
+    }
   }
 }

@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 
 import 'function_rewrite.dart';
+import 'loop_ranges.dart' show cyclicBlocks;
 import 'program_flow.dart';
 import 'program_pass.dart';
 import 'simplification.dart';
@@ -109,6 +110,7 @@ IrProgram _inlineSelected(
             })
           >{};
       final dominance = ValueDominance(input);
+      late final cyclic = cyclicBlocks(input.blocks);
       final incoming = <Block, List<Jump>>{};
       for (final block in input.blocks) {
         for (final edge in block.successors) {
@@ -216,12 +218,17 @@ IrProgram _inlineSelected(
             target = operation.target;
             arguments = operation.inputs;
             environment = {
+              ...operation.lexicalEnvironment,
               if (operation.ownerType case final owner?)
                 ...target.environmentFor(owner),
               for (final (i, type) in operation.typeArguments.indexed)
                 target.typeParameters[i]: type,
             };
           } else if (operation is Construct &&
+              // The plain-object expansion below synthesizes a nominal header.
+              // Callable storage's actual descriptor is exposed by allocation
+              // lowering before its initializer can be expanded independently.
+              operation.callableStorage == null &&
               sourceFacts &&
               operation.instantiatedType.freeTypeParameters.isEmpty) {
             target = operation.initializer;
@@ -229,6 +236,7 @@ IrProgram _inlineSelected(
             arguments = operation.inputs;
             environment = target.environmentFor(operation.instantiatedType);
           } else if (operation is FunctionCall) {
+            if (operation.entryBinding != null) continue;
             final binding = closureOf(operation);
             if (binding == null) continue;
             final closure = binding.closure;
@@ -317,6 +325,12 @@ IrProgram _inlineSelected(
             }
           }
           if (candidate.body.closures.isNotEmpty) continue;
+          // Re-entering a body-scoped binder could change the meaning of values
+          // carried from a previous iteration. Keep the invocation scope intact.
+          if (candidate.body.typeBindings.isNotEmpty &&
+              cyclic.contains(block)) {
+            continue;
+          }
           late final live = ValueLiveness.source(candidate.body)
               .liveIn[candidate.body.entry]!;
           final parameters = source.entry.parameters
@@ -340,7 +354,7 @@ IrProgram _inlineSelected(
             )) {
               continue;
             }
-            final type = parameter.type.substitute(environment);
+            final type = parameter.type.substituteForFlow(environment);
             final argument = arguments[i];
             if (type == argument.type) continue;
             views++;
@@ -380,6 +394,7 @@ IrProgram _inlineSelected(
           ? input
           : FunctionRewrite(
               input,
+              executionShapes: program.executionShapes,
               inlined: sites,
               discardable: {
                 if (sourceFacts)
@@ -410,7 +425,7 @@ IrProgram _inlineSelected(
               if (block.end case Invoke(:final operation)) operation,
             ].whereType<MakeClosure>(),
         };
-        body = FunctionRewrite(body, discardable: closures).run();
+        body = FunctionRewrite(body, executionShapes: program.executionShapes, discardable: closures).run();
         final retained = body.blocks.fold(
           0,
           (count, block) =>
@@ -441,6 +456,8 @@ IrProgram _inlineSelected(
           program.classes,
           functions,
           globals: program.globals,
+          nativeBoundaries: program.nativeBoundaries,
+          executionShapes: program.executionShapes,
           externals: program.externals,
         )
       : program;
@@ -486,7 +503,12 @@ bool _entryChecksProved(Instruction call, ProgramFlowFacts facts) {
         arguments[(call is Construct ? 0 : target.argumentOffset) + slot],
       );
       if (actual.isBottom ||
-          actual.check(parameter.substitute(environment)).mayFail) {
+          actual
+              .check(
+                parameter.substituteForFlow(environment),
+                runtimeTypes: true,
+              )
+              .mayFail) {
         return false;
       }
     }

@@ -31,6 +31,54 @@ final class FunctionContext(
   final sourceLocations = <Object, SourceLocation>{};
   SourceLocation? _sourceLocation;
 
+  final _executionValues = <Value, ExecutionShape>{};
+
+  /// Physical continuation choices established while lexical handlers are live.
+  FunctionExecution? get execution =>
+      _executionValues.isEmpty ? null : FunctionExecution(_executionValues);
+
+  ExecutionShape _shapeOf(Value value) =>
+      ExecutionShapes.defaults.shapeOf(null, value, values: _executionValues);
+
+  Value represent(Value value, ValueType destination) =>
+      _representShape(value, ExecutionShapes.forType(destination));
+
+  Value _representShape(Value value, ExecutionShape target) {
+    final source = _shapeOf(value);
+    if (source == target || value.type == .never) return value;
+    if (source.isScalar && target.isReference) {
+      var payload = value;
+      while (payload is TypeView || payload is UncheckedCast) {
+        payload = (payload as Instruction).inputs.single;
+      }
+      final represented = emit(
+        payload is Constant
+            ? ConstantCarrier(payload)
+            : MaterializeValue(payload),
+      );
+      if (represented.type == value.type) return represented;
+      return emit(
+        value.type.accepts(represented.type)
+            ? TypeView(represented, value.type)
+            : UncheckedCast(represented, value.type),
+      );
+    }
+    if (source.isReference && target.isScalar) {
+      return emit(ProjectValue(value, target));
+    }
+    throw StateError('Unimplemented execution shape conversion.');
+  }
+
+  /// Records the declared entry carriers before lowering its source body.
+  void bindExecutionEntry(Block entry) {
+    final shapes = ExecutionShapes.defaults.entryOf(target).parameters;
+    for (final (index, value) in entry.parameters.indexed) {
+      if (shapes[index] != ExecutionShapes.forType(value.type)) {
+        _executionValues[value] = shapes[index];
+      }
+    }
+  }
+
   /// Gives emitted operations this node's position without replacing child sites.
   T withSource<T>(ast.AstNode? site, T Function() lower) {
     if (site == null) return lower();
@@ -505,6 +553,22 @@ final class FunctionContext(
 
   /// Emits [operation], capturing the local values at this site if it can throw.
   Value emit(Instruction operation) {
+    final expected = ExecutionShapes.defaults.inputShapesOf(
+      null,
+      operation,
+      values: _executionValues,
+    );
+    final inputs = operation.inputs.toList();
+    final converted = <Value>[
+      for (final (index, input) in inputs.indexed)
+        _representShape(input, expected[index]),
+    ];
+    if (inputs.indexed.any(
+      (entry) => !identical(entry.$2, converted[entry.$1]),
+    )) {
+      var index = 0;
+      operation = operation.mapInputs((_) => converted[index++]);
+    }
     _locate(operation);
     if (!operation.mayThrow) return current!.emit(operation);
     final retained = operation.type == .never
@@ -520,6 +584,13 @@ final class FunctionContext(
       ),
     );
     current = next;
+    if (next != null) {
+      final result = next.parameters.single;
+      final shape = _shapeOf(operation);
+      if (shape != ExecutionShapes.forType(result.type)) {
+        _executionValues[result] = shape;
+      }
+    }
     return next?.parameters.single ?? operation;
   }
 
@@ -821,13 +892,74 @@ final class FunctionContext(
       second.add(value);
       changed.add(variable);
     }
+    // A lexical variable's declaration is not an SSA storage obligation. Retain
+    // an exact common producer type where both incoming values establish it.
+    Value payload(Value value) {
+      while (value is TypeView || value is UncheckedCast) {
+        value = (value as Instruction).inputs.single;
+      }
+      return value;
+    }
+    for (var index = 0; index < types.length; index++) {
+      final left = payload(first[index]), right = payload(second[index]);
+      if (left.type == right.type && types[index].accepts(left.type)) {
+        types[index] = left.type;
+        first[index] = left;
+        second[index] = right;
+      }
+    }
     final block = addBlock(types);
+    final expected = <ExecutionShape>[];
+    for (var index = 0; index < types.length; index++) {
+      final left = _shapeOf(first[index]), right = _shapeOf(second[index]);
+      final declared = ExecutionShapes.forType(types[index]);
+      final shape = left == right && (left == declared || left.isReference)
+          ? left : declared;
+      expected.add(shape);
+      if (shape != declared) _executionValues[block.parameters[index]] = shape;
+    }
+    final activeLocals = saveLocals(), activeFacts = _facts;
+    Jump edge(List<Value> arguments, List<Value> locals) {
+      if (arguments.indexed.every((item) =>
+          _shapeOf(item.$2) == expected[item.$1])) {
+        return Jump(block, arguments);
+      }
+      // Only this predecessor enters the adapter. Its original locals remain
+      // available to the lexical catch if a necessary materialization fails.
+      final proofs = <TestedValue>{
+        ...arguments.whereType<TestedValue>(),
+        ...locals.whereType<TestedValue>(),
+      }.toList();
+      final bridge = addBlock(proofs.map((value) => value.type));
+      final narrowed = <Value, Value>{
+        for (final (index, proof) in proofs.indexed)
+          proof: bridge.parameters[index],
+      };
+      for (final (index, proof) in proofs.indexed) {
+        final shape = _shapeOf(proof), parameter = bridge.parameters[index];
+        if (shape != ExecutionShapes.forType(parameter.type)) {
+          _executionValues[parameter] = shape;
+        }
+      }
+      current = bridge;
+      restoreLocals([for (final value in locals) narrowed[value] ?? value]);
+      _facts = null;
+      final converted = <Value>[
+        for (final (index, argument) in arguments.indexed)
+          _representShape(narrowed[argument] ?? argument, expected[index]),
+      ];
+      finish(Jump(block, converted));
+      restoreLocals(activeLocals);
+      _facts = activeFacts;
+      return Jump(bridge, proofs);
+    }
+    final fromFirst = edge(first, saved), fromSecond = edge(second, activeLocals);
     var slot = result == null ? 0 : 1;
     for (final variable in changed) {
       _locals[variable] = block.parameters[slot++];
     }
     current = block;
-    return (.new(block, first), .new(block, second));
+    return (fromFirst, fromSecond);
   }
 
   /// Lowers alternatives from the same local state and joins paths that return normally.
@@ -917,7 +1049,7 @@ final class FunctionContext(
         evaluateWhen ? skip : enter,
       ),
     );
-    return skip.target.parameters.first;
+    return current!.parameters.first;
   }
 }
 

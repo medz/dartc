@@ -4,21 +4,19 @@ import 'dart:typed_data';
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/interop.dart';
-import 'package:dartc/ir.dart' show ScalarConstant, ClosureCallbackTarget;
+import 'package:dartc/ir.dart' show ClosureCallbackTarget;
 
 import 'function_emitter.dart';
-import 'heap_entry.dart';
 import 'native_callback.dart';
 
 /// Converts native scalar and aggregate calls to internal value locations.
 final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
   /// Emits an incoming or outgoing native boundary and reports its direct call.
+  /// Runtime state publication belongs to the supplied ordinary IR bridge.
   Uint8List generate(
     NativeSignature signature,
     void Function(Fixup, int, FrameLayout<R>) call, {
     required bool intoDart,
-    HeapEntry<R>? heap,
-    void Function(Fixup, int)? codeAddress,
     void Function(int, FrameLayout<R>)? indirectCall,
     NativeCallback<R>? callback,
   }) {
@@ -35,8 +33,6 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         signature,
         call,
         intoDart: intoDart,
-        heap: heap,
-        codeAddress: codeAddress,
         indirectCall: indirectCall,
         callback: callback,
       );
@@ -56,16 +52,13 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
       ),
     );
     final (source, destination) = intoDart ? (native, body) : (body, native);
-    final frame = intoDart && heap != null
-        ? heap.frame(destination.stackBytes)
-        : emitter.convention.frameLayout(
-            localBytes: 0,
-            localAlignment: 8,
-            savedRegisters: [],
-            outgoingStackBytes: destination.stackBytes,
-          );
+    final frame = emitter.convention.frameLayout(
+      localBytes: 0,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: destination.stackBytes,
+    );
     emitter.prologue(frame);
-    if (intoDart) heap?.enter(frame);
     for (final (i, location) in source.parameters.indexed) {
       final type = signature.parameters[i];
       final integer = type.integerLayout;
@@ -102,26 +95,8 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
           );
       }
     }
-    final parked = !intoDart && heap?.persistent == true
-        ? HeapEntry.park(
-            emitter,
-            emitter.allocatableRegisters.lastWhere(
-              (r) =>
-                  emitter.bank(r) == .general &&
-                  r != emitter.failureRegister &&
-                  destination.clobberedRegisters.contains(r) &&
-                  !destination.parameters.any(
-                    (p) => p is RegisterArgument<R> && p.register == r,
-                  ),
-            ),
-          )
-        : const <Fixup>[];
     final fixup = emitter.call();
     call(fixup, emitter.position, frame);
-    for (final address in parked) {
-      codeAddress!(address, emitter.position);
-    }
-    if (intoDart) heap?.leave(frame, destination.resultRegister);
     if (destination.resultRegister case final result?) {
       convert(result, signature.result, intoDart: !intoDart);
     }
@@ -149,8 +124,6 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     NativeSignature signature,
     void Function(Fixup, int, FrameLayout<R>) call, {
     required bool intoDart,
-    HeapEntry<R>? heap,
-    void Function(Fixup, int)? codeAddress,
     void Function(int, FrameLayout<R>)? indirectCall,
     NativeCallback<R>? callback,
   }) {
@@ -195,17 +168,13 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     final resultPointer = reserve(8);
     final callPointer = indirectCall == null ? null : reserve(8);
     final callbackPointer = closureCallback ? reserve(8) : null;
-    final frame = intoDart && heap != null
-        ? heap.frame(destination.stackBytes, extraBytes: bytes)
-        : emitter.convention.frameLayout(
-            localBytes: bytes,
-            localAlignment: 8,
-            savedRegisters: [],
-            outgoingStackBytes: destination.stackBytes,
-          );
-    final base =
-        frame.localOffset +
-        (intoDart && heap != null ? HeapEntry.localBytes : 0);
+    final frame = emitter.convention.frameLayout(
+      localBytes: bytes,
+      localAlignment: 8,
+      savedRegisters: [],
+      outgoingStackBytes: destination.stackBytes,
+    );
+    final base = frame.localOffset;
     final occupied = {
       for (final location in [...native.parameters, ...body.parameters])
         ...location.registers,
@@ -310,7 +279,7 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         emitter.storeStack(address, base + resultPointer);
       }
     }
-    // Snapshot incoming registers before argument remapping or heap entry can clobber them.
+    // Snapshot incoming registers before argument remapping and thread checks.
     for (final (i, type) in signature.parameters.indexed) {
       final location = intoDart
           ? native.parameters[i]
@@ -344,7 +313,6 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
     callback?.checkThread(
       addressSlot: callbackPointer == null ? null : base + callbackPointer,
     );
-    if (intoDart) heap?.enter(frame);
     if (!intoDart) {
       for (final (i, type) in signature.parameters.indexed) {
         if (type is NativeCompoundType) {
@@ -353,10 +321,6 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
         }
       }
     }
-    // Root publication may clobber the native hidden result-address register.
-    final parked = !intoDart && heap?.persistent == true
-        ? HeapEntry.park(emitter, address)
-        : const <Fixup>[];
     if (callbackPointer != null) {
       emitter.loadStack(address, base + callbackPointer);
       writeScalar(body.parameters[compoundResult ? 1 : 0], address);
@@ -415,35 +379,6 @@ final class NativeAdapter<R extends Object>(final FunctionEmitter<R> emitter) {
       emitter.callRegister(address);
       indirectCall(emitter.position, frame);
     }
-    for (final fixup in parked) {
-      codeAddress!(fixup, emitter.position);
-    }
-    if (callback != null) {
-      final returned = emitter.label();
-      emitter.jumpIfZero(emitter.failureRegister, returned);
-      if (compoundResult) {
-        emitter.loadImmediate(address, 0);
-        for (var offset = 0; offset < storage.of(signature.result).size;) {
-          final count = width(storage.of(signature.result).size - offset);
-          emitter.storeStack(address, base + resultSlot + offset, bytes: count);
-          offset += count;
-        }
-      } else if (!signature.result.isVoid) {
-        final value =
-            (callback.definition.exceptionalReturn as ScalarConstant?)?.value;
-        final bits = switch (value) {
-          double() => (ByteData(8)..setFloat64(0, value)).getInt64(0),
-          int() => value,
-          bool() => value ? 1 : 0,
-          _ => 0,
-        };
-        emitter.loadImmediate(address, bits);
-        emitter.move(body.resultRegister!, address);
-      }
-      emitter.loadImmediate(emitter.failureRegister, 0);
-      emitter.bind(returned);
-    }
-    if (intoDart) heap?.leave(frame, body.resultRegister);
     if (compoundResult) {
       final size = storage.of(signature.result).size;
       if (intoDart) {

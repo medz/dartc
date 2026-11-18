@@ -6,14 +6,11 @@ final class NativeInvocation(
   final Value address,
   final List<Value> arguments,
   final NativeSignature signature, {
+
+  /// A no-reentry promise retained from the checked native call.
   required final bool isLeaf,
 }) extends Value {
-  this
-    : super(
-        signature.result is NativePointerType
-            ? ValueType.integer
-            : FfiTypes.valueType(signature.result),
-      );
+  this : super(FfiTypes.rawValueType(signature.result));
 
   Iterable<Value> get inputs => [address, ...arguments];
 }

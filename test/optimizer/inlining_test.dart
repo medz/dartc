@@ -30,6 +30,227 @@ IrProgram _inline(
 ).run(ProgramFlow(program, const [], openEntries: roots).facts);
 
 void main() {
+  test(
+    'inlining retains promoted values across block parameters and returns',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final promoted = PromotedTypeParameterType(t, ValueType.floating);
+      final helper = FunctionTarget(
+        _uri,
+        'promotedDouble',
+        .floating,
+        [t],
+        typeParameters: [t],
+      );
+      final body = Block(helper.parameterTypes);
+      final yes = Block([promoted]), no = Block();
+      final test = body.emit(TypeTest(body.parameters.single, promoted));
+      body.finish(Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)));
+      yes.finish(Return(yes.parameters.single));
+      no.finish(const Return(Constant.floating(-1.0)));
+      final root = FunctionTarget(_uri, 'root', .floating, [.object.nullable]);
+      final entry = Block(root.parameterTypes);
+      entry.finish(
+        Return(
+          entry.emit(
+            DirectCall(
+              helper,
+              entry.parameters,
+              typeArguments: [.object.nullable],
+            ),
+          ),
+        ),
+      );
+      final source = IrProgram([], [
+        IrFunction(helper, [body, yes, no]),
+        IrFunction(root, [entry]),
+      ]);
+      final result = _inline(source, [root]);
+      expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
+      for (final value in <Object?>[1.25, -0.0, 42, 'other', null]) {
+        expect(_run(result, root, [value]), _run(source, root, [value]));
+      }
+    },
+  );
+
+  test('inlining keeps both runtime obligations of a promoted type test', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final helper = FunctionTarget(
+      _uri,
+      'check',
+      .boolean,
+      [.object.nullable],
+      typeParameters: [t],
+    );
+    final body = Block(helper.parameterTypes);
+    body.finish(
+      Return(
+        body.emit(
+          TypeTest(
+            body.parameters.single,
+            PromotedTypeParameterType(t, ValueType.integer),
+          ),
+        ),
+      ),
+    );
+    final root = FunctionTarget(_uri, 'root', .boolean, [.object.nullable]);
+    final entry = Block(root.parameterTypes);
+    entry.finish(
+      Return(
+        entry.emit(
+          DirectCall(helper, entry.parameters, typeArguments: [.object]),
+        ),
+      ),
+    );
+    final source = IrProgram([], [
+      IrFunction(helper, [body]),
+      IrFunction(root, [entry]),
+    ]);
+    final result = _inline(source, [root]);
+    expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
+    for (final value in <Object?>[3, 'other', 1.25, null]) {
+      expect(_run(result, root, [value]), value is int);
+    }
+  });
+
+  test(
+    'instantiated promotions survive fields, cells, calls and exception edges',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final slot = TypeParameterType('V')..initializeBound(.object.nullable);
+      final owner = ClassType(_uri, 'Holder', typeParameters: [slot]);
+      final field = InstanceField(owner, 'value', slot);
+      final initialize = FunctionTarget(
+        _uri,
+        'new',
+        .voidType,
+        [slot],
+        owner: owner,
+        kind: .initializer,
+      );
+      final initializing = Block(initialize.parameterTypes);
+      initializing.emit(
+        StoreField(
+          field,
+          initializing.parameters[0],
+          initializing.parameters[1],
+        ),
+      );
+      initializing.finish(const Return());
+      final promoted = PromotedTypeParameterType(t, ValueType.integer);
+      final helper = FunctionTarget(
+        _uri,
+        'promotedStorage',
+        .integer,
+        [.object.nullable],
+        typeParameters: [t],
+      );
+      final body = Block(helper.parameterTypes);
+      final checked = body.emit(TypeCast(body.parameters.single, promoted));
+      final object = body.emit(
+        Construct(initialize, [
+          checked,
+        ], instantiatedType: owner.instantiate([promoted])),
+      );
+      final loaded = body.emit(LoadField(field, object));
+      final cell = body.emit(NewCell(CellType(promoted), loaded));
+      final read = body.emit(ReadCell(cell));
+      final called = body.emit(DirectCall(_tick, [read]));
+      body.finish(
+        Return(body.emit(IntBinary(.add, called, const Constant.integer(1)))),
+      );
+      final root = FunctionTarget(_uri, 'root', .integer, [.object.nullable]);
+      final entry = Block(root.parameterTypes),
+          done = Block([ValueType.integer]),
+          failed = Block();
+      final call = DirectCall(
+        helper,
+        entry.parameters,
+        typeArguments: [.object],
+      );
+      entry.finish(
+        Invoke(call, onReturn: Jump(done, [call]), onThrow: Jump(failed)),
+      );
+      done.finish(Return(done.parameters.single));
+      failed.finish(const Return(Constant.integer(-99)));
+      final helperBody = IrFunction(helper, [body]);
+      final rootBody = IrFunction(root, [entry, done, failed]);
+      final source = IrProgram(
+        [
+          IrClass(owner, [field], constructors: [initialize]),
+        ],
+        [
+          IrFunction(initialize, [initializing]),
+          helperBody,
+          rootBody,
+        ],
+        externals: [IrExternal(_tick)],
+      );
+      // Exercise copying these consumers independently of the inlining cost
+      // policy; the smaller promoted-return case above uses the default pass.
+      final rewritten = FunctionRewrite(
+        rootBody,
+        inlined: {
+          call: (
+            body: helperBody,
+            arguments: entry.parameters,
+            environment: {t: ValueType.object},
+            handler: (entry.end as Invoke).onThrow,
+          ),
+        },
+      ).run();
+      final result = IrProgram(source.classes, [
+        for (final function in source.functions)
+          function.target == root ? rewritten : function,
+      ], externals: source.externals);
+      expect(
+        (result.implementationOf(root) as IrFunction).callees,
+        isNot(contains(helper)),
+      );
+      for (final value in <Object?>[7, -13, 'bad', null]) {
+        final before = <int>[], after = <int>[];
+        expect(
+          _run(result, root, [value], after),
+          _run(source, root, [value], before),
+        );
+        expect(after, before);
+        expect(after, value is int ? [value] : isEmpty);
+      }
+    },
+  );
+
+  test(
+    'inlined type reification retains the lexical type without its proof',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final helper = FunctionTarget(
+        _uri,
+        'reified',
+        .typeType,
+        [],
+        typeParameters: [t],
+      );
+      final body = Block();
+      body.finish(
+        Return(
+          body.emit(ReifyType(PromotedTypeParameterType(t, ValueType.integer))),
+        ),
+      );
+      final root = FunctionTarget(_uri, 'root', .typeType, []);
+      final entry = Block();
+      entry.finish(
+        Return(entry.emit(DirectCall(helper, [], typeArguments: [.object]))),
+      );
+      final source = IrProgram([], [
+        IrFunction(helper, [body]),
+        IrFunction(root, [entry]),
+      ]);
+      final result = _inline(source, [root]);
+      expect((result.implementationOf(root) as IrFunction).callees, isEmpty);
+      expect(_run(result, root, []), _run(source, root, []));
+    },
+  );
+
   test('inlining preserves call-bound frame values at the remaining call', () {
     final walker = FunctionTarget(_uri, 'walk', .integer, [.integer, .integer]);
     final helper = FunctionTarget(_uri, 'helper', .integer, []);

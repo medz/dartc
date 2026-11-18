@@ -167,7 +167,7 @@ abstract final class CoreTypes() {
     ClassType declaration,
     Set<TypeParameterType>? active,
   ) {
-    if (type case PromotedTypeParameterType(:final parameter, :final bound)) {
+    if (type case PromotedType(:final lexicalType, :final bound)) {
       final nonNullable = !type.mayBeNull;
       if (nonNullable && declaration == ValueType.object) {
         return ValueType.object;
@@ -177,7 +177,7 @@ abstract final class CoreTypes() {
             declaration,
             active,
           ) ??
-          _view(parameter, declaration, active);
+          _view(lexicalType, declaration, active);
     }
     if (type is NonNullableTypeParameterType &&
         declaration == ValueType.object) {

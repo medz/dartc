@@ -32,5 +32,12 @@ final class ManagedGlobals() {
         'initialization',
       );
 
+  late final voidStorage = _library
+      .lookupFunction<Int64 Function(Int64, Int64), int Function(int, int)>(
+        'voidStorage',
+      );
+  late final neverStorage = _library
+      .lookupFunction<Int64 Function(Int64), int Function(int)>('neverStorage');
+
   void close() => _library.close();
 }

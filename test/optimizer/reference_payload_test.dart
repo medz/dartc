@@ -413,7 +413,7 @@ void main() {
 
   test('copies, call summaries and escaped payloads retain actual objects and functions', () {
     final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
-    final input = a.state.project([a.value]);
+    final input = a.state.project([a.value]).copy(resetWrites: true);
     final b = _allocate(input, 8);
     final child = _store(b.state, b.value, _function);
     final saved = _store(child, a.value, b.value);

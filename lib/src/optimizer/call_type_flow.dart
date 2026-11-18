@@ -1,5 +1,7 @@
 import 'package:dartc/ir.dart';
 
+import 'program_call_facts.dart';
+
 /// A call closure narrowed by the union of values passed to each parameter.
 ///
 /// The roots and unknownCalls arguments add entry points admitting every value
@@ -12,9 +14,8 @@ import 'package:dartc/ir.dart';
 /// declaration or binding requires a new analysis from the actual roots, without
 /// carrying forward old retained definitions or supplemental facts.
 ///
-/// Drivers must [extend] this analysis when generated calls add source
-/// dependencies, including calls to an already selected function. Such targets
-/// belong among unknown callers unless their actual arguments are analyzed here.
+/// This structural query does not replace execution-state analysis. Generated
+/// implementations must enter their actual caller's graph before optimization.
 final class CallTypeFlow(
   final IrProgram program,
   Iterable<FunctionTarget> roots, {
@@ -275,7 +276,7 @@ final class CallTypeFlow(
       _include(callee);
     }
     for (final value in body.functionConstants) {
-      _include(value.target, unknown: true);
+      _include(value.invocationEntry ?? value.target, unknown: true);
     }
     if (body is! IrFunction) return;
     for (final closure in body.closures) {
@@ -307,6 +308,15 @@ final class CallTypeFlow(
             for (final selected in _members(target, receiver, [
               member.selector,
             ])) {
+              if (operation.entryBinding case final binding?) {
+                final entry = binding.entries[selected] ??
+                    (throw StateError('Missing actual member execution entry.'));
+                if (targets.add(entry)) _pending.add(target);
+                _invoke(target, entry, [receiver, ...operation.positional,
+                  for (final name in binding.names) operation.named[name]!,
+                  ...operation.executionTypes]);
+                continue;
+              }
               // A result use may precede this block and see no targets yet.
               if (targets.add(selected)) _pending.add(target);
               final definition = program.implementationOf(selected);
@@ -399,13 +409,16 @@ final class CallTypeFlow(
 /// Extending the owning analysis with new facts invalidates this result.
 /// Definitions already obtained remain an immutable snapshot; querying an
 /// invalidated result throws [StateError]. No IR graph is copied.
-final class CallTypeFacts._(final CallTypeFlow _flow) {
+final class CallTypeFacts._(final CallTypeFlow _flow)
+    implements ProgramCallFacts {
   final Set<FunctionTarget> _definitions = Set.unmodifiable(_flow._definitions);
 
   /// The exact immutable input whose calls and values were analyzed.
+  @override
   final IrProgram program = _flow.program;
 
   /// The required source bodies and imports at convergence.
+  @override
   Set<FunctionTarget> get definitions {
     _checkCurrent();
     return _definitions;
@@ -415,6 +428,7 @@ final class CallTypeFacts._(final CallTypeFlow _flow) {
   ///
   /// A different input, including a rewrite with the same function count,
   /// throws [ArgumentError] and requires a new analysis from explicit roots.
+  @override
   void checkProgram(IrProgram program) {
     _checkCurrent();
     if (!identical(this.program, program)) {
@@ -440,12 +454,34 @@ final class CallTypeFacts._(final CallTypeFlow _flow) {
         );
   }
 
+  @override
+  bool coversEntry(FunctionTarget target) => admitsUnknownCall(target);
+
   /// Whether [receiver] can hold an instance of [actual] at an observed call.
   ///
   /// Values outside the analyzed source graphs retain their static bounds.
+  @override
   bool allows(Value receiver, ClassType actual) {
     _checkCurrent();
     return _flow._allows(receiver, actual);
+  }
+
+  @override
+  Set<FunctionTarget> executionTargetsOf(Instruction operation) {
+    _checkCurrent();
+    return switch (operation) {
+      DirectCall(:final target) || InitializeObject(initializer: final target) =>
+        {target.implementation},
+      InstanceCall() => Set.unmodifiable(_flow._targets[operation] ?? const {}),
+      FunctionCall(entryBinding: final binding?) =>
+        Set.unmodifiable(binding.entries.values),
+      FunctionCall(target: final target?) => {target.implementation},
+      FunctionCall(:final function) => {
+        for (final target in _definitions)
+          if (function.type.accepts(target.signature)) target,
+      },
+      _ => const {},
+    };
   }
 
   void _checkCurrent() {

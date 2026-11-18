@@ -1,5 +1,12 @@
 import 'core_types.dart';
+import 'callable_storage.dart';
+import 'cell_storage.dart';
+import 'ffi_types.dart';
 import 'function.dart';
+import 'block.dart';
+import 'value.dart';
+import 'native_boundary_bindings.dart';
+import 'execution_shape.dart';
 import 'signature.dart';
 import 'type.dart';
 import 'verify.dart';
@@ -28,6 +35,25 @@ final class IrClass(
   /// takes `List<T>` and `Iterable<Object?>` and returns void.
   final ({InstanceField length, InstanceField data, FunctionTarget spread})?
   listStorage,
+
+  /// The real native-view prefix and optional ordinary initializer.
+  ///
+  /// Inheriting views reuse the ancestor's exact field identities. The owner
+  /// field is a strong reference; native bytes themselves remain untraced.
+  /// This contract survives graph rewrites and does not depend on field names
+  /// or an in-memory representation owner.
+  final ({
+    InstanceField address,
+    InstanceField owner,
+    FunctionTarget? initializer,
+  })?
+  nativeViewStorage,
+
+  /// The explicit physical layout of a language function value.
+  final CallableStorage? callableStorage,
+
+  /// The typed backing and fixed payload carrier of an internal capture cell.
+  final CellStorage? cellStorage,
 }) {
   /// Declared fields in initialization order, excluding inherited storage.
   final List<InstanceField> fields = .unmodifiable(fields);
@@ -98,6 +124,31 @@ final class IrClass(
   }
 
   this {
+    if (cellStorage case final storage?) {
+      if (storage.type != type || callableStorage != null ||
+          storage.fields.any((field) => !this.fields.contains(field) ||
+              this.weakFields.contains(field) || this.ephemerons.containsKey(field) ||
+              this.ephemerons.containsValue(field)) ||
+          this.constructors[storage.initializer.name] != storage.initializer) {
+        throw ArgumentError('Cell fields require their declared strong storage.');
+      }
+    }
+    if (callableStorage case final storage?) {
+      if (storage.type != type ||
+          storage.fields.any(
+            (field) => field.owner == type && !this.fields.contains(field),
+          ) ||
+          storage.fields.any(this.weakFields.contains) ||
+          storage.fields.any(this.ephemerons.containsKey) ||
+          storage.fields.any(this.ephemerons.containsValue) ||
+          storage.initializer != null &&
+              this.constructors[storage.initializer!.name] !=
+                  storage.initializer) {
+        throw ArgumentError(
+          'Callable fields require their declared strong storage.',
+        );
+      }
+    }
     if (recordStorage &&
         (!referencePayload ||
             type.isAbstract ||
@@ -132,6 +183,38 @@ final class IrClass(
           storage.spread.parameterTypes[1] !=
               CoreTypes.iterableOf(ValueType.object.nullable)) {
         throw ArgumentError('Invalid List storage contract.');
+      }
+    }
+    if (nativeViewStorage case final storage?) {
+      final slots = [storage.address, storage.owner];
+      final initializer = storage.initializer;
+      if (type.typeParameters.isNotEmpty ||
+          storage.address == storage.owner ||
+          storage.address.owner != storage.owner.owner ||
+          storage.address.owner != FfiTypes.nativeViewPrefix(type) ||
+          type.asInstanceOf(storage.address.owner) == null ||
+          storage.address.type != ValueType.integer ||
+          storage.owner.type != ValueType.object.nullable ||
+          slots.any(
+            (field) =>
+                !field.isFinal || field.isLate || field.initializer != null,
+          ) ||
+          (storage.address.owner == type &&
+              !slots.every(this.fields.contains)) ||
+          slots.any(this.weakFields.contains) ||
+          slots.any(this.ephemerons.containsKey) ||
+          slots.any(this.ephemerons.containsValue) ||
+          initializer != null &&
+              (initializer.owner != type ||
+                  initializer.kind != FunctionKind.initializer ||
+                  initializer.typeParameters.isNotEmpty ||
+                  initializer.signature !=
+                      FunctionType(type, [
+                        ValueType.integer,
+                        ValueType.object.nullable,
+                      ]) ||
+                  this.constructors[initializer.name] != initializer)) {
+        throw ArgumentError('Invalid native view storage contract.');
       }
     }
     if (!identical(type, type.declaration)) {
@@ -184,6 +267,12 @@ final class IrProgram(
   Iterable<IrFunction> functions, {
   Iterable<GlobalVariable> globals = const [],
   Iterable<IrExternal> externals = const [],
+
+  /// Existing native entries and module ownership, preserved by graph rewrites.
+  final NativeBoundaryBindings? nativeBoundaries,
+
+  /// Persistent entry and storage choices shared by every execution consumer.
+  final ExecutionShapes? executionShapes,
 }) {
   /// The class definitions supplied by the input libraries.
   final List<IrClass> classes = .unmodifiable(classes);
@@ -287,6 +376,13 @@ final class IrProgram(
           '${field.initializer == null ? '' : ' = ${field.initializer!.name}'}',
         );
       }
+      if (declaration.nativeViewStorage case final storage?) {
+        output.writeln(
+          '  native-view address ${label(storage.address.owner)}.${storage.address.name}'
+          ' owner ${label(storage.owner.owner)}.${storage.owner.name}'
+          '${storage.initializer == null ? '' : ' initializer ${storage.initializer!.name}'}',
+        );
+      }
       for (final ctor in declaration.constructors.values) {
         if (ctor.redirect case final destination?) {
           output.writeln(
@@ -323,6 +419,7 @@ final class IrProgram(
   }
 
   this {
+    nativeBoundaries?.checkProgram(this);
     (Object, String) className(ClassType type) =>
         (type.library ?? type.declaration, type.name);
     final owners = <(Object, String), ClassType>{};
@@ -333,6 +430,32 @@ final class IrProgram(
         );
       }
       owners[className(c.type)] = c.type;
+    }
+    for (final c in this.classes) {
+      if (c.nativeViewStorage case final storage?) {
+        final prefix = _definitions[storage.address.owner]?.nativeViewStorage;
+        if (prefix == null ||
+            prefix.address != storage.address ||
+            prefix.owner != storage.owner) {
+          throw ArgumentError(
+            'Native view prefix requires its declared field identities.',
+          );
+        }
+        for (
+          ClassType? parent = c.type.superclass;
+          parent != null;
+          parent = parent.superclass
+        ) {
+          final inherited = _definitions[parent.declaration]?.nativeViewStorage;
+          if (inherited != null &&
+              (inherited.address != storage.address ||
+                  inherited.owner != storage.owner)) {
+            throw ArgumentError(
+              'Inheriting native views must share their prefix.',
+            );
+          }
+        }
+      }
     }
     (Object, ClassType?, FunctionKind, String, Object?) nameOf(
       FunctionTarget t,
@@ -505,6 +628,52 @@ final class IrProgram(
       f.callees
           .followedBy(f.virtualMembers.map((m) => m.target))
           .forEach(checkTarget);
+      if (f is IrFunction) {
+        for (final block in f.blocks) {
+          for (final operation in [
+            ...block.instructions,
+            if (block.end case Invoke(:final operation)) operation,
+          ]) {
+            final field = switch (operation) {
+              LoadField(:final field) ||
+              StoreField(:final field) ||
+              InitializeStorageField(:final field) => field,
+              _ => null,
+            };
+            final view = operation.storageContract;
+            final fieldStorage = field == null
+                ? null
+                : definitionOf(field.owner)?.cellStorage;
+            if (fieldStorage case final storage?) {
+              if (view == null ||
+                  view.storageType.declaration != storage.type ||
+                  !view.fields.containsKey(field)) {
+                throw ArgumentError('Cell slot access requires its invariant view.');
+              }
+            }
+            if (view != null) {
+              final storage = definitionOf(view.storageType.declaration)?.cellStorage;
+              final capability = view.capability;
+              if (capability is! CellType || storage == null ||
+                  storage.viewOf(capability) != view) {
+                throw ArgumentError('Storage view disagrees with its allocation declaration.');
+              }
+            }
+            if (operation case FunctionCall(entryBinding: final binding?) ||
+                DynamicDispatch(entryBinding: final binding?)) {
+              binding.checkExecution(executionShapes ?? ExecutionShapes.defaults);
+            }
+            if (operation case InstanceCall(entryBinding: final binding?) || BindMethod(entryBinding: final binding?)) {
+              binding.checkExecution(executionShapes ?? ExecutionShapes.defaults);
+            }
+          }
+        }
+      }
+      for (final storage in f.cellStorages) {
+        if (!identical(definitionOf(storage.type)?.cellStorage, storage)) {
+          throw ArgumentError('A cell view requires its declared storage contract.');
+        }
+      }
       for (final field in f.fields) {
         final c = definitionOf(field.owner);
         if (c != null && !c.fields.contains(field)) {
@@ -529,6 +698,16 @@ final class IrProgram(
           if (c != null && !c.fields.every(object.fields.containsKey)) {
             throw ArgumentError('Incomplete constant storage for ${t.name}.');
           }
+        }
+      }
+    }
+    for (final f in _implementations.values) {
+      for (final object in f.moduleObjects) {
+        final declaration = definitionOf(object.type);
+        if (declaration == null || declaration.referencePayload) {
+          throw ArgumentError(
+            'Module object requires declared fixed-size storage.',
+          );
         }
       }
     }

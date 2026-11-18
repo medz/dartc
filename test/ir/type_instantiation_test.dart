@@ -2,6 +2,27 @@ import 'package:dartc/ir.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('generic cell substitution retains its existing slot carrier', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final generic = CellType(t, isLate: true, isFinal: true);
+    final specialized = generic.substitute({t: ValueType.integer}) as CellType;
+    final direct = CellType(.integer, isLate: true, isFinal: true);
+    expect(specialized.content, ValueType.integer);
+    expect(specialized.slotShape, ExecutionShape.reference);
+    expect(direct.slotShape, ExecutionShape.word);
+    expect(specialized, isNot(direct));
+    expect(specialized.accepts(direct), isFalse);
+    expect({specialized, direct}, hasLength(2));
+    expect(
+      ExecutionShapes.defaults.slotOf(specialized),
+      ExecutionShape.reference,
+    );
+    expect(
+      () => ExecutionShapes(slots: {specialized: ExecutionShape.word}),
+      throwsArgumentError,
+    );
+  });
+
   test('nongeneric instantiation preserves immutable signature and shape', () {
     final nested = FunctionType(.integer, [.string]);
     final named = FunctionType(

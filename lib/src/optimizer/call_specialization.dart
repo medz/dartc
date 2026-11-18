@@ -32,7 +32,47 @@ final class const ProgramCallSpecialization() extends ProgramPass {
             final targets = facts.targetsOf(operation);
             if (targets.length != 1) continue;
             final target = targets.single;
+            if (operation case InstanceCall(entryBinding: final binding?)) {
+              if (binding.entries.containsValue(target)) {
+                operations[operation] = DirectCall(target, [
+                  operation.receiver, ...operation.positional,
+                  for (final name in binding.names) operation.named[name]!,
+                  ...operation.executionTypes,
+                ]);
+              }
+              continue;
+            }
+            if (operation case DynamicDispatch(entryBinding: final binding?)) {
+              if (binding.shape.typeArgumentCount == 0 && binding.entries.containsValue(target)) {
+                final arguments = [operation.receiver, ...operation.positional,
+                  for (final name in binding.shape.named.keys) operation.named[name]!];
+                if (arguments.indexed.every((entry) =>
+                    target.parameterTypes[entry.$1].accepts(entry.$2.type))) {
+                  operations[operation] = DirectCall(target, arguments);
+                }
+              }
+              continue;
+            }
             if (operation is FunctionCall) {
+              if (operation.entryBinding case final binding?) {
+                if (binding.shape.typeArgumentCount == 0 &&
+                    binding.entries.containsValue(target) &&
+                    operation.type.accepts(target.returnType)) {
+                  final arguments = [
+                    operation.function,
+                    ...operation.positional,
+                    for (final name in binding.shape.named.keys)
+                      operation.named[name]!,
+                  ];
+                  if (arguments.indexed.every(
+                    (entry) =>
+                        target.parameterTypes[entry.$1].accepts(entry.$2.type),
+                  )) {
+                    operations[operation] = DirectCall(target, arguments);
+                  }
+                }
+                continue;
+              }
               if (facts.valueOf(operation.function).constant
                   case final FunctionConstant value) {
                 final binding = value.resolveInvocation(
@@ -82,7 +122,8 @@ final class const ProgramCallSpecialization() extends ProgramPass {
             }
             if (operation is DynamicDispatch &&
                 (operation.failure == target ||
-                    operation.getterCalls.containsValue(target))) {
+                    operation.getterCalls.containsValue(target) ||
+                    operation.methodBindings.containsValue(target))) {
               operations[operation] = DirectCall(
                 target,
                 operation.inputs,
@@ -176,7 +217,7 @@ final class const ProgramCallSpecialization() extends ProgramPass {
       }
       final rewritten = operations.isEmpty
           ? function
-          : FunctionRewrite(function, operations: operations).run();
+          : FunctionRewrite(function, executionShapes: facts.program.executionShapes, operations: operations).run();
       changed |= !identical(rewritten, function);
       functions.add(rewritten);
     }
@@ -185,6 +226,8 @@ final class const ProgramCallSpecialization() extends ProgramPass {
             facts.program.classes,
             functions,
             globals: facts.program.globals,
+            nativeBoundaries: facts.program.nativeBoundaries,
+            executionShapes: facts.program.executionShapes,
             externals: facts.program.externals,
           )
         : facts.program;

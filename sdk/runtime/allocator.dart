@@ -64,18 +64,19 @@ final class Allocator(
         if (page != null) {
           page.replaceStorage(address, size, capacity);
         } else {
-          Pointer<Int64>.fromAddress(context + RuntimeContext.initializing)
-                  .value =
-              1;
+          final phase = Pointer<Int64>.fromAddress(
+            context + RuntimeContext.phase,
+          );
+          if (phase.value != RuntimePhase.managed) Memory.fail();
+          phase.value = RuntimePhase.control;
           try {
             page = Page(objects, address, size, capacity);
           } catch (_) {
             Memory.unmap(address, size * capacity);
             rethrow;
           } finally {
-            Pointer<Int64>.fromAddress(context + RuntimeContext.initializing)
-                    .value =
-                0;
+            if (phase.value != RuntimePhase.control) Memory.fail();
+            phase.value = RuntimePhase.managed;
           }
           heap.addPage(page);
         }
@@ -104,14 +105,19 @@ int slotSize(int bytes) {
 /// Returns nonzero storage or throws OutOfMemoryError after allocation fails.
 @RuntimeEntry(.allocate)
 int allocate(int context, int descriptor, int sp, int pc, int payloadBytes) {
+  final phase = Pointer<Int64>.fromAddress(context + RuntimeContext.phase)
+      .value;
+  if (phase != RuntimePhase.dormant &&
+      phase != RuntimePhase.bootstrap &&
+      phase != RuntimePhase.managed &&
+      phase != RuntimePhase.control) {
+    Memory.fail();
+  }
   final prefix = Pointer<Int64>.fromAddress(descriptor).value;
   var address = 0;
   if (payloadBytes >= 0 && payloadBytes <= 0x0ffffffffffffff8 - prefix) {
     final bytes = (prefix + payloadBytes + 7) & -8;
-    address =
-        Pointer<Int64>.fromAddress(context + RuntimeContext.initializing)
-                .value !=
-            0
+    address = phase == RuntimePhase.bootstrap || phase == RuntimePhase.control
         ? allocateControl(context, descriptor, bytes)
         : _allocator(context).allocate(context, descriptor, bytes, sp, pc);
   }
@@ -130,40 +136,40 @@ Never allocationFailure() =>
 bool isOutOfMemory(Object error) => identical(error, const OutOfMemoryError());
 
 Allocator _allocator(int context) {
-  var allocator = Memory.objectAt<Allocator?>(
-    Pointer<Int64>.fromAddress(context + RuntimeContext.heap).value,
-  );
-  if (allocator == null) {
-    Pointer<Int64>.fromAddress(context + RuntimeContext.initializing).value = 1;
-    try {
-      final objects = NativeObjects();
-      final finalization = FinalizationQueue();
-      final events = EventLoop(finalization);
-      allocator = Allocator(
-        objects,
-        NativeRoots(context, objects, events),
-        finalization,
-        events,
-      );
-      Pointer<Int64>.fromAddress(context + RuntimeContext.heap)
-          .value = Memory.addressOf(
-        allocator,
-      );
-    } catch (_) {
-      releaseControl(context);
-      rethrow;
-    } finally {
-      Pointer<Int64>.fromAddress(context + RuntimeContext.initializing).value =
-          0;
-    }
+  final phase = Pointer<Int64>.fromAddress(context + RuntimeContext.phase);
+  final address = Pointer<Int64>.fromAddress(context + RuntimeContext.heap)
+      .value;
+  if (phase.value == RuntimePhase.managed) {
+    if (address == 0) Memory.fail();
+    return Memory.objectAt<Allocator>(address);
   }
-  return allocator;
+  if (phase.value != RuntimePhase.dormant || address != 0) Memory.fail();
+  phase.value = RuntimePhase.bootstrap;
+  try {
+    final objects = NativeObjects();
+    final finalization = FinalizationQueue();
+    final events = EventLoop(finalization);
+    final allocator = Allocator(
+      objects,
+      NativeRoots(context, objects),
+      finalization,
+      events,
+    );
+    Pointer<Int64>.fromAddress(context + RuntimeContext.heap)
+        .value = Memory.addressOf(
+      allocator,
+    );
+    phase.value = RuntimePhase.managed;
+    return allocator;
+  } catch (_) {
+    releaseControl(context);
+    rethrow;
+  }
 }
 
 /// Registers event delivery when scheduling facilities are first used.
 EventLoop events() {
   final allocator = _allocator(Memory.context());
-  // Control storage does not trace managed closures; this tear-off is constant.
   allocator._drainEvents = _drain;
   return allocator.events;
 }
@@ -189,8 +195,11 @@ void release(int context) {
     Pointer<Int64>.fromAddress(context + RuntimeContext.heap).value,
   );
   try {
-    callbacks.release();
-    if (allocator != null) allocator.heap.close();
+    try {
+      callbacks.release();
+    } finally {
+      if (allocator != null) allocator.heap.close();
+    }
   } finally {
     releaseControl(context);
   }

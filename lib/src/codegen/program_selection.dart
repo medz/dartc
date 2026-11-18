@@ -4,13 +4,14 @@ import 'package:dartc/interop.dart';
 import 'checked_casts.dart';
 import 'function_representation.dart';
 import 'selected_function.dart';
-import 'global_storage.dart';
 import 'heap_plan.dart';
 import 'instance_storage.dart';
 import 'member_calls.dart';
 import 'native_invocation.dart';
+import 'indirect_invocation.dart';
 import 'program_layout.dart';
 import 'program_normalization.dart';
+import 'storage_access.dart';
 
 /// Selects function bodies and closes generated call dependencies before emission.
 final class ProgramSelection(
@@ -18,7 +19,6 @@ final class ProgramSelection(
   final HeapPlan heap,
   final CheckedCasts casts,
   final MemberCalls members,
-  final GlobalStorage globals,
   final InstanceStorage instances, {
   final Map<FunctionTarget, NativeImport> imports = const {},
   final Map<NativeCallbackTarget, FunctionTarget> callbacks = const {},
@@ -33,6 +33,10 @@ final class ProgramSelection(
 
   /// Source entries reached through generated code rather than checked call sites.
   final implicitCalls = <FunctionTarget>{};
+
+  /// Selected call sites whose execution is absent from their source contract.
+  final unobservedCalls =
+      <Instruction, ({FunctionTarget caller, FunctionTarget target})>{};
 
   /// Checks the selected operations and transitive call effects of a closure.
   void checkNonAllocating(FunctionTarget entry) {
@@ -85,9 +89,6 @@ final class ProgramSelection(
           }
           reject();
         }
-        if (operation is NewCell && body.stackCells.contains(operation)) {
-          continue;
-        }
         if (operation is TypeTest &&
             switch (body.tests[operation]) {
               .constantTrue || .constantFalse || .isNull || .isNotNull => true,
@@ -99,9 +100,7 @@ final class ProgramSelection(
           reject(operation);
         }
       }
-      pending.addAll(
-        body.invocations.values.map((callee) => (callee, [...path, target])),
-      );
+      pending.addAll(body.callees.map((callee) => (callee, [...path, target])));
     }
   }
 
@@ -151,12 +150,8 @@ final class ProgramSelection(
           'Numeric checks must be normalized before target preparation.',
         );
       }
-      final box = body.boxes[instruction];
-      final target = box != null
-          ? heap.box(body.typeOf(box))
-          : body.invocations[instruction] ??
+      final target = body.invocations[instruction] ??
                 layouts.strings.callFor(instruction) ??
-                globals.callFor(instruction) ??
                 switch (instruction) {
                   NativeCallbackAddress(:final target) => callbacks[target],
                   DirectCall(:final target) ||
@@ -185,17 +180,13 @@ final class ProgramSelection(
     required bool persistent,
     required Set<FunctionTarget> roots,
   }) {
-    final calls = {
-      for (final body in functions.values) ...body.invocations.values,
-    };
+    final calls = {for (final body in functions.values) ...body.callees};
     Iterable<IrFunction> supportFunctions() => [
       ..._normalization.supportFunctions,
       ...heap.functions(calls),
-      ...layouts.native.functions,
       ...members.functions,
       ...layouts.closures.functions,
       ...layouts.records.functions,
-      ...globals.functions,
       ...instances.functions,
       ...casts.functions,
       ...layouts.relations.functions,
@@ -216,7 +207,7 @@ final class ProgramSelection(
       for (final function in pending) {
         include(function);
         final body = functions[function.target]!;
-        calls.addAll(body.invocations.values);
+        calls.addAll(body.callees);
       }
       if (pending.isEmpty) break;
     }
@@ -230,8 +221,8 @@ final class ProgramSelection(
         capture ||
         persistent ||
         heap.allocates(calls) ||
-        calls.any((target) => heap.runtime?.primitives[target] == .context) ||
-        _unwindsTo(roots);
+        _requiresNativeContext(roots) ||
+        unwindsTo(roots);
     for (final body in functions.values) {
       // Factory inputs are accounted for at their originating construction sites.
       if (heap.allocates([body.target])) continue;
@@ -251,14 +242,99 @@ final class ProgramSelection(
         return value;
       }
 
+      Value physicalAlias(Value value) {
+        final visited = <Value>{};
+        while (visited.add(value)) {
+          value = unview(value);
+          if (!body.aliases.contains(value)) return value;
+          final inputs = body.operands[value];
+          if (inputs == null || inputs.length != 1) return value;
+          value = inputs.single;
+        }
+        throw StateError('Cyclic selected operand aliases.');
+      }
+
+      bool sameArgument(
+        FunctionTarget callee,
+        int slot,
+        Value source,
+        Value selected,
+      ) {
+        if (identical(physicalAlias(source), physicalAlias(selected))) {
+          return true;
+        }
+        if (!FfiTypes.isPointer(source.type) ||
+            !layouts.pointerRepresentation.contains(callee, slot)) {
+          return false;
+        }
+        final actual = physicalAlias(selected);
+        // An address-only entry may receive a pointer stored by its caller.
+        // Reading that immutable representation slot is ABI transport, not a
+        // new Dart call, check, allocation or user-defined property access.
+        return actual is StorageRead &&
+            identical(actual.field, layouts.pointers.address) &&
+            identical(physicalAlias(actual.receiver), physicalAlias(source));
+      }
+
       for (final MapEntry(key: operation, value: callee)
           in body.invocations.entries) {
         final origin = body.callOrigins[operation] ?? operation;
         final initializer = heap.initializersFor([callee]).firstOrNull;
+        if (origin is NativeCallbackAddress &&
+            identical(operation, origin) &&
+            observed.contains(origin)) {
+          final binding =
+              members.program.nativeBoundaries?.callbacks[origin.target];
+          final inputs = body.operands[operation] ?? operation.inputs;
+          if (binding != null &&
+              identical(binding.address, callee) &&
+              identical(callbacks[origin.target], callee) &&
+              inputs.isEmpty) {
+            // The verified graph owns this exact native entry address. Its
+            // provider only materializes a machine address; the callback body
+            // and lifecycle are ordinary source definitions in that binding.
+            continue;
+          }
+        }
+        if (origin is RawNativeCall &&
+            operation is DirectCall &&
+            observed.contains(origin)) {
+          final abi = layouts.nativeCalls.entries[callee];
+          final inputs = body.operands[operation] ?? operation.inputs;
+          final original = origin.inputs.toList();
+          if (abi != null &&
+              abi.signature == origin.signature &&
+              abi.isLeaf == origin.isLeaf &&
+              inputs.length == original.length &&
+              original.indexed.every(
+                (entry) =>
+                    identical(unview(entry.$2), unview(inputs[entry.$1])),
+              )) {
+            // The source already owns this exact external C operation. This
+            // target only lays out its explicit scalar/address carriers.
+            continue;
+          }
+        }
         if (observed.contains(origin) &&
-            (origin is InstanceCall && operation is InstanceCall ||
-                origin is Construct && initializer == origin.initializer)) {
+            origin is Construct &&
+            initializer == origin.initializer) {
           continue;
+        }
+        if (origin is ManagedStorageAllocation &&
+            identical(origin, operation) &&
+            observed.contains(origin) &&
+            identical(origin.allocator, callee) &&
+            identical(heap.runtime?.allocate, callee) &&
+            (members.callTypes?.executionTargetsOf(origin).contains(callee) ??
+                false)) {
+          final inputs = body.operands[operation] ?? origin.inputs;
+          if (inputs.length == origin.inputs.length &&
+              origin.inputs.indexed.every(
+                (entry) =>
+                    sameArgument(callee, entry.$1, entry.$2, inputs[entry.$1]),
+              )) {
+            continue;
+          }
         }
         if (origin is DirectCall &&
             operation is DirectCall &&
@@ -268,41 +344,110 @@ final class ProgramSelection(
           if (inputs.length >= origin.inputs.length &&
               origin.inputs.indexed.every(
                 (entry) =>
-                    identical(unview(entry.$2), unview(inputs[entry.$1])),
+                    sameArgument(callee, entry.$1, entry.$2, inputs[entry.$1]),
               )) {
             continue;
           }
         }
+        final sourceSelector = origin is InstanceCall
+            ? origin.member.selector
+            : origin.implicitMember?.selector;
+        if (origin case InstanceCall(entryBinding: final binding?)
+            when operation is DirectCall && observed.contains(origin) &&
+                binding.entries.containsValue(callee) &&
+                (members.callTypes?.executionTargetsOf(origin).contains(callee) ?? false)) {
+          final expected = [origin.receiver, ...origin.positional,
+            for (final name in binding.names) origin.named[name]!,
+            ...origin.executionTypes];
+          final inputs = (body.operands[operation] ?? operation.inputs).toList();
+          if (inputs.length == expected.length && expected.indexed.every(
+              (entry) => sameArgument(callee, entry.$1, entry.$2, inputs[entry.$1]))) {
+            continue;
+          }
+        }
+        final selectedSelector = operation is InstanceCall
+            ? operation.member.selector
+            : operation.implicitMember?.selector;
+        if (sourceSelector != null &&
+            selectedSelector == sourceSelector &&
+            callee.kind.isVirtual &&
+            callee.selector == sourceSelector &&
+            observed.contains(origin) &&
+            (members.callTypes?.executionTargetsOf(origin).contains(callee) ??
+                false)) {
+          final original = origin.inputs.toList();
+          final definition = members.program.implementationOf(callee)!;
+          final expected = [
+            original.first,
+            ...callee.signature.bind<Value>(
+              origin is InstanceCall
+                  ? origin.positional
+                  : original.skip(1).toList(),
+              origin is InstanceCall ? origin.named : const {},
+              (i) => definition.defaults[i]!,
+            ),
+          ];
+          final inputs = body.operands[operation] ?? operation.inputs.toList();
+          if (inputs.length == expected.length &&
+              expected.indexed.every(
+                (entry) =>
+                    sameArgument(callee, entry.$1, entry.$2, inputs[entry.$1]),
+              )) {
+            continue;
+          }
+        }
+        if (origin is CheckedTypeArgument &&
+            identical(operation, origin) &&
+            observed.contains(origin) &&
+            origin.implementation == callee &&
+            (members.callTypes?.executionTargetsOf(origin).contains(callee) ??
+                false)) {
+          final inputs = body.operands[operation] ?? origin.inputs.toList();
+          final original = origin.inputs.toList();
+          if (inputs.length == original.length &&
+              original.indexed.every(
+                (entry) => identical(inputs[entry.$1], entry.$2),
+              )) {
+            continue;
+          }
+        }
+        if (origin is DynamicDispatch && operation is DirectCall &&
+            observed.contains(origin) && origin.methodBindings.containsValue(callee) &&
+            (members.callTypes?.executionTargetsOf(origin).contains(callee) ?? false)) {
+          final inputs = body.operands[operation] ?? operation.inputs;
+          if (inputs.length == 1 && identical(inputs.single, origin.receiver)) {
+            continue;
+          }
+        }
+        if (origin is FunctionCall &&
+            operation is FunctionCall &&
+            observed.contains(origin) &&
+            (members.callTypes?.executionTargetsOf(origin).contains(callee) ??
+                false)) {
+          // Captures and supplied arguments are wired by this source operation;
+          // casts, boxes and reification helpers have their own call identities.
+          continue;
+        }
         implicitCalls.add(initializer ?? callee);
+        unobservedCalls[origin] = (
+          caller: body.sourceTarget,
+          target: initializer ?? callee,
+        );
       }
-    }
-    if (managed) {
-      implicitCalls.addAll([
-        heap.allocate,
-        heap.release,
-        heap.isOutOfMemory,
-        heap.runEvents,
-      ]);
     }
     calls.addAll(implicitCalls);
     heap.retain(calls);
-    primitives = heap.primitives.intersection({
-      ...calls,
-      if (managed) heap.invalid,
-    });
+    primitives = heap.primitives.intersection(calls);
     final missing = calls.difference({
       ...callbacks.values,
       ...functions.keys,
       ...primitives,
-      ...layouts.nativeCalls.signatures.keys,
+      ...layouts.nativeCalls.entries.keys,
       ...members.definitions,
-      if (!globals.isEmpty) globals.address,
     });
     if (missing.isNotEmpty) return missing;
     IrProgram(
       [
-        ...layouts.native.classes,
-        if (!globals.isEmpty) globals.declaration,
         ...layouts.closures.classes,
         ?layouts.records.generatedClass,
         layouts.strings.declaration,
@@ -314,7 +459,7 @@ final class ProgramSelection(
       externals: [
         for (final target in [
           ...heap.primitives,
-          ...layouts.nativeCalls.signatures.keys,
+          ...layouts.nativeCalls.entries.keys,
         ])
           IrExternal(target),
         // Source bodies were verified already; this boundary owns generated bodies.
@@ -335,14 +480,44 @@ final class ProgramSelection(
               target,
               defaults: members.program.implementationOf(target)!.defaults,
             ),
-        if (!globals.isEmpty) IrExternal(globals.address),
       ],
     );
     return {};
   }
 
-  // Only exceptions escaping an entry require the native failure lifecycle.
-  bool _unwindsTo(Set<FunctionTarget> roots) {
+  // Calls inherit a context until their own activation binds one. The binding
+  // expires at that activation's exit; a callee cannot initialize its caller.
+  bool _requiresNativeContext(Set<FunctionTarget> roots) {
+    final pending = roots.toList(), visited = <FunctionTarget>{};
+    while (pending.isNotEmpty) {
+      final target = pending.removeLast();
+      if (!visited.add(target)) continue;
+      final body = functions[target];
+      if (body == null) continue;
+      final blocks = [(body.entry, false)], reached = <(Block, bool)>{};
+      while (blocks.isNotEmpty) {
+        final state = blocks.removeLast();
+        if (!reached.add(state)) continue;
+        final (block, initiallyBound) = state;
+        var bound = initiallyBound;
+        for (final operation in body.instructions[block]!) {
+          if (body.aliases.contains(operation)) continue;
+          if (operation is BindNativeContext) bound = true;
+          if (!bound) {
+            if (operation is ReadNativeContext) return true;
+            pending.addAll(body.targetsOf(operation));
+          }
+        }
+        blocks.addAll(
+          body.successors(block).map((edge) => (edge.target, bound)),
+        );
+      }
+    }
+    return false;
+  }
+
+  /// Whether an uncaught Dart failure can escape one of the supplied entries.
+  bool unwindsTo(Set<FunctionTarget> roots) {
     final callers = <FunctionTarget, Set<FunctionTarget>>{};
     final pending = <FunctionTarget>[];
     for (final body in functions.values) {
@@ -350,8 +525,13 @@ final class ProgramSelection(
         final end = body.ends[block];
         if (end is Throw && end.onThrow == null) pending.add(body.target);
         for (final operation in body.instructions[block]!) {
-          if (end is Invoke && identical(end.operation, operation)) continue;
-          if (body.invocations[operation] case final target?) {
+          if (end is Invoke &&
+              (identical(end.operation, operation) ||
+                  operation is IndirectInvocation &&
+                      identical(end.operation, operation.origin))) {
+            continue;
+          }
+          for (final target in body.targetsOf(operation)) {
             (callers[target] ??= {}).add(body.target);
           }
         }

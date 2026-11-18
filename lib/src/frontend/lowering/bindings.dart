@@ -1299,7 +1299,17 @@ final class Bindings({
           layer.type,
           layer.fields,
           members: layer.members.values,
+          implementations: layer.implementations.values,
           constructors: [...layer.constructors.values, initializer],
+          unsupportedForwarders: layer.unsupportedForwarders,
+          weakFields: layer.weakFields,
+          ephemerons: layer.ephemerons,
+          referencePayload: layer.referencePayload,
+          recordStorage: layer.recordStorage,
+          listStorage: layer.listStorage,
+          nativeViewStorage: layer.nativeViewStorage,
+          callableStorage: layer.callableStorage,
+          cellStorage: layer.cellStorage,
         );
       }
       destination = initializer;

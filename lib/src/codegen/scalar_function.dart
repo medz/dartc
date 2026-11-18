@@ -8,9 +8,9 @@ import 'package:dartc/layout.dart';
 import 'double_bits.dart';
 import 'function_allocation.dart';
 import 'function_emitter.dart';
-import 'heap_entry.dart';
 import 'native_adapter.dart';
 import 'native_invocation.dart';
+import 'callable_table_address.dart';
 import 'scalar_binary.dart';
 import 'storage_access.dart';
 import 'type_values.dart';
@@ -28,9 +28,14 @@ final class ScalarFunction<R extends Object>(
     void Function(Fixup, Constant) constant,
     void Function(int, StackRoots, SourceLocation?, int?) safepoint, {
     bool failures = false,
-    bool persistent = false,
     void Function(Fixup, NativeReference)? nativeAddress,
+    void Function(Fixup, NativeData)? nativeDataAddress,
+    int? Function(FunctionTarget)? callableTable,
+    void Function(Fixup, int)? constantSymbol,
+    void Function(Fixup, ModuleObject)? moduleObjectAddress,
     void Function(Fixup, ClassType)? descriptorAddress,
+    void Function(Fixup)? stackMapAddress,
+    void Function(Fixup)? moduleRootsAddress,
     void Function(Fixup, int)? codeAddress,
   }) {
     final adapter = NativeAdapter(emitter);
@@ -67,9 +72,7 @@ final class ScalarFunction<R extends Object>(
         final result = plan.result;
         if (selection.calls[instruction] case final selected?) {
           final native = instruction is NativeInvocation ? instruction : null;
-          final returnAddresses = persistent && native != null
-              ? HeapEntry.park(emitter, selected.parkRegister!)
-              : <Fixup>[];
+          final returnAddresses = <Fixup>[];
           for (final argument in plan.arguments) {
             transfers(argument.loads);
             if (argument.frameValue case final frame?) {
@@ -90,8 +93,8 @@ final class ScalarFunction<R extends Object>(
               );
             }
           }
-          if (native == null) {
-            call(emitter.call(), selected.target!);
+          if (selected.target case final target?) {
+            call(emitter.call(), target);
           } else {
             for (final entry in selected.layout.registerInputs.entries) {
               emitter.loadImmediate(entry.key, entry.value);
@@ -139,6 +142,52 @@ final class ScalarFunction<R extends Object>(
           // The zero result below is the only selected work.
         } else if (selection.constantTests[instruction] case final value?) {
           emitter.loadImmediate(result!, value ? 1 : 0);
+        } else if (instruction is BindNativeContext) {
+          emitter.move(emitter.heapRegister, inputs.single);
+        } else if (instruction is ReadNativeContext) {
+          emitter.move(result!, emitter.heapRegister);
+        } else if (instruction case NativeLocalStorage(:final zeroInitialize)) {
+          final slot = allocation.nativeStorage[instruction]!.offset;
+          final size = selection.nativeStorage[instruction]!.size;
+          emitter.stackAddress(result!, slot);
+          if (zeroInitialize) {
+            final scratch = plan.temporaries.first;
+            var offset = 0;
+            if (size > 64) {
+              final remaining = plan.temporaries.last;
+              emitter.loadImmediate(remaining, size & -8);
+              final loop = emitter.label(), done = emitter.label();
+              emitter.bind(loop);
+              emitter.loadImmediate(scratch, 0);
+              emitter.storeMemory(scratch, result, bytes: 8);
+              emitter.loadImmediate(scratch, 8);
+              emitter.add.emit(result, result, scratch);
+              emitter.subtract.emit(remaining, remaining, scratch);
+              emitter.jumpIfZero(remaining, done);
+              emitter.jump(loop);
+              emitter.bind(done);
+              offset = size & -8;
+            }
+            emitter.loadImmediate(scratch, 0);
+            for (var tail = size - offset, displacement = 0; tail != 0;) {
+              final width = tail >= 8
+                  ? 8
+                  : tail >= 4
+                  ? 4
+                  : tail >= 2
+                  ? 2
+                  : 1;
+              emitter.storeMemory(
+                scratch,
+                result,
+                offset: displacement,
+                bytes: width,
+              );
+              tail -= width;
+              displacement += width;
+            }
+            if (offset != 0) emitter.stackAddress(result, slot);
+          }
         } else if (instruction case FrameValue(:final kind)) {
           final frame = allocation.frame!;
           switch (kind) {
@@ -147,6 +196,10 @@ final class ScalarFunction<R extends Object>(
             case .returnAddress:
               emitter.loadStack(result!, frame.returnAddressOffset);
           }
+        } else if (instruction is StackMapAddress) {
+          emitter.address(result!, stackMapAddress!);
+        } else if (instruction is ModuleRootsAddress) {
+          emitter.address(result!, moduleRootsAddress!);
         } else if (instruction case ObjectDescriptorAddress(
           :final declaration,
         )) {
@@ -154,6 +207,30 @@ final class ScalarFunction<R extends Object>(
             result!,
             (fixup) => descriptorAddress!(fixup, declaration),
           );
+        } else if (instruction case ModuleObjectReference(:final declaration)) {
+          final address = moduleObjectAddress;
+          if (address == null) {
+            throw StateError('Module object requires a module storage owner.');
+          }
+          emitter.address(result!, (fixup) => address(fixup, declaration));
+        } else if (instruction case CallableTableAddress(:final target)) {
+          if (callableTable == null || constantSymbol == null) {
+            throw StateError('Callable entries require a module table owner.');
+          }
+          final symbol = callableTable(target);
+          if (symbol == null) {
+            emitter.loadImmediate(result!, 0);
+          } else {
+            emitter.address(result!, (fixup) => constantSymbol(fixup, symbol));
+          }
+        } else if (instruction case NativeDataAddress(:final declaration)) {
+          final address = nativeDataAddress;
+          if (address == null) {
+            throw StateError(
+              'Native data address requires a module data owner.',
+            );
+          }
+          emitter.address(result!, (fixup) => address(fixup, declaration));
         } else if (instruction case NativeSymbolAddress(:final reference)) {
           emitter.address(
             result!,
@@ -167,7 +244,7 @@ final class ScalarFunction<R extends Object>(
                 ObjectHashCode(:final operand, direct: true)
             when !selection.body.aliases.contains(instruction) &&
                 (instruction is ObjectHashCode || operand.type != .nullType) &&
-                layouts.representation(operand.type) == .reference) {
+                selection.body.shapeOf(operand).isReference) {
           final done = emitter.label();
           if (instruction is ObjectRuntimeType) {
             emitter.address(
@@ -188,27 +265,8 @@ final class ScalarFunction<R extends Object>(
             signed: false,
           );
           emitter.bind(done);
-        } else if (instruction case NewCell(:final initial)
-            when selection.cells.contains(instruction)) {
-          final slot = allocation.homes[instruction]!.offset;
-          if (initial != null) {
-            emitter.storeStack(inputs.single, slot);
-          } else if (plan.temporaries.isNotEmpty) {
-            final scratch = plan.temporaries.single;
-            emitter.loadImmediate(scratch, 0);
-            emitter.storeStack(scratch, slot);
-          }
         } else if (instruction is KeepAlive) {
           // Lifetime is represented by the allocation; there is no instruction.
-        } else if (instruction is ReadCell &&
-            !selection.body.aliases.contains(instruction)) {
-          emitter.loadStack(
-            result!,
-            allocation.homes[instruction.cell]!.offset,
-          );
-        } else if (instruction case WriteCell(:final cell)
-            when selection.cells.contains(cell)) {
-          emitter.storeStack(inputs.single, allocation.homes[cell]!.offset);
         } else if (instruction
             case StoreField(:final field) || StorageWrite(:final field)) {
           emitter.storeMemory(
@@ -300,7 +358,7 @@ final class ScalarFunction<R extends Object>(
             }
           }
         } else if (instruction case NumericToInt(:final operand)) {
-          if (operand.type == .integer) {
+          if (selection.body.typeOf(operand) == .integer) {
             emitter.move(result!, inputs.single);
           } else {
             emitter.truncateDoubleToInt(result!, inputs.single);
@@ -309,7 +367,7 @@ final class ScalarFunction<R extends Object>(
             case NumericToDouble(:final operand) ||
                 NumericRoundToDouble(:final operand) ||
                 NumericSquareRoot(:final operand)) {
-          if (operand.type == .integer) {
+          if (selection.body.typeOf(operand) == .integer) {
             emitter.convertIntToDouble(result!, inputs.single);
           } else if (instruction is! NumericSquareRoot) {
             emitter.move(result!, inputs.single);
@@ -317,7 +375,9 @@ final class ScalarFunction<R extends Object>(
           if (instruction is NumericSquareRoot) {
             emitter.squareRootDouble(
               result!,
-              operand.type == .integer ? result : inputs.single,
+              selection.body.typeOf(operand) == .integer
+                  ? result
+                  : inputs.single,
             );
           }
         } else if (instruction is NumericNegate) {

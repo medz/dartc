@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:dartc/ir.dart';
-import 'package:dartc/codegen.dart' show ProgramNormalization;
+import 'package:dartc/codegen.dart'
+    show ProgramNormalization, RepresentationLowering;
 import 'package:dartc/abi.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/suspension_normalization.dart';
@@ -52,6 +53,8 @@ void main() {
       normalized.classes,
       normalized.functions.where((body) => !external.contains(body.target)),
       globals: normalized.globals,
+      executionShapes: normalized.executionShapes,
+      nativeBoundaries: normalized.nativeBoundaries,
       externals: [...normalized.externals, ...external.map(IrExternal.new)],
     );
     runner = IrInterpreter(
@@ -87,6 +90,100 @@ void main() {
       },
     );
   });
+
+  test(
+    'suspension retains a scalar capture with managed execution storage',
+    () {
+      final target = FunctionTarget(
+        null,
+        'retainedScalar',
+        CoreTypes.iterableOf(.integer),
+        [.integer],
+      );
+      final entry = Block(target.parameterTypes),
+          again = Block(),
+          done = Block();
+      entry.finish(Yield(entry.parameters.single, Jump(again)));
+      again.finish(Yield(entry.parameters.single, Jump(done)));
+      done.finish(const Return());
+      final original = IrFunction(
+        target,
+        [entry, again, done],
+        bodyKind: .syncGenerator,
+        yieldType: .integer,
+        execution: FunctionExecution({
+          entry.parameters.single: ExecutionShape.reference,
+        }),
+      );
+      final shapes = program.executionShapes ?? ExecutionShapes.defaults;
+      final source = IrProgram(
+        program.classes,
+        [...program.functions, original],
+        globals: program.globals,
+        externals: program.externals,
+        executionShapes: ExecutionShapes(
+          entries: {
+            ...shapes.entries,
+            target: ExecutionSignature([
+              ExecutionShape.reference,
+            ], ExecutionShape.reference),
+          },
+          slots: shapes.slots,
+        ),
+      );
+      var normalized = SuspensionNormalization(source, heapRuntime).run();
+      bool belongs(FunctionTarget function) =>
+          function == target ||
+          function.enclosing != null && belongs(function.enclosing!);
+      final definitions = normalized.functions
+          .where((body) => belongs(body.target))
+          .map((body) => body.target)
+          .toList();
+      normalized = RepresentationLowering().lower(normalized, definitions);
+      final authority = normalized.executionShapes!;
+      var retained = 0;
+      for (final function in normalized.functions.where(
+        (body) => belongs(body.target),
+      )) {
+        authority.verify(function);
+        for (final (index, type) in function.target.captures.indexed) {
+          if (type != ValueType.integer) continue;
+          retained++;
+          expect(
+            authority.slotOf(CaptureSlot(function.target, index)),
+            ExecutionShape.reference,
+          );
+          expect(
+            authority.entryOf(function.target).parameters[index + 1],
+            ExecutionShape.reference,
+          );
+        }
+      }
+      expect(retained, greaterThanOrEqualTo(2));
+      late IrInterpreter evaluator;
+      evaluator = IrInterpreter(
+        normalized,
+        {},
+        externalCalls: {
+          heapRuntime.sync!.create: (args) =>
+              _Iterations(args.single, evaluator),
+          heapRuntime.sync!.yieldValue: (args) {
+            final iterator = args[0] as _Iteration;
+            iterator.current = args[1];
+            iterator.step = args[2];
+            return null;
+          },
+        },
+      );
+      final root = normalized.implementationOf(target) as IrFunction;
+      for (final n in [7, 42]) {
+        expect((evaluator.run(root, [n]) as Iterable<Object?>).toList(), [
+          n,
+          n,
+        ]);
+      }
+    },
+  );
 
   test('suspension normalization preserves recorded throws', () {
     final target = FunctionTarget(

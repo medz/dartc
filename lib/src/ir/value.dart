@@ -6,9 +6,18 @@ import 'dart:typed_data';
 import 'package:dartc/interop.dart';
 
 import 'core_types.dart';
+import 'call_entry.dart';
+import 'member_entry.dart';
+import 'callable_storage.dart';
+import 'cell_storage.dart';
+import 'storage_view.dart';
 import 'ffi_types.dart';
+import 'execution_shape.dart';
+import 'native_data.dart';
+import 'module_object.dart';
 import 'signature.dart';
 import 'type.dart';
+import 'type_metadata.dart';
 
 /// An operand in static single assignment (SSA) form.
 ///
@@ -29,6 +38,13 @@ abstract class const Value(
     }
     return value.type;
   }
+
+  /// Whether this value is a built-in descriptor rather than a user Type.
+  bool get isTypeDescriptor => switch (this) {
+    TypeConstant() || ReifyType() || ObjectRuntimeType(direct: true) => true,
+    TypeView(:final operand) => operand.isTypeDescriptor,
+    _ => type.runtimeValueBound == TypeMetadata.type,
+  };
 }
 
 /// An edge-only result supplied by one Await's successful resumption.
@@ -45,6 +61,35 @@ final class AwaitResult(ValueType type) extends Value {
 
 /// A compile-time value that can be used in any block.
 sealed class const Constant(super.type) extends Value {
+  /// The established bound usable for static execution and assignment.
+  ///
+  /// This preserves callable value-level proofs and refines record fields from
+  /// their known values. It does not describe observable runtime identity; [type]
+  /// remains the operand's declared static type.
+  ValueType get provenValueType => _valueType(reified: false);
+
+  /// The actual runtime type used by observation, type checks and encoding.
+  ///
+  /// Callable signatures erase value-level proofs. Records derive their type
+  /// recursively from actual field types. Built-in type literals use metadata;
+  /// user Type implementations retain their nominal class.
+  ValueType get runtimeValueType => _valueType(reified: true);
+
+  ValueType _valueType({required bool reified}) => switch (this) {
+    TypeConstant() => TypeMetadata.type,
+    final FunctionConstant value when reified => value.reifiedSignature,
+    RecordConstant(:final fields, type: final RecordType shape) => RecordType(
+      fields
+          .take(shape.positionalCount)
+          .map((field) => field._valueType(reified: reified)),
+      {
+        for (final entry in shape.slots.entries.skip(shape.positionalCount))
+          entry.key: fields[entry.value]._valueType(reified: reified),
+      },
+    ),
+    _ => type,
+  };
+
   /// A structural identity key without executing Dart user equality or hashing.
   ///
   /// Scalar representation, collection order, nominal field slots and complete
@@ -52,7 +97,7 @@ sealed class const Constant(super.type) extends Value {
   Object get structuralKey => switch (this) {
     TypeConstant(:final representedType) => (
       TypeConstant,
-      representedType.normalize(),
+      representedType.reify(),
     ),
     ScalarConstant(:final type, :final value) => (
       type,
@@ -100,6 +145,50 @@ final class ReifyType(final ValueType template) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => const [];
+}
+
+/// Validates one reified argument against its simultaneously substituted bound.
+///
+/// Normal completion returns [argument] unchanged. The complete raw descriptor
+/// environment is available before any binder is assumed valid, including for
+/// recursive bounds. A bound implementation is ordinary IR with these exact
+/// inputs; the semantic checkpoint survives its implementation's optimization.
+final class CheckedTypeArgument(
+  final TypeParameterType parameter,
+  final Value argument,
+  Map<TypeParameterType, Value> environment, {
+  final FunctionTarget? implementation,
+}) extends Instruction {
+  final Map<TypeParameterType, Value> environment = .unmodifiable(environment);
+
+  this : super(TypeMetadata.type) {
+    if (!identical(this.environment[parameter], argument) ||
+        !this.environment.keys.toSet().containsAll(
+          parameter.bound.freeTypeParameters,
+        ) ||
+        inputs.any(
+          (value) =>
+              !TypeMetadata.type.accepts(value.type) && !value.isTypeDescriptor,
+        )) {
+      throw ArgumentError(
+        'A checked type argument requires its complete raw descriptor environment.',
+      );
+    }
+    if (implementation case final target?
+        when target.kind != .function ||
+            target.isAbstract ||
+            target.signature !=
+                FunctionType(TypeMetadata.type, [
+                  for (final _ in inputs) TypeMetadata.type,
+                ])) {
+      throw ArgumentError(
+        'Type argument implementation must preserve its explicit metadata signature.',
+      );
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [argument, ...environment.values];
 }
 
 /// Reads Dart Object.runtimeType, retaining virtual dispatch for user objects.
@@ -156,6 +245,10 @@ final class FunctionConstant._(
 
   /// The target type arguments in an erased constructor alias's binder scope.
   final List<ValueType>? constructorTypeArguments,
+
+  /// The ordinary implementation of this callable view, when lowered.
+  /// This entry changes execution, never the source identity or function type.
+  final FunctionTarget? invocationEntry,
 ) extends Constant {
   new(
     FunctionTarget target, {
@@ -164,6 +257,7 @@ final class FunctionConstant._(
     FunctionType? constructorSignature,
     (Uri, String)? constructorAlias,
     Iterable<ValueType>? constructorTypeArguments,
+    FunctionTarget? invocationEntry,
   }) : this._(
          target,
          ownerType,
@@ -173,6 +267,7 @@ final class FunctionConstant._(
          constructorTypeArguments == null
              ? null
              : .unmodifiable(constructorTypeArguments),
+         invocationEntry,
        );
   this
     : super(
@@ -250,7 +345,51 @@ final class FunctionConstant._(
         target.kind == .initializer && target.owner!.isAbstract) {
       throw ArgumentError('Expected a callable without a bound receiver.');
     }
+    if (invocationEntry case final entry?) {
+      if (entry.kind != .function ||
+          entry.isAbstract ||
+          entry.implementation != entry ||
+          entry.signature != genericSignature) {
+        throw ArgumentError(
+          'A function invocation entry must match its unapplied callable view.',
+        );
+      }
+    }
   }
+
+  /// The declared callable view before [typeArguments] are applied.
+  FunctionType get genericSignature =>
+      constructorSignature ?? target.tearOffSignature(ownerType: ownerType);
+
+  /// The callable signature observed at runtime, without value-level proofs.
+  ///
+  /// An unaliased raw constructor tear-off retains its declaration's generic
+  /// signature, even if a static view spells equivalent default bounds.
+  FunctionType get reifiedSignature {
+    final original =
+        constructorAlias == null &&
+            constructorSignature?.typeParameters.isNotEmpty == true
+        ? target.tearOffSignature(ownerType: ownerType, reified: true)
+        : constructorSignature ??
+              target.tearOffSignature(ownerType: ownerType, reified: true);
+    return (typeArguments == null
+                ? original
+                : original.instantiate(typeArguments!))
+            .reify()
+        as FunctionType;
+  }
+
+  /// Keeps source identity and instantiation while selecting a checked entry.
+  FunctionConstant withInvocationEntry(FunctionTarget entry) =>
+      FunctionConstant(
+        target,
+        ownerType: ownerType,
+        typeArguments: typeArguments,
+        constructorSignature: constructorSignature,
+        constructorAlias: constructorAlias,
+        constructorTypeArguments: constructorTypeArguments,
+        invocationEntry: entry,
+      );
 
   /// Resolves this callable's actual declaration, owner and applied arguments.
   /// Redirecting constructors and erased aliases retain their checked binders.
@@ -260,6 +399,9 @@ final class FunctionConstant._(
     final signature = (type as FunctionType).instantiate(arguments);
     var owner = ownerType;
     var applied = typeArguments ?? arguments;
+    if (invocationEntry case final entry?) {
+      return (target: entry, owner: null, typeArguments: applied);
+    }
     if (constructorTypeArguments case final template?) {
       applied = [
         for (final type in template)
@@ -319,7 +461,7 @@ final class SequenceConstant(ClassType type, Iterable<Constant> elements)
     extends Constant {
   final List<Constant> elements = .unmodifiable(elements);
   late final Object _key = _ConstantKey(
-    type.normalize(),
+    type.reify(),
     elements.map((element) => element.structuralKey),
   );
 
@@ -342,7 +484,7 @@ final class MapConstant(ClassType type, Iterable<(Constant, Constant)> entries)
     extends Constant {
   final List<(Constant, Constant)> entries = .unmodifiable(entries);
   late final Object _key = _ConstantKey(
-    type.normalize(),
+    type.reify(),
     entries.map((entry) => (entry.$1.structuralKey, entry.$2.structuralKey)),
   );
 
@@ -372,7 +514,7 @@ final class ObjectConstant(
   ///
   /// Nonempty payloads require a declared reference-payload class in the program.
   final List<Constant> payload = .unmodifiable(payload);
-  late final Object _key = _ConstantKey(type.normalize(), [
+  late final Object _key = _ConstantKey(type.reify(), [
     fields.length,
     for (final field in _orderedFields(fields)) ...[
       field,
@@ -427,9 +569,9 @@ Object _functionConstantKey(FunctionConstant value) {
       : value.typeArguments;
   return (
     value.target,
-    owner?.normalize(),
+    owner?.reify(),
     value.constructorAlias,
-    arguments?.fold<Object?>(null, (tail, type) => (tail, type.normalize())),
+    arguments?.fold<Object?>(null, (tail, type) => (tail, type.reify())),
   );
 }
 
@@ -506,16 +648,36 @@ sealed class Instruction(super.type) extends Value {
   /// The SSA operands consumed by the operation.
   Iterable<Value> get inputs;
 
+  /// Invariant storage capability that the actual allocation must supply.
+  StorageView? get requiredStorageView => switch (this) {
+    CellStorageView(:final storage, :final type) =>
+      storage.viewOf(type as CellType),
+    CellStorageReference(:final storage, :final cell) =>
+      storage.viewOf(cell.type as CellType),
+    LoadField(:final storageView) ||
+    StoreField(:final storageView) ||
+    InitializeStorageField(:final storageView) => storageView,
+    _ => null,
+  };
+
+  /// Logical storage types established or consumed by this instruction.
+  StorageView? get storageContract => switch (this) {
+    Construct(:final storageView) || NewPayload(:final storageView) => storageView,
+    ManagedStorageAllocation(:final storageView) => storageView,
+    _ => requiredStorageView,
+  };
+
   /// Copies operands and substitutes free types through [environment].
   ///
   /// Declaration identities, flags and native signatures are retained. Each
-  /// operand must have its substituted type; constructors validate remaining
+  /// operand is visited once in [inputs] order, including repeated values. Each
+  /// operand must have its substituted flow type; constructors validate remaining
   /// operation contracts. Lexical declarations require their own rebinding.
   Instruction mapInputs(
     Value Function(Value) replace, {
     Map<TypeParameterType, ValueType> environment = const {},
   }) {
-    ValueType type(ValueType value) => value.substitute(environment);
+    ValueType type(ValueType value) => value.substituteForFlow(environment);
     Value map(Value value) {
       final result = replace(value);
       if (result.type != type(value.type)) {
@@ -527,13 +689,64 @@ sealed class Instruction(super.type) extends Value {
     }
 
     Value? optional(Value? value) => value == null ? null : map(value);
+    FunctionCall functionCall(FunctionCall call) {
+      final function = map(call.function);
+      final arguments = call.typeArguments.map(type).toList();
+      var target = call.target;
+      if (target != null &&
+          call.function is FunctionConstant &&
+          function is FunctionConstant) {
+        target = function.resolveInvocation(arguments).target;
+      }
+      return FunctionCall(
+        function,
+        call.positional.map(map).toList(),
+        {for (final entry in call.named.entries) entry.key: map(entry.value)},
+        arguments,
+        target,
+        call.entryBinding,
+      );
+    }
+
+    RawNativeCall rawNativeCall(RawNativeCall call) {
+      final address = map(call.address);
+      final resultStorage = optional(call.resultStorage);
+      final arguments = call.arguments.map(map).toList();
+      return RawNativeCall(
+        address,
+        call.signature,
+        arguments,
+        resultStorage: resultStorage,
+        isLeaf: call.isLeaf,
+      );
+    }
+
     return switch (this) {
       CaptureStackTrace() => CaptureStackTrace(),
       FrameValue(:final kind) => FrameValue(kind),
+      StackMapAddress() => StackMapAddress(),
+      ModuleRootsAddress() => ModuleRootsAddress(),
+      ReadNativeContext() => ReadNativeContext(),
+      BindNativeContext(:final address) => BindNativeContext(map(address)),
+      NativeLocalStorage(
+        :final storage,
+        :final zeroInitialize,
+        :final declaration,
+      ) =>
+        NativeLocalStorage._(storage, zeroInitialize, declaration),
       ObjectDescriptorAddress(:final declaration) => ObjectDescriptorAddress(
         declaration,
       ),
-      final ReifyType v => ReifyType(type(v.template)),
+      final ReifyType v => ReifyType(v.template.substitute(environment)),
+      final CheckedTypeArgument v => CheckedTypeArgument(
+        type(v.parameter) as TypeParameterType,
+        map(v.argument),
+        {
+          for (final entry in v.environment.entries)
+            type(entry.key) as TypeParameterType: map(entry.value),
+        },
+        implementation: v.implementation,
+      ),
       final ObjectRuntimeType v => ObjectRuntimeType(
         map(v.operand),
         direct: v.direct,
@@ -544,13 +757,23 @@ sealed class Instruction(super.type) extends Value {
       ),
       final ObjectClassName v => ObjectClassName(map(v.operand)),
       final NativeSymbolAddress v => NativeSymbolAddress(v.reference),
+      final NativeDataAddress v => NativeDataAddress(v.declaration),
+      final FunctionEntryTableAddress v => FunctionEntryTableAddress(v.target),
+      final ModuleObjectReference v => ModuleObjectReference(v.declaration),
       final NativeCallbackAddress v => NativeCallbackAddress(v.target),
       final ReferenceAddress v => ReferenceAddress(map(v.object)),
-      final AllocatedObject v => AllocatedObject(
-        map(v.address),
-        type(v.type) as ClassType,
-        map(v.payloadBytes),
-      ),
+      final AllocatedObject v =>
+        v.callableStorage != null
+            ? AllocatedObject.callable(
+                map(v.address),
+                v.callableStorage!,
+                type(v.type),
+              )
+            : AllocatedObject(
+                map(v.address),
+                type(v.storageType) as ClassType,
+                map(v.payloadBytes),
+              ),
       final ReferenceFromAddress v => ReferenceFromAddress(
         map(v.address),
         type(v.type),
@@ -560,7 +783,11 @@ sealed class Instruction(super.type) extends Value {
         type(v.type) as ClassType,
       ),
       final PointerAddress v => PointerAddress(map(v.pointer)),
-      final NewPayload v => NewPayload(type(v.type) as ClassType, map(v.bytes)),
+      final ManagedStorageAllocation v => ManagedStorageAllocation(
+        v.allocator, v.storageView.mapTypes(type), v.inputs.map(map),
+      ),
+      final NewPayload v => NewPayload(type(v.type) as ClassType, map(v.bytes),
+          storageView: v.storageView?.mapTypes(type)),
       final NativeView v => NativeView(
         type(v.type) as ClassType,
         address: optional(v.address),
@@ -606,7 +833,35 @@ sealed class Instruction(super.type) extends Value {
       final LoadLibrary v => LoadLibrary(v.reference),
       final CheckLibraryLoaded v => CheckLibraryLoaded(v.reference),
       final AssertionFailure v => AssertionFailure(optional(v.message)),
-      final MakeClosure v => MakeClosure(v.target, v.inputs.map(map)),
+      final MakeClosure v => MakeClosure(v.target, v.inputs.map(map).toList()),
+      final CellStorageView v => CellStorageView(
+        map(v.backing),
+        type(v.type) as CellType,
+        v.storage,
+      ),
+      final CellStorageReference v => CellStorageReference(
+        map(v.cell),
+        v.storage,
+      ),
+      final CellReference v => CellReference(map(v.cell)),
+      final InitializeStorageField v => InitializeStorageField(
+        v.field,
+        map(v.destination),
+        map(v.source),
+        storageView: v.storageView?.mapTypes(type),
+      ),
+      final CallableReference v => CallableReference(map(v.function)),
+      final ReadFunctionEnvironment v => ReadFunctionEnvironment._(
+        map(v.function),
+        v.source,
+        v.capture,
+        type(v.type),
+      ),
+      final ReadFunctionTypeArgument v => ReadFunctionTypeArgument(
+        map(v.function),
+        v.source,
+        v.parameter,
+      ),
       final NewCell v => NewCell(
         type(v.type) as CellType,
         optional(v.initial),
@@ -620,6 +875,8 @@ sealed class Instruction(super.type) extends Value {
         map(v.receiver),
         direct: v.direct,
         ownerType: v.ownerType == null ? null : type(v.ownerType!) as ClassType,
+        entryBinding: v.entryBinding,
+        executionTypes: v.executionTypes.map(map),
       ),
       final InstantiateFunction v => InstantiateFunction(
         map(v.function),
@@ -630,53 +887,61 @@ sealed class Instruction(super.type) extends Value {
         map(v.instance),
         v.declaration,
       ),
-      final FunctionCall v => FunctionCall(
-        map(v.function),
-        v.positional.map(map),
-        {for (final e in v.named.entries) e.key: map(e.value)},
-        v.typeArguments.map(type),
-        v.target,
-      ),
+      final FunctionCall v => functionCall(v),
       final LoadGlobal v => LoadGlobal(v.global),
       final StoreGlobal v => StoreGlobal(v.global, map(v.value)),
-      final LoadField v => LoadField(v.field, map(v.receiver)),
-      final StoreField v => StoreField(v.field, map(v.receiver), map(v.value)),
+      final LoadField v => LoadField(v.field, map(v.receiver), storageView: v.storageView?.mapTypes(type)),
+      final StoreField v => StoreField(v.field, map(v.receiver), map(v.value), storageView: v.storageView?.mapTypes(type)),
       final InstanceCall v => InstanceCall(
         v.member,
         map(v.receiver),
-        v.positional.map(map),
+        v.positional.map(map).toList(),
         {for (final e in v.named.entries) e.key: map(e.value)},
         v.ownerType == null ? null : type(v.ownerType!) as ClassType,
         v.typeArguments.map(type),
+        v.entryBinding,
+        v.executionTypes.map(map).toList(),
+        v.resultView == null ? null : type(v.resultView!),
       ),
       final DynamicDispatch v => DynamicDispatch(
         map(v.receiver),
         v.selector,
-        v.positional.map(map),
+        v.positional.map(map).toList(),
         {for (final e in v.named.entries) e.key: map(e.value)},
         v.typeArguments.map(type),
         v.failure,
         v.getterCalls,
+        v.entryBinding,
+        v.methodBindings,
       ),
       final MakeInvocation v => MakeInvocation(
         v.selector,
-        v.positional.map(map),
+        v.positional.map(map).toList(),
         {for (final e in v.named.entries) e.key: map(e.value)},
         v.typeArguments.map(type),
       ),
       final InitializeObject v => InitializeObject(
         v.initializer,
         map(v.receiver),
-        v.inputs.skip(1).map(map),
+        v.inputs.skip(1).map(map).toList(),
       ),
-      final Construct v => Construct(
-        v.initializer,
-        v.inputs.map(map),
-        instantiatedType: type(v.instantiatedType) as ClassType,
-      ),
+      final Construct v =>
+        v.callableStorage != null
+            ? Construct.callable(
+                v.callableStorage!,
+                v.arguments.map(map).toList(),
+                type(v.type),
+                map(v.typeDescriptor!),
+              )
+            : Construct(
+                v.initializer,
+                v.inputs.map(map).toList(),
+                instantiatedType: type(v.instantiatedType) as ClassType,
+                storageView: v.storageView?.mapTypes(type),
+              ),
       final MakeRecord v => MakeRecord(
         type(v.type) as RecordType,
-        v.inputs.map(map),
+        v.inputs.map(map).toList(),
       ),
       final RecordGet v => RecordGet(map(v.record), v.slot),
       final TypeTest v => TypeTest(
@@ -685,6 +950,13 @@ sealed class Instruction(super.type) extends Value {
         negated: v.negated,
       ),
       final TypeView v => TypeView(map(v.operand), type(v.type)),
+      final MaterializeValue v => MaterializeValue(map(v.value)),
+      final MaterializedValue v => MaterializedValue(
+        map(v.value),
+        map(v.backing),
+      ),
+      final ConstantCarrier v => ConstantCarrier(map(v.value) as Constant),
+      final ProjectValue v => ProjectValue(map(v.value), v.shape),
       final UncheckedCast v => UncheckedCast(map(v.operand), type(v.type)),
       final TypeCast v => TypeCast(map(v.operand), type(v.type)),
       final NullCheck v => NullCheck(map(v.operand)),
@@ -699,6 +971,7 @@ sealed class Instruction(super.type) extends Value {
         map(v.left),
         map(v.right),
       ),
+      final RawNativeCall v => rawNativeCall(v),
       final NativeCall v => switch (map(v.pointer)) {
         final NativeSymbolAddress pointer
             when pointer.reference.type == NativeFunctionType(v.signature) &&
@@ -706,14 +979,14 @@ sealed class Instruction(super.type) extends Value {
           NativeCall.symbol(
             pointer,
             type(v.dartSignature) as FunctionType,
-            v.arguments.map(map),
+            v.arguments.map(map).toList(),
             borrowedOwners: {
               for (final e in v.borrowedOwners.entries) e.key: map(e.value),
             },
           ),
         final pointer => NativeCall(
           pointer,
-          v.arguments.map(map),
+          v.arguments.map(map).toList(),
           isLeaf: v.isLeaf,
           borrowedOwners: {
             for (final e in v.borrowedOwners.entries) e.key: map(e.value),
@@ -722,9 +995,13 @@ sealed class Instruction(super.type) extends Value {
       },
       final DirectCall v => DirectCall(
         v.target,
-        v.inputs.map(map),
+        v.inputs.map(map).toList(),
         ownerType: v.ownerType == null ? null : type(v.ownerType!) as ClassType,
         typeArguments: v.typeArguments.map(type),
+        lexicalEnvironment: {
+          for (final entry in v.lexicalEnvironment.entries)
+            entry.key: type(entry.value),
+        },
       ),
       final NumericNegate v => NumericNegate(map(v.operand)),
       final NumericToDouble v => NumericToDouble(map(v.operand)),
@@ -845,15 +1122,10 @@ sealed class Instruction(super.type) extends Value {
           receiver: operand.type,
           selector: (kind: .getter, name: 'hashCode', privateScope: null),
         ),
-        Equals(:final left, :final right, mayCallUserCode: true)
-            when left is! TypeConstant &&
-                left is! ReifyType &&
-                left.type != .nullType &&
-                right.type != .nullType =>
-          (
-            receiver: left.type,
-            selector: (kind: .method, name: '==', privateScope: null),
-          ),
+        Equals(:final left, mayCallUserCode: true) => (
+          receiver: left.type,
+          selector: (kind: .method, name: '==', privateScope: null),
+        ),
         _ => null,
       };
 
@@ -869,6 +1141,46 @@ sealed class Instruction(super.type) extends Value {
   static const _checkedAllocate = <Effect>{.allocates, .mayThrow};
   static const _checkedWrite = <Effect>{.writesStorage, .mayThrow};
   static const _bindOnce = <Effect>{.readsStorage, .writesStorage, .mayThrow};
+
+  /// Types whose body-scoped binders must be available before this operation.
+  Iterable<ValueType> get referencedTypes sync* {
+    yield type;
+    yield* inputs.map((value) => value.type);
+    if (storageContract case final view?) {
+      yield view.storageType;
+      yield view.capability;
+      yield* view.fields.values;
+    }
+    switch (this) {
+      case ReifyType(:final template):
+        yield template;
+      case MakeClosure(:final target):
+        yield* target.capturedTypeParameters;
+      case TypeTest(:final testedType):
+        yield testedType;
+      case DirectCall(
+        :final typeArguments,
+        :final ownerType,
+        :final lexicalEnvironment,
+      ):
+        yield* typeArguments;
+        yield* lexicalEnvironment.values;
+        if (ownerType != null) yield ownerType;
+      case FunctionCall(:final typeArguments) ||
+          InstantiateFunction(:final typeArguments):
+        yield* typeArguments;
+      case DynamicDispatch(:final typeArguments) ||
+          MakeInvocation(:final typeArguments):
+        yield* typeArguments;
+      case BindMethod(:final ownerType):
+        if (ownerType != null) yield ownerType;
+      case InstanceCall(:final typeArguments, :final ownerType):
+        yield* typeArguments;
+        if (ownerType != null) yield ownerType;
+      default:
+        break;
+    }
+  }
 
   /// A conservative bound on this operation's effects on every path.
   ///
@@ -897,8 +1209,11 @@ sealed class Instruction(super.type) extends Value {
     IteratorMoveNext() ||
     IteratorCurrent() ||
     DirectCall() ||
+    ManagedStorageAllocation() ||
     InitializeObject() ||
     NativeCall() ||
+    RawNativeCall() ||
+    CheckedTypeArgument(implementation: != null) ||
     LoadLibrary() ||
     InstanceCall() ||
     DynamicDispatch() ||
@@ -912,6 +1227,7 @@ sealed class Instruction(super.type) extends Value {
     InstantiateFunctionFrom() ||
     NewCell() ||
     NewPayload() => _checkedAllocate,
+    MaterializeValue() => _checkedAllocate,
     CaptureStackTrace() ||
     NewCollection() ||
     MakeInvocation() ||
@@ -922,7 +1238,8 @@ sealed class Instruction(super.type) extends Value {
     AssertionFailure() ||
     PatternMatchFailure() => _allocate,
     CopyCell() => const {.readsStorage, .allocates},
-    CopyNative() => const {.readsStorage, .writesStorage},
+    CopyNative() ||
+    InitializeStorageField() => const {.readsStorage, .writesStorage},
     LoadGlobal(global: GlobalVariable(initializer: != null)) ||
     LoadField(field: InstanceField(initializer: != null)) ||
     ReadCell(cell: Value(type: CellType(isLate: true))) => _call,
@@ -934,14 +1251,19 @@ sealed class Instruction(super.type) extends Value {
     ) => const {.readsStorage, .mayThrow},
     LoadGlobal() ||
     LoadField() ||
+    ReadFunctionEnvironment() ||
+    ReadFunctionTypeArgument() ||
     ReadCell() ||
+    ReadNativeContext() ||
     StringLength() ||
     LoadObjectData() ||
     LoadObjectReference() ||
     ReferenceAddress() ||
     ReferenceFromAddress() ||
+    ProjectValue() ||
     LoadNative() => const {.readsStorage},
     StringCodeUnitAt() => const {.readsStorage, .mayThrow},
+    CheckedTypeArgument() => const {.mayThrow},
     StoreGlobal(global: GlobalVariable(isFinal: true)) ||
     StoreField(field: InstanceField(isLate: true, isFinal: true)) ||
     WriteCell(
@@ -949,12 +1271,8 @@ sealed class Instruction(super.type) extends Value {
     ) => _bindOnce,
     StoreField(:final field) when field.type.freeTypeParameters.isNotEmpty =>
       _checkedWrite,
-    WriteCell(
-      cell: Value(type: CellType(:final content)),
-      value: Value(type: final source),
-    )
-        when (source == .integer || source == .floating) && source != content =>
-      _checkedWrite,
+    BindNativeContext() ||
+    NativeLocalStorage(zeroInitialize: true) ||
     StoreGlobal() ||
     StoreField() ||
     WriteCell() ||
@@ -968,19 +1286,21 @@ sealed class Instruction(super.type) extends Value {
     NumericToInt(checked: true, operand: Value(type: final type))
         when type != .integer =>
       const {.mayThrow},
-    TypeView(:final operand) || UncheckedCast(:final operand)
-        when operand is! Constant &&
-            (operand.type == .integer || operand.type == .floating) &&
-            type != .integer &&
-            type != .floating =>
-      _allocate,
     TypeTest(testedType: != ValueType.nullType) => _allocate,
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() ||
     NativeView() => _allocate,
+    NativeLocalStorage() ||
     FrameValue() ||
     AllocatedObject() ||
+    MaterializedValue() ||
+    ConstantCarrier() ||
+    FunctionEntryTableAddress() ||
+    CellStorageView() ||
+    CellStorageReference() ||
+    CellReference() ||
+    CallableReference() ||
     Identical() ||
     Equals() ||
     IntBinary() ||
@@ -998,7 +1318,11 @@ sealed class Instruction(super.type) extends Value {
     PointerAddress() ||
     NativeAddress() ||
     ObjectDescriptorAddress() ||
+    StackMapAddress() ||
+    ModuleRootsAddress() ||
     NativeSymbolAddress() ||
+    NativeDataAddress() ||
+    ModuleObjectReference() ||
     NativeSize() ||
     NativeFieldOffset() => const {},
   };
@@ -1039,6 +1363,54 @@ final class FrameValue(final FrameValueKind kind) extends Instruction {
   Iterable<Value> get inputs => const [];
 }
 
+/// Reads the native calling context inherited by this activation.
+/// The address follows the current binding; it does not read pointed-to bytes.
+final class ReadNativeContext() extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Binds this activation's native calling context without allocation or GC.
+///
+/// Ordinary callees inherit [address]. Further bindings replace it until this
+/// function exits; the ABI restores the caller's binding on normal return or
+/// propagated Dart failure. The owner retains a synchronous physical frame.
+final class BindNativeContext(final Value address) extends Instruction {
+  this : super(.voidType) {
+    if (address.type != .integer) {
+      throw ArgumentError('Native context requires an integer address.');
+    }
+  }
+
+  @override
+  Iterable<Value> get inputs => [address];
+}
+
+/// The stable, nonzero address of this module's immutable stack-map table.
+///
+/// The table describes the emitted call PCs and roots. Its bytes are assigned
+/// after machine locations are known, including a valid empty table.
+final class StackMapAddress() extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// The immutable registry of this module's retained mutable objects.
+///
+/// The final table contains a count followed by object addresses, and is valid
+/// when empty. Membership and ordering follow the closed emitted program;
+/// analysis must not assume a final machine-order index before selection.
+final class ModuleRootsAddress() extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
 /// The immutable layout descriptor consumed by the target allocator.
 ///
 /// Its address is resolved at link time; its object layout belongs to the target.
@@ -1054,6 +1426,29 @@ final class ObjectDescriptorAddress(ClassType type) extends Instruction {
 
 /// The link-resolved address of a native declaration, without reading it.
 final class NativeSymbolAddress(final NativeReference reference)
+    extends Instruction {
+  this : super(.integer);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// The same typed mutable object for every use of its module declaration.
+///
+/// Reading this reference neither initializes its fields nor allocates storage.
+final class ModuleObjectReference(final ModuleObject declaration)
+    extends Instruction {
+  this : super(declaration.type);
+
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// The stable, nonzero address of one module-owned native data declaration.
+///
+/// All evaluations of the same declaration alias across calls and reentry.
+/// This operation neither reads nor initializes its contents and cannot collect.
+final class NativeDataAddress(final NativeData declaration)
     extends Instruction {
   this : super(.integer);
 
@@ -1158,14 +1553,43 @@ final class NativeCallbackAddress(final NativeCallbackTarget target)
 final class ReferenceAddress(final Value object) extends Instruction {
   this : super(.integer) {
     if (!ValueType.object.nullable.accepts(object.type) ||
-        object.type == .integer ||
-        object.type == .floating ||
-        object.type == .boolean) {
+        object is Constant && ExecutionShapes.forType(object.type).isScalar) {
       throw ArgumentError('Expected an object reference.');
     }
   }
   @override
   Iterable<Value> get inputs => [object];
+}
+
+/// A link-time table of the execution entries actually demanded for [target].
+/// Storing this address neither invokes the target nor retains its source body.
+final class FunctionEntryTableAddress(final FunctionTarget target)
+    extends Instruction {
+  this : super(.integer);
+  @override
+  Iterable<Value> get inputs => const [];
+}
+
+/// Invokes the bound managed allocator and returns its freshly allocated object.
+///
+/// The runtime owns failure, collection and the nonzero normal result. Unlike
+/// recovering a reference from an integer, this operation grants the indicated
+/// invariant view only by making the actual call with its storage descriptor.
+final class ManagedStorageAllocation(
+  final FunctionTarget allocator,
+  final StorageView storageView,
+  Iterable<Value> arguments,
+) extends Instruction {
+  @override
+  final List<Value> inputs = List.unmodifiable(arguments);
+
+  this : super(storageView.storageType) {
+    if (allocator.signature != FunctionType(.integer, List.filled(5, ValueType.integer)) ||
+        allocator.kind != .function ||
+        inputs.length != 5 || inputs.any((value) => value.type != .integer)) {
+      throw ArgumentError('Invalid managed allocator call.');
+    }
+  }
 }
 
 /// Names the fresh storage returned by a successful managed allocation.
@@ -1174,15 +1598,39 @@ final class ReferenceAddress(final Value object) extends Instruction {
 /// and has zeroed fixed fields plus [payloadBytes] inline bytes. Header metadata
 /// is initialized separately before user code can observe the object. This view
 /// neither allocates again nor introduces another allocation failure.
-final class AllocatedObject(
+final class AllocatedObject._(
   final Value address,
-  ClassType super.type,
+  final ClassType storageType,
   final Value payloadBytes,
+  super.type,
+  final CallableStorage? callableStorage,
 ) extends Instruction {
+  new(Value address, ClassType type, Value payloadBytes)
+    : this._(address, type, payloadBytes, type, null);
+
+  /// Gives the same fresh allocation its language function view and layout.
+  new callable(Value address, CallableStorage storage, ValueType functionType)
+    : this._(
+        address,
+        storage.type,
+        const Constant.integer(0),
+        functionType,
+        storage,
+      );
+
   this {
     if (address.type != .integer ||
         payloadBytes.type != .integer ||
-        (type as ClassType).isAbstract && type != ValueType.string) {
+        storageType.isAbstract &&
+            !{
+              ValueType.string,
+              ValueType.integer,
+              ValueType.floating,
+              ValueType.boolean,
+            }.contains(storageType) ||
+        callableStorage != null &&
+            type is! FunctionType &&
+            type != ValueType.function) {
       throw ArgumentError(
         'Expected fresh object storage and its payload size.',
       );
@@ -1190,7 +1638,10 @@ final class AllocatedObject(
   }
 
   @override
-  Iterable<Value> get inputs => [address, payloadBytes];
+  Iterable<Value> get inputs => [
+    address,
+    if (callableStorage == null) payloadBytes,
+  ];
 }
 
 /// Recovers an existing reference from initialized storage without allocating.
@@ -1203,9 +1654,6 @@ final class ReferenceFromAddress(final Value address, super.type)
     if (address.type != .integer ||
         type == .voidType ||
         type == .never ||
-        type == .integer ||
-        type == .floating ||
-        type == .boolean ||
         type is CellType) {
       throw ArgumentError('Expected an integer address and a value type.');
     }
@@ -1240,9 +1688,10 @@ final class PointerAddress(final Value pointer) extends Instruction {
 }
 
 /// Allocates zeroed inline storage for a runtime class or built-in String.
-final class NewPayload(ClassType type, final Value bytes) extends Instruction {
+final class NewPayload(ClassType type, final Value bytes, {final StorageView? storageView}) extends Instruction {
   this : super(type) {
-    if (type.isAbstract && type != ValueType.string ||
+    if (storageView != null && storageView!.storageType != type ||
+        type.isAbstract && type != ValueType.string ||
         type.freeTypeParameters.isNotEmpty ||
         bytes.type != .integer) {
       throw ArgumentError(
@@ -1266,7 +1715,8 @@ final class NativeView(
   final bool copy = false,
 }) extends Instruction {
   this : super(type) {
-    if (address != null && address!.type != .integer ||
+    if (copy && address == null ||
+        address != null && address!.type != .integer ||
         type.nativeType is! NativeCompoundType ||
         !ValueType.object.nullable.accepts(owner.type) ||
         owner.type == .integer ||
@@ -1277,6 +1727,39 @@ final class NativeView(
   }
   @override
   Iterable<Value> get inputs => [?address, owner];
+}
+
+/// The address of fixed native storage owned by this function activation.
+///
+/// Each declaration owns a distinct block in each invocation, sized and aligned
+/// by the target's C layout. Reexecuting it in a loop returns the same block and
+/// repeats initialization. The address expires when the function returns; raw
+/// addresses and borrowed views do not extend that lifetime. The block contains
+/// untraced native bytes, not managed references or an object header.
+///
+/// This operation needs no managed allocation, collection or Dart failure path.
+/// Without [zeroInitialize], initial bytes are unspecified. With it, every byte
+/// of the native layout, including padding, is cleared at this operation.
+final class NativeLocalStorage._(
+  final NativeTypeRef storage,
+  final bool zeroInitialize,
+  final NativeLocalStorage? _origin,
+) extends Instruction {
+  factory(NativeTypeRef storage, {bool zeroInitialize = false}) {
+    if (!storage.isSized) {
+      throw ArgumentError('Local native storage requires a sized type.');
+    }
+    return ._(storage, zeroInitialize, null);
+  }
+
+  this : super(.integer);
+
+  /// Stable block identity retained when rewrites clone an evaluation.
+  /// Separate constructor calls declare separate blocks, even for equal types.
+  NativeLocalStorage get declaration => _origin ?? this;
+
+  @override
+  Iterable<Value> get inputs => const [];
 }
 
 /// The address of a native compound view; the view owns any managed backing.
@@ -1465,11 +1948,9 @@ final class StoreObjectReference(
 
 void _checkObjectData(Value object, Value offset) {
   final type = object.type;
-  if (type is! ClassType ||
+  if (!ValueType.object.accepts(type) ||
       type.mayBeNull ||
-      type == ValueType.integer ||
-      type == ValueType.floating ||
-      type == ValueType.boolean ||
+      object is Constant && ExecutionShapes.forType(type).isScalar ||
       offset.type != .integer) {
     throw ArgumentError(
       'A non-null managed object and integer offset are required.',
@@ -1516,6 +1997,53 @@ final class AssertionFailure(
 }
 
 /// Creates a local function value retaining its capture slots by identity.
+/// Exposes a compiler capture cell as a traced physical reference.
+/// It preserves the cell allocation and grants no Dart read or write operation.
+final class CellReference(final Value cell) extends Instruction {
+  this : super(.object) {
+    if (cell.type is! CellType)
+      throw ArgumentError('Expected capture storage.');
+  }
+  @override
+  Iterable<Value> get inputs => [cell];
+}
+
+/// Grants a cell capability only for the exact typed backing declaration.
+/// This view preserves the allocation identity and never allocates or copies.
+final class CellStorageView(
+  final Value backing,
+  CellType type,
+  final CellStorage storage,
+) extends Instruction {
+  this : super(type) {
+    if (backing.type != storage.backingOf(type)) {
+      throw ArgumentError('Cell capability requires its exact typed backing.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [backing];
+}
+
+/// Exposes the same cell's declared backing for ordinary field operations.
+final class CellStorageReference(final Value cell, final CellStorage storage)
+    extends Instruction {
+  this : super(storage.backingOf(cell.type as CellType));
+  @override
+  Iterable<Value> get inputs => [cell];
+}
+
+/// Exposes the shared physical prefix of an existing non-null function value.
+/// Its language identity and captures remain unchanged.
+final class CallableReference(final Value function) extends Instruction {
+  this : super(FunctionStorage.type) {
+    if (function.type is! FunctionType && function.type != ValueType.function) {
+      throw ArgumentError('Expected a non-null function value.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [function];
+}
+
 final class MakeClosure(
   /// The body executed by this closure.
   final FunctionTarget target,
@@ -1530,6 +2058,59 @@ final class MakeClosure(
     }
     checkArguments(target.captures, inputs);
   }
+}
+
+/// Reads an immutable slot of a proven callable's original environment.
+///
+/// With [capture], reads that lexical capture. Otherwise reads the original
+/// closure itself or the bound receiver. A function instantiation preserves its
+/// original environment. Analysis must prove the actual [source] identity.
+final class ReadFunctionEnvironment._(
+  final Value function,
+  final FunctionTarget source,
+  final int? capture,
+  super.type,
+) extends Instruction {
+  factory(Value function, FunctionTarget source, {int? capture}) =>
+      ._(function, source, capture, _environmentType(source, capture));
+
+  @override
+  Iterable<Value> get inputs => [function];
+}
+
+/// Reads one actual descriptor stored with a proven callable environment.
+/// Own parameters require an instantiated value; outer parameters read the
+/// original environment even through an instantiation wrapper.
+final class ReadFunctionTypeArgument(
+  final Value function,
+  final FunctionTarget source,
+  final TypeParameterType parameter,
+) extends Instruction {
+  this : super(TypeMetadata.type) {
+    if (!source.typeParameters.contains(parameter) &&
+        !source.capturedTypeParameters.contains(parameter)) {
+      throw ArgumentError(
+        'Type parameter does not belong to this callable environment.',
+      );
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [function];
+}
+
+ValueType _environmentType(FunctionTarget source, int? capture) {
+  if (source.kind != .closure && !source.kind.isVirtual ||
+      capture != null &&
+          (source.kind != .closure ||
+              capture < 0 ||
+              capture >= source.captures.length)) {
+    throw ArgumentError('Expected a declared callable environment slot.');
+  }
+  return capture != null
+      ? source.captures[capture]
+      : source.kind == .closure
+      ? source.signature
+      : source.owner!;
 }
 
 /// Allocates storage for one activation of a local variable.
@@ -1628,14 +2209,33 @@ final class BindMethod(
   /// Whether `super` has already selected the implementation.
   final bool direct = false,
   final ClassType? ownerType,
+  final MemberEntryBinding? entryBinding,
+  Iterable<Value> executionTypes = const [],
 }) extends Instruction {
+  final List<Value> executionTypes = .unmodifiable(executionTypes);
   this : super(_memberSignature(method, receiver, ownerType)) {
     if (method.kind != .method || direct && method.isAbstract) {
       throw ArgumentError('Invalid method tear-off.');
     }
+    if (entryBinding case final binding?) {
+      if (binding.positionalCount != 0 ||
+          binding.names.isNotEmpty ||
+          binding.typeArgumentCount != this.executionTypes.length ||
+          !binding.signature.parameters.first.accepts(receiver.type) ||
+          !binding.signature.result.accepts(type) ||
+          this.executionTypes.any((v) => v.type != TypeMetadata.type)) {
+        throw ArgumentError(
+          'A method producer must retain its complete execution arguments.',
+        );
+      }
+    } else if (this.executionTypes.isNotEmpty) {
+      throw ArgumentError(
+        'Unbound method extraction has no execution arguments.',
+      );
+    }
   }
   @override
-  Iterable<Value> get inputs => [receiver];
+  Iterable<Value> get inputs => [receiver, ...executionTypes];
 }
 
 /// Applies explicit or inferred type arguments to a generic function value.
@@ -1697,6 +2297,9 @@ final class FunctionCall._(
   /// The proven implementation; the function value still supplies its environment.
   /// A rewrite may bind this only when every executable value selects this target.
   final FunctionTarget? target,
+
+  /// The explicit execution entries for this call's representation shape.
+  final CallEntryBinding? entryBinding,
 ) extends Instruction {
   new(
     Value function,
@@ -1704,12 +2307,14 @@ final class FunctionCall._(
     Map<String, Value> named = const {},
     Iterable<ValueType> typeArguments = const [],
     FunctionTarget? target,
+    CallEntryBinding? entryBinding,
   ]) : this._(
          function,
          .unmodifiable(positional),
          .unmodifiable(named),
          .unmodifiable(typeArguments),
          target,
+         entryBinding,
        );
   this
     : super(
@@ -1719,6 +2324,32 @@ final class FunctionCall._(
           named,
         ),
       ) {
+    if (entryBinding case final binding?) {
+      final shape = binding.shape;
+      if (shape.positional.length != positional.length ||
+          shape.named.length != named.length ||
+          !shape.named.keys.every(named.containsKey) ||
+          shape.typeArgumentCount != typeArguments.length) {
+        throw ArgumentError(
+          'A call entry must preserve the supplied arguments.',
+        );
+      }
+      final arguments = [
+        function,
+        ...positional,
+        for (final name in shape.named.keys) named[name]!,
+      ];
+      for (final entry in binding.entries.values) {
+        if (arguments.indexed.any(
+          (argument) =>
+              !entry.parameterTypes[argument.$1].accepts(argument.$2.type),
+        )) {
+          throw ArgumentError(
+            'Call entry parameters must accept the original operands.',
+          );
+        }
+      }
+    }
     if (target case final bound?) {
       if (bound != bound.implementation ||
           bound.isAbstract ||
@@ -1798,9 +2429,10 @@ final class LoadField(
   final InstanceField field,
 
   /// The object containing the slot.
-  final Value receiver,
-) extends Instruction {
-  this : super(field.typeFor(_classReceiver(receiver.type, field.owner)));
+  final Value receiver, {
+  final StorageView? storageView,
+}) extends Instruction {
+  this : super(_fieldAccessType(field, receiver, storageView));
   @override
   Iterable<Value> get inputs => [receiver];
 }
@@ -1823,6 +2455,15 @@ final class InstanceCall._(
   final Map<String, Value> named,
   final ClassType? ownerType,
   final List<ValueType> typeArguments,
+
+  /// Actual ordinary entries implementing each resolved source member.
+  final MemberEntryBinding? entryBinding,
+
+  /// Evaluated descriptors supplied to those entries, in method binder order.
+  final List<Value> executionTypes,
+
+  /// A widened result before an explicit check in the caller's lexical scope.
+  final ValueType? resultView,
 ) extends Instruction {
   new(
     FunctionTarget member,
@@ -1831,6 +2472,9 @@ final class InstanceCall._(
     Map<String, Value> named = const {},
     ClassType? ownerType,
     Iterable<ValueType> typeArguments = const [],
+    MemberEntryBinding? entryBinding,
+    Iterable<Value> executionTypes = const [],
+    ValueType? resultView,
   ]) : this._(
          member,
          receiver,
@@ -1838,25 +2482,68 @@ final class InstanceCall._(
          .unmodifiable(named),
          ownerType,
          .unmodifiable(typeArguments),
+         entryBinding,
+         .unmodifiable(executionTypes),
+         resultView,
        );
   this
     : super(
-        _callResult(
-          _memberSignature(
-            member,
-            receiver,
-            ownerType,
-          ).instantiate(typeArguments),
-          positional,
-          named,
-        ),
+        resultView ??
+            _callResult(
+              _memberSignature(
+                member,
+                receiver,
+                ownerType,
+              ).instantiate(typeArguments),
+              positional,
+              named,
+            ),
+      ) {
+    if (entryBinding == null && executionTypes.isNotEmpty ||
+        entryBinding != null &&
+            (entryBinding!.typeArgumentCount != typeArguments.length ||
+                executionTypes.length != typeArguments.length ||
+                entryBinding!.positionalCount != positional.length ||
+                entryBinding!.names.length != named.length ||
+                !named.keys.every(entryBinding!.names.contains) ||
+                executionTypes.any((value) => !value.isTypeDescriptor))) {
+      throw ArgumentError('Member entries require their actual call operands.');
+    }
+    final original = _callResult(
+      _memberSignature(member, receiver, ownerType).instantiate(typeArguments),
+      positional,
+      named,
+    );
+    if (resultView != null && !resultView!.accepts(original)) {
+      throw ArgumentError(
+        'A member result view can only widen its source type.',
       );
+    }
+    if (entryBinding case final binding?) {
+      final arguments = [
+        receiver,
+        ...positional,
+        for (final name in binding.names) named[name]!,
+        ...executionTypes,
+      ];
+      if (arguments.indexed.any(
+            (entry) =>
+                !binding.signature.parameters[entry.$1].accepts(entry.$2.type),
+          ) ||
+          !type.accepts(binding.signature.result)) {
+        throw ArgumentError(
+          'Member entries must preserve their operand types.',
+        );
+      }
+    }
+  }
 
   @override
   Iterable<Value> get inputs sync* {
     yield receiver;
     yield* positional;
     yield* named.values;
+    yield* executionTypes;
   }
 }
 
@@ -1893,10 +2580,17 @@ final class DynamicDispatch(
   /// Its type parameters receive this operation's explicit type arguments.
   final FunctionTarget? failure,
   Map<FunctionTarget, FunctionTarget> getterCalls = const {},
+  final CallEntryBinding? entryBinding,
+  Map<FunctionTarget, FunctionTarget> methodBindings = const {},
 ]) extends Instruction {
   /// Normalized getter-then-call bodies, selected by the actual getter identity.
   final Map<FunctionTarget, FunctionTarget> getterCalls = .unmodifiable(
     getterCalls,
+  );
+
+  /// Real receiver-to-function producers selected for method extraction.
+  final Map<FunctionTarget, FunctionTarget> methodBindings = .unmodifiable(
+    methodBindings,
   );
   final List<Value> positional = .unmodifiable(positional);
   final Map<String, Value> named = .unmodifiable(named);
@@ -1923,6 +2617,29 @@ final class DynamicDispatch(
           fallback.signature.optionalPositional != 0 ||
           fallback.signature.namedParameters.isNotEmpty) {
         throw ArgumentError('Invalid normalized dispatch signature.');
+      }
+    }
+    if (entryBinding case final binding?) {
+      if (selector.name != 'call' ||
+          selector.privateScope != null ||
+          selector.kind != .method ||
+          !binding.shape.checked ||
+          binding.shape.failure != failure ||
+          binding.shape.positional.length != this.positional.length ||
+          binding.shape.named.length != this.named.length ||
+          !binding.shape.named.keys.every(this.named.containsKey) ||
+          binding.shape.typeArgumentCount != this.typeArguments.length) {
+        throw ArgumentError(
+          'A dynamic function entry must preserve its actual call.',
+        );
+      }
+    }
+    for (final entry in this.methodBindings.entries) {
+      if (selector.kind != .getter ||
+          entry.key.kind != .method ||
+          entry.value.signature != FunctionType(.dynamicType, [.dynamicType]) ||
+          entry.value.kind != .function) {
+        throw ArgumentError('Invalid method extraction execution binding.');
       }
     }
     if (this.getterCalls.keys.any((getter) => getter.kind != .getter) ||
@@ -1993,33 +2710,76 @@ void _checkInvocationArguments(
 /// Allocates a fresh object, runs [initializer] on it and returns it on success.
 ///
 /// Nullable instance slots without an initializer start as `null`.
-final class Construct(
+final class Construct._(
   /// The generative constructor of the allocated class.
   final FunctionTarget initializer,
-  Iterable<Value> arguments, {
-  ClassType? instantiatedType,
-}) extends Instruction {
+  Iterable<Value> arguments,
+  super.type,
+  final CallableStorage? callableStorage,
+  final StorageView? storageView,
+) extends Instruction {
+  new(
+    FunctionTarget initializer,
+    Iterable<Value> arguments, {
+    ClassType? instantiatedType,
+    StorageView? storageView,
+  }) : this._(
+         initializer,
+         arguments,
+         instantiatedType ??
+             initializer.owner ??
+             (throw ArgumentError('Expected a constructor.')),
+         null,
+         storageView,
+       );
+
+  /// Constructs function storage with an explicit runtime type descriptor.
+  new callable(
+    CallableStorage storage,
+    Iterable<Value> arguments,
+    ValueType functionType,
+    Value descriptor,
+  ) : this._(
+        storage.initializer ??
+            (throw ArgumentError('Callable storage requires an initializer.')),
+        [...arguments, descriptor],
+        functionType,
+        storage,
+        null,
+      );
+
   /// The instance type produced by this constructor invocation.
-  ClassType get instantiatedType => type as ClassType;
+  ClassType get instantiatedType => callableStorage?.type ?? type as ClassType;
+
+  /// The actual initializer inputs, excluding a callable's runtime descriptor.
+  Iterable<Value> get arguments =>
+      callableStorage == null ? inputs : inputs.take(inputs.length - 1);
+
+  Value? get typeDescriptor => callableStorage == null ? null : inputs.last;
   @override
   final List<Value> inputs = .unmodifiable(arguments);
 
-  this
-    : super(
-        instantiatedType ??
-            initializer.owner ??
-            (throw ArgumentError('Expected a constructor.')),
-      ) {
+  this {
+    if (callableStorage != null &&
+        (type is! FunctionType && type != ValueType.function ||
+            !inputs.last.isTypeDescriptor)) {
+      throw ArgumentError(
+        'Callable storage requires a function type and descriptor.',
+      );
+    }
     if (initializer.kind != .initializer || initializer.owner!.isAbstract) {
       throw ArgumentError('Expected a concrete generative constructor.');
     }
-    if (this.instantiatedType.declaration != initializer.owner!.declaration) {
+    if (instantiatedType.declaration != initializer.owner!.declaration) {
       throw ArgumentError('Constructor belongs to a different class.');
     }
-    this.instantiatedType.validateTypeArguments();
+    instantiatedType.validateTypeArguments();
+    if (storageView != null && storageView!.storageType != instantiatedType) {
+      throw ArgumentError('Allocation and invariant storage view disagree.');
+    }
     checkArguments(
-      initializer.signatureFor(this.instantiatedType).parameters,
-      inputs,
+      initializer.signatureFor(instantiatedType).parameters,
+      this.arguments.toList(),
     );
   }
 }
@@ -2041,14 +2801,43 @@ final class InitializeObject(
   this : super(.voidType) {
     if (initializer.kind != .initializer ||
         receiver.type.mayBeNull ||
-        receiver is! ReferenceFromAddress && receiver is! AllocatedObject ||
+        receiver is! ReferenceFromAddress && receiver is! AllocatedObject &&
+            receiver is! ManagedStorageAllocation ||
+        receiver is ManagedStorageAllocation &&
+            (receiver as ManagedStorageAllocation).storageView.storageType.declaration != initializer.owner!.declaration ||
         receiver is AllocatedObject &&
-            (receiver.type as ClassType).declaration !=
+            (receiver as AllocatedObject).storageType.declaration !=
                 initializer.owner!.declaration) {
       throw ArgumentError('Initialization requires fresh non-null storage.');
     }
-    checkArguments(initializer.erasedParameterTypes, inputs);
+    checkArguments(
+      initializer.erasedParameterTypes.skip(1),
+      inputs.skip(1).toList(),
+    );
   }
+}
+
+/// Initializes a fresh, unpublished raw slot by copying storage and binding.
+/// This is not a Dart read and can preserve an uninitialized source. The owner
+/// must verify that the destination slot has never been initialized or exposed.
+/// Source and destination share the exact declared payload type and carrier.
+final class InitializeStorageField(
+  final InstanceField field,
+  final Value destination,
+  final Value source, {
+  final StorageView? storageView,
+}) extends Instruction {
+  this : super(.voidType) {
+    _fieldAccessType(field, destination, storageView);
+    if (!field.initiallyUnbound ||
+        destination.type is! ClassType ||
+        source.type != destination.type ||
+        (destination.type as ClassType).asInstanceOf(field.owner) == null) {
+      throw ArgumentError('Raw slot copy requires the same typed storage.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [destination, source];
 }
 
 /// Stores [value] directly in [field]. Ordinary final fields are constructor-only.
@@ -2063,13 +2852,12 @@ final class StoreField(
   final Value receiver,
 
   /// The value written to the slot.
-  final Value value,
-) extends Instruction {
+  final Value value, {
+  final StorageView? storageView,
+}) extends Instruction {
   this : super(.voidType) {
     if (field.isLate && !field.isWritable ||
-        !field
-            .typeFor(_classReceiver(receiver.type, field.owner))
-            .accepts(value.type)) {
+        !_fieldAccessType(field, receiver, storageView).accepts(value.type)) {
       throw ArgumentError('Incompatible instance field write.');
     }
   }
@@ -2175,6 +2963,65 @@ final class TypeView(final Value operand, super.type) extends Instruction {
   }
   @override
   Iterable<Value> get inputs => [operand];
+}
+
+/// Selects a managed carrier for the same semantic scalar value.
+///
+/// Retained dynamic materialization expands to actual allocator, header and
+/// payload operations before final execution closure. Initial flow models the
+/// allocation and payload at this site; its allocation failure uses this site's
+/// exception edge. Constants and boolean values may use canonical storage.
+final class MaterializeValue(final Value value) extends Instruction {
+  this : super(value.type) {
+    if (!ExecutionShapes.forType(type).isScalar) {
+      throw ArgumentError('Scalar materialization requires a scalar proof.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [value];
+}
+
+/// Binds one scalar's language value to its initialized managed backing.
+///
+/// This does not allocate or reinterpret a Dart type. The backing is the actual
+/// object whose payload was initialized; it supplies this value's rooted carrier.
+final class MaterializedValue(final Value value, final Value backing)
+    extends Instruction {
+  this : super(value.type) {
+    if (!ExecutionShapes.forType(type).isScalar) {
+      throw ArgumentError('A managed scalar requires its semantic payload.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [value, backing];
+}
+
+/// The immutable canonical reference representation of a scalar constant.
+final class ConstantCarrier(final Constant value) extends Instruction {
+  this : super(value.type) {
+    if (!ExecutionShapes.forType(type).isScalar) {
+      throw ArgumentError('A constant carrier requires a scalar constant.');
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [value];
+}
+
+/// Reads the current payload of a proven scalar in a managed carrier.
+///
+/// This performs no type check, allocation or failure. The semantic scalar proof
+/// must precede it; raw mutation of the backing invalidates earlier payload facts.
+final class ProjectValue(final Value value, final ExecutionShape shape)
+    extends Instruction {
+  this : super(value.type) {
+    if (!shape.isScalar || shape != ExecutionShapes.forType(type)) {
+      throw ArgumentError(
+        'Projection requires the proven scalar payload shape.',
+      );
+    }
+  }
+  @override
+  Iterable<Value> get inputs => [value];
 }
 
 /// A trusted type assertion with no runtime check.
@@ -2303,7 +3150,13 @@ final class Equals(
   this : super(.boolean);
 
   /// Whether the comparison may call a user-defined equality operator.
-  bool get mayCallUserCode => !left.type.hasBuiltinEquality;
+  ///
+  /// Comparing either operand with null never invokes an equality operator.
+  bool get mayCallUserCode =>
+      left.type != .nullType &&
+      right.type != .nullType &&
+      !left.isTypeDescriptor &&
+      !left.type.hasBuiltinEquality;
   @override
   Iterable<Value> get inputs => [left, right];
 }
@@ -2491,6 +3344,48 @@ final class NativeCall._(
   ];
 }
 
+/// Calls a native address using only C scalar and storage-address carriers.
+///
+/// Pointer arguments and results are integer addresses. Compound arguments name
+/// readable storage; compound results write [resultStorage] and return void.
+/// The caller owns every storage lifetime, including across native reentry.
+/// Conversions retain the signature's integer widths and floating precision.
+/// This operation creates no pointer or aggregate wrapper and publishes no roots.
+/// Before a nonleaf call can reenter a managed module, its caller must publish
+/// the live source frame through ordinary IR. The machine boundary only applies
+/// the native ABI; it does not interpret the current native context as a heap.
+final class RawNativeCall(
+  final Value address,
+  final NativeSignature signature,
+  Iterable<Value> arguments, {
+  final Value? resultStorage,
+  final bool isLeaf = false,
+}) extends Instruction {
+  final List<Value> arguments = .unmodifiable(arguments);
+
+  this
+    : super(
+        signature.result is NativeCompoundType
+            ? ValueType.voidType
+            : FfiTypes.rawValueType(signature.result),
+      ) {
+    if (address.type != .integer ||
+        (signature.result is NativeCompoundType) != (resultStorage != null) ||
+        resultStorage != null && resultStorage!.type != .integer) {
+      throw ArgumentError(
+        'Native calls require an address and matching result storage.',
+      );
+    }
+    checkArguments(
+      signature.parameters.map(FfiTypes.rawValueType).toList(),
+      this.arguments,
+    );
+  }
+
+  @override
+  Iterable<Value> get inputs => [address, ?resultStorage, ...arguments];
+}
+
 /// A call to a statically bound function.
 ///
 /// The call may change state or throw even when its result is unused.
@@ -2504,6 +3399,7 @@ final class DirectCall._(
   @override final List<Value> inputs,
   final ClassType? ownerType,
   final List<ValueType> typeArguments,
+  final Map<TypeParameterType, ValueType> lexicalEnvironment,
   super.type,
 ) extends Instruction {
   factory(
@@ -2511,10 +3407,8 @@ final class DirectCall._(
     Iterable<Value> arguments, {
     ClassType? ownerType,
     Iterable<ValueType> typeArguments = const [],
+    Map<TypeParameterType, ValueType> lexicalEnvironment = const {},
   }) {
-    if (target.kind == .closure) {
-      throw ArgumentError('A lexical invocation requires its closure.');
-    }
     if (target.redirect != null) {
       throw ArgumentError('Bind arguments to the redirect destination.');
     }
@@ -2522,15 +3416,44 @@ final class DirectCall._(
       throw ArgumentError('Cannot directly invoke an abstract member.');
     }
     ownerType?.validateTypeArguments();
-    final ownerEnvironment = ownerType == null
-        ? const <TypeParameterType, ValueType>{}
-        : target.environmentFor(ownerType);
+    if (lexicalEnvironment.isNotEmpty &&
+        (target.kind != .closure ||
+            lexicalEnvironment.keys.any(
+              (parameter) => !target.capturedTypeParameters.contains(parameter),
+            ))) {
+      throw ArgumentError(
+        'Explicit lexical arguments require the source closure binders.',
+      );
+    }
+    final ownerEnvironment = {
+      if (ownerType != null) ...target.environmentFor(ownerType),
+      ...lexicalEnvironment,
+    };
     final types = List<ValueType>.unmodifiable(typeArguments);
     final inputs = List<Value>.unmodifiable(arguments);
+    if (target.kind == .closure) {
+      final origin = inputs.firstOrNull;
+      final valid = switch (origin) {
+        ReadFunctionEnvironment(source: final source, capture: null) =>
+          source == target,
+        MakeClosure(target: final source) => source == target,
+        _ => false,
+      };
+      if (!valid) {
+        throw ArgumentError(
+          'A lexical invocation requires its proven original environment.',
+        );
+      }
+    }
     final signature = (target.signature.substitute(
       ownerEnvironment,
     ) as FunctionType).instantiate(types);
     checkArguments([
+      if (target.kind == .closure) ...[
+        target.signature.substitute(ownerEnvironment),
+        for (final capture in target.captures)
+          capture.substitute(ownerEnvironment),
+      ],
       if (target.kind.hasReceiver)
         target.parameterTypes.first.substitute(ownerEnvironment),
       ...signature.parameters,
@@ -2548,6 +3471,7 @@ final class DirectCall._(
       inputs,
       ownerType,
       types,
+      Map.unmodifiable(lexicalEnvironment),
       target.kind == .initializer ? .voidType : signature.result,
     );
   }
@@ -2836,9 +3760,22 @@ final class StringCodeUnitAt(final Value string, final Value index)
   Iterable<Value> get inputs => [string, index];
 }
 
+ValueType _fieldAccessType(InstanceField field, Value receiver, StorageView? view) {
+  final physical = field.typeFor(_classReceiver(receiver.type, field.owner));
+  if (view == null) return physical;
+  if (view.storageType != receiver.type) {
+    throw ArgumentError('Slot access requires its exact backing.');
+  }
+  final logical = view.typeOf(field);
+  if (!physical.accepts(logical)) {
+    throw ArgumentError('The logical slot type does not fit its physical field.');
+  }
+  return logical;
+}
+
 ClassType _classReceiver(ValueType type, [ClassType? owner]) {
   if (type == ValueType.nullType && owner == ValueType.nullClass) return owner!;
-  if (type is PromotedTypeParameterType && owner != null) {
+  if (type is PromotedType && owner != null) {
     final view = CoreTypes.view(type, owner);
     if (view != null) return view;
   }

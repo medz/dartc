@@ -16,16 +16,22 @@ final class SuspensionNormalization(
     if (program.functions.every((body) => body.bodyKind == .synchronous)) {
       return program;
     }
+    final shapes = program.executionShapes ?? ExecutionShapes.defaults;
+    final entries = {...shapes.entries};
+    final slots = {...shapes.slots};
+    final functions = [
+      for (final body in program.functions)
+        if (body.bodyKind == .synchronous)
+          body
+        else
+          ..._SuspensionBody(body, runtime, shapes, entries, slots).run(),
+    ];
     return IrProgram(
       program.classes,
-      [
-        for (final body in program.functions)
-          if (body.bodyKind == .synchronous)
-            body
-          else
-            ..._SuspensionBody(body, runtime).run(),
-      ],
+      functions,
       globals: program.globals,
+      nativeBoundaries: program.nativeBoundaries,
+      executionShapes: ExecutionShapes(entries: entries, slots: slots),
       externals: program.externals,
     );
   }
@@ -40,6 +46,9 @@ final class _Continuation(
 final class _SuspensionBody(
   final IrFunction source,
   final HeapRuntime runtime,
+  final ExecutionShapes shapes,
+  final Map<FunctionTarget, ExecutionSignature> entries,
+  final Map<Object, ExecutionShape> slots,
 ) {
   late final flow = ValueLiveness.source(source);
   late final inputs = {
@@ -65,22 +74,35 @@ final class _SuspensionBody(
     );
   }
 
-  _Continuation continuation(List<Value> captures, Block? suspended) =>
-      _Continuation(
-        FunctionTarget(
-          null,
-          'resume',
-          signature.result,
-          signature.parameters,
-          kind: .closure,
-          enclosing: source.target,
-          sourceOffset: 0,
-          captures: [if (!sync) contextType, ...captures.map((v) => v.type)],
-          awaiterCapture: sync ? null : 0,
-        ),
-        captures,
-        suspended,
-      );
+  void bindCaptures(FunctionTarget target, List<ExecutionShape> captures) {
+    for (final (index, shape) in captures.indexed) {
+      slots[CaptureSlot(target, index)] = shape;
+    }
+    entries[target] = ExecutionSignature([
+      ExecutionShape.reference,
+      ...captures,
+      ...target.signature.parameters.map(ExecutionShapes.forType),
+    ], ExecutionShapes.forType(target.returnType));
+  }
+
+  _Continuation continuation(List<Value> captures, Block? suspended) {
+    final target = FunctionTarget(
+      null,
+      'resume',
+      signature.result,
+      signature.parameters,
+      kind: .closure,
+      enclosing: source.target,
+      sourceOffset: 0,
+      captures: [if (!sync) contextType, ...captures.map((v) => v.type)],
+      awaiterCapture: sync ? null : 0,
+    );
+    bindCaptures(target, [
+      if (!sync) ExecutionShape.reference,
+      ...captures.map((value) => shapes.shapeOf(source, value)),
+    ]);
+    return _Continuation(target, captures, suspended);
+  }
 
   List<Value> arguments(Jump edge) => [
     for (final value in inputs[edge.target]!)
@@ -135,12 +157,25 @@ final class _SuspensionBody(
         captures: initial.target.captures,
       );
       final start = Block(factory.parameterTypes);
+      bindCaptures(factory, [
+        for (var index = 0; index < initial.target.captures.length; index++)
+          slots[CaptureSlot(initial.target, index)]!,
+      ]);
       start.finish(
         Return(
           start.emit(MakeClosure(initial.target, start.parameters.skip(1))),
         ),
       );
-      generated.add(IrFunction(factory, [start]));
+      generated.add(
+        IrFunction(
+          factory,
+          [start],
+          execution: FunctionExecution({
+            for (final (index, value) in start.parameters.indexed)
+              value: entries[factory]!.parameters[index],
+          }),
+        ),
+      );
       final create = entry.emit(
         MakeClosure(factory, initial.captures.map((v) => received[v]!)),
       );
@@ -183,6 +218,10 @@ final class _SuspensionBody(
         source.target,
         [entry],
         defaults: source.defaults,
+        execution: FunctionExecution({
+          for (final (index, value) in entry.parameters.indexed)
+            value: shapes.entryOf(source.target).parameters[index],
+        }),
         sourceLocations: {
           entry: location(source.entry),
           for (final operation in entry.instructions)
@@ -205,6 +244,10 @@ final class _Region(
   final copies = <Block, Block>{};
   final pending = <Block>[];
   final locations = <Object, SourceLocation>{};
+  late final execution = <Value, ExecutionShape>{
+    for (final (index, value) in entry.parameters.indexed)
+      value: owner.entries[continuation.target]!.parameters[index],
+  };
   late final captured = <Value, Value>{
     for (final (index, value) in continuation.captures.indexed)
       value: entry.parameters[index + (owner.sync ? 1 : 2)],
@@ -223,7 +266,15 @@ final class _Region(
   // Explicit live inputs preserve loop redefinitions when a region is resumed.
   Block copy(Block original) => copies.putIfAbsent(original, () {
     pending.add(original);
-    return block(original, owner.inputs[original]!.map((v) => v.type));
+    final inputs = owner.inputs[original]!;
+    final result = block(original, inputs.map((v) => v.type));
+    for (final (index, value) in inputs.indexed) {
+      execution[result.parameters[index]] = owner.shapes.shapeOf(
+        owner.source,
+        value,
+      );
+    }
+    return result;
   });
 
   T emit<T extends Instruction>(Block into, T operation, Object origin) {
@@ -256,6 +307,12 @@ final class _Region(
       for (final v in arguments) v is TestedValue ? v.test.operand : v,
     ];
     final bridge = block(origin, raw.map((v) => v.type));
+    for (final (index, value) in raw.indexed) {
+      execution[bridge.parameters[index]] = owner.shapes.shapeOf(
+        owner.source,
+        value,
+      );
+    }
     final refined = [
       for (final (index, v) in arguments.indexed)
         if (v is TestedValue)
@@ -372,7 +429,12 @@ final class _Region(
     for (var index = 0; index < pending.length; index++) {
       lower(pending[index]);
     }
-    return IrFunction(continuation.target, blocks, sourceLocations: locations);
+    return IrFunction(
+      continuation.target,
+      blocks,
+      sourceLocations: locations,
+      execution: FunctionExecution(execution),
+    );
   }
 
   void lower(Block original) {
@@ -384,7 +446,9 @@ final class _Region(
     Value value(Value input) => read(values, input);
     Jump jump(Jump source) => edge(source, value, original);
     for (final operation in original.instructions) {
-      values[operation] = emit(into, operation.mapInputs(value), operation);
+      final copied = emit(into, operation.mapInputs(value), operation);
+      values[operation] = copied;
+      execution[copied] = owner.shapes.shapeOf(owner.source, operation);
     }
     final end = original.end;
     switch (end) {
@@ -395,6 +459,7 @@ final class _Region(
       case Invoke(:final operation, :final onReturn, :final onThrow):
         final called = operation.mapInputs(value);
         values[operation] = called;
+        execution[called] = owner.shapes.shapeOf(owner.source, operation);
         locations[called] = owner.location(operation);
         into.finish(
           Invoke(

@@ -8,14 +8,29 @@ final class TypeInfo(
   final bool allowsNull,
   final TypeArguments? parts,
   final FunctionInfo? signature,
-  final String className,
-) implements Type {
+  final String className, [
+  final TypeInfo? Function(TypeInfo, int, int)? projector,
+]) implements Type {
   @Primitive(.typeView)
   external static TypeInfo of(Type value);
 
   /// Projects onto one nominal declaration without constructing unrelated types.
-  @Primitive(.typeProjection)
-  external TypeInfo? _asInstanceOf(int shape);
+  @RuntimeEntry(.typeProjection)
+  TypeInfo? _asInstanceOf(int shape) {
+    if (kind != TypeKind.nominal.index && kind != TypeKind.record.index) {
+      return null;
+    }
+    return projector!(this, shape, -1);
+  }
+
+  /// Reads a projected argument without constructing the enclosing type view.
+  @RuntimeEntry(.typeArgument)
+  TypeInfo? argumentOf(int shape, int slot) {
+    if (kind != TypeKind.nominal.index && kind != TypeKind.record.index) {
+      return null;
+    }
+    return projector!(this, shape, slot);
+  }
 
   @override
   bool operator ==(Object other) => equal(this, other);
@@ -52,6 +67,7 @@ final class TypeInfo(
     TypeArguments(this, null),
     null,
     'Future',
+    of(Future).projector,
   );
 
   @RuntimeEntry(.typeFutureOr)
@@ -94,11 +110,54 @@ final class TypeInfo(
       parts!.shift(amount, cutoff + (signature?.binders ?? 0)),
       signature,
       className,
+      projector,
     );
   }
 
   @RuntimeEntry(.typeSubtype)
   bool isSubtypeOf(TypeInfo other) => _isSubtype(other, null, null, null);
+
+  /// Applies one complete argument group to this function's actual descriptor.
+  /// Bounds use the same simultaneous substitution as the resulting signature.
+  @RuntimeEntry(.typeInstantiate)
+  TypeInfo instantiate(TypeArguments? arguments) {
+    final info = signature;
+    if (kind != TypeKind.function.index || info == null ||
+        info.binders == 0 || info.appliedSignature == null) {
+      throw TypeError();
+    }
+    final count = info.binders;
+    var actual = arguments;
+    var remaining = parts;
+    for (var index = 0; index < count; index++) {
+      if (actual == null || remaining == null) throw TypeError();
+      final bound = remaining.head._substitute(arguments, count, 0);
+      if (!actual.head.isSubtypeOf(bound)) throw TypeError();
+      actual = actual.tail;
+      remaining = remaining.tail;
+    }
+    if (actual != null) throw TypeError();
+    return TypeInfo(kind, info.appliedShape, false,
+        remaining?._substitute(arguments, count, 0), info.appliedSignature,
+        className, projector);
+  }
+
+  TypeInfo _substitute(TypeArguments? arguments, int count, int depth) {
+    if (kind == TypeKind.parameter.index) {
+      if (shape < depth) return this;
+      if (shape < depth + count) {
+        return TypeArguments.at(arguments, shape - depth).shift(depth, 0);
+      }
+      return TypeInfo(kind, shape - count, false, null, null, className);
+    }
+    final children = parts;
+    if (children == null) return this;
+    final applied = children._substitute(arguments, count,
+        depth + (signature?.binders ?? 0));
+    if (kind == TypeKind.nullable.index) return applied.head.nullable;
+    if (kind == TypeKind.futureOr.index) return applied.head.futureOr;
+    return TypeInfo(kind, shape, allowsNull, applied, signature, className, projector);
+  }
 
   bool _isSubtype(
     TypeInfo other,
@@ -409,6 +468,10 @@ final class TypeArguments(final TypeInfo head, final TypeArguments? tail) {
 
   TypeArguments shift(int amount, int cutoff) =>
       TypeArguments(head.shift(amount, cutoff), tail?.shift(amount, cutoff));
+
+  TypeArguments _substitute(TypeArguments? arguments, int count, int depth) =>
+      TypeArguments(head._substitute(arguments, count, depth),
+          tail?._substitute(arguments, count, depth));
 }
 
 /// Function or record parameter names and positional boundaries.
@@ -417,7 +480,10 @@ final class FunctionInfo(
   final int binders,
   final int positional,
   final int required,
-  final NamedParameter? named,
+  final NamedParameter? named, [
+  final int appliedShape = 0,
+  final FunctionInfo? appliedSignature,
+]
 ) {
   NamedParameter? find(int name) {
     for (var node = named; node != null; node = node.next) {

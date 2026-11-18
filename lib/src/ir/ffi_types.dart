@@ -42,6 +42,28 @@ abstract final class FfiTypes() {
     interfaces: [nativeType],
   );
 
+  /// The declaration owning a native view hierarchy's shared managed prefix.
+  ///
+  /// SDK views use [compound]; independent native-only inheritance uses its
+  /// root. Ordinary or generic parent storage cannot acquire hidden view slots.
+  static ClassType? nativeViewPrefix(ClassType type) {
+    if (type == ValueType.object) return null;
+    ClassType prefix = type.declaration;
+    for (
+      ClassType? current = type;
+      current != null && current != ValueType.object;
+      current = current.superclass
+    ) {
+      final declaration = current.declaration;
+      if (declaration == compound) return declaration;
+      if (!isCompound(declaration) || declaration.typeParameters.isNotEmpty) {
+        return null;
+      }
+      prefix = declaration;
+    }
+    return prefix;
+  }
+
   /// The Dart supertype of native struct views, without a by-value layout.
   static final struct = ClassType(
     _library,
@@ -272,6 +294,13 @@ abstract final class FfiTypes() {
       'A source native declaration must be bound before use.',
     ),
   };
+
+  /// The C call carrier: scalar Dart values and integer storage addresses.
+  /// Compounds name caller-owned storage, never an implicit managed wrapper.
+  static ValueType rawValueType(NativeTypeRef native) =>
+      native is NativePointerType || native is NativeCompoundType
+      ? .integer
+      : valueType(native);
 
   /// Preserves bound compounds and pointers when converting an FFI declaration.
   static ValueType dartValueType(ValueType type) =>

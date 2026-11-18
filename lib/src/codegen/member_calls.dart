@@ -2,7 +2,9 @@ import 'package:dartc/ir.dart';
 import 'package:dartc/optimizer.dart';
 
 import 'record_storage.dart';
+import 'cell_initialization.dart';
 import 'type_values.dart';
+import 'value_carrier.dart';
 
 /// Resolves native member entries for the concrete classes in a compilation.
 final class MemberCalls(
@@ -10,7 +12,7 @@ final class MemberCalls(
   final Set<FunctionTarget> definitions, {
   Iterable<ClassType> instantiatedTypes = const [],
   final RecordStorage? records,
-  final CallTypeFacts? callTypes,
+  final ProgramCallFacts? callTypes,
 }) {
   this {
     if (callTypes case final facts?) {
@@ -30,6 +32,9 @@ final class MemberCalls(
   }
 
   final _instances = {
+    if (callTypes is ProgramFlowFacts)
+      for (final declaration in program.classes)
+        if (!declaration.type.isAbstract) declaration.type,
     ...instantiatedTypes,
     for (final target in definitions)
       ...?program.implementationOf(target)?.instantiatedClasses,
@@ -37,45 +42,54 @@ final class MemberCalls(
   };
   final _builtins = <(ValueType, bool), IrFunction>{};
 
+  /// Static cell entry obligations proved against this exact program graph.
+  late final cellInitialization = CellInitialization(program);
+
   Iterable<IrFunction> get functions => _builtins.values;
 
-  FunctionTarget builtin(
-    ValueType type, {
-    required bool hash,
-  }) => _builtins.putIfAbsent((type, hash), () {
-    final target = FunctionTarget(
-      null,
-      '${type.dartName}.${hash ? 'hash' : 'equals'}',
-      hash ? .integer : .boolean,
-      [type, if (!hash) .object.nullable],
-    );
-    final entry = Block(target.parameterTypes);
-    if (hash) {
-      entry.finish(Return(entry.emit(ObjectHashCode(entry.parameters.first))));
-      return IrFunction(target, [entry]);
-    }
-    final blocks = [entry];
-    var current = entry;
-    for (final other
-        in type == .boolean
-            ? [ValueType.boolean]
-            : FfiTypes.isPointer(type)
-            ? [FfiTypes.pointerRuntimeType]
-            : [ValueType.integer, ValueType.floating]) {
-      final yes = Block([other]), no = Block();
-      blocks.addAll([yes, no]);
-      final test = current.emit(TypeTest(entry.parameters[1], other));
-      current.finish(
-        Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)),
+  FunctionTarget builtin(ValueType type, {required bool hash}) {
+    // Bounds prove the operation's carrier without exporting a caller's lexical
+    // parameter (or its promotion) into this independent helper's signature.
+    type = valueCarrier(type);
+    return _builtins.putIfAbsent((type, hash), () {
+      final target = FunctionTarget(
+        null,
+        '${type.dartName}.${hash ? 'hash' : 'equals'}',
+        hash ? .integer : .boolean,
+        [type, if (!hash) .object.nullable],
       );
-      yes.finish(
-        Return(yes.emit(Equals(entry.parameters.first, yes.parameters.single))),
-      );
-      current = no;
-    }
-    current.finish(const Return(Constant.boolean(false)));
-    return IrFunction(target, blocks);
-  }).target;
+      final entry = Block(target.parameterTypes);
+      if (hash) {
+        entry.finish(
+          Return(entry.emit(ObjectHashCode(entry.parameters.first))),
+        );
+        return IrFunction(target, [entry]);
+      }
+      final blocks = [entry];
+      var current = entry;
+      for (final other
+          in type == .boolean
+              ? [ValueType.boolean]
+              : FfiTypes.isPointer(type)
+              ? [FfiTypes.pointerRuntimeType]
+              : [ValueType.integer, ValueType.floating]) {
+        final yes = Block([other]), no = Block();
+        blocks.addAll([yes, no]);
+        final test = current.emit(TypeTest(entry.parameters[1], other));
+        current.finish(
+          Branch(test, Jump(yes, [test.refinement(true)!]), Jump(no)),
+        );
+        yes.finish(
+          Return(
+            yes.emit(Equals(entry.parameters.first, yes.parameters.single)),
+          ),
+        );
+        current = no;
+      }
+      current.finish(const Return(Constant.boolean(false)));
+      return IrFunction(target, blocks);
+    }).target;
+  }
 
   Iterable<DynamicDispatch> get dynamicCalls sync* {
     for (final target in definitions) {

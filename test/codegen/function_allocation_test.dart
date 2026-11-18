@@ -1,15 +1,18 @@
 import 'dart:typed_data';
+import 'dart:ffi' as ffi;
 
 import 'package:dartc/abi.dart';
 import 'package:dartc/assembler.dart';
 import 'package:dartc/src/assembler/code_buffer.dart' show CodeBuffer;
 import 'package:dartc/assembler/arm64.dart';
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/src/codegen/binary_encoding.dart';
 import 'package:dartc/src/codegen/function_allocation.dart';
 import 'package:dartc/src/codegen/function_emitter.dart';
 import 'package:dartc/src/codegen/function_selection.dart';
+import 'package:dartc/src/codegen/indirect_invocation.dart';
 import 'package:dartc/src/codegen/program_layout.dart';
 import 'package:dartc/src/codegen/selected_function.dart';
 import 'package:dartc/src/codegen/scalar_function.dart';
@@ -40,6 +43,182 @@ void main() {
 
   FunctionAllocation<CpuRegister> allocate(SelectedFunction body) =>
       FunctionAllocation(FunctionSelection(body, _Constraints()));
+
+  test('an indirect result retains its proven floating ABI register', () {
+    final root = FunctionTarget(uri, 'consume', .voidType, [.integer]);
+    final declaration = FunctionTarget(uri, 'produce', .object, []);
+    final block = Block(root.parameterTypes);
+    final indirect = IndirectInvocation(
+      DirectCall(declaration, []),
+      block.parameters.single,
+      [],
+      declaration.signature,
+      ExecutionSignature([], ExecutionShape.floating),
+    );
+    block.emit(KeepAlive(indirect));
+    block.finish(const Return());
+    final selected = select(root, [block]);
+    selected.instructions[block]!.insert(0, indirect);
+    final allocation = allocate(selected);
+    expect(allocation.operations[indirect]!.result, FloatRegister.d0);
+    expect(allocation.operations[indirect]!.resultMoves, isEmpty);
+  });
+
+  test(
+    'binding owns one saved context slot on normal and exceptional exits',
+    () {
+      for (final mode in ['return', 'throw', 'forward']) {
+        final target = FunctionTarget(uri, 'bind_$mode', .integer, [
+          .integer,
+          if (mode == 'throw') ...[ValueType.object, ValueType.stackTrace],
+        ]);
+        final entry = Block(target.parameterTypes);
+        entry.emit(BindNativeContext(entry.parameters.first));
+        entry.emit(BindNativeContext(entry.parameters.first));
+        final callee = FunctionTarget(uri, 'fails', .voidType, []);
+        final call = mode == 'forward'
+            ? entry.emit(DirectCall(callee, []))
+            : null;
+        if (mode == 'throw') {
+          entry.finish(
+            Throw(entry.parameters[1], stackTrace: entry.parameters[2]),
+          );
+        } else {
+          entry.finish(Return(entry.emit(ReadNativeContext())));
+        }
+        IrFunction(target, [entry]);
+        final body = select(target, [entry]);
+        if (call != null) body.invocations[call] = callee;
+        final result = allocate(body);
+        final frame = result.frame!;
+        expect(
+          frame.savedRegisters.keys.where(
+            (register) => register == Register.x28,
+          ),
+          hasLength(1),
+        );
+        final sink = _ContextSink();
+        ScalarFunction(result, sink).generate(
+          (_, _) {},
+          (_, _) => fail('Unexpected constant data'),
+          (_, _, _, _) {},
+          failures: true,
+        );
+        expect(sink.entered, same(frame));
+        expect(sink.exits, hasLength(mode == 'forward' ? 2 : 1));
+        expect(sink.exits, everyElement(same(frame)));
+        expect(
+          sink.moves.where((move) => move.$1 == Register.x28),
+          hasLength(2),
+        );
+      }
+    },
+  );
+
+  test(
+    'reading an inherited context does not create a frame or saved binding',
+    () {
+      final target = FunctionTarget(uri, 'readContext', .integer, []);
+      final entry = Block();
+      entry.finish(Return(entry.emit(ReadNativeContext())));
+      final result = allocate(select(target, [entry]));
+      expect(result.frame, isNull);
+      final sink = _ContextSink();
+      ScalarFunction(result, sink).generate(
+        (_, _) => fail('Unexpected call'),
+        (_, _) => fail('Unexpected data'),
+        (_, _, _, _) => fail('Unexpected safepoint'),
+      );
+      expect(sink.moves.single, (Register.x0, Register.x28));
+      expect(sink.exits, isEmpty);
+    },
+  );
+
+  test(
+    'native blocks use target layout and cannot overlap address spill homes',
+    () {
+      final target = FunctionTarget(uri, 'localStorage', .integer, []);
+      final callee = FunctionTarget(uri, 'observe', .voidType, [.integer]);
+      final entry = Block();
+      final bytes = entry.emit(
+        NativeLocalStorage(
+          NativeArrayType(.of(ffi.Uint8), 77),
+          zeroInitialize: true,
+        ),
+      );
+      final word = entry.emit(NativeLocalStorage(.of(ffi.Int64)));
+      final call = entry.emit(DirectCall(callee, [bytes]));
+      entry.finish(Return(entry.emit(IntBinary(.subtract, word, bytes))));
+      final body = select(target, [entry])..invocations[call] = callee;
+      final result = allocate(body);
+      final byteOffset = result.nativeStorage[bytes]!.offset;
+      final wordOffset = result.nativeStorage[word]!.offset;
+      expect(wordOffset % 8, 0);
+      expect(wordOffset, greaterThanOrEqualTo(byteOffset + 77));
+      for (final home in result.homes.values) {
+        expect(
+          home.offset < byteOffset || home.offset >= byteOffset + 77,
+          isTrue,
+        );
+        expect(
+          home.offset < wordOffset || home.offset >= wordOffset + 8,
+          isTrue,
+        );
+      }
+      expect(result.safepoints[call]!.offsets, isEmpty);
+      expect(result.operations[bytes]!.temporaries, hasLength(2));
+    },
+  );
+
+  test(
+    'small native block emission clears every byte and no neighboring bytes',
+    () {
+      for (final size in [1, 2, 3, 7, 8, 9, 17, 64]) {
+        final target = FunctionTarget(uri, 'zero$size', .integer, []);
+        final entry = Block();
+        final storage = entry.emit(
+          NativeLocalStorage(
+            NativeArrayType(.of(ffi.Uint8), size),
+            zeroInitialize: true,
+          ),
+        );
+        entry.finish(Return(storage));
+        final result = allocate(select(target, [entry]));
+        final emitter = _StorageSink();
+        ScalarFunction(result, emitter).generate(
+          (_, _) => fail('Local storage called a function'),
+          (_, _) => fail('Local storage referenced constant data'),
+          (_, _, _, _) => fail('Local storage introduced a safepoint'),
+        );
+        final offset = result.nativeStorage[storage]!.offset;
+        expect(emitter.cleared, {for (var i = 0; i < size; i++) offset + i: 0});
+        expect(emitter.registers[result.operations[storage]!.result], offset);
+      }
+    },
+  );
+
+  test('cloned storage evaluations retain their activation block', () {
+    final target = FunctionTarget(uri, 'clonedStorage', .integer, []);
+    final entry = Block();
+    final first = entry.emit(NativeLocalStorage(.of(ffi.Int64)));
+    final clone =
+        entry.emit(first.mapInputs((value) => value)) as NativeLocalStorage;
+    entry.finish(Return(entry.emit(IntBinary(.subtract, first, clone))));
+    final result = allocate(select(target, [entry]));
+    expect(result.nativeStorage[first], same(result.nativeStorage[clone]));
+  });
+
+  test('oversized and empty native blocks fail before emission', () {
+    for (final type in [
+      NativeArrayType(.of(ffi.Uint8), 0, variableLength: true),
+      NativeArrayType(.of(ffi.Uint8), 0x1000000),
+    ]) {
+      final target = FunctionTarget(uri, 'invalidStorage', .integer, []);
+      final entry = Block();
+      entry.finish(Return(entry.emit(NativeLocalStorage(type))));
+      expect(() => allocate(select(target, [entry])), throwsArgumentError);
+    }
+  });
 
   test('call-frame arguments bind ABI locations without SSA homes', () {
     final callee = FunctionTarget(
@@ -188,23 +367,25 @@ void main() {
     },
   );
 
-  test('constant boxing keeps the original constant in the transfer', () {
-    final target = FunctionTarget(uri, 'boxed', .object, []);
-    final block = Block();
-    final view = block.emit(
-      TypeView(const Constant.integer(17), ValueType.object),
-    );
-    block.finish(Return(view));
-    final allocation = allocate(select(target, [block]));
-    final copy = allocation.operations[view]!.before.single;
-    expect(copy.source, isA<AllocationConstant>());
-    expect(
-      (copy.source as AllocationConstant).value,
-      const Constant.integer(17),
-    );
-    expect(copy.from, ValueRepresentation.word);
-    expect(copy.to, ValueRepresentation.reference);
-  });
+  test(
+    'an explicit constant carrier keeps the constant relocation payload',
+    () {
+      final target = FunctionTarget(uri, 'boxed', .object, []);
+      final block = Block();
+      final view = block.emit(ConstantCarrier(const Constant.integer(17)));
+      block.finish(Return(view));
+      final body = select(target, [block])..aliases.add(view);
+      final allocation = allocate(body);
+      final copy = allocation.operations[view]!.before.single;
+      expect(copy.source, isA<AllocationConstant>());
+      expect(
+        (copy.source as AllocationConstant).value,
+        const Constant.integer(17),
+      );
+      expect(copy.from, ValueRepresentation.word);
+      expect(copy.to, ValueRepresentation.reference);
+    },
+  );
 
   test('register swap cycles use a scratch register in either bank', () {
     for (final type in [ValueType.integer, ValueType.floating]) {
@@ -522,6 +703,8 @@ class _Constraints() implements FunctionEmitter<CpuRegister> {
   @override
   CpuRegister get failureRegister => Register.x16;
   @override
+  CpuRegister get heapRegister => Register.x28;
+  @override
   bool get negationNeedsTemporary => false;
   @override
   BinaryEncoding<CpuRegister> get subtract => BinaryEncoding(
@@ -552,6 +735,74 @@ final class _Sink() extends _Constraints {
       BinaryEncoding((_, _, _) => _code.addByte(0xa0));
   @override
   void ret() => _code.addByte(0xc0);
+  @override
+  Uint8List finish() => _code.finish();
+}
+
+final class _StorageSink() extends _Constraints {
+  final _code = CodeBuffer();
+  final registers = <CpuRegister, int>{};
+  final cleared = <int, int>{};
+  @override
+  Label label() => _code.label();
+  @override
+  void bind(Label label) => _code.bind(label);
+  @override
+  void prologue(FrameLayout<CpuRegister> frame) {}
+  @override
+  void epilogue(FrameLayout<CpuRegister> frame) {}
+  @override
+  void stackAddress(CpuRegister destination, int offset) =>
+      registers[destination] = offset;
+  @override
+  void loadImmediate(CpuRegister destination, int value) =>
+      registers[destination] = value;
+  @override
+  void storeMemory(
+    CpuRegister source,
+    CpuRegister base, {
+    int offset = 0,
+    required int bytes,
+  }) {
+    final address = registers[base]! + offset;
+    final value = registers[source]!;
+    for (var i = 0; i < bytes; i++) {
+      cleared[address + i] = (value >> (i * 8)) & 255;
+    }
+  }
+
+  @override
+  Uint8List finish() => _code.finish();
+}
+
+final class _ContextSink() extends _Constraints {
+  final _code = CodeBuffer();
+  final moves = <(CpuRegister, CpuRegister)>[];
+  final exits = <FrameLayout<CpuRegister>>[];
+  FrameLayout<CpuRegister>? entered;
+  @override
+  int get position => 0;
+  @override
+  Label label() => _code.label();
+  @override
+  void bind(Label label) => _code.bind(label);
+  @override
+  void jump(Label label) {}
+  @override
+  void jumpIfZero(CpuRegister value, Label label) {}
+  @override
+  void prologue(FrameLayout<CpuRegister> frame) => entered = frame;
+  @override
+  void epilogue(FrameLayout<CpuRegister> frame) => exits.add(frame);
+  @override
+  void ret() {}
+  @override
+  void move(CpuRegister destination, CpuRegister source) =>
+      moves.add((destination, source));
+  @override
+  void loadImmediate(CpuRegister destination, int value) {}
+  @override
+  Fixup call() => const Fixup(0, FixupEncoding.arm64Call26);
   @override
   Uint8List finish() => _code.finish();
 }

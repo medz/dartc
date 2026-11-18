@@ -1,14 +1,13 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/runtime/contracts.dart';
 
-/// Checked Dart entries and the one generated nominal metadata projection.
+/// Checked ordinary Dart entries for type operations.
 final class TypeRuntime(
   final IrProgram program,
   Map<RuntimeRole, FunctionTarget> entries,
-
-  /// Maps (type metadata, declaration shape) to its ancestor view or null.
-  final FunctionTarget projection,
 ) {
+  /// Maps metadata and a declaration shape through the value's own projector.
+  FunctionTarget get projection => entry(.typeProjection);
   final Map<RuntimeRole, FunctionTarget> _entries = {
     for (final role in _signatures.keys)
       role:
@@ -16,6 +15,11 @@ final class TypeRuntime(
   };
 
   static final _signatures = <RuntimeRole, FunctionType>{
+    .typeProjection: FunctionType(TypeMetadata.type.nullable, [
+      TypeMetadata.type,
+      .integer,
+    ]),
+    .typeArgument: TypeMetadata.projectorSignature,
     .typeSubtype: FunctionType(.boolean, [
       TypeMetadata.type,
       TypeMetadata.type,
@@ -38,6 +42,9 @@ final class TypeRuntime(
       .integer,
       .integer,
     ]),
+    .typeInstantiate: FunctionType(TypeMetadata.type, [
+      TypeMetadata.type, TypeMetadata.list.nullable,
+    ]),
     .typeAt: FunctionType(TypeMetadata.type, [
       TypeMetadata.list.nullable,
       .integer,
@@ -55,18 +62,13 @@ final class TypeRuntime(
         throw ArgumentError('Invalid type runtime entry: $role');
       }
     }
-    if (projection.typeParameters.isNotEmpty ||
-        projection.signature.optionalPositional != 0 ||
-        projection.signature.named.isNotEmpty ||
-        FunctionType(projection.returnType, projection.parameterTypes) !=
-            FunctionType(TypeMetadata.type.nullable, [
-              TypeMetadata.type,
-              ValueType.integer,
-            ]) ||
-        program.implementationOf(projection) is! IrExternal) {
-      throw ArgumentError('Invalid type metadata projection.');
-    }
   }
+
+  /// Binds these entry identities to the current verified graph.
+  ///
+  /// Constructor and entry lookups must never read a superseded source graph.
+  TypeRuntime rebind(IrProgram current) =>
+      identical(current, program) ? this : TypeRuntime(current, _entries);
 
   Iterable<FunctionTarget> get entries => _entries.values;
 

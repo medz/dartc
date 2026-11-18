@@ -50,8 +50,8 @@ void main() {
     body.edgeArguments[deadJump] = const [];
     body.operands[value] = [value.left, value.right];
     body.operands[deadValue] = [deadValue.left, deadValue.right];
-    body.resultTypes[value] = .integer;
-    body.resultTypes[deadValue] = .integer;
+    body.resultShapes[value] = ExecutionShape.word;
+    body.resultShapes[deadValue] = ExecutionShape.word;
     body.tests[deadTest] = TypeTestKind.constantFalse;
     body.aliases.add(deadValue);
     body.introduced.add(deadValue);
@@ -76,7 +76,7 @@ void main() {
     });
     expect(body.inputsOf(value), [value.left, value.right]);
     expect(body.operands.containsKey(deadValue), isFalse);
-    expect(body.resultTypes, {value: ValueType.integer});
+    expect(body.resultShapes, {value: ExecutionShape.word});
     expect(body.tests, isEmpty);
     expect(body.aliases, isEmpty);
     expect(body.introduced, isEmpty);
@@ -109,7 +109,7 @@ void main() {
     body.ends[exit] = Return(const Constant.integer(1));
     body.operands[invoke] = [argument];
     body.invocations[invoke] = callee;
-    body.resultTypes[invoke] = .voidType;
+    body.resultShapes[invoke] = ExecutionShape.reference;
     body.sourceLocations[invoke] = location;
 
     body.prune();
@@ -117,7 +117,7 @@ void main() {
     expect(body.invocations[invoke], callee);
     expect(body.inputsOf(invoke), [argument]);
     expect(body.operands[invoke], [argument]);
-    expect(body.resultTypes[invoke], ValueType.voidType);
+    expect(body.resultShapes[invoke], ExecutionShape.reference);
     expect(body.sourceLocations[invoke], location);
   });
 
@@ -140,14 +140,14 @@ void main() {
       body.ends[dead] = const Return();
       body.sourceLocations[call] = location;
       body.operands[call] = [entry.parameters.single];
-      body.resultTypes[entry.parameters.single] = .integer;
-      body.resultTypes[dead.parameters.single] = .integer;
+      body.resultShapes[entry.parameters.single] = ExecutionShape.word;
+      body.resultShapes[dead.parameters.single] = ExecutionShape.word;
 
       body.prune();
 
       expect(body.sourceLocations[call], location);
       expect(body.operands[call], [entry.parameters.single]);
-      expect(body.resultTypes, {entry.parameters.single: ValueType.integer});
+      expect(body.resultShapes, {entry.parameters.single: ExecutionShape.word});
     },
   );
 }

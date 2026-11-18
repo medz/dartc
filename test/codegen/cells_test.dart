@@ -143,11 +143,17 @@ void main() {
       throwsUnsupportedError,
     );
   });
-  test('closure entry captures and their copies retain initialization', () {
+  test('closure entry captures require their explicit initialization contract', () {
     final entry = Block(capture.parameterTypes);
     final copy = entry.emit(CopyCell(entry.parameters[1]));
     entry.finish(Return(entry.emit(ReadCell(copy))));
-    checkCellInitialization(IrFunction(capture, [entry]));
+    final body = IrFunction(capture, [entry]);
+    expect(() => checkCellInitialization(body), throwsUnsupportedError);
+    final enclosing = Block(target.parameterTypes)
+      ..finish(const Return(Constant.integer(0)));
+    final program = IrProgram([], [IrFunction(target, [enclosing]), body]);
+    expect(cellInitializationRequirements(program)[capture], {(1, null)});
+    checkCellInitialization(body, program: program);
   });
   test('normal continuation writes do not initialize an exceptional path', () {
     final entry = Block(target.parameterTypes),
@@ -207,11 +213,8 @@ void main() {
           ]);
           expect(
             () => generator.generate(
-              Compiler(generator.target).prepare(
-                program,
-                runtime: heapRuntime,
-                roots: [declaration, child],
-              ),
+              Compiler(generator.target)
+                  .prepare(program, runtime: heapRuntime, roots: [declaration]),
             ),
             throwsA(
               isA<UnsupportedError>().having(

@@ -1,10 +1,14 @@
 import 'type_metadata.dart';
+import 'cell_storage.dart';
+import 'storage_view.dart';
+import 'module_object.dart';
 import 'block.dart';
 import 'control_flow.dart';
 import 'core_types.dart';
 import 'ffi_types.dart';
 import 'signature.dart';
 import 'type.dart';
+import 'type_binding.dart';
 import 'value.dart';
 
 typedef FunctionReferences = ({
@@ -17,7 +21,9 @@ typedef FunctionReferences = ({
   Set<ClassType> instantiatedClasses,
   Set<GlobalVariable> globals,
   Set<InstanceField> fields,
+  Set<CellStorage> cellStorages,
   Set<ObjectConstant> objects,
+  Set<ModuleObject> moduleObjects,
   Set<FunctionConstant> functionConstants,
   Set<SequenceConstant> sequenceConstants,
   Set<RecordType> recordTypes,
@@ -33,6 +39,7 @@ FunctionReferences verifyCallable(
   FunctionBodyKind bodyKind = .synchronous,
   ValueType? yieldType,
   ValueType? completionType,
+  List<TypeBinding> typeBindings = const [],
 }) {
   Set<FunctionTarget>? closures;
   Set<FunctionTarget>? callees;
@@ -43,7 +50,9 @@ FunctionReferences verifyCallable(
   Set<ClassType>? instantiatedClasses;
   Set<GlobalVariable>? globals;
   Set<InstanceField>? fields;
+  Set<CellStorage>? cellStorages;
   Set<ObjectConstant>? objects;
+  Set<ModuleObject>? moduleObjects;
   Set<FunctionConstant>? functionConstants;
   Set<SequenceConstant>? sequenceConstants;
   Set<RecordType>? recordTypes;
@@ -71,7 +80,9 @@ FunctionReferences verifyCallable(
       instantiatedClasses: _snapshot(instantiatedClasses),
       globals: _snapshot(globals),
       fields: _snapshot(fields),
+      cellStorages: _snapshot(cellStorages),
       objects: _snapshot(objects),
+      moduleObjects: _snapshot(moduleObjects),
       functionConstants: _snapshot(functionConstants),
       sequenceConstants: _snapshot(sequenceConstants),
       recordTypes: _snapshot(recordTypes),
@@ -90,6 +101,17 @@ FunctionReferences verifyCallable(
       scope.addAll(lexical.owner?.typeParameters ?? const []);
     }
   }
+  final bindings = {
+    for (final binding in typeBindings) binding.parameter: binding,
+  };
+  if (bindings.length != typeBindings.length ||
+      bindings.keys.any(scope.contains) ||
+      target.signature.freeTypeParameters.any(bindings.containsKey)) {
+    throw ArgumentError(
+      'Body type bindings must have distinct, body-only parameters.',
+    );
+  }
+  scope.addAll(bindings.keys);
   void checkTypeScope(ValueType type) {
     if (checkedTypes.contains(type)) return;
     for (final declaration in typeDeclarationsIn(type)) {
@@ -128,10 +150,12 @@ FunctionReferences verifyCallable(
       :final typeArguments,
       :final constructorSignature,
       :final constructorTypeArguments,
+      :final invocationEntry,
     )) {
       (functionConstants ??= {}).add(value);
-      (callees ??= {}).add(callee);
-      if (callee.implementation.kind == .initializer) {
+      (callees ??= {}).add(invocationEntry ?? callee);
+      if (invocationEntry == null &&
+          callee.implementation.kind == .initializer) {
         (instantiatedClasses ??= {}).add(callee.implementation.owner!);
       }
       if (constructorSignature != null) checkTypeScope(constructorSignature);
@@ -241,6 +265,59 @@ FunctionReferences verifyCallable(
   final idom = predecessors == null
       ? const <Block, Block>{}
       : immediateDominators(entry, predecessors);
+  bool dominates(Block owner, Block use) {
+    while (use != owner && use != entry) {
+      use = idom[use]!;
+    }
+    return use == owner;
+  }
+
+  for (final binding in typeBindings) {
+    checkTypeScope(binding.parameter.bound);
+    if (binding.value is Constant) {
+      binding.remap(binding.check, binding.value);
+      continue;
+    }
+    if (!identical(binding.value, binding.check) ||
+        !definitions.containsKey(binding.check)) {
+      throw StateError(
+        'A body type binding requires its owned checked checkpoint.',
+      );
+    }
+    final owner = definitions[binding.check]!.$1;
+    final pending = owner.successors.map((edge) => edge.target).toList();
+    final visited = <Block>{};
+    while (pending.isNotEmpty) {
+      final next = pending.removeLast();
+      if (next == owner) {
+        throw StateError('A body type binding cannot be re-entered by a loop.');
+      }
+      if (visited.add(next)) {
+        pending.addAll(next.successors.map((edge) => edge.target));
+      }
+    }
+  }
+
+  void useBinding(TypeBinding binding, Block block, int position) {
+    if (binding.value is Constant) return;
+    final (owner, index) = definitions[binding.value]!;
+    if (index == owner.instructions.length) {
+      final end = owner.end as Invoke;
+      final normal = end.onReturn?.target;
+      if (normal == null ||
+          predecessors![normal]!.length != 1 ||
+          !dominates(normal, block)) {
+        throw StateError(
+          'Body type used before its check successfully returns.',
+        );
+      }
+    } else if (owner == block ? index >= position : !dominates(owner, block)) {
+      throw StateError(
+        'Body type used before its checked descriptor dominates.',
+      );
+    }
+  }
+
   bool freshReceiver(Value value, ClassType owner, [Set<Value>? seen]) {
     seen = {...?seen};
     if (!seen.add(value)) return false;
@@ -255,7 +332,8 @@ FunctionReferences verifyCallable(
     }
     switch (value) {
       case NewPayload(type: final ClassType type) ||
-          AllocatedObject(type: final ClassType type):
+          AllocatedObject(storageType: final type) ||
+          ManagedStorageAllocation(storageView: StorageView(storageType: final type)):
         for (
           ClassType? ancestor = type;
           ancestor != null;
@@ -285,7 +363,19 @@ FunctionReferences verifyCallable(
   }
 
   for (final block in blocks) {
+    for (final parameter in block.parameters) {
+      for (final binding in typeBindings) {
+        if (parameter.type.freeTypeParameters.contains(binding.parameter)) {
+          useBinding(binding, block, -1);
+        }
+      }
+    }
     void use(Value value, int position) {
+      for (final binding in typeBindings) {
+        if (value.type.freeTypeParameters.contains(binding.parameter)) {
+          useBinding(binding, block, position);
+        }
+      }
       if (value is Constant) {
         constant(value);
         return;
@@ -337,7 +427,31 @@ FunctionReferences verifyCallable(
     }
 
     void checkOperation(Instruction op, int position) {
+      for (final binding in typeBindings) {
+        if (identical(binding.value, op)) continue;
+        if (op.referencedTypes.any(
+          (type) => type.freeTypeParameters.contains(binding.parameter),
+        )) {
+          useBinding(binding, block, position);
+        }
+      }
       checkTypeScope(op.type);
+      if (op.storageContract case final storageView?) {
+        checkTypeScope(storageView.capability);
+        checkTypeScope(storageView.storageType);
+        for (final type in storageView.fields.values) {
+          checkTypeScope(type);
+        }
+        (fields ??= {}).addAll(storageView.fields.keys);
+      }
+      if (op is NativeLocalStorage && bodyKind != .synchronous) {
+        throw StateError('Native local storage requires a synchronous frame.');
+      }
+      if (op is BindNativeContext && bodyKind != .synchronous) {
+        throw StateError(
+          'Native context binding requires a synchronous frame.',
+        );
+      }
       if (op case ReifyType(:final template)) checkTypeScope(template);
       if (op case ObjectDescriptorAddress(:final declaration)) {
         (classes ??= {}).add(declaration);
@@ -348,6 +462,9 @@ FunctionReferences verifyCallable(
               InstanceCall(:final ownerType?) ||
               BindMethod(:final ownerType?)) {
         checkTypeScope(ownerType);
+      }
+      if (op case DirectCall(:final lexicalEnvironment)) {
+        lexicalEnvironment.values.forEach(checkTypeScope);
       }
       final typeArguments = switch (op) {
         DirectCall(:final typeArguments) ||
@@ -376,8 +493,12 @@ FunctionReferences verifyCallable(
         case LoadLibrary(:final reference) ||
             CheckLibraryLoaded(:final reference):
           (deferredImports ??= {}).add(reference);
-        case FunctionCall(:final target?):
-          (callees ??= {}).add(target);
+        case FunctionCall(:final target, :final entryBinding):
+          if (target != null) (callees ??= {}).add(target);
+          if (entryBinding != null) {
+            (callees ??= {}).addAll(entryBinding.entries.values);
+            checkTypeScope(entryBinding.shape.signature);
+          }
         case MakeInvocation():
           (instantiatedClasses ??= {}).add(CoreTypes.symbolStorage);
         case DynamicDispatch(
@@ -385,8 +506,12 @@ FunctionReferences verifyCallable(
           :final selector,
           :final failure,
           :final getterCalls,
+          :final entryBinding,
+          :final methodBindings,
         ):
-          (callees ??= {}).addAll([?failure, ...getterCalls.values]);
+          (callees ??= {}).addAll([?failure, ...getterCalls.values,
+            ...methodBindings.values, ...?entryBinding?.entries.values]);
+          if (entryBinding != null) checkTypeScope(entryBinding.shape.signature);
           (instantiatedClasses ??= {}).add(ValueType.nullClass);
           for (final selected in [
             selector,
@@ -414,13 +539,20 @@ FunctionReferences verifyCallable(
               selector: selected,
             ));
           }
-        case InstanceCall(member: final callee, :final receiver) ||
+        case InstanceCall(member: final callee, :final receiver, :final entryBinding):
+          if (entryBinding != null) {
+            (callees ??= {}).addAll(entryBinding.entries.values);
+            checkTypeScope(entryBinding.signature);
+          }
+          (virtualMembers ??= {}).add((receiver: receiver.unviewedType, target: callee));
+        case
             BindMethod(method: final callee, :final receiver, direct: false):
           (virtualMembers ??= {}).add((
             receiver: receiver.unviewedType,
             target: callee,
           ));
-        case DirectCall(target: final callee) ||
+        case ManagedStorageAllocation(allocator: final callee) ||
+            DirectCall(target: final callee) ||
             InitializeObject(initializer: final callee) ||
             BindMethod(method: final callee) ||
             Construct(initializer: final callee):
@@ -434,14 +566,26 @@ FunctionReferences verifyCallable(
           break;
       }
       switch (op) {
+        case ModuleObjectReference(:final declaration):
+          (moduleObjects ??= {}).add(declaration);
+          (instantiatedClasses ??= {}).add(declaration.type.declaration);
+          (fields ??= {}).addAll(declaration.initialFields.keys);
+          for (final initial in declaration.initialFields.values) {
+            constant(initial);
+          }
         case BindMethod(:final method, :final direct, :final receiver):
+          if (op.entryBinding case final binding?) {
+            (callees ??= {}).addAll(binding.entries.values);
+            checkTypeScope(binding.signature);
+          }
           (methodTearOffs ??= {}).add((
             receiver: receiver.unviewedType,
             method: method,
             direct: direct,
           ));
         case NativeView(type: final ClassType type) ||
-            AllocatedObject(type: final ClassType type) ||
+            ManagedStorageAllocation(storageView: StorageView(storageType: final type)) ||
+            AllocatedObject(storageType: final type) ||
             NewPayload(type: final ClassType type):
           (instantiatedClasses ??= {}).add(type.declaration);
         case Construct(:final instantiatedType):
@@ -451,6 +595,8 @@ FunctionReferences verifyCallable(
         case PointerFromAddress() || PointerOffset() || NativeCall()
             when FfiTypes.isPointer(op.type):
           (instantiatedClasses ??= {}).add(FfiTypes.pointer);
+        case InitializeStorageField(:final field):
+          (fields ??= {}).add(field);
         case LoadGlobal(:final global) || StoreGlobal(:final global):
           (globals ??= {}).add(global);
         case MakeClosure(target: final child):
@@ -462,6 +608,14 @@ FunctionReferences verifyCallable(
             throw StateError('Closure created outside its lexical scope.');
           }
           (closures ??= {}).add(child);
+        case CellStorageView(:final storage) || CellStorageReference(:final storage):
+          (cellStorages ??= {}).add(storage);
+          (fields ??= {}).addAll(storage.fields);
+        case ReadFunctionEnvironment(:final source) ||
+            ReadFunctionTypeArgument(:final source):
+          (callees ??= {}).add(source);
+        case CheckedTypeArgument(:final implementation):
+          if (implementation != null) (callees ??= {}).add(implementation);
         case StoreField(:final field, :final receiver)
             when field.isFinal && !field.isLate:
           if (!freshReceiver(receiver, field.owner)) {
@@ -486,10 +640,20 @@ FunctionReferences verifyCallable(
             op is! CopyCell &&
             op is! WriteCell &&
             op is! KeepAlive &&
-            op is! MakeClosure) {
+            op is! CellReference &&
+            op is! CellStorageReference &&
+            op is! MakeClosure &&
+            !(op is DirectCall &&
+                op.target.kind == .closure &&
+                op.inputs.indexed.any(
+                  (entry) =>
+                      identical(entry.$2, input) &&
+                      entry.$1 > 0 &&
+                      entry.$1 <= op.target.captures.length,
+                ))) {
           throw StateError('Capture storage used as a Dart value.');
         }
-        if (input is CallFrameValue && op is DirectCall) continue;
+        if (input is CallFrameValue && (op is DirectCall || op is ManagedStorageAllocation)) continue;
         use(input, position);
       }
     }

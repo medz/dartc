@@ -18,7 +18,10 @@ Iterable<(String, SourceLocation?)> sourceFrames(
 
   var current = location;
   do {
-    final target = current?.function ?? function;
+    var target = current?.function ?? function;
+    while (target.executionSource != null) {
+      target = target.executionSource!;
+    }
     if (target.library != null) {
       yield (name(target), current);
     }

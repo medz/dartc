@@ -6,6 +6,7 @@ import 'program_layout.dart';
 import 'reference_equality.dart';
 import 'selected_function.dart';
 import 'storage_access.dart';
+import 'value_carrier.dart';
 
 /// Builds comparisons and hashes from runtime value identities.
 final class ValueOperations(
@@ -20,45 +21,17 @@ final class ValueOperations(
   }
 
   Block _functionIdentity(Value value, Block current) {
-    final tag = _load(
-      layouts.closures.tag,
-      value,
-      graph.instructions[current]!,
-    );
+    final body = graph.instructions[current]!;
     final done = graph.addBlock([
       .integer,
       .object.nullable,
       TypeMetadata.list.nullable,
     ]);
-    for (final shape in layouts.closures.all) {
-      final selected = graph.addBlock(), next = graph.addBlock();
-      final match = Equals(tag, Constant.integer(shape.tag));
-      graph.instructions[current]!.add(match);
-      graph.ends[current] = Branch(match, Jump(selected), Jump(next));
-      final body = graph.instructions[selected]!;
-      final applied = shape.instantiation;
-      final original = applied == null
-          ? value
-          : _load(applied.origin, value, body);
-      final generic = applied?.generic ?? shape;
-      final anchor = generic.target.kind == .closure
-          ? original
-          : generic.target.kind.isVirtual
-          ? _load(generic.captures.single, original, body)
-          : const Constant.nullValue();
-      final arguments = applied == null
-          ? layouts.types.argumentConstants(shape.identityArguments)
-          : _load(applied.arguments, value, body);
-      graph.ends[selected] = Jump(done, [
-        Constant.integer(shape.identity),
-        anchor,
-        arguments,
-      ]);
-      current = next;
-    }
-    final failure = DirectCall(invalid, []);
-    graph.instructions[current]!.add(failure);
-    graph.ends[current] = Unreachable(failure);
+    graph.ends[current] = Jump(done, [
+      _load(layouts.closures.identity, value, body),
+      _load(layouts.closures.identityAnchor, value, body),
+      _load(layouts.closures.identityArguments, value, body),
+    ]);
     return done;
   }
 
@@ -135,7 +108,7 @@ final class ValueOperations(
     );
     block = ordinary;
     final identity =
-        layouts.isReference(left.type) && layouts.isReference(right.type)
+        graph.shapeOf(left).isReference && graph.shapeOf(right).isReference
         ? ReferenceEquality(left, right)
         : const Constant.boolean(false);
     if (identity is ReferenceEquality) graph.instructions[block]!.add(identity);
@@ -177,6 +150,11 @@ final class ValueOperations(
   }
 
   Block hashScalar(Value value, Block entry) {
+    final carrier = valueCarrier(value.type);
+    if (carrier != value.type) {
+      value = TypeView(value, carrier);
+      graph.instructions[entry]!.add(value);
+    }
     final done = graph.addBlock([.integer]);
     if (value.type == .nullType) {
       graph.ends[entry] = Jump(done, [const Constant.integer(0)]);
@@ -242,7 +220,7 @@ final class ValueOperations(
       return comparison;
     }
 
-    if (layouts.representation(right.type) != .reference) {
+    if (!graph.shapeOf(right).isReference) {
       graph.ends[entry] = result(false);
       return join;
     }
@@ -252,10 +230,7 @@ final class ValueOperations(
       result(true),
       Jump(current),
     );
-    if (left.type == .nullType ||
-        right.type == .nullType ||
-        layouts.closures.methods.isEmpty &&
-            layouts.closures.specializations.isEmpty) {
+    if (left.type == .nullType || right.type == .nullType) {
       graph.ends[current] = result(false);
       return join;
     }

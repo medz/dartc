@@ -1,6 +1,7 @@
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_state.dart';
-import 'package:dartc/src/optimizer/flow_value.dart' show FlowRegion, FlowSource;
+import 'package:dartc/src/optimizer/flow_value.dart'
+    show FlowRegion, FlowSource, FlowAddress;
 import 'package:dartc/optimizer.dart';
 import 'package:test/test.dart';
 
@@ -12,6 +13,262 @@ const _one = Constant.integer(1);
 const _two = Constant.integer(2);
 
 void main() {
+  for (final raw in [false, true]) {
+    test(
+      'program-state invalidation preserves typed and raw global capabilities ($raw)',
+      () {
+        final box = ClassType(_uri, 'RawGlobalTarget');
+        final field = InstanceField(box, 'value', .integer, isFinal: true);
+        final global = GlobalVariable(
+          _uri,
+          'reference',
+          raw ? .integer.nullable : box.nullable,
+        );
+        final program = IrProgram(
+          [
+            IrClass(box, [field]),
+          ],
+          [],
+          globals: [global],
+        );
+        final create = NewPayload(box, const Constant.integer(0));
+        final allocated = _step(FlowState(program), create);
+        final initialized = _step(
+          allocated.normal!,
+          StoreField(field, create, _one),
+          operands: [allocated.value, FlowValue.constant(_one)],
+        );
+        final object = allocated.value.objects.single;
+        final stored = _step(
+          initialized.normal!,
+          StoreGlobal(global, raw ? const Constant.integer(0) : create),
+          operands: [
+            raw ? FlowValue.address(FlowAddress(object, 0)) : allocated.value,
+          ],
+        );
+        final changed = stored.normal!.copy()..invalidate([], globals: true);
+        expect(
+          changed.storedValue(object, field).constant,
+          raw ? isNull : _one,
+        );
+        expect(stored.normal!.storedValue(object, field).constant, _one);
+      },
+    );
+  }
+
+  test('projected alias dependencies do not claim an external observation', () {
+    final box = ClassType(_uri, 'AliasDependency');
+    final field = InstanceField(box, 'value', .integer);
+    final global = GlobalVariable(_uri, 'alias', box.nullable);
+    final program = IrProgram(
+      [
+        IrClass(box, [field]),
+      ],
+      [],
+      globals: [global],
+    );
+    final create = NewPayload(box, const Constant.integer(0));
+    final created = _step(FlowState(program), create);
+    final initialized = _step(
+      created.normal!,
+      StoreField(field, create, _one),
+      operands: [created.value, FlowValue.constant(_one)],
+    );
+    final stored = _step(
+      initialized.normal!,
+      StoreGlobal(global, create),
+      operands: [created.value],
+    );
+    final external = FlowValue.unknown(box, external: true);
+    final object = created.value.objects.single;
+    final access = (
+      fields: {field},
+      globals: <GlobalVariable>{},
+      data: <NativeData>{},
+      modules: <ModuleObject>{},
+      context: false,
+      cells: false,
+      memory: false,
+      writes: true,
+      exposed: false,
+      rawWrites: false,
+    );
+    final projected = stored.normal!
+        .project([external], access: access)
+        .project([external], access: access);
+    expect(projected.containsObject(object), isTrue);
+    expect(projected.exposedValues.objects, isEmpty);
+    expect(projected.escapedValues.objects, isEmpty);
+    final write = _step(
+      projected,
+      StoreField(field, create, _two),
+      operands: [external, FlowValue.constant(_two)],
+    );
+    expect(
+      write.normal!.storedValue(object, field).integers!.contains(2),
+      isTrue,
+    );
+    expect(write.normal!.exposedValues.objects, isEmpty);
+  });
+
+  test('external origins preserve actual escape and raw alias frontiers', () {
+    final box = ClassType(_uri, 'ExternalBox');
+    final field = InstanceField(box, 'value', .integer);
+    final program = IrProgram([
+      IrClass(box, [field]),
+    ], []);
+    final create = NewPayload(box, const Constant.integer(0));
+    final created = _step(FlowState(program), create);
+    final initialized = _step(
+      created.normal!,
+      StoreField(field, create, _one),
+      operands: [created.value, FlowValue.constant(_one)],
+    );
+    final state = initialized.normal!;
+    final external = FlowValue.unknown(box, external: true);
+    final unrestricted = FlowValue.unknown(box);
+    final object = created.value.objects.single;
+    expect(state.reachableValues([external]).objects, isEmpty);
+    final privateWrite = _step(
+      state,
+      StoreField(field, create, _two),
+      operands: [external, FlowValue.constant(_two)],
+    );
+    expect(privateWrite.normal!.storedValue(object, field).constant, _one);
+    // Untagged raw snapshots remain capable of naming an existing allocation.
+    final raw = FlowValue.unknown(.integer).withReferences([unrestricted]);
+    expect(state.exposedFrom([raw, external]).objects, contains(object));
+    expect(state.exposedFrom([external, raw]).objects, contains(object));
+    final exposed = state.copy()..escape([created.value]);
+    expect(exposed.reachableValues([external]).objects, contains(object));
+    final before = exposed.project([external]).copy(resetWrites: true);
+    final write = _step(
+      before,
+      StoreField(field, create, _two),
+      operands: [external, FlowValue.constant(_two)],
+    );
+    final applied = exposed.applySummary(
+      before,
+      write.normal!,
+      mapObject: (object) => object,
+      mapValue: (value) => value,
+    );
+    expect(applied.storedValue(object, field).integers!.contains(2), isTrue);
+    expect(state.storedValue(object, field).constant, _one);
+  });
+
+  test('unknown alias traversal preserves typed and raw closure frontiers', () {
+    final cell = NewCell(CellType(.integer), _one);
+    final allocated = _step(FlowState(IrProgram([], [])), cell);
+    final target = FunctionTarget(
+      _uri,
+      'capturing',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: FunctionTarget(_uri, 'enclosing', .voidType, []),
+      sourceOffset: 0,
+      captures: [cell.type],
+    );
+    final closure = MakeClosure(target, [cell]);
+    final captured = _step(
+      allocated.normal!,
+      closure,
+      operands: [allocated.value],
+    );
+    final state = captured.normal!;
+    final unknown = FlowValue.unknown(closure.type);
+    final raw = FlowValue.unknown(.integer).withReferences([unknown]);
+    final cellObject = allocated.value.objects.single;
+    expect(
+      state.exposedFrom([unknown]).objects,
+      containsAll(captured.value.objects),
+    );
+    expect(state.exposedFrom([unknown]).objects, isNot(contains(cellObject)));
+    for (final roots in [
+      [raw, unknown, unknown],
+      [unknown, unknown, raw],
+    ]) {
+      expect(state.exposedFrom(roots).objects, contains(cellObject));
+    }
+
+    // A later traversal sees objects added since an earlier query.
+    final anotherCell = NewCell(CellType(.integer), _two);
+    final another = _step(state, anotherCell);
+    final anotherClosure = _step(
+      another.normal!,
+      MakeClosure(target, [anotherCell]),
+      operands: [another.value],
+    );
+    final reachable = anotherClosure.normal!.exposedFrom([raw, unknown]);
+    expect(
+      reachable.objects,
+      containsAll([
+        cellObject,
+        another.value.objects.single,
+        ...captured.value.objects,
+        ...anotherClosure.value.objects,
+      ]),
+    );
+    expect(
+      state.exposedFrom([raw]).objects,
+      isNot(contains(another.value.objects.single)),
+    );
+  });
+
+  test('unknown writes preserve possible late final cell initialization in summaries', () {
+    final program = IrProgram([], []);
+    for (final bound in [false, true]) {
+      final cell = NewCell(
+        CellType(.integer, isLate: true, isFinal: true),
+        bound ? _one : null,
+      );
+      final created = _step(FlowState(program), cell);
+      final caller = created.normal!;
+      final input = caller.copy(resetWrites: true);
+      final output = input.copy()..invalidate([created.value]);
+      final applied = caller.applySummary(
+        input,
+        output,
+        mapObject: (value) => value,
+        mapValue: (value) => value,
+      );
+      final read = _step(applied, ReadCell(cell), operands: [created.value]);
+      expect(read.normal, isNotNull);
+      expect(read.value.isBottom, isFalse);
+      if (bound) expect(read.value.constant?.structuralKey, _one.structuralKey);
+      if (!bound) expect(read.exceptional, isNotNull);
+    }
+  });
+
+  test('unknown writes preserve possible late final global initialization in summaries', () {
+    final global = GlobalVariable(
+      _uri,
+      'lateFinal',
+      .integer,
+      isLate: true,
+      isFinal: true,
+    );
+    final program = IrProgram([], [], globals: [global]);
+    for (final bound in [false, true]) {
+      var caller = FlowState(program);
+      if (bound) caller = _step(caller, StoreGlobal(global, _one)).normal!;
+      final input = caller.copy(resetWrites: true);
+      final output = input.copy()..invalidate([], globals: true);
+      final applied = caller.applySummary(
+        input,
+        output,
+        mapObject: (value) => value,
+        mapValue: (value) => value,
+      );
+      final read = _step(applied, LoadGlobal(global));
+      expect(read.normal, isNotNull);
+      expect(read.value.isBottom, isFalse);
+      if (bound) expect(read.value.constant?.structuralKey, _one.structuralKey);
+      if (!bound) expect(read.exceptional, isNotNull);
+    }
+  });
+
   for (final repeated in [false, true]) {
     test(
       'read equality applies only to one cell and expires on write ($repeated)',
@@ -911,21 +1168,186 @@ void main() {
       WriteCell(cell, _two),
       operands: [receiver, .constant(_two)],
     ).normal!;
-    final summarized = caller.copy()..join(other);
+    final summarized = (caller.copy()..join(other)).copy(resetWrites: true);
+    final entry = summarized.copy();
     final read = ReadCell(cell);
     final source = FlowSource(read, _activation);
     summarized.rememberRead(read, [receiver], source);
     final result = caller.applySummary(
-      caller.project([receiver]),
+      entry,
       summarized,
       mapObject: (object) => object,
       mapValue: (value) => value,
-      preservesInputSources: true,
     );
     final retained = result.boundValueOf(read, [receiver])!;
     expect(retained.constant?.structuralKey, _one.structuralKey);
     expect(retained.sources, contains(source));
     expect(caller.boundValueOf(read, [receiver])!.sources, isEmpty);
+  });
+
+  test('input renaming is bijective and preserves global and native-context capabilities', () {
+    final box = ClassType(_uri, 'Anchor');
+    final cell = NewPayload(box, const Constant.integer(0));
+    final global = GlobalVariable(_uri, 'anchor', cell.type, isLate: true);
+    final program = IrProgram([IrClass(box, [])], [], globals: [global]);
+    final initial = _step(FlowState(program), cell);
+    final object = initial.value.objects.single;
+    final renamed = FlowObject(object.site, Object(), type: object.type);
+    final private = initial.normal!.mapObjects({object: renamed});
+    expect(private.containsObject(renamed), isTrue);
+    expect(private.containsObject(object), isFalse);
+    final second = _step(
+      initial.normal!,
+      NewPayload(box, const Constant.integer(0)),
+    );
+    expect(
+      () => second.normal!.mapObjects({
+        object: renamed,
+        second.value.objects.single: renamed,
+      }),
+      throwsArgumentError,
+    );
+    final anchored = _step(
+      initial.normal!,
+      StoreGlobal(global, cell),
+      operands: [initial.value],
+    ).normal!;
+    expect(() => anchored.mapObjects({object: renamed}), throwsArgumentError);
+    final native = initial.normal!.copy(
+      nativeContext: FlowValue.address(FlowAddress(object, 0)),
+    );
+    expect(() => native.mapObjects({object: renamed}), throwsArgumentError);
+  });
+
+  test('projection removes write owners outside the observable state', () {
+    final before = FlowState(IrProgram([], []));
+    final private = _step(before, NewCell(CellType(.integer), _one));
+    final after = private.normal!.project([]);
+    final mapped = <FlowObject>[];
+    final applied = before.applySummary(
+      before,
+      after,
+      mapObject: (object) {
+        mapped.add(object);
+        return object;
+      },
+      mapValue: (value) => value,
+    );
+    expect(mapped, isEmpty);
+    expect(applied.containsObject(private.value.objects.single), isFalse);
+  });
+
+  test('summary writes survive equal joined entry and exit values', () {
+    final global = GlobalVariable(_uri, 'swapped', .integer, isLate: true);
+    final program = IrProgram([], [], globals: [global]);
+    final cell = NewCell(CellType(.integer), _one);
+    final allocated = _step(FlowState(program), cell);
+    final receiver = allocated.value;
+    FlowState assign(FlowState state, Constant value) => _step(
+      _step(state, StoreGlobal(global, value)).normal!,
+      WriteCell(cell, value),
+      operands: [receiver, .constant(value)],
+    ).normal!;
+    final first = assign(allocated.normal!, _one).copy(resetWrites: true);
+    final second = assign(first, _two).copy(resetWrites: true);
+    final before = first.copy()..join(second);
+    // These are the two executions of swapping 1 and 2, not a no-op transfer.
+    final after = assign(first, _two)..join(assign(second, _one));
+    expect(after.structuralKey, before.structuralKey);
+    final applied = first.applySummary(
+      before,
+      after,
+      mapObject: (object) => object,
+      mapValue: (value) => value,
+    );
+    for (final (read, operands) in [
+      (LoadGlobal(global), <FlowValue>[]),
+      (ReadCell(cell), [receiver]),
+    ]) {
+      final value = _step(applied, read, operands: operands).value;
+      expect(value.integers, FlowIntegerRange(1, 2));
+      expect(value.constant, isNull);
+    }
+    // A containing summary must retain the write as well.
+    final relayed = first.applySummary(
+      first,
+      applied,
+      mapObject: (object) => object,
+      mapValue: (value) => value,
+    );
+    expect(
+      _step(relayed, LoadGlobal(global)).value.integers,
+      FlowIntegerRange(1, 2),
+    );
+  });
+
+  test('summary entry pairs preserve slots admitted by a later caller', () {
+    final box = ClassType(_uri, 'Paired');
+    final written = InstanceField(box, 'written', ValueType.integer.nullable);
+    final private = InstanceField(box, 'private', ValueType.integer.nullable);
+    final program = IrProgram([
+      IrClass(box, [written, private]),
+    ], []);
+    final allocation = NewPayload(box, const Constant.integer(0));
+    final created = _step(FlowState(program), allocation);
+    final caller = _step(
+      created.normal!,
+      StoreField(private, allocation, _two),
+      operands: [created.value, .constant(_two)],
+    ).normal!;
+    final before = caller
+        .project(
+          [created.value],
+          access: (
+            fields: {written},
+            globals: {},
+            cells: false,
+            memory: false,
+            writes: true,
+            exposed: false,
+            rawWrites: false,
+            data: {},
+            modules: {},
+            context: false,
+          ),
+        )
+        .copy(resetWrites: true);
+    final after = _step(
+      before,
+      StoreField(written, allocation, _one),
+      operands: [created.value, .constant(_one)],
+    ).normal!;
+    expect(
+      () => caller.applySummary(
+        caller.copy(resetWrites: true),
+        after,
+        mapObject: (object) => object,
+        mapValue: (value) => value,
+      ),
+      throwsStateError,
+    );
+    final applied = caller.applySummary(
+      before,
+      after,
+      mapObject: (object) => object,
+      mapValue: (value) => value,
+    );
+    expect(
+      _step(
+        applied,
+        LoadField(private, allocation),
+        operands: [created.value],
+      ).value.constant,
+      _two,
+    );
+    expect(
+      _step(
+        applied,
+        LoadField(written, allocation),
+        operands: [created.value],
+      ).value.constant,
+      _one,
+    );
   });
 
   test(
@@ -942,7 +1364,7 @@ void main() {
       final a = _step(FlowState(program), sharedCell);
       final b = _step(a.normal!, privateCell);
       final caller = b.normal!;
-      final before = caller.project([a.value]);
+      final before = caller.project([a.value]).copy(resetWrites: true);
       final written = _step(
         before,
         WriteCell(sharedCell, const Constant.integer(7)),

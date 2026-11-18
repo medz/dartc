@@ -171,6 +171,11 @@ final class _X64Emitter(
   @override
   void abort(int status) {
     assembler.loadImmediate(.rdi, status);
+    exitProcess();
+  }
+
+  @override
+  void exitProcess() {
     _systemCall(231, 1);
   }
 
@@ -300,16 +305,6 @@ final class _X64Emitter(
       ..loadImmediate(.r11, 0);
     epilogue(frame);
     return assembler.finish();
-  }
-
-  @override
-  void reportFailure(void Function(Fixup) message, int length) {
-    address(Register.rsi, message);
-    assembler
-      ..loadImmediate(.rdi, 2)
-      ..loadImmediate(.rdx, length);
-    _systemCall(1, 4);
-    abort(255);
   }
 
   @override

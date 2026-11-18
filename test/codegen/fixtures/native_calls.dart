@@ -229,6 +229,158 @@ List<ObjectModule> nativeCalls(Target target) {
     IrFunction(repeated, [entry, first, second, loop, invoke, exit]),
   );
   exports[repeated] = NativeExport('repeated', repeatedExport);
+  final localCallbackType = NativeSignature(Int64, [Int64, Int64, Int64]);
+  final localTarget = FunctionTarget(library, 'localStorage', .integer, [
+    .integer,
+    .integer,
+  ]);
+  final local = Block(localTarget.parameterTypes);
+  final buffer = local.emit(
+    NativeLocalStorage(NativeArrayType(.of(Uint8), 77), zeroInitialize: true),
+  );
+  final word = local.emit(NativeLocalStorage(.of(Int64), zeroInitialize: true));
+  final callbackPointer = local.emit(
+    PointerFromAddress(
+      local.parameters.first,
+      FfiTypes.resolve(
+        NativePointerType(NativeFunctionType(localCallbackType)),
+      ),
+    ),
+  );
+  final checked = local.emit(
+    NativeCall(callbackPointer, [buffer, word, local.parameters.last]),
+  );
+  final stored = local.emit(LoadNative(word, .of(Int64)));
+  local.finish(Return(local.emit(IntBinary(.add, checked, stored))));
+  functions.add(IrFunction(localTarget, [local]));
+  exports[localTarget] = NativeExport(
+    'localStorage',
+    NativeSignature(Int64, [Int64, Int64]),
+  );
+  final moduleData = NativeData([5, 0, 0, 0, 0, 0, 0, 0], alignment: 8);
+  final moduleTarget = FunctionTarget(library, 'moduleStorage', .integer, [
+    .integer,
+  ]);
+  final moduleEntry = Block(moduleTarget.parameterTypes);
+  final moduleAddress = moduleEntry.emit(NativeDataAddress(moduleData));
+  final previous = moduleEntry.emit(LoadNative(moduleAddress, .of(Int64)));
+  moduleEntry.emit(
+    StoreNative(
+      moduleAddress,
+      .of(Int64),
+      moduleEntry.emit(
+        IntBinary(.add, previous, moduleEntry.parameters.single),
+      ),
+    ),
+  );
+  moduleEntry.finish(Return(previous));
+  functions.add(IrFunction(moduleTarget, [moduleEntry]));
+  exports[moduleTarget] = NativeExport(
+    'moduleStorage',
+    NativeSignature(Int64, [Int64]),
+  );
+  final inspectContext = FunctionTarget(
+    library,
+    'inspectContext',
+    .integer,
+    [],
+  );
+  final inspectWords = FunctionTarget(library, 'inspectWords', .integer, [
+    .integer,
+    .integer,
+  ]);
+  for (final (function, name, signature) in [
+    (inspectContext, 'provided_context', NativeSignature(Int64, [])),
+    (inspectWords, 'provided_words', NativeSignature(Int64, [Int64, Int64])),
+  ]) {
+    externals.add(
+      IrExternal(
+        function,
+        effects: const {Effect.readsStorage},
+        memory: const .unchanged(),
+        capturesArguments: false,
+      ),
+    );
+    imports[function] = NativeImport(
+      name,
+      signature,
+      isLeaf: true,
+      isNonAllocating: true,
+    );
+  }
+  final bindInner = FunctionTarget(library, 'bindInner', .integer, [
+    .integer,
+    .integer,
+    .integer,
+  ]);
+  final bound = Block(bindInner.parameterTypes);
+  bound.emit(BindNativeContext(bound.parameters[1]));
+  bound.emit(
+    StoreNative(
+      bound.emit(ReadNativeContext()),
+      .of(Int64),
+      bound.parameters[2],
+    ),
+  );
+  bound.emit(BindNativeContext(bound.parameters[0]));
+  bound.emit(
+    StoreNative(
+      bound.emit(ReadNativeContext()),
+      .of(Int64),
+      bound.emit(
+        IntBinary(.add, bound.parameters[2], const Constant.integer(7)),
+      ),
+    ),
+  );
+  bound.emit(BindNativeContext(bound.parameters[1]));
+  bound.finish(Return(bound.emit(DirectCall(inspectContext, []))));
+  functions.add(IrFunction(bindInner, [bound]));
+  final bindingTarget = FunctionTarget(library, 'contextBinding', .integer, [
+    .integer,
+  ]);
+  final binding = Block(bindingTarget.parameterTypes);
+  final firstContext = binding.emit(
+    NativeLocalStorage(.of(Int64), zeroInitialize: true),
+  );
+  final secondContext = binding.emit(
+    NativeLocalStorage(.of(Int64), zeroInitialize: true),
+  );
+  binding.emit(BindNativeContext(firstContext));
+  final nested = binding.emit(
+    DirectCall(bindInner, [
+      firstContext,
+      secondContext,
+      binding.parameters.single,
+    ]),
+  );
+  final actual = binding.emit(DirectCall(inspectContext, []));
+  final inherited = binding.emit(ReadNativeContext());
+  final checkInner = Block(), observe = Block(), invalid = Block();
+  binding.finish(
+    Branch(
+      binding.emit(Equals(actual, inherited)),
+      Jump(checkInner),
+      Jump(invalid),
+    ),
+  );
+  checkInner.finish(
+    Branch(
+      checkInner.emit(Equals(nested, secondContext)),
+      Jump(observe),
+      Jump(invalid),
+    ),
+  );
+  observe.finish(
+    Return(observe.emit(DirectCall(inspectWords, [inherited, nested]))),
+  );
+  invalid.finish(const Return(Constant.integer(-999)));
+  functions.add(
+    IrFunction(bindingTarget, [binding, checkInner, observe, invalid]),
+  );
+  exports[bindingTarget] = NativeExport(
+    'contextBinding',
+    NativeSignature(Int64, [Int64]),
+  );
   final program = IrProgram([], functions, externals: externals);
   final CodeGenerator generator = target.architecture == .arm64
       ? Arm64CodeGenerator(target)
@@ -237,7 +389,7 @@ List<ObjectModule> nativeCalls(Target target) {
     Compiler(generator.target).prepare(
       program,
       runtime: heapRuntime,
-      roots: [...functions.map((f) => f.target), ...imports.keys],
+      roots: [...exports.keys, ...imports.keys],
       exports: exports,
       imports: imports,
     ),
@@ -251,6 +403,47 @@ List<ObjectModule> nativeCalls(Target target) {
     symbols.add(
       Symbol(
         target.nativeSymbol('provided_$key'),
+        0,
+        bytes.length,
+        body.length,
+        exported: true,
+      ),
+    );
+    bytes.add(body);
+  }
+  // Real ABI observers keep the context-register and memory checks observable
+  // even when ordinary IR reads can be replaced by known binding addresses.
+  for (final name in ['provided_context', 'provided_words']) {
+    final Uint8List body;
+    if (target.architecture == .arm64) {
+      final assembler = arm.Assembler();
+      if (name == 'provided_context') {
+        assembler.move(.x0, .x28);
+      } else {
+        assembler
+          ..load(.x2, .x0, 0)
+          ..load(.x0, .x1, 0)
+          ..add(.x0, .x0, .x2);
+      }
+      assembler.ret();
+      body = assembler.finish();
+    } else {
+      final assembler = x64.Assembler();
+      if (name == 'provided_context') {
+        assembler.move(.rax, .r15);
+      } else {
+        assembler
+          ..load(.rax, .rdi, 0)
+          ..load(.rcx, .rsi, 0)
+          ..add(.rax, .rcx);
+      }
+      assembler.ret();
+      body = assembler.finish();
+    }
+    bytes.add(Uint8List((-bytes.length) & 15));
+    symbols.add(
+      Symbol(
+        target.nativeSymbol(name),
         0,
         bytes.length,
         body.length,

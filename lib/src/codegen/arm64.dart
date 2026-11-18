@@ -191,6 +191,11 @@ final class _Arm64Emitter(
   @override
   void abort(int status) {
     assembler.loadImmediate(.x0, status);
+    exitProcess();
+  }
+
+  @override
+  void exitProcess() {
     _systemCall(94, 1);
   }
 
@@ -323,16 +328,6 @@ final class _Arm64Emitter(
       ..loadImmediate(.x8, 0);
     epilogue(frame);
     return assembler.finish();
-  }
-
-  @override
-  void reportFailure(void Function(Fixup) message, int length) {
-    address(Register.x1, message);
-    assembler
-      ..loadImmediate(.x0, 2)
-      ..loadImmediate(.x2, length);
-    _systemCall(64, 4);
-    abort(255);
   }
 
   @override

@@ -1,5 +1,3 @@
-import 'dart:ffi' show Pointer, Uint8;
-
 import 'package:dartc/ir.dart';
 import 'package:dartc/interop.dart';
 
@@ -11,7 +9,7 @@ enum MemoryPrimitive(final Set<Effect> effects) {
   map({.writesStorage}),
   unmap({.writesStorage}),
   fail({}),
-  context({.readsStorage}),
+  exitProcess({}),
   writeBytes({.readsStorage, .writesStorage}),
   entropy({.writesStorage}),
   clock({.readsStorage}),
@@ -22,7 +20,7 @@ enum MemoryPrimitive(final Set<Effect> effects) {
 
   /// Whether the service completes without waiting on an external event.
   bool get terminates => switch (this) {
-    .context || .currentThread || .callbackTemplate => true,
+    .currentThread || .callbackTemplate => true,
     _ => false,
   };
 
@@ -44,9 +42,19 @@ final class HeapRuntime(
   final IrProgram program, {
   required final FunctionTarget allocate,
 
+  /// Checked source query for this module's managed runtime context.
+  /// Lifecycle binding supplies its storage independently of native ABI context.
+  final FunctionTarget? context,
+
   /// The ordinary failure path, which must not allocate while reporting exhaustion.
   final FunctionTarget? allocationFailure,
   required final FunctionTarget isOutOfMemory,
+
+  /// Links caller-owned context/record storage and actual module metadata.
+  required final FunctionTarget linkEntry,
+
+  /// Unlinks the innermost record after event draining and release complete.
+  required final FunctionTarget unlinkEntry,
   required final FunctionTarget release,
   required final FunctionTarget runEvents,
   final FunctionTarget? processExitCode,
@@ -71,6 +79,44 @@ final class HeapRuntime(
   required Iterable<FunctionTarget> nonAllocating,
   Iterable<NativeReference> nonAllocatingNatives = const [],
 }) {
+  /// Revalidates the runtime contract against an authoritative current graph.
+  ///
+  /// Rebinding does not merge old declarations or restore lowered globals.
+  HeapRuntime rebind(IrProgram current) => identical(current, program)
+      ? this
+      : HeapRuntime(
+          current,
+          allocate: allocate,
+          context: context,
+          allocationFailure: allocationFailure,
+          isOutOfMemory: isOutOfMemory,
+          linkEntry: linkEntry,
+          unlinkEntry: unlinkEntry,
+          release: release,
+          runEvents: runEvents,
+          processExitCode: processExitCode,
+          copyBytes: copyBytes,
+          captureStackTrace: captureStackTrace,
+          captureTrace: captureTrace,
+          recordError: recordError,
+          stackContext: stackContext,
+          invocation: invocation,
+          dispatchFailure: dispatchFailure,
+          exhaustivenessFailure: exhaustivenessFailure,
+          patternMatchFailure: patternMatchFailure,
+          assertionFailure: assertionFailure,
+          typeCheckFailure: typeCheckFailure,
+          floatingRemainder: floatingRemainder,
+          floatingModulo: floatingModulo,
+          async: async,
+          sync: sync,
+          asyncGenerator: asyncGenerator,
+          types: types?.rebind(current),
+          primitives: primitives,
+          nonAllocating: nonAllocating,
+          nonAllocatingNatives: nonAllocatingNatives,
+        );
+
   /// Explicit machine entries; their signatures must match the selected service.
   final Map<FunctionTarget, MemoryPrimitive> primitives = .unmodifiable(
     primitives,
@@ -85,6 +131,8 @@ final class HeapRuntime(
   final List<FunctionTarget> nonAllocating = .unmodifiable({
     ...nonAllocating,
     isOutOfMemory,
+    linkEntry,
+    unlinkEntry,
   });
 
   this {
@@ -97,19 +145,15 @@ final class HeapRuntime(
     }
     for (final (target, signature) in [
       (allocate, FunctionType(.integer, List.filled(5, ValueType.integer))),
+      if (context case final target?) (target, FunctionType(.integer, [])),
       (isOutOfMemory, FunctionType(.boolean, [.object])),
+      (linkEntry, FunctionType(.voidType, List.filled(4, ValueType.integer))),
+      (unlinkEntry, FunctionType(.voidType, [.integer, .integer])),
       (release, FunctionType(.voidType, [.integer])),
       (runEvents, FunctionType(.voidType, [.integer, .boolean])),
       if (processExitCode case final target?)
         (target, FunctionType(.integer, [])),
-      (
-        copyBytes,
-        FunctionType(.voidType, [
-          FfiTypes.pointerTypes[Pointer<Uint8>]!,
-          FfiTypes.pointerTypes[Pointer<Uint8>]!,
-          .integer,
-        ]),
-      ),
+      (copyBytes, FunctionType(.voidType, [.integer, .integer, .integer])),
       (captureStackTrace, FunctionType(.stackTrace, [.integer, .integer])),
       (captureTrace, FunctionType(.stackTrace, [])),
       (recordError, FunctionType(.voidType, [.object, .stackTrace])),
@@ -156,7 +200,7 @@ final class HeapRuntime(
         .map => FunctionType(.integer, [.integer]),
         .unmap => FunctionType(.voidType, [.integer, .integer]),
         .fail => FunctionType(.never, []),
-        .context => FunctionType(.integer, []),
+        .exitProcess => FunctionType(.never, [.integer]),
         .writeBytes => FunctionType(.integer, [.integer, .integer, .integer]),
         .entropy => FunctionType(.integer, [.integer, .integer]),
         .clock => FunctionType(.integer, []),

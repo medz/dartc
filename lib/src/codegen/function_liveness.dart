@@ -2,7 +2,7 @@ import 'package:dartc/ir.dart';
 
 import 'selected_function.dart';
 
-/// Tracks selected operands and stack cells using the shared graph liveness.
+/// Tracks selected operands using the shared graph liveness.
 final class FunctionLiveness(
   SelectedFunction body,
   Iterable<Value> Function(Value) inputsOf,
@@ -19,7 +19,6 @@ final class FunctionLiveness(
         body.argumentsOf,
         inputsOf,
         calls,
-        stackCells: body.stackCells,
         introduced: body.introduced,
       );
 }

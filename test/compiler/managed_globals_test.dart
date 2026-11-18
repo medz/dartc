@@ -86,6 +86,24 @@ void main() {
     expect(native.binding(4), 1);
   });
 
+  test('void globals retain values observed through dynamic calls', () {
+    expect(native.voidStorage(0, 0), 42);
+    for (final value in [9007199254740993, -73]) {
+      expect(native.voidStorage(1, value), value);
+      native.collect(40000);
+      expect(native.voidStorage(0, 0), value);
+    }
+  });
+
+  test('Never globals preserve throwing retries and unbound errors', () {
+    expect(native.neverStorage(2), 0);
+    expect(native.neverStorage(0), 185);
+    expect(native.neverStorage(0), 185);
+    expect(native.neverStorage(2), 2);
+    expect(native.neverStorage(1), -1);
+    expect(native.neverStorage(2), 2);
+  });
+
   test('failed and recursive initializers preserve committed references', () {
     expect(native.initialization(1), 0);
     expect(native.initialization(0), -2);

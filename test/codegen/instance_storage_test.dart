@@ -9,7 +9,6 @@ import 'package:dartc/src/codegen/function_representation.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/member_calls.dart';
 import 'package:dartc/src/codegen/storage_access.dart';
-import 'package:dartc/src/codegen/closure_storage.dart';
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -28,49 +27,42 @@ void main() {
       entry.finish(
         Invoke(cell, onReturn: Jump(done, [cell]), onThrow: Jump(failed)),
       );
-      final copy = done.emit(CopyCell(done.parameters.single));
+      done.emit(CopyCell(done.parameters.single));
       done.finish(const Return());
       failed.finish(const Return());
       final function = IrFunction(target, [entry, done, failed]);
-      final closures = ClosureStorage([
-        function,
-      ], lateFailure: FunctionTarget(uri, 'fail', .never, [.string]));
+      final source = IrProgram([], [function]);
+      final program = CellLowering().bind().normalize(source);
+      final shape = program.classes.map((c) => c.cellStorage).nonNulls.single;
+      final body = program.implementationOf(target)! as IrFunction;
+      final reads = body.blocks
+          .expand((block) => block.instructions)
+          .whereType<LoadField>()
+          .toList();
+      expect(reads.map((read) => read.field), shape.fields);
+      expect(reads.map((read) => read.receiver).toSet(), hasLength(1));
+      expect(body.callees, {shape.initializer});
       final layouts = ProgramLayout(
-        closures.classes,
-        closureStorage: closures,
+        program.classes,
         nativeLayout: NativeLayout(const Target(.linux, .arm64)),
+        executionShapes: program.executionShapes,
       );
-      final body = FunctionRepresentation(
-        function,
-        layouts,
-        CheckedCasts(failure: heapRuntime.typeCheckFailure),
-        MemberCalls(IrProgram([], []), {}),
-        HeapPlan(),
-      );
-      final shape = closures.cell(cell.type as CellType);
-      final reads = body.inputsOf(copy).whereType<StorageRead>().toList();
-      expect(reads.map((read) => read.field), [
-        shape.value,
-        shape.lazy!.bound,
-        shape.lazy!.thunk,
-      ]);
-      expect(
-        reads.every((read) => identical(read.receiver, done.parameters.single)),
-        isTrue,
-      );
-      expect(body.invocations.values, isNot(contains(shape.lazy!.initialize)));
       expect(
         layouts.storageOf(shape.type).layout.referenceOffsets,
-        contains(layouts.fieldOffset(shape.lazy!.thunk)),
+        contains(layouts.fieldOffset(shape.thunk!)),
       );
-      expect(
-        body.ends[entry],
-        isA<Invoke>().having(
-          (end) => end.onThrow.target,
-          'handler',
-          same(failed),
-        ),
+      final failedBlock = body.blocks.singleWhere(
+        (block) =>
+            block.end is Return &&
+            block.instructions.isEmpty &&
+            body.blocks.any(
+              (previous) =>
+                  previous.end is Invoke &&
+                  identical((previous.end as Invoke).onThrow.target, block),
+            ),
       );
+      expect(body.blocks.where((block) => block.end is Invoke), isNotEmpty);
+      expect((body.entry.end as Invoke).onThrow.target, same(failedBlock));
     },
   );
 

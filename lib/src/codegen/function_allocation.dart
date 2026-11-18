@@ -7,6 +7,8 @@ import 'double_bits.dart';
 import 'function_emitter.dart' show RegisterBank;
 import 'function_selection.dart';
 import 'native_invocation.dart';
+import 'indirect_invocation.dart';
+import 'callable_table_address.dart';
 import 'storage_access.dart';
 import 'type_values.dart';
 
@@ -84,6 +86,7 @@ final class FunctionAllocation<R extends Object>._(
   Map<(Block, Jump), List<AllocationMove<R>>> edges,
   Map<Block, Map<Value, AllocationLocation<R>>> entries,
   Map<Value, AllocationStack<R>> homes,
+  Map<NativeLocalStorage, AllocationStack<R>> nativeStorage,
   Map<Value, StackRoots> safepoints,
 ) {
   factory(FunctionSelection<R> selection) => _Allocator(selection).build();
@@ -102,6 +105,7 @@ final class FunctionAllocation<R extends Object>._(
           ),
       }),
       homes = Map.unmodifiable(homes),
+      nativeStorage = Map.unmodifiable(nativeStorage),
       safepoints = Map.unmodifiable(safepoints);
 
   final Map<Value, AllocatedOperation<R>> operations;
@@ -111,6 +115,9 @@ final class FunctionAllocation<R extends Object>._(
   final Map<(Block, Jump), List<AllocationMove<R>>> edges;
   final Map<Block, Map<Value, AllocationLocation<R>>> entries;
   final Map<Value, AllocationStack<R>> homes;
+
+  /// Untraced frame blocks, separate from spill homes of their address values.
+  final Map<NativeLocalStorage, AllocationStack<R>> nativeStorage;
   final Map<Value, StackRoots> safepoints;
 
   int? get contextOffset => homes[selection.body.stackContext]?.offset;
@@ -122,6 +129,8 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
   final _edges = <(Block, Jump), List<AllocationMove<R>>>{};
   final _entries = <Block, Map<Value, AllocationLocation<R>>>{};
   final _homes = <Value, AllocationStack<R>>{};
+  final _nativeStorage = <NativeLocalStorage, AllocationStack<R>>{};
+  final _nativeDeclarations = <NativeLocalStorage, AllocationStack<R>>{};
   final _locations = <R, AllocationRegister<R>>{};
   final _stacks = <AllocationStack<R>>[];
   final _registers = <Value, R>{};
@@ -130,7 +139,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
   late Map<Value, int> _uses;
   late Set<Value> _liveOut;
   late List<AllocationMove<R>> _moves;
-  int _localWords = 0;
+  int _localBytes = 0, _localAlignment = 8;
   AllocationStack<R>? _cycle;
 
   AllocationRegister<R> _register(R register) =>
@@ -142,14 +151,27 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
     return result;
   }
 
+  AllocationStack<R> _reserve(int bytes, int alignment) {
+    final padding = (-_localBytes) & (alignment - 1);
+    if (_localBytes > 0x7fffffffffffffff - padding ||
+        _localBytes + padding > 0x7fffffffffffffff - bytes) {
+      throw RangeError('Native frame storage exceeds the signed size range.');
+    }
+    _localBytes += padding;
+    final slot = _stack(_localBytes, .local);
+    _localBytes += bytes;
+    if (alignment > _localAlignment) _localAlignment = alignment;
+    return slot;
+  }
+
   AllocationStack<R> _slot(Value value) =>
-      _homes.putIfAbsent(value, () => _stack(_localWords++ * 8, .local));
+      _homes.putIfAbsent(value, () => _reserve(8, 8));
 
   Value _stored(Value value) =>
       value is TestedValue ? value.test.operand : value;
 
   ValueRepresentation _representation(Value value) =>
-      selection.layouts.representation(selection.body.typeOf(value));
+      selection.body.representationOf(value);
 
   RegisterBank _bank(ValueRepresentation representation) =>
       representation == .floating ? .floating : .general;
@@ -166,6 +188,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       _terminators[block] = _terminator(block);
     }
     final framed =
+        selection.bindsContext ||
         _stacks.isNotEmpty ||
         selection.calls.isNotEmpty ||
         selection.body.instructions.values.any(
@@ -174,9 +197,11 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         selection.body.ends.values.any((end) => end is Throw);
     final frame = framed
         ? selection.convention.frameLayout(
-            localBytes: _localWords * 8,
-            localAlignment: 8,
-            savedRegisters: [],
+            localBytes: _localBytes,
+            localAlignment: _localAlignment,
+            savedRegisters: [
+              if (selection.bindsContext) selection.contextRegister,
+            ],
             outgoingStackBytes: selection.calls.values.fold(
               0,
               (bytes, call) => call.layout.stackBytes > bytes
@@ -224,6 +249,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       _edges,
       _entries,
       _homes,
+      _nativeStorage,
       safepoints,
     );
   }
@@ -262,8 +288,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
           .toList();
       final parameters = selection.body.parametersOf(block);
       for (final value in selection.liveness.liveIn[block]!) {
-        if (selection.cells.contains(value)) continue;
-        final bank = selection.bank(selection.body.typeOf(value));
+        final bank = selection.valueBank(value);
         var register = preferred[value];
         final index = value is BlockParameter ? parameters.indexOf(value) : -1;
         if (register == null && index >= 0) {
@@ -327,10 +352,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
     value = _stored(value);
     if (_registers[value] case final register?) return register;
     final source = _location(value);
-    final register = _allocate(
-      selection.bank(selection.body.typeOf(value)),
-      except: except,
-    );
+    final register = _allocate(selection.valueBank(value), except: except);
     _transfer(
       source,
       _register(register),
@@ -489,10 +511,10 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       preferred: preferredResult ?? preferred,
       except: except,
     );
-    R input(Value value, {ValueType? asType}) {
+    R input(Value value, {ExecutionShape? asShape}) {
       final from = _representation(_stored(value));
-      final to = selection.layouts.representation(
-        asType ?? selection.body.typeOf(value),
+      final to = selection.layouts.shapeRepresentation(
+        asShape ?? selection.body.shapeOf(value),
       );
       final R assigned;
       if (from == to) {
@@ -534,39 +556,34 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
     if (selection.body.aliases.contains(operation) &&
         selection.body.inputsOf(operation).isEmpty) {
       emptyResult();
+    } else if (operation is BindNativeContext) {
+      input(selection.body.inputsOf(operation).single);
+      consume();
+      emptyResult();
+    } else if (operation case NativeLocalStorage(:final zeroInitialize)) {
+      final layout = selection.nativeStorage[operation]!;
+      _nativeStorage[operation] = _nativeDeclarations.putIfAbsent(
+        operation.declaration,
+        () => _reserve(layout.size, layout.alignment),
+      );
+      result = output(.general);
+      if (zeroInitialize) {
+        scratch(.general);
+        if (layout.size > 64) scratch(.general);
+      }
     } else if (selection.constantTests.containsKey(operation) ||
         operation is NativeSymbolAddress ||
+        operation is NativeDataAddress ||
+        operation is CallableTableAddress ||
+        operation is ModuleObjectReference ||
+        operation is ReadNativeContext ||
         operation is ObjectDescriptorAddress ||
+        operation is StackMapAddress ||
+        operation is ModuleRootsAddress ||
         operation is FrameValue) {
       result = output(.general);
-    } else if (operation case NewCell(:final initial)
-        when selection.cells.contains(operation)) {
-      _slot(operation);
-      if (initial != null) {
-        input(
-          selection.body.inputsOf(operation).single,
-          asType: (operation.type as CellType).content,
-        );
-        consume();
-      } else if (selection.layouts.isReference(
-        selection.body.typeOf(operation),
-      )) {
-        scratch(.general);
-      }
     } else if (operation is KeepAlive) {
       _release(selection.body.inputsOf(operation).single);
-      emptyResult();
-    } else if (operation is ReadCell &&
-        !selection.body.aliases.contains(operation)) {
-      _slot(operation.cell);
-      result = output(selection.bank(operation.type));
-    } else if (operation case WriteCell(:final cell)
-        when selection.cells.contains(cell)) {
-      input(
-        selection.body.inputsOf(operation).last,
-        asType: (cell.type as CellType).content,
-      );
-      consume();
       emptyResult();
     } else if (selection.binaries[operation] case final binary?) {
       final fixed = binary.fixed;
@@ -602,15 +619,15 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       } else {
         final left = input(
           binary.left,
-          asType: binary.floatingInputs ? ValueType.floating : null,
+          asShape: binary.floatingInputs ? ExecutionShape.floating : null,
         );
         final right = input(
           binary.right,
-          asType: binary.floatingInputs ? ValueType.floating : null,
+          asShape: binary.floatingInputs ? ExecutionShape.floating : null,
         );
         consume();
         result = output(
-          selection.bank(operation.type),
+          selection.valueBank(operation),
           preferred: left,
           except: binary.reuseLeft && left != right ? [right] : [],
         );
@@ -645,14 +662,17 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
             ObjectHashCode(:final operand, direct: true)
         when !selection.body.aliases.contains(operation) &&
             (operation is ObjectHashCode || operand.type != .nullType) &&
-            selection.layouts.representation(operand.type) == .reference) {
+            selection.body.shapeOf(operand).isReference) {
       input(selection.body.inputsOf(operation).single);
       consume();
       result = output(.general, except: inputs);
     } else if (operation
         case StoreField(:final field) || StorageWrite(:final field)) {
       input(selection.body.inputsOf(operation).first);
-      input(selection.body.inputsOf(operation).last, asType: field.type);
+      input(
+        selection.body.inputsOf(operation).last,
+        asShape: selection.layouts.slotShape(field),
+      );
       consume();
       emptyResult();
     } else if (operation
@@ -660,24 +680,23 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         when !selection.body.aliases.contains(operation)) {
       final source = input(selection.body.inputsOf(operation).first);
       consume();
-      final stored = _allocate(selection.bank(field.type), preferred: source);
-      result =
-          selection.layouts.representation(field.type) ==
-                  selection.layouts.representation(
-                    selection.body.typeOf(operation),
-                  ) ||
-              selection.bank(selection.body.typeOf(operation)) ==
-                  selection.registerBanks[stored]
-          ? stored
-          : _allocate(
-              selection.bank(selection.body.typeOf(operation)),
-              except: [stored],
-            );
-      temporaries.add(stored);
-      final from = selection.layouts.representation(field.type);
-      final to = selection.layouts.representation(
-        selection.body.typeOf(operation),
+      final stored = _allocate(
+        selection.shapeBank(selection.layouts.slotShape(field)),
+        preferred: source,
       );
+      result =
+          selection.layouts.shapeRepresentation(
+                    selection.layouts.slotShape(field),
+                  ) ==
+                  selection.body.representationOf(operation) ||
+              selection.valueBank(operation) == selection.registerBanks[stored]
+          ? stored
+          : _allocate(selection.valueBank(operation), except: [stored]);
+      temporaries.add(stored);
+      final from = selection.layouts.shapeRepresentation(
+        selection.layouts.slotShape(field),
+      );
+      final to = selection.body.representationOf(operation);
       if (from != to) {
         resultMoves.add(
           AllocationMove(_register(stored), _register(result!), from, to),
@@ -696,12 +715,9 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         operation is ReifyType ||
         operation is ObjectRuntimeType) {
       final value = selection.body.inputsOf(operation).single;
-      final source = input(value, asType: selection.body.typeOf(operation));
+      final source = input(value, asShape: selection.body.shapeOf(operation));
       consume();
-      result = output(
-        selection.bank(selection.body.typeOf(operation)),
-        preferred: source,
-      );
+      result = output(selection.valueBank(operation), preferred: source);
     } else if (operation is StoreObjectReference ||
         operation is LoadObjectReference ||
         operation is StoreObjectData ||
@@ -736,7 +752,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         emptyResult();
       } else {
         result = output(
-          selection.bank(operation.type),
+          selection.valueBank(operation),
           preferred: object ? temporaries.first : inputs.first,
         );
       }
@@ -748,7 +764,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         operation is NumericNegate) {
       final source = input(selection.body.inputsOf(operation).single);
       consume();
-      result = output(selection.bank(operation.type), preferred: source);
+      result = output(selection.valueBank(operation), preferred: source);
       if (operation is FloatBitCast &&
           operation.width == 32 &&
           operation.type == .integer) {
@@ -791,7 +807,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
     });
     for (final value in roots) {
       _slot(value);
-      if (!selection.cells.contains(value) && !_spilled.contains(value)) {
+      if (!_spilled.contains(value)) {
         throw StateError('Live reference has no initialized stack home.');
       }
     }
@@ -805,8 +821,8 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
           _location(value),
           _register(register),
           _representation(_stored(value)),
-          selection.layouts.representation(
-            selected.parameterTypes?[index] ?? selection.body.typeOf(value),
+          selection.layouts.shapeRepresentation(
+            selected.parameterShapes?[index] ?? selection.body.shapeOf(value),
           ),
         );
         _release(value);
@@ -828,9 +844,9 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       if (location case StackArgument(:final offset)) {
         argument(
           i,
-          selected.stackScratch[selection.bank(
-            selected.parameterTypes?[i] ??
-                selection.body.typeOf(selected.arguments[i]),
+          selected.stackScratch[selection.shapeBank(
+            selected.parameterShapes?[i] ??
+                selection.body.shapeOf(selected.arguments[i]),
           )]!,
           stackOffset: offset,
         );
@@ -844,9 +860,9 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
         }
       }
     }
-    if (native != null) {
+    if (selected.target == null) {
       final loads = _moves = <AllocationMove<R>>[];
-      final value = selection.body.inputsOf(native).first;
+      final value = selection.body.inputsOf(operation).first;
       _transfer(
         _location(value),
         _register(selected.addressRegister!),
@@ -882,9 +898,11 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       if (operation case Equals(negated: true) || TypeTest(negated: true)) {
         temporaries.add(_allocate(.general, except: [register]));
       }
-      final from = native == null
-          ? selection.layouts.representation(
-              selection.layouts.returnType(selected.target!),
+      final from = operation is IndirectInvocation
+          ? selection.layouts.shapeRepresentation(operation.execution.result)
+          : native == null
+          ? selection.layouts.shapeRepresentation(
+              selection.layouts.resultShape(selected.target!),
             )
           : _representation(operation);
       final to = _representation(operation);
@@ -918,8 +936,8 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
             _location(value),
             _register(result),
             _representation(_stored(value)),
-            selection.layouts.representation(
-              selection.layouts.returnType(selection.body.target),
+            selection.layouts.shapeRepresentation(
+              selection.layouts.resultShape(selection.body.target),
             ),
           );
         }
@@ -1077,7 +1095,7 @@ final class _Allocator<R extends Object>(final FunctionSelection<R> selection) {
       if (temporaryRegister != null) {
         temporary = _register(temporaryRegister);
       } else {
-        final slot = _cycle ??= _stack(_localWords++ * 8, .local);
+        final slot = _cycle ??= _reserve(8, 8);
         if (pending.any((move) => identical(move.source, slot))) {
           throw StateError(
             'Parallel transfer cannot release its cycle scratch.',

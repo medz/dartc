@@ -190,6 +190,9 @@ final class FunctionTarget(
 
   /// The original declaration or literal start, when a source position is known.
   final SourceLocation? declarationLocation,
+  /// The language declaration implemented by a generated ordinary body.
+  /// This identity does not create a call or retain an execution root.
+  final FunctionTarget? executionSource,
   Iterable<ValueType> captures = const [],
 
   /// The capture slot linking this lexical function to its asynchronous awaiter.
@@ -212,6 +215,24 @@ final class FunctionTarget(
 
   /// The lexical type parameters declared by this function.
   List<TypeParameterType> get typeParameters => signature.typeParameters;
+
+  /// Reified lexical inputs stored with this function's original environment.
+  late final List<TypeParameterType> capturedTypeParameters = List.unmodifiable(
+    () {
+      final scopes = <FunctionTarget>[];
+      for (var scope = enclosing; scope != null; scope = scope.enclosing) {
+        scopes.add(scope);
+      }
+      return <TypeParameterType>{
+        if (kind.isVirtual) ...owner!.typeParameters,
+        for (final scope in scopes.reversed) ...[
+          if (scope.kind.hasReceiver || scope.kind == .factory)
+            ...scope.owner!.typeParameters,
+          ...scope.typeParameters,
+        ],
+      };
+    }(),
+  );
 
   /// The capture slots, in the order supplied when the closure is created.
   final List<ValueType> captures = .unmodifiable(captures);
@@ -461,6 +482,11 @@ final class InstanceField(
   /// Whether unbound reads lazily initialize the slot or raise a late error.
   final bool isLate = false,
 
+  /// Whether storage starts unbound even when its payload type permits null.
+  /// This raw slot requires definite initialization before a language read.
+  /// Zeroed GC-safe bytes do not establish a Dart value.
+  final bool initiallyUnbound = false,
+
   /// The receiver-only body evaluated on an unbound late read.
   final FunctionTarget? initializer,
 }) {
@@ -490,6 +516,9 @@ final class InstanceField(
         !isDartType(type) ||
         type.freeTypeParameters.any((p) => !owner.typeParameters.contains(p))) {
       throw ArgumentError('Invalid instance field type or declaring class.');
+    }
+    if (initiallyUnbound && (isLate || isFinal || initializer != null)) {
+      throw ArgumentError('Raw storage has no lazy or final binding protocol.');
     }
     if (initializer case final target?) {
       if (!isLate ||

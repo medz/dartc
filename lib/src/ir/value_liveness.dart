@@ -12,7 +12,6 @@ base class ValueLiveness(
   List<Value> Function(Jump) argumentsOf,
   Iterable<Value> Function(Value) inputsOf,
   Set<Value> calls, {
-  Set<NewCell> stackCells = const {},
   Set<Instruction> introduced = const {},
   Iterable<Value> Function(Terminator)? extraInputs,
 }) {
@@ -37,7 +36,10 @@ base class ValueLiveness(
         ],
         (block) => block.end,
         (edge) => edge.arguments,
-        (value) => (value as Instruction).inputs,
+        (value) => [
+          ...(value as Instruction).inputs,
+          ...body.typeInputsOf(value),
+        ],
         calls,
       );
 
@@ -72,7 +74,7 @@ base class ValueLiveness(
       final counts = record ? uses[block] = <Value, int>{} : null;
       void read(Value value) {
         if (value is TestedValue) value = value.test.operand;
-        if (counts != null && !stackCells.contains(value)) {
+        if (counts != null) {
           counts.update(value, (n) => n + 1, ifAbsent: () => 1);
         }
         if (value is! Constant &&
@@ -121,26 +123,12 @@ base class ValueLiveness(
           if (record) omitted.add(instruction);
           continue;
         }
-        live.remove(
-          instruction is WriteCell && stackCells.contains(instruction.cell)
-              ? instruction.cell
-              : instruction,
-        );
-        if (end case Invoke(operation: WriteCell(:final cell), :final onThrow)
-            when end.operation == instruction &&
-                edgeValues(onThrow).contains(cell)) {
-          live.add(cell);
-        }
+        live.remove(instruction);
         if (record && calls.contains(instruction)) {
           acrossCalls[instruction] = {...live};
         }
         for (final input in inputsOf(instruction)) {
-          // Writing needs the slot's address, not its previous contents.
-          if (instruction is! WriteCell ||
-              !stackCells.contains(instruction.cell) ||
-              input != instruction.cell) {
-            read(input);
-          }
+          read(input);
         }
       }
       return live;

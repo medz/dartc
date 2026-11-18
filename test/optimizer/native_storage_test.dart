@@ -20,6 +20,260 @@ const _placeholder = Constant.integer(0);
 
 void main() {
   test(
+    'input renaming preserves native references, offsets and write effects',
+    () {
+      final a = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+      final b = _allocate(a.state, 8);
+      final stored = _store(b.state, a.address, _i64, b.address);
+      final originalA = a.object.objects.single,
+          originalB = b.object.objects.single;
+      final formalA = FlowObject(
+        originalA.site,
+        Object(),
+        type: originalA.type,
+      );
+      final formalB = FlowObject(
+        originalB.site,
+        Object(),
+        type: originalB.type,
+      );
+      FlowObject rename(FlowObject value) => value == originalA
+          ? formalA
+          : value == originalB
+          ? formalB
+          : value;
+      final mapped = stored.mapObjects({
+        originalA: formalA,
+        originalB: formalB,
+      });
+      final address = a.address.mapObjects(rename);
+      final pointer = _load(mapped, address, _i64);
+      expect(pointer.addresses.single.base, formalB);
+      expect(
+        pointer.addresses.single.offset,
+        b.address.addresses.single.offset,
+      );
+      expect(mapped.nativeReferences(address).objects, {formalB});
+      final baseline = b.state.copy(resetWrites: true).mapObjects({
+        originalA: formalA,
+        originalB: formalB,
+      });
+      final applied = b.state.applySummary(
+        baseline,
+        mapped,
+        mapObject: (value) => value == formalA
+            ? originalA
+            : value == formalB
+            ? originalB
+            : value,
+        mapValue: (value) => value.mapObjects(
+          (object) => object == formalA
+              ? originalA
+              : object == formalB
+              ? originalB
+              : object,
+        ),
+      );
+      expect(_load(applied, a.address, _i64).addresses, b.address.addresses);
+    },
+  );
+
+  test(
+    'module bytes have one identity across bodies and reads never reset them',
+    () {
+      final data = NativeData(List.filled(8, 0), alignment: 8);
+      final other = NativeData(List.filled(8, 0), alignment: 8);
+      final reader = FunctionTarget(null, 'moduleRead', .integer, []);
+      final read = Block();
+      final fromReader = read.emit(NativeDataAddress(data));
+      read.finish(Return(read.emit(LoadNative(fromReader, _i64))));
+      final writer = FunctionTarget(null, 'moduleWrite', .integer, []);
+      final write = Block();
+      final fromWriter = write.emit(NativeDataAddress(data));
+      final separate = write.emit(NativeDataAddress(other));
+      write.emit(StoreNative(fromWriter, _i64, const Constant.integer(79)));
+      final reread = write.emit(NativeDataAddress(data));
+      write.emit(LoadNative(reread, _i64));
+      write.finish(Return(write.emit(DirectCall(reader, []))));
+      final program = IrProgram([], [
+        IrFunction(reader, [read]),
+        IrFunction(writer, [write]),
+      ]);
+      final facts = ProgramFlow(program, [
+        (target: writer, arguments: []),
+      ], memoryLayout: _layout).facts;
+      expect(_number(facts.returnedBy(writer)), 79);
+      expect(
+        facts.valueOf(fromReader).addresses,
+        facts.valueOf(fromWriter).addresses,
+      );
+      expect(
+        facts.valueOf(reread).addresses,
+        facts.valueOf(fromWriter).addresses,
+      );
+      expect(
+        facts.valueOf(separate).addresses,
+        isNot(facts.valueOf(fromWriter).addresses),
+      );
+      final repeated = ProgramFlow(
+        program,
+        [],
+        openEntries: [reader, writer],
+        memoryLayout: _layout,
+      ).facts;
+      final returned = repeated.returnedBy(reader);
+      expect(returned.constant, isNull);
+      expect(returned.integers!.contains(0), isTrue);
+      expect(returned.integers!.contains(79), isTrue);
+    },
+  );
+
+  test('known writes cannot silently mutate immutable module data', () {
+    final data = NativeData([7], writable: false);
+    final root = FunctionTarget(null, 'readonlyData', .integer, []);
+    final entry = Block();
+    final address = entry.emit(NativeDataAddress(data));
+    entry.finish(Return(entry.emit(LoadNative(address, _u8))));
+    final program = IrProgram([], [
+      IrFunction(root, [entry]),
+    ]);
+    final loaded = _step(FlowState(program, memoryLayout: _layout), address);
+    expect(_number(_load(loaded.normal!, loaded.value, _u8)), 7);
+    expect(
+      () => _store(loaded.normal!, loaded.value, _u8, _integer(8)),
+      throwsStateError,
+    );
+  });
+
+  test(
+    'activation storage keeps declaration identity and initialization effects',
+    () {
+      final state = FlowState(_program, memoryLayout: _layout);
+      final declaration = NativeLocalStorage(_i64);
+      final initial = _step(state, declaration);
+      expect(initial.value.constants, isEmpty);
+      expect(initial.value.addresses, hasLength(1));
+      expect(initial.effects, isEmpty);
+      expect(_load(initial.normal!, initial.value, _i64).constant, isNull);
+      final written = _store(
+        initial.normal!,
+        initial.value,
+        _i64,
+        _integer(37),
+      );
+      final clone = declaration.mapInputs((value) => value);
+      final again = _step(written, clone);
+      expect(again.value, initial.value);
+      expect(_number(_load(again.normal!, again.value, _i64)), 37);
+      final other = _step(again.normal!, NativeLocalStorage(_i64));
+      expect(other.value, isNot(initial.value));
+
+      final zeroed = NativeLocalStorage(_i64, zeroInitialize: true);
+      final zero = _step(other.normal!, zeroed);
+      expect(zero.effects, {Effect.writesStorage});
+      expect(zero.exceptional, isNull);
+      expect(_number(_load(zero.normal!, zero.value, _i64)), 0);
+      final dirty = _store(zero.normal!, zero.value, _i64, _integer(91));
+      final reset = _step(dirty, zeroed.mapInputs((value) => value));
+      expect(reset.value, zero.value);
+      expect(_number(_load(reset.normal!, zero.value, _i64)), 0);
+      final recursive = _step(dirty, zeroed, repeated: true);
+      final joined = _load(recursive.normal!, zero.value, _i64);
+      expect(joined.constant, isNull);
+      expect(joined.integers!.contains(91), isTrue);
+      expect(joined.integers!.contains(0), isTrue);
+    },
+  );
+
+  test('ordinary callees observe the initialized activation native region', () {
+    final reader = FunctionTarget(null, 'read', .integer, [.integer]);
+    final read = Block(reader.parameterTypes);
+    read.finish(Return(read.emit(LoadNative(read.parameters.single, _i64))));
+    final root = FunctionTarget(null, 'entry', .integer, []);
+    final entry = Block();
+    final local = entry.emit(NativeLocalStorage(_i64, zeroInitialize: true));
+    entry.emit(StoreNative(local, _i64, const Constant.integer(73)));
+    entry.finish(Return(entry.emit(DirectCall(reader, [local]))));
+    final program = IrProgram([], [
+      IrFunction(reader, [read]),
+      IrFunction(root, [entry]),
+    ]);
+    final facts = ProgramFlow(program, [
+      (target: root, arguments: []),
+    ], memoryLayout: _layout).facts;
+    expect(_number(facts.returnedBy(root)), 73);
+  });
+
+  for (final local in [false, true]) {
+    test(
+      'native writes survive equal joined entry and exit bytes ($local)',
+      () {
+        final state = FlowState(_program, memoryLayout: _layout);
+        final ({FlowState state, FlowValue address}) allocation;
+        if (local) {
+          final created = _step(state, NativeLocalStorage(_i64));
+          allocation = (state: created.normal!, address: created.value);
+        } else {
+          final created = _allocate(state, 8);
+          allocation = (state: created.state, address: created.address);
+        }
+        final first = _store(
+          allocation.state,
+          allocation.address,
+          _u8,
+          _integer(1),
+        ).copy(resetWrites: true);
+        final second = _store(
+          first,
+          allocation.address,
+          _u8,
+          _integer(2),
+        ).copy(resetWrites: true);
+        final before = first.copy()..join(second);
+        final after = _store(first, allocation.address, _u8, _integer(2))
+          ..join(_store(second, allocation.address, _u8, _integer(1)));
+        expect(after.structuralKey, before.structuralKey);
+        final applied = first.applySummary(
+          before,
+          after,
+          mapObject: (object) => object,
+          mapValue: (value) => value,
+        );
+        final value = _load(applied, allocation.address, _u8);
+        expect(value.integers, _load(after, allocation.address, _u8).integers);
+        expect(value.integers!.contains(2), isTrue);
+        expect(value.constant, isNull);
+      },
+    );
+  }
+
+  test('unknown raw writes retain their footprint after values are already unknown', () {
+    final allocation = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final caller = _store(
+      allocation.state,
+      allocation.address,
+      _u8,
+      _integer(1),
+    );
+    final unknown = FlowValue.unknown(ValueType.integer);
+    final before = _store(
+      caller,
+      unknown,
+      _u8,
+      _integer(2),
+    ).copy(resetWrites: true);
+    final after = _store(before, unknown, _u8, _integer(2));
+    expect(after.structuralKey, before.structuralKey);
+    final applied = caller.applySummary(
+      before,
+      after,
+      mapObject: (object) => object,
+      mapValue: (value) => value,
+    );
+    expect(_load(applied, allocation.address, _u8).constant, isNull);
+  });
+
+  test(
     'field-write summaries invalidate aliased bytes without touching payload',
     () {
       final field = InstanceField(_type, 'value', .integer);
@@ -46,16 +300,23 @@ void main() {
         _i64,
         _integer(11),
       );
-      final before = caller.project(
-        [created.value],
-        access: (
-          fields: {field},
-          globals: {},
-          cells: false,
-          memory: false,
-          writes: true,
-        ),
-      );
+      final before = caller
+          .project(
+            [created.value],
+            access: (
+              fields: {field},
+              globals: {},
+              data: {},
+              modules: {},
+              context: false,
+              cells: false,
+              memory: false,
+              writes: true,
+              exposed: false,
+              rawWrites: false,
+            ),
+          )
+          .copy(resetWrites: true);
       final after = _step(
         before,
         StoreField(field, allocation, _placeholder),
@@ -1388,7 +1649,9 @@ void main() {
   test('stored addresses retain allocation identities through projection and summaries', () {
     final a = _allocate(FlowState(_program, memoryLayout: _layout), 16);
     final b = _allocate(a.state, 8);
-    final input = b.state.project([a.address, b.address]);
+    final input = b.state
+        .project([a.address, b.address])
+        .copy(resetWrites: true);
     expect(input.nativeReferences(a.address).isBottom, isTrue);
     final output = _store(input, a.address, _i64, b.address);
     expect(output.nativeReferences(a.address).objects, {

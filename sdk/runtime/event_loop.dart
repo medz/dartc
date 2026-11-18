@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'finalization.dart';
-import 'heap.dart';
 import 'memory.dart';
 
 /// Runs SDK microtasks before each finalization event at an idle Dart boundary.
@@ -22,11 +21,6 @@ final class EventLoop(final FinalizationQueue finalizers) {
   }
 
   void scheduleMicrotasks(void Function() drain) => _microtasks = drain;
-
-  void visitRoots(ReferenceVisitor visitor) {
-    visitor.visit(_microtasks);
-    visitor.visit(_timers);
-  }
 
   Timer createTimer(
     Duration duration,

@@ -1,6 +1,8 @@
 import 'dart:convert' show jsonEncode;
 
 import 'block.dart';
+import 'native_data.dart';
+import 'module_object.dart';
 import 'signature.dart';
 import 'type.dart';
 import 'value.dart';
@@ -16,6 +18,8 @@ void writeFunction(
 }) {
   final labels = {for (final (i, b) in blocks.indexed) b: 'b$i'};
   final ids = <Value, int>{};
+  final nativeData = <NativeData, int>{};
+  final moduleObjects = <ModuleObject, int>{};
   String symbol(FunctionTarget t, [ClassType? ownerType]) {
     if (t.enclosing case final outer?) {
       return '${symbol(outer)}::${t.name}@${t.sourceOffset}';
@@ -47,8 +51,9 @@ void writeFunction(
       :final constructorAlias,
       :final constructorSignature,
       :final constructorTypeArguments,
+      :final invocationEntry,
     ) =>
-      'tearoff ${constructorAlias == null ? symbol(target, ownerType) : "${constructorAlias.$1}::${constructorAlias.$2}.${target.name}"}${typeArgs(typeArguments ?? const [])}${constructorSignature == null ? "" : " as ${constructorSignature.dartName}"}${constructorTypeArguments == null ? "" : " => ${symbol(target)}${typeArgs(constructorTypeArguments)}"}',
+      'tearoff ${constructorAlias == null ? symbol(target, ownerType) : "${constructorAlias.$1}::${constructorAlias.$2}.${target.name}"}${typeArgs(typeArguments ?? const [])}${constructorSignature == null ? "" : " as ${constructorSignature.dartName}"}${constructorTypeArguments == null ? "" : " => ${symbol(target)}${typeArgs(constructorTypeArguments)}"}${invocationEntry == null ? "" : " via ${symbol(invocationEntry)}"}',
     RecordConstant(:final type, :final fields) =>
       'const ${type.dartName}[${fields.map(value).join(', ')}]',
     SequenceConstant(:final type, :final elements) =>
@@ -83,6 +88,10 @@ void writeFunction(
   String operation(Instruction op) => switch (op) {
     CaptureStackTrace() => 'captureStackTrace',
     FrameValue(:final kind) => 'frame.${kind.name}',
+    StackMapAddress() => 'stackMapAddress',
+    ModuleRootsAddress() => 'moduleRootsAddress',
+    ReadNativeContext() => 'readNativeContext',
+    BindNativeContext(:final address) => 'bindNativeContext ${value(address)}',
     ObjectDescriptorAddress(:final declaration) =>
       'descriptor ${declaration.dartName}',
     LoadLibrary(:final reference) =>
@@ -116,28 +125,48 @@ void writeFunction(
       'assertionFailure${op.message == null ? '' : ' ${value(op.message!)}'}',
     MakeClosure() =>
       'close ${symbol(op.target)}(${op.inputs.map(value).join(', ')})',
+    CheckedTypeArgument() =>
+      'checkTypeArgument ${op.parameter.name} ${value(op.argument)}${op.implementation == null ? '' : ' via ${symbol(op.implementation!)}'}',
+    ReadFunctionTypeArgument() =>
+      'functionTypeArgument ${value(op.function)}, ${op.source.name}.${op.parameter.name}',
+    ReadFunctionEnvironment() =>
+      'functionEnvironment ${value(op.function)} ${symbol(op.source)} ${op.capture ?? 'origin'}',
     NewCell() => cell(op),
     ReadCell() => 'readCell ${value(op.cell)}',
     CopyCell() => 'copyCell ${value(op.cell)}',
     WriteCell() => 'writeCell ${value(op.cell)}, ${value(op.value)}',
     BindMethod() =>
-      'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}',
+      'bind ${op.direct ? 'super ' : ''}${value(op.receiver)} ${symbol(op.method)}${op.entryBinding == null ? '' : ' entries(${op.entryBinding!.entries.values.map(symbol).join(', ')})'}',
     InstantiateFunction() =>
       'instantiate ${value(op.function)}${typeArgs(op.typeArguments)}',
     InstantiateFunctionFrom() =>
       'instantiate ${value(op.function)} from ${value(op.instance)} as ${op.declaration.dartName}',
     FunctionCall() =>
       'callValue ${value(op.function)}${typeArgs(op.typeArguments)}(${arguments(op.positional, op.named)})'
-          '${op.target == null ? "" : " target ${symbol(op.target!)}"}',
+          '${op.target == null ? "" : " target ${symbol(op.target!)}"}'
+          '${op.entryBinding == null ? "" : " entries[${op.entryBinding!.shape.slot}] {${op.entryBinding!.entries.entries.map((entry) => '${symbol(entry.key)}: ${symbol(entry.value)}').join(', ')}}"}',
     LoadGlobal() => 'loadGlobal ${global(op.global)}',
     NewPayload() => 'payload ${op.type.dartName} ${value(op.bytes)}',
     NativeView() =>
       'nativeView ${op.type.dartName} ${op.address == null ? "new" : value(op.address!)} copy=${op.copy} owner=${value(op.owner)}',
+    NativeLocalStorage(:final storage, :final zeroInitialize) =>
+      'nativeLocalStorage $storage zero=$zeroInitialize',
     NativeAddress() => 'nativeAddress ${value(op.view)}',
     FloatBitCast() => 'floatBits${op.width} ${value(op.operand)}',
     NativeSize() => 'nativeSize ${op.nativeType}',
     NativeSymbolAddress(:final reference) =>
       'nativeSymbol ${reference.assetId}::${reference.symbol}',
+    NativeDataAddress(:final declaration) =>
+      'nativeData${nativeData.putIfAbsent(declaration, () => nativeData.length)} bytes=${declaration.bytes.length} align=${declaration.alignment} writable=${declaration.writable}',
+    FunctionEntryTableAddress(:final target) => 'functionEntries ${symbol(target)}',
+    CellStorageView(:final backing) => 'cellStorageView ${value(backing)}',
+    CellStorageReference(:final cell) => 'cellStorageReference ${value(cell)}',
+    CellReference(:final cell) => 'cellReference ${value(cell)}',
+    InitializeStorageField(:final field, :final destination, :final source) =>
+      'initializeStorageField ${field.name} ${value(destination)} ${value(source)}',
+    CallableReference(:final function) => 'callableReference ${value(function)}',
+    ModuleObjectReference(:final declaration) =>
+      'moduleObject${moduleObjects.putIfAbsent(declaration, () => moduleObjects.length)} ${declaration.type.dartName} {${declaration.initialFields.entries.map((entry) => '${entry.key.name}: ${value(entry.value)}').join(', ')}}',
     NativeCallbackAddress(:final target) =>
       'nativeCallback ${symbol(switch (target) {
         StaticCallbackTarget(:final function) => function,
@@ -150,6 +179,7 @@ void writeFunction(
     PointerFromAddress() => 'pointerFromAddress ${value(op.address)}',
     ReferenceAddress() => 'referenceAddress ${value(op.object)}',
     ReferenceFromAddress() => 'referenceFromAddress ${value(op.address)}',
+    ManagedStorageAllocation() => 'allocateStorage ${op.type.dartName} ${op.inputs.map(value).join(" ")}',
     AllocatedObject() =>
       'allocatedObject ${op.type.dartName} ${value(op.address)}, ${value(op.payloadBytes)}',
     PointerAddress() => 'pointerAddress ${value(op.pointer)}',
@@ -199,6 +229,11 @@ void writeFunction(
       '${op.direct ? 'direct ' : ''}hashCode ${value(op.operand)}',
     TypeTest() =>
       '${value(op.operand)} ${op.negated ? 'is!' : 'is'} ${op.testedType.dartName}',
+    MaterializeValue() => 'materialize ${value(op.value)}',
+    MaterializedValue() =>
+      'materialized ${value(op.value)} in ${value(op.backing)}',
+    ConstantCarrier() => 'constantCarrier ${value(op.value)}',
+    ProjectValue() => 'project ${value(op.value)}',
     TypeView() => 'view ${value(op.operand)} as ${op.type.dartName}',
     UncheckedCast() => 'unchecked ${value(op.operand)} as ${op.type.dartName}',
     TypeCast() => '${value(op.operand)} as ${op.type.dartName}',
@@ -222,6 +257,8 @@ void writeFunction(
       '${op.operator.name}${op.checked ? '' : '.unchecked'} ${value(op.left)}, ${value(op.right)}',
     DirectCall() =>
       'call ${symbol(op.target, op.ownerType)}${typeArgs(op.typeArguments)}(${op.inputs.map(value).join(', ')})',
+    RawNativeCall() =>
+      'callNativeRaw${op.isLeaf ? ' leaf' : ''} ${value(op.address)}(${op.arguments.map(value).join(', ')})${op.resultStorage == null ? '' : ' into ${value(op.resultStorage!)}'}',
     NativeCall() =>
       'callNative${op.isLeaf ? ' leaf' : ''} ${value(op.pointer)}(${op.arguments.map(value).join(', ')})${op.borrowedOwners.isEmpty ? '' : ' borrow ${op.borrowedOwners.entries.map((e) => '${e.key}:${value(e.value)}').join(', ')}'}',
   };

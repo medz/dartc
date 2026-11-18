@@ -6,6 +6,8 @@ import 'package:dartc/codegen.dart';
 import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/object.dart';
+import 'package:dartc/src/codegen/program_preparation.dart'
+    show PreparedProgramEmission;
 import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
@@ -54,6 +56,49 @@ void main() {
       raw.target,
     });
   });
+
+  test(
+    'native pointer bridges retain leaf and allocation promises separately',
+    () {
+      final pointer = FfiTypes.int64Pointer;
+      final read = FunctionTarget(library, 'readPointer', .integer, [pointer]);
+      final entryTarget = FunctionTarget(library, 'readAddress', .integer, [
+        .integer,
+      ]);
+      final block = Block(entryTarget.parameterTypes);
+      final address = block.emit(
+        PointerFromAddress(block.parameters.single, pointer),
+      );
+      block.finish(Return(block.emit(DirectCall(read, [address]))));
+      final source = IrProgram(
+        [],
+        [
+          IrFunction(entryTarget, [block]),
+        ],
+        externals: [
+          IrExternal(read, effects: const {Effect.readsStorage}),
+        ],
+      );
+      for (final leaf in [false, true]) {
+        for (final nonAllocating in [false, true]) {
+          final binding = NativeImport(
+            'read_pointer',
+            NativeSignature(Int64, [Pointer<Int64>]),
+            isLeaf: leaf,
+            isNonAllocating: nonAllocating,
+          );
+          final prepared = Compiler(const Target(.linux, .arm64))
+              .prepare(source, roots: [entryTarget], imports: {read: binding});
+          final raw = prepared.imports.entries.single;
+          expect(raw.key, isNot(same(read)));
+          expect(raw.key.parameterTypes, [ValueType.integer]);
+          expect(raw.value, same(binding));
+          expect(raw.value.isLeaf, leaf);
+          expect(raw.value.isNonAllocating, nonAllocating);
+        }
+      }
+    },
+  );
 
   for (final os in OperatingSystem.values) {
     for (final arch in Architecture.values) {
