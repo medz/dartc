@@ -14,6 +14,39 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test('a joined stack address stays paired with its incoming storage', () {
+    final target = FunctionTarget(_uri, 'write', .integer, [.boolean]);
+    final flag = GlobalVariable(_uri, 'flag', .integer, isLate: true);
+    final entry = Block(target.parameterTypes);
+    final fast = Block();
+    // Let the direct edge reach the store before the other allocation arrives.
+    final delayed = List.generate(7, (_) => Block());
+    final join = Block([ValueType.integer]);
+    final use = Block();
+    entry.emit(StoreGlobal(flag, const Constant.integer(42)));
+    entry.finish(
+      Branch(entry.parameters.single, Jump(fast), Jump(delayed.first)),
+    );
+    final first = fast.emit(NativeLocalStorage(_i64));
+    fast.finish(Jump(join, [first]));
+    for (var i = 1; i < delayed.length; i++) {
+      delayed[i - 1].finish(Jump(delayed[i]));
+    }
+    final second = delayed.last.emit(NativeLocalStorage(_i64));
+    delayed.last.finish(Jump(join, [second]));
+    join.finish(Jump(use));
+    use.emit(
+      StoreNative(join.parameters.single, _i64, const Constant.integer(7)),
+    );
+    use.finish(Return(use.emit(LoadGlobal(flag))));
+    final fn = IrFunction(target, [entry, fast, ...delayed, join, use]);
+    final ir = IrProgram([], [fn], globals: [flag]);
+    final facts = ProgramFlow(ir, [
+      (target: target, arguments: [FlowValue.unknown(ValueType.boolean)]),
+    ], memoryLayout: _layout).facts;
+    expect(facts.returnedBy(target).constant, const Constant.integer(42));
+  });
+
   test('only a published mapping has a readable initialized header', () {
     final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
     final make = FunctionTarget(_uri, 'make', .integer, []);

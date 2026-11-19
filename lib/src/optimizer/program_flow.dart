@@ -1761,6 +1761,7 @@ final class ProgramFlow(
         value = value.withSources(
           value.sources.where((source) => availableAt(source, jump.target)),
         );
+        nextState.bindAddress(FlowSource(parameter, activation), value);
         nextRanges.remove(parameter);
         if (value.integers case final range?
             when range != FlowIntegerRange.full) {

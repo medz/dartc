@@ -395,6 +395,16 @@ final class FlowState {
     }
   }
 
+  /// Keeps an SSA block argument paired with the storage on its incoming edge.
+  void bindAddress(FlowSource parameter, FlowValue value) {
+    if (value.addresses.isNotEmpty &&
+        value.managedBackings.isEmpty &&
+        !value.hasUnknownBacking &&
+        value.types.every((type) => type == ValueType.integer)) {
+      _addresses = _addresses.withEntry(parameter, value.withSources(const []));
+    }
+  }
+
   /// Applies current storage and address facts, not facts from an earlier use.
   FlowValue resolveValue(FlowValue value) {
     if (value.managedBackings.isNotEmpty || value.hasUnknownBacking) {
