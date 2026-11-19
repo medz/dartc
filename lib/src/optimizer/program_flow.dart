@@ -1,3 +1,4 @@
+import 'package:dartc/interop.dart' show NativeCompoundType;
 import 'package:dartc/ir.dart';
 
 import 'flow_state.dart';
@@ -2560,6 +2561,24 @@ final class ProgramFlow(
           value: FlowValue.address(FlowAddress(target, 0)),
           normal: state.copy(),
         );
+      case NativeCall(:final signature) || RawNativeCall(:final signature)
+          when signature.result is! NativeCompoundType &&
+              !signature.parameters.any((type) => type is NativeCompoundType):
+        // The native ABI transports scalar values and pointers. Foreign code
+        // may retain and overwrite reachable storage, and call exported Dart
+        // functions, which expose their ordinary effects through re-entry.
+        activation.operationEffects[operation] = operation.effects;
+        activation.externalCalls.add(operation);
+        return _external(
+          activation,
+          block,
+          operation,
+          inputs,
+          state,
+          resultType,
+          nativeScalarCall: true,
+          returned: resultType == .voidType ? _null : null,
+        );
       case ReferenceAddress():
         activation.operationEffects[operation] = const {Effect.readsStorage};
         return FlowResult(
@@ -3769,6 +3788,7 @@ final class ProgramFlow(
     // An unknown Dart invocation can name module storage without receiving it
     // as an argument. Explicit external leaves keep their own memory contract.
     bool accessesProgramState = false,
+    bool nativeScalarCall = false,
     FlowValue? returned,
     bool allocationProjected = false,
   }) {
@@ -3799,13 +3819,21 @@ final class ProgramFlow(
         if (accessesProgramState) next.programValues,
       ]);
     }
+    void invalidateAccessibleStorage() {
+      final exposed = next.exposedValues;
+      next.invalidate(
+        [...inputs, exposed],
+        globals: accessesProgramState,
+        writtenReferences: nativeScalarCall
+            ? next.exposedFrom([...inputs, exposed]).references
+            : const FlowValue.bottom(),
+      );
+    }
+
     if (effects.contains(Effect.writesStorage)) {
       switch (memory) {
         case ArbitraryMemory():
-          next.invalidate([
-            ...inputs,
-            next.exposedValues,
-          ], globals: accessesProgramState);
+          invalidateAccessibleStorage();
         case WrittenMemory(:final addressParameter, :final lengthParameter) ||
             ReleasedMemory(:final addressParameter, :final lengthParameter):
           next = next.overwriteNative(
@@ -3820,20 +3848,38 @@ final class ProgramFlow(
     if (effects.contains(Effect.callsUserCode)) {
       // Re-entry follows values that crossed this boundary or declared exports.
       _admitEscaped(next, arguments: inputs);
-      for (final callback in {
-        ..._escapingActivations,
-        for (final target in _openEntries) _roots[target]!,
-      }) {
-        _ancestry.link(activation.body.target, callback.body.target);
-        callback.readers.add(activation);
-        _supply(callback, callback.arguments, next.project(callback.arguments));
-        if (callback.normal != null) {
-          next.join(callback.normal!.project(const []));
+      final merged = <_Activation>{};
+      bool changed;
+      do {
+        changed = false;
+        final current = nativeScalarCall ? next.copy() : next;
+        for (final callback in {
+          ..._escapingActivations,
+          for (final target in _openEntries) _roots[target]!,
+        }) {
+          _ancestry.link(activation.body.target, callback.body.target);
+          callback.readers.add(activation);
+          _supply(
+            callback,
+            callback.arguments,
+            current.project(callback.arguments),
+          );
+          if (!merged.add(callback)) continue;
+          for (final exit in [callback.normal, callback.exceptional]) {
+            if (exit != null) {
+              changed = next.join(exit.project(const [])) || changed;
+            }
+          }
         }
-        if (callback.exceptional != null) {
-          next.join(callback.exceptional!.project(const []));
+        // A foreign invocation may write a pointer returned by one callback
+        // before invoking a second callback. Callback summaries stay fixed
+        // during this evaluation and notify this caller when they grow.
+        if (nativeScalarCall &&
+            changed &&
+            effects.contains(Effect.writesStorage)) {
+          invalidateAccessibleStorage();
         }
-      }
+      } while (nativeScalarCall && changed);
     }
     final mapping = switch (memory) {
       ZeroedMemory(:final lengthParameter) => next.allocateMemory(

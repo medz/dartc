@@ -1036,7 +1036,11 @@ final class FlowState {
   ///
   /// The caller supplies previously escaped roots and program-wide access
   /// explicitly. [globals] includes globals after lowering to module storage.
-  void invalidate(Iterable<FlowValue> roots, {bool globals = false}) {
+  void invalidate(
+    Iterable<FlowValue> roots, {
+    bool globals = false,
+    FlowValue writtenReferences = const FlowValue.bottom(),
+  }) {
     final reachable = exposedFrom([...roots, if (globals) programValues]);
     // A program slot may itself hold a raw capability. It has the same write
     // authority as that capability supplied directly as an argument.
@@ -1067,7 +1071,9 @@ final class FlowState {
           entry.value.invalidate(type, isFinal: readonly),
         );
       }
-      next = next.withMemory(state.memory?.invalidate());
+      next = next.withMemory(
+        state.memory?.invalidate().retainReferences(writtenReferences),
+      );
       if (state.memory != null) _recordWrite(object, _objectMemoryWrites);
       _objects = _objects.withEntry(object, next);
     }
@@ -1078,7 +1084,9 @@ final class FlowState {
           _recordWrite(allocation, _regionWrites);
           _regions = _regions.withEntry(
             allocation,
-            region.withMemory(region.memory!.invalidate()),
+            region.withMemory(
+              region.memory!.invalidate().retainReferences(writtenReferences),
+            ),
           );
         }
       }
