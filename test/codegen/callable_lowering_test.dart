@@ -288,6 +288,72 @@ void main() {
       },
     );
   }
+  test('generic operands reach a concrete function through its adapter', () {
+    final t = TypeParameterType('T')..initializeBound(.object.nullable);
+    final signature = FunctionType(
+      .integer,
+      [t, t],
+      namedParameters: {'other': true},
+    );
+    final apply = FunctionTarget(
+      uri,
+      'apply',
+      .integer,
+      [signature, t, t],
+      typeParameters: [t],
+    );
+    final caller = Block(apply.parameterTypes);
+    caller.finish(
+      Return(
+        caller.emit(
+          FunctionCall(
+            caller.parameters[0],
+            [caller.parameters[1]],
+            {'other': caller.parameters[2]},
+          ),
+        ),
+      ),
+    );
+
+    final add = FunctionTarget(
+      uri,
+      'add',
+      .integer,
+      [.integer, .integer],
+      namedParameters: {'other': true},
+    );
+    final target = Block(add.parameterTypes);
+    target.finish(
+      Return(
+        target.emit(
+          IntBinary(.add, target.parameters.first, target.parameters.last),
+        ),
+      ),
+    );
+    final root = FunctionTarget(uri, 'root', .integer, []);
+    final entry = Block();
+    entry.finish(
+      Return(
+        entry.emit(
+          DirectCall(
+            apply,
+            [
+              FunctionConstant(add),
+              const Constant.integer(29),
+              const Constant.integer(13),
+            ],
+            typeArguments: const [ValueType.integer],
+          ),
+        ),
+      ),
+    );
+    final graph = IrProgram([], [
+      IrFunction(root, [entry]),
+      IrFunction(apply, [caller]),
+      IrFunction(add, [target]),
+    ]);
+    check(graph, root, 42, select: false);
+  });
   test('generic function values enter a checked typed adapter', () {
     final t = TypeParameterType('T')..initializeBound(.number);
     final source = FunctionTarget(uri, 'identity', t, [t], typeParameters: [t]);

@@ -677,34 +677,11 @@ final class CallableImplementations({final TypeImplementations? types}) {
         'Generic callable entry environment: ${source.name}',
       );
     }
-    ValueType entryType(ValueType carrier, ValueType semantic) =>
-        !shape.checked &&
-            carrier == ValueType.object.nullable &&
-            semantic.freeTypeParameters.isEmpty
-        ? semantic
-        : carrier;
     final target = FunctionTarget(
       null,
       'callEntry${_functions.length}',
       shape.result,
-      [
-        ValueType.object.nullable,
-        for (final (i, carrier) in shape.positional.indexed)
-          shape.checked
-              ? carrier
-              : entryType(carrier, source.reifiedSignature.parameters[i]),
-        for (final entry in shape.named.entries)
-          shape.checked
-              ? entry.value
-              : entryType(
-                  entry.value,
-                  source.reifiedSignature.parameters[source
-                      .reifiedSignature
-                      .named[entry.key]!
-                      .slot],
-                ),
-        for (var i = 0; i < shape.typeArgumentCount; i++) TypeMetadata.type,
-      ],
+      shape.signature.parameters,
     );
     final entry = Block(target.parameterTypes);
     _entryExecutions[target] = shape.execution;
