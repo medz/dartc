@@ -9,6 +9,8 @@ Future<void> main(List<String> arguments) async {
   final file = File(destination);
   final output = switch (kind) {
     'executable' => const Output.executable(),
+    'object' => const Output.object(),
+    'static' => const Output.staticLibrary(),
     'shared' => Output.sharedLibrary(file.uri.pathSegments.last),
     _ => throw ArgumentError.value(kind, 'kind'),
   };
