@@ -13,20 +13,19 @@ final class ModuleRoots(final int context) {
     ).value;
     _table = table;
     _index = 0;
-    if (table == 0) {
-      _count = 0;
-      return;
-    }
+    if (table == 0) return;
     _count = Pointer<Int64>.fromAddress(table + ModuleRootTable.count).value;
     if (_count < 0) Memory.fail();
   }
 
   /// Returns the next module object address, or zero when exhausted.
   int nextAddress() {
+    final table = _table;
+    if (table == 0) return 0;
     final index = _index;
     if (index >= _count) return 0;
     final address = Pointer<Int64>.fromAddress(
-      _table + ModuleRootTable.entries + index * ModuleRootTable.entrySize,
+      table + ModuleRootTable.entries + index * ModuleRootTable.entrySize,
     ).value;
     if (address == 0) Memory.fail();
     _index = index + 1;
