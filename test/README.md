@@ -104,7 +104,10 @@ for verification and report writing when setting the outer deadline. A timeout
 at the outer deadline exits with 124 and can precede the JSON report. Use a fresh
 report path or check its creation time before interpreting a result.
 
-Independent functional runs can overlap in separate build directories. For
+The harness locks its own `build/bench` directory while writing artifacts and
+reports. Source archives and independent checkouts can run concurrently in
+separate build directories. The operating system releases the lock when the
+harness exits. For
 example, on a 16 GiB host, two jobs can each use a 3 GiB sampled group RSS
 budget, 180 CPU seconds per process and a 120-second wall deadline.
 

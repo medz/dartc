@@ -122,7 +122,7 @@ Future<void> main(List<String> arguments) async {
       exitCode = 1;
     }
   } finally {
-    if (lock.existsSync()) lock.deleteSync();
+    await lock.close();
   }
 }
 
@@ -873,48 +873,31 @@ Future<void> _terminate(Process process) async {
   }
 }
 
-Future<File?> _benchLock() async {
-  final result = Process.runSync('git', ['rev-parse', '--git-common-dir']);
-  final raw = result.exitCode == 0 ? '${result.stdout}'.trim() : '.git';
-  final lock = File('${Directory(raw).absolute.path}/dartc-bench.lock');
+Future<RandomAccessFile?> _benchLock() async {
+  final directory = await Directory('build/bench').create(recursive: true);
+  final file = File('${directory.path}/dartc-bench.lock');
+  final handle = await file.open(mode: FileMode.append);
   final watch = Stopwatch()..start();
-  while (true) {
-    if (lock.existsSync()) {
-      final owner = int.tryParse(lock.readAsStringSync().trim());
-      if (owner != null && !_processAlive(owner)) {
-        lock.deleteSync();
-      }
-    }
-    try {
-      lock.createSync(exclusive: true);
-    } on FileSystemException catch (error) {
-      // POSIX EEXIST is contention. Permission, missing-parent and filesystem
-      // failures must keep their real cause instead of waiting five minutes.
-      if (error.osError?.errorCode != 17) rethrow;
-      if (watch.elapsed > const Duration(minutes: 5)) {
-        stderr.writeln('Another dartc benchmark holds $lock.');
-        return null;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      continue;
-    }
-    try {
-      lock.writeAsStringSync('$pid\n');
-      return lock;
-    } on FileSystemException {
+  var acquired = false;
+  try {
+    while (true) {
       try {
-        lock.deleteSync();
-      } on FileSystemException {
-        // Preserve the original write failure if cleanup also fails.
+        await handle.lock();
+        acquired = true;
+        return handle;
+      } on FileSystemException catch (error) {
+        // Non-blocking lock contention on Linux, Darwin and Windows.
+        if (!const {11, 13, 33, 35}.contains(error.osError?.errorCode)) rethrow;
+        if (watch.elapsed > const Duration(minutes: 5)) {
+          stderr.writeln('Another dartc benchmark holds ${file.path}.');
+          return null;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
       }
-      rethrow;
     }
+  } finally {
+    if (!acquired) await handle.close();
   }
-}
-
-bool _processAlive(int pid) {
-  final result = Process.runSync('kill', ['-0', '$pid']);
-  return result.exitCode == 0;
 }
 
 Future<int?> _rssKiB(int pid) async {
