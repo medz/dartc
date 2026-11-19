@@ -2224,7 +2224,7 @@ final class ProgramFlow(
     final resultType = operation.type.substituteForFlow(
       activation.executionEnvironment,
     );
-    final folded = _fold(operation, inputs, program);
+    final folded = _fold(operation, inputs, program, state);
     if (folded != null) {
       activation.operationEffects[operation] = const {};
       final normal = state.copy();
@@ -2595,6 +2595,7 @@ final class ProgramFlow(
                 address.base,
                 address.offsets,
                 type: resultType,
+                retainedBase: address.retainedBase,
               ),
             ),
           );
@@ -2645,6 +2646,7 @@ final class ProgramFlow(
                   bits: (layout?.target.wordSize ?? 8) * 8,
                 ),
                 type: resultType,
+                retainedBase: address.retainedBase,
               ),
             ),
           );
@@ -5981,6 +5983,7 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
           FlowAddress.ranged(
             address.base,
             _shiftOffsets(address.offsets, offset.integers, subtract: negative),
+            retainedBase: address.retainedBase,
           ),
         ),
       );
@@ -6033,8 +6036,9 @@ FlowIntegerRange? _shiftOffsets(
 Constant? _fold(
   Instruction operation,
   List<FlowValue> inputs,
-  IrProgram program,
-) {
+  IrProgram program, [
+  FlowState? state,
+]) {
   // Dart's null equality never dispatches a user operator. A non-null bound
   // therefore decides this branch even when the other identity is unknown.
   if (operation is Equals || operation is Identical) {
@@ -6084,6 +6088,17 @@ Constant? _fold(
           allocated.addresses.isEmpty &&
           allocated.objects.every((object) => object.type is ClassType)) {
         return const Constant.boolean(false);
+      }
+    }
+  }
+  if (state != null && operation is Equals && !operation.mayCallUserCode) {
+    for (final (value, other) in [
+      (inputs.first, inputs.last),
+      (inputs.last, inputs.first),
+    ]) {
+      if (other.constant case ScalarConstant(type: final type, value: 0)
+          when type == ValueType.integer && state.isMappedAddress(value)) {
+        return Constant.boolean(operation.negated);
       }
     }
   }

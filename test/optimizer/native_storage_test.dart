@@ -19,6 +19,56 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('a cursor and its page agree after conditional initialization', () {
+    final target = FunctionTarget(null, 'samePage', .boolean, [.boolean]);
+    final entry = Block(target.parameterTypes), initialize = Block();
+    final inspect = Block(), empty = Block(), active = Block();
+    final fields = NativeData(List.filled(16, 0), alignment: 8);
+    final storage = NativeData(List.filled(16, 0), alignment: 8);
+    final baseSlot = entry.emit(NativeDataAddress(fields));
+    final cursorSlot = entry.emit(
+      IntBinary(.add, baseSlot, const Constant.integer(8)),
+    );
+    entry.finish(
+      Branch(entry.parameters.single, Jump(initialize), Jump(inspect)),
+    );
+    final page = initialize.emit(NativeDataAddress(storage));
+    initialize.emit(StoreNative(baseSlot, _i64, page));
+    final cursor = initialize.emit(
+      IntBinary(.add, page, const Constant.integer(8)),
+    );
+    initialize.emit(StoreNative(cursorSlot, _i64, cursor));
+    initialize.finish(Jump(inspect));
+    final mark = inspect.emit(LoadNative(cursorSlot, _i64));
+    inspect.finish(
+      Branch(
+        inspect.emit(Equals(mark, const Constant.integer(0))),
+        Jump(empty),
+        Jump(active),
+      ),
+    );
+    for (final block in [empty, active]) {
+      final base = block.emit(LoadNative(baseSlot, _i64));
+      block.finish(
+        Return(
+          block.emit(
+            Equals(base, const Constant.integer(0), negated: block == active),
+          ),
+        ),
+      );
+    }
+    final program = IrProgram([], [
+      IrFunction(target, [entry, initialize, inspect, empty, active]),
+    ]);
+    final facts = ProgramFlow(program, [
+      (target: target, arguments: [FlowValue.unknown(.boolean)]),
+    ], memoryLayout: _layout).facts;
+    expect(
+      (facts.returnedBy(target).constant as ScalarConstant?)?.value,
+      isTrue,
+    );
+  });
+
   test(
     'input renaming preserves native references, offsets and write effects',
     () {

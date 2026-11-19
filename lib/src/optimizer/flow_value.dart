@@ -82,7 +82,12 @@ final class FlowAddress.ranged(
   final Object base,
   FlowIntegerRange? offsets, {
   final ValueType type = ValueType.integer,
+  // A retained base grants access to storage without supplying its address bits.
+  final bool retainedBase = false,
 }) {
+  new _retained(Object base)
+    : this.ranged(base, FlowIntegerRange(0, 0), retainedBase: true);
+
   /// Inclusive byte offsets, or null when the displacement is unbounded.
   final FlowIntegerRange? offsets = offsets == FlowIntegerRange.full
       ? null
@@ -120,13 +125,14 @@ final class FlowAddress.ranged(
   };
 
   /// The capability retained by this address, without a concrete numeric value.
-  FlowValue get reference => switch (base) {
+  FlowValue get reference => _reference ?? const FlowValue.bottom();
+
+  FlowValue? get _reference => switch (base) {
     final FlowObject object => FlowValue.object(object),
     final Constant constant => FlowValue.constant(constant),
-    ClassType() => const FlowValue.bottom(),
-    FunctionTarget() => const FlowValue.bottom(),
+    ClassType() || FunctionTarget() => null,
     FlowRegion() => FlowValue._(const {}, const {}, const {}, const {}, null, {
-      FlowAddress(base, 0),
+      FlowAddress._retained(base),
     }),
     FlowMetadata() => FlowValue._(
       const {},
@@ -134,7 +140,7 @@ final class FlowAddress.ranged(
       const {},
       const {},
       null,
-      {FlowAddress(base, 0)},
+      {FlowAddress._retained(base)},
     ),
     final NativeCallbackTarget target => FlowValue._(
       const {},
@@ -142,7 +148,7 @@ final class FlowAddress.ranged(
       const {},
       const {},
       null,
-      {FlowAddress(target, 0)},
+      {FlowAddress._retained(target)},
     ),
     _ => throw StateError('Invalid address base.'),
   };
@@ -152,10 +158,11 @@ final class FlowAddress.ranged(
       other is FlowAddress &&
       identity == other.identity &&
       offsets == other.offsets &&
-      type == other.type;
+      type == other.type &&
+      retainedBase == other.retainedBase;
 
   @override
-  int get hashCode => Object.hash(identity, offsets, type);
+  int get hashCode => Object.hash(identity, offsets, type, retainedBase);
 }
 
 /// Values arriving on executable paths, including explicit unknown bounds.
@@ -525,6 +532,7 @@ final class FlowValue {
           },
           address.offsets,
           type: address.type,
+          retainedBase: address.retainedBase,
         ),
     };
     if (mapped.length == objects.length &&
@@ -577,7 +585,12 @@ final class FlowValue {
     final mappedAddresses = {
       for (final address in addresses)
         if (address.base case final Constant value)
-          FlowAddress.ranged(rebind(value), address.offsets, type: address.type)
+          FlowAddress.ranged(
+            rebind(value),
+            address.offsets,
+            type: address.type,
+            retainedBase: address.retainedBase,
+          )
         else
           address,
     };
@@ -1017,7 +1030,7 @@ final class FlowValue {
     final unrestricted = <ValueType>{};
     final sources = values.first.sources.toSet();
     final scalars = <ValueType, Object>{};
-    final addresses = <(Object, ValueType), FlowAddress>{};
+    final addresses = <(Object, ValueType, bool), FlowAddress>{};
     var integers = values.first.integers;
     Set<ClassType>? receiverClasses = {};
 
@@ -1059,7 +1072,7 @@ final class FlowValue {
         }
       }
       for (final address in value.addresses) {
-        final key = (address.identity, address.type);
+        final key = (address.identity, address.type, address.retainedBase);
         final previous = addresses[key];
         addresses[key] = previous == null || previous == address
             ? address
@@ -1069,6 +1082,7 @@ final class FlowValue {
                     ? null
                     : previous.offsets!.join(address.offsets!, widen: widen),
                 type: address.type,
+                retainedBase: address.retainedBase,
               );
       }
     }

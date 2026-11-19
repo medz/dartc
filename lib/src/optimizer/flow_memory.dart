@@ -10,6 +10,8 @@ import 'flow_value.dart';
 import 'integer_range.dart';
 import 'state_map.dart';
 
+typedef NativeWordProofs = (bool Function(FlowValue), bool Function(FlowValue));
+
 /// Byte facts for one allocation, without materializing its unused zeroes.
 final class FlowMemory {
   final int start;
@@ -21,13 +23,17 @@ final class FlowMemory {
   // Keep its alternatives only while every path supplies all eight bytes.
   final StateMap<int, FlowValue> _words;
 
+  final _WordGroups _groups;
+  Map<int, int> get _presence => _groups.members;
+
   new(this.start, this.length)
     : _zeroes = length == null || length == 0
           ? const []
           : [(start, start + length)],
       _bytes = const .empty(),
       _retained = const .bottom(),
-      _words = const .empty();
+      _words = const .empty(),
+      _groups = _WordGroups.empty;
 
   /// Entry bytes supplied by an explicit storage contract; null means unknown.
   factory bytes(List<int?> bytes) {
@@ -61,7 +67,8 @@ final class FlowMemory {
     this._bytes,
     this._retained, [
     this._words = const StateMap.empty(),
-  ]);
+    _WordGroups? groups,
+  ]) : _groups = groups ?? _WordGroups.empty;
 
   StateMap<int, FlowValue> _untouchedWords(int offset, int size) {
     var keep = _words;
@@ -77,6 +84,105 @@ final class FlowMemory {
       }
     }
     return keep;
+  }
+
+  FlowMemory rememberWord(int offset, FlowSource source) {
+    if (_groups.links[offset] == null) return this;
+    final word = _words[offset]!;
+    final next = _words.withEntry(
+      offset,
+      word.withSource(source.value, source.activation),
+    );
+    return identical(next, _words)
+        ? this
+        : FlowMemory._(
+            start,
+            length,
+            _zeroes,
+            _bytes,
+            _retained,
+            next,
+            _groups,
+          );
+  }
+
+  FlowMemory refineWords(
+    Map<FlowSource, FlowIntegerRange> ranges,
+    void Function(FlowSource, FlowValue) bind,
+  ) {
+    if (_groups.links.isEmpty) return this;
+    final selected = <int, bool>{};
+    for (final entry in _presence.entries) {
+      final value = _words[entry.key]!;
+      for (final source in value.sources) {
+        if (source.value is! LoadNative) continue;
+        final range = ranges[source];
+        if (range == null) continue;
+        if (!range.contains(0)) {
+          selected[entry.value] = true;
+        } else if (range.constant == 0) {
+          selected[entry.value] = false;
+        }
+      }
+    }
+    if (selected.isEmpty) return this;
+    var next = _words;
+    for (final entry in _presence.entries) {
+      final present = selected[entry.value];
+      if (present == null) continue;
+      final old = _words[entry.key]!;
+      final word = present
+          ? old.restrictIntegers(_nonzero)
+          : _zero.value.withSources(old.sources).withReferences([
+              old.references,
+            ]);
+      for (final source in old.sources) {
+        bind(source, word);
+      }
+      next = next.withEntry(entry.key, word);
+    }
+    return identical(_words, next)
+        ? this
+        : FlowMemory._(
+            start,
+            length,
+            _zeroes,
+            _bytes,
+            _retained,
+            next,
+            _groups,
+          );
+  }
+
+  Object? _presenceOf(int offset, bool Function(FlowValue)? mapped) {
+    final word = _words[offset] ?? _zeroWord(offset);
+    if (word == null) return null;
+    if (word.constant case ScalarConstant(value: 0)) return false;
+    if (word.integers case final range? when !range.contains(0)) return true;
+    // Only a byte inside a live mapping proves that an address cannot wrap
+    // to zero. This is an observation about the stored bits at the join.
+    if (word.addresses.isNotEmpty && mapped?.call(word) == true) return true;
+    return _presence[offset];
+  }
+
+  _WordGroups _joinPresence(
+    FlowMemory other,
+    StateMap<int, FlowValue> words,
+    NativeWordProofs? proofs,
+  ) {
+    final bins = <(Object, Object), List<int>>{};
+    for (final offset in {
+      ..._presence.keys,
+      ...other._presence.keys,
+      for (final difference in _words.differences(other._words)) difference.key,
+    }) {
+      if (words[offset] == null) continue;
+      final a = _presenceOf(offset, proofs?.$1),
+          b = other._presenceOf(offset, proofs?.$2);
+      if (a == null || b == null || a is bool && b is bool && a == b) continue;
+      (bins[(a, b)] ??= []).add(offset);
+    }
+    return _WordGroups.from(bins.values);
   }
 
   FlowValue? _zeroWord(int offset) {
@@ -305,6 +411,7 @@ final class FlowMemory {
       bytes,
       _retained,
       _untouchedWords(offset, ObjectHeader.alignment),
+      _groups.remove(offset, ObjectHeader.alignment),
     );
   }
 
@@ -354,7 +461,15 @@ final class FlowMemory {
           : value.withManagedBackings(const []).withSources(const []);
       if (bits != _zero.value) words = words.withEntry(offset, bits);
     }
-    return FlowMemory._(start, length, _zeroes, bytes, _retained, words);
+    return FlowMemory._(
+      start,
+      length,
+      _zeroes,
+      bytes,
+      _retained,
+      words,
+      _groups.remove(offset, size),
+    );
   }
 
   /// Forgets only the overwritten range and preserves disjoint storage.
@@ -385,6 +500,7 @@ final class FlowMemory {
       bytes,
       _retained.join(retained),
       _untouchedWords(offset, size),
+      _groups.remove(offset, size),
     );
   }
 
@@ -419,6 +535,7 @@ final class FlowMemory {
       bytes,
       cleared._retained,
       words,
+      cleared._groups,
     );
   }
 
@@ -430,7 +547,15 @@ final class FlowMemory {
     final retained = _retained.join(value);
     return retained == _retained
         ? this
-        : FlowMemory._(start, length, _zeroes, _bytes, retained, _words);
+        : FlowMemory._(
+            start,
+            length,
+            _zeroes,
+            _bytes,
+            retained,
+            _words,
+            _groups,
+          );
   }
 
   FlowMemory map(FlowValue Function(FlowValue) transform) {
@@ -448,10 +573,14 @@ final class FlowMemory {
             identical(words, _words) &&
             retained == _retained
         ? this
-        : FlowMemory._(start, length, _zeroes, bytes, retained, words);
+        : FlowMemory._(start, length, _zeroes, bytes, retained, words, _groups);
   }
 
-  FlowMemory join(FlowMemory other, {bool widen = false}) {
+  FlowMemory join(
+    FlowMemory other, {
+    bool widen = false,
+    NativeWordProofs? nativeWords,
+  }) {
     if (this == other) return this;
     if (start != other.start) {
       throw StateError('One allocation has incompatible native storage.');
@@ -498,6 +627,11 @@ final class FlowMemory {
       bytes,
       merged._retained,
       words,
+      nativeWords != null ||
+              !_groups.links.isEmpty ||
+              !other._groups.links.isEmpty
+          ? _joinPresence(other, words, nativeWords)
+          : null,
     );
   }
 
@@ -509,6 +643,7 @@ final class FlowMemory {
           length == other.length &&
           _bytes == other._bytes &&
           _words == other._words &&
+          _groups.links == other._groups.links &&
           _retained == other._retained &&
           _zeroes.length == other._zeroes.length &&
           _zeroes.indexed.every((e) => e.$2 == other._zeroes[e.$1]);
@@ -520,6 +655,7 @@ final class FlowMemory {
     Object.hashAll(_zeroes),
     _bytes,
     _words,
+    _groups.links,
     _retained,
   );
 }
@@ -585,6 +721,74 @@ final class _Byte(
   int get hashCode => Object.hash(value, type, index, known);
 }
 
+final class _WordGroups(final StateMap<int, (int, int)> links) {
+  static final empty = _WordGroups(const .empty());
+
+  factory from(Iterable<List<int>> groups) {
+    var links = const StateMap<int, (int, int)>.empty();
+    for (final group in groups) {
+      if (group.length < 2) continue;
+      group.sort();
+      for (final (i, offset) in group.indexed) {
+        links = links.withEntry(offset, (
+          group[(i - 1) % group.length],
+          group[(i + 1) % group.length],
+        ));
+      }
+    }
+    return links.isEmpty ? empty : _WordGroups(links);
+  }
+
+  // Labels are local to this snapshot and never enter equality or hashing.
+  late final Map<int, int> members = _label();
+  Map<int, int> _label() {
+    final groups = <int, int>{};
+    for (final start in links.keys) {
+      var offset = start;
+      while (!groups.containsKey(offset)) {
+        groups[offset] = start;
+        offset = links[offset]!.$2;
+      }
+    }
+    return groups;
+  }
+
+  _WordGroups remove(int offset, int size) {
+    if (links.isEmpty || size == 0) return this;
+    var next = links;
+    void unlink(int key) {
+      final link = next[key];
+      if (link == null) return;
+      final (before, after) = link;
+      next = next.withoutKey(key);
+      if (before == after) {
+        next = next.withoutKey(before);
+      } else {
+        next = next.withEntry(before, (next[before]!.$1, after));
+        next = next.withEntry(after, (before, next[after]!.$2));
+      }
+    }
+
+    final end = offset + size;
+    if (size <= 8) {
+      for (var key = offset - 7; key < end; key++) {
+        unlink(key);
+      }
+    } else {
+      for (final key in links.keys) {
+        if (key < end && offset < key + 8) unlink(key);
+      }
+    }
+    if (identical(next, links)) return this;
+    return next.isEmpty ? empty : _WordGroups(next);
+  }
+}
+
+final _nonzero = FlowIntegerRange(
+  FlowIntegerRange.minimum,
+  FlowIntegerRange.maximum,
+  excludesZero: true,
+);
 final _null = FlowValue.constant(const Constant.nullValue());
 final _uint8 = NativeScalarType(Uint8);
 final _zero = _Byte(.constant(const Constant.integer(0)), _uint8, 0);

@@ -437,6 +437,15 @@ final class FlowState {
   /// Applies path bounds to storage still equal to the checked SSA definitions.
   void refineIntegers(Map<FlowSource, FlowIntegerRange> ranges) {
     if (ranges.isEmpty) return;
+    if (ranges.keys.any((source) => source.value is LoadNative)) {
+      _regions = _regions.mapValues((_, region) {
+        if (region.summary || region.memory == null) return region;
+        final narrowed = region.memory!.refineWords(ranges, (source, value) {
+          _addresses = _addresses.withEntry(source, value);
+        });
+        return region.withMemory(narrowed);
+      });
+    }
     _mapValues((value) {
       for (final source in value.sources) {
         if (ranges[source] case final range?) {
@@ -529,7 +538,13 @@ final class FlowState {
           ? right
           : right == null
           ? left
-          : left.join(right, widen: widen),
+          : left.join(
+              right,
+              widen: widen,
+              nativeWords: left.summary || right.summary
+                  ? null
+                  : (isMappedAddress, incoming.isMappedAddress),
+            ),
     );
     final addresses = _addresses.merge(
       incoming._addresses,
@@ -1807,6 +1822,17 @@ final class FlowState {
     return value;
   }
 
+  bool isMappedAddress(FlowValue value) =>
+      value.managedBackings.isEmpty &&
+      !value.hasUnknownBacking &&
+      value.addresses.every(
+        (address) =>
+            address.base is FlowRegion &&
+            address.type == ValueType.integer &&
+            !address.retainedBase,
+      ) &&
+      _containsNative(value, 1);
+
   bool _containsNative(FlowValue address, int? size) =>
       size != null &&
       address.addresses.isNotEmpty &&
@@ -2625,6 +2651,39 @@ final class FlowState {
         'A stored read requires its operands and SSA source.',
       );
     }
+    if (read case LoadNative(nativeType: final NativeTypeRef storage)) {
+      final address = operands.single;
+      final pointer = address.addresses.singleOrNull;
+      if (address.constants.isEmpty &&
+          address.unknownTypes.isEmpty &&
+          address.objects.isEmpty &&
+          !address.hasUnknownBacking &&
+          address.managedBackings.isEmpty &&
+          pointer != null &&
+          !pointer.retainedBase &&
+          pointer.offset != null &&
+          pointer.base is FlowRegion) {
+        final allocation = (pointer.base as FlowRegion).allocation;
+        final prior = _regions[allocation];
+        if (prior != null &&
+            !prior.summary &&
+            prior.memory != null &&
+            memoryLayout != null &&
+            storage
+                    .resolveAbi(memoryLayout!.nativeLayout.target.abi)
+                    .integerLayout
+                    ?.bytes ==
+                8) {
+          _regions = _regions.withEntry(
+            allocation,
+            prior.withMemory(
+              prior.memory!.rememberWord(pointer.offset!, source),
+            ),
+          );
+        }
+      }
+      return;
+    }
     if (read case LoadGlobal(:final global)) {
       _requireGlobal(global);
       final slot = _globals[global] ?? _initial(global);
@@ -3068,7 +3127,11 @@ final class _ObjectState {
     memory,
   );
 
-  _ObjectState join(_ObjectState incoming, {bool widen = false}) {
+  _ObjectState join(
+    _ObjectState incoming, {
+    bool widen = false,
+    NativeWordProofs? nativeWords,
+  }) {
     if (identical(this, incoming)) return this;
     final joinedSlots = slots.merge(
       incoming.slots,
@@ -3082,7 +3145,11 @@ final class _ObjectState {
         ? incoming.memory?.invalidate()
         : incoming.memory == null
         ? memory!.invalidate()
-        : memory!.join(incoming.memory!, widen: widen);
+        : memory!.join(
+            incoming.memory!,
+            widen: widen,
+            nativeWords: nativeWords,
+          );
     var changed =
         joinedMemory != memory ||
         !identical(joinedSlots, slots) ||
