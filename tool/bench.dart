@@ -13,7 +13,7 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln(_usage);
     return;
   }
-  final selected = fixtures
+  final selected = (options.only == null ? defaultFixtures : fixtures)
       .where(
         (fixture) =>
             options.only == null || options.only!.contains(fixture.name),
@@ -21,7 +21,7 @@ Future<void> main(List<String> arguments) async {
       .toList();
   final inputs = {
     for (final fixture in selected)
-      fixture.name: await _fileIdentity(fixture.path),
+      fixture.name: await _fixtureIdentity(fixture, execute: options.execute),
   };
   final harness = await _fileIdentity(Platform.script.toFilePath());
   final baseline = _readBaseline(options, inputs);
@@ -32,12 +32,12 @@ Future<void> main(List<String> arguments) async {
   }
   try {
     final source = options.compiler == null
-        ? await _sourceIdentity(built: options.build)
+        ? await _sourceIdentity(built: options.build, api: options.api)
         : null;
     var compiler = options.compiler == null
-        ? _Compiler(Platform.resolvedExecutable, const [
+        ? _Compiler(Platform.resolvedExecutable, [
             'run',
-            'bin/dartc.dart',
+            if (options.api) _apiDriver else 'bin/dartc.dart',
           ])
         : _Compiler(_resolveExecutable(options.compiler!), const []);
     _Measurement? build;
@@ -68,13 +68,16 @@ Future<void> main(List<String> arguments) async {
       inputChanges.add('compiler executable');
     }
     if (source != null &&
-        (await _sourceIdentity(built: options.build))['sha256'] !=
+        (await _sourceIdentity(
+              built: options.build,
+              api: options.api,
+            ))['sha256'] !=
             source['sha256']) {
       inputChanges.add('compiler sources or SDK resources');
     }
     for (final fixture in selected) {
-      if ((await _fileIdentity(fixture.path))['sha256'] !=
-          inputs[fixture.name]!['sha256']) {
+      final current = await _fixtureIdentity(fixture, execute: options.execute);
+      if (jsonEncode(current) != jsonEncode(inputs[fixture.name])) {
         inputChanges.add(fixture.path);
       }
     }
@@ -191,6 +194,20 @@ _Baseline? _readBaseline(
         'Invalid benchmark baseline: ${fixture.name} has incomplete or failed execution records.',
       );
     }
+    if (options.execute && fixture.hostTest != null) {
+      final verification = row['hostVerification'];
+      if (row['source']['hostExpectationSha256'] !=
+              inputs[fixture.name]!['hostExpectationSha256'] ||
+          verification is! Map ||
+          verification['exitCode'] != 0 ||
+          verification['timedOut'] != false ||
+          verification['outputComplete'] != true ||
+          verification['error'] != null) {
+        throw FormatException(
+          'Invalid benchmark baseline: ${fixture.name} requires a successful host test.',
+        );
+      }
+    }
     final elapsedUs = row['elapsedUs'];
     final bytes = row['bytes'];
     final runMedianUs = row['runMedianUs'];
@@ -214,7 +231,7 @@ _Baseline? _readBaseline(
   return baseline;
 }
 
-const fixtures = <_Fixture>[
+const defaultFixtures = <_Fixture>[
   _Fixture(
     'hello',
     'tool/bench/fixtures/hello.dart',
@@ -252,21 +269,42 @@ const fixtures = <_Fixture>[
   ),
 ];
 
+const _apiDriver = 'tool/bench/compile_api.dart';
+
+const fixtures = <_Fixture>[
+  ...defaultFixtures,
+  _Fixture(
+    'generic_member_carriers',
+    'test/compiler/fixtures/generic_member_carriers.dart',
+    .shared,
+    hostTest: 'test/compiler/generic_member_carriers_test.dart',
+  ),
+  _Fixture(
+    'generic_cell_storage',
+    'test/compiler/fixtures/generic_cell_storage.dart',
+    .shared,
+    hostTest: 'test/compiler/generic_cell_storage_test.dart',
+  ),
+];
+
 final class const _Fixture(
   final String name,
   final String path,
   final _Kind kind, {
   final bool run = false,
   final String? expected,
+  final String? hostTest,
 }) {
+  String assetRoot(String target) => 'build/bench/${_safe(target)}';
+
   String output(String target) {
-    final directory = 'build/bench/${_safe(target)}';
+    final directory = assetRoot(target);
     return switch (kind) {
       .executable => '$directory/$name',
       .shared =>
         target.contains('linux')
-            ? '$directory/lib$name.so'
-            : '$directory/lib$name.dylib',
+            ? '$directory/compiler/$name.so'
+            : '$directory/compiler/$name.dylib',
     };
   }
 }
@@ -289,9 +327,12 @@ final class _Options(
   final double maxTimeGrowth,
   final double maxSizeGrowth,
   final bool build,
+  final bool api,
   final int runRepeats,
 ) {
-  String get compilerMode => compiler != null
+  String get compilerMode => api
+      ? 'api'
+      : compiler != null
       ? 'external'
       : build
       ? 'built'
@@ -310,6 +351,7 @@ final class _Options(
     var maxTimeGrowth = 10.0;
     var maxSizeGrowth = 5.0;
     var build = false;
+    var api = false;
     var runRepeats = 3;
     for (final argument in arguments) {
       if (argument == '--help' || argument == '-h') {
@@ -342,6 +384,8 @@ final class _Options(
         maxSizeGrowth = double.parse(
           argument.substring('--max-size-growth='.length),
         );
+      } else if (argument == '--api') {
+        api = true;
       } else if (argument == '--build') {
         build = true;
       } else if (argument.startsWith('--run-repeats=')) {
@@ -358,6 +402,11 @@ final class _Options(
       }
     }
     if (!help) {
+      if (api && (build || compiler != null)) {
+        throw ArgumentError(
+          '--api uses the source Compiler API; choose one compiler mode.',
+        );
+      }
       const targets = {'macos-arm64', 'macos-x64', 'linux-arm64', 'linux-x64'};
       if (!targets.contains(target) || execute && target != _hostTarget()) {
         throw ArgumentError(
@@ -400,6 +449,7 @@ final class _Options(
       maxTimeGrowth,
       maxSizeGrowth,
       build,
+      api,
       runRepeats,
     );
   }
@@ -419,6 +469,7 @@ final class _Row(
   final Map<String, Object?> source,
   final _Measurement compilation,
   final List<_Measurement> runs,
+  final _Measurement? hostVerification,
   final Map<String, Object?>? artifact,
   final String? failure,
 ) {
@@ -436,6 +487,7 @@ final class _Row(
           run.stdout == fixture.expected;
   bool get failed =>
       compilation.failed ||
+      (hostVerification?.failed ?? false) ||
       failure != null ||
       runs.any((run) => run.failed || !matches(run));
 
@@ -445,6 +497,8 @@ final class _Row(
     'artifact': artifact,
     'bytes': bytes,
     'runMedianUs': runMedianUs,
+    if (hostVerification != null)
+      'hostVerification': hostVerification!.toJson(),
     'runs': [
       for (final run in runs) {...run.toJson(), 'matched': matches(run)},
     ],
@@ -484,17 +538,24 @@ Future<_Row> _run(
     [
       ...compiler.prefix,
       fixture.path,
-      '--kind',
-      fixture.kind == .executable ? 'exe' : 'shared',
-      '--target',
-      options.target,
-      '-o',
-      output.path,
+      if (options.api) ...[
+        fixture.kind.name,
+        options.target,
+        output.path,
+      ] else ...[
+        '--kind',
+        fixture.kind == .executable ? 'exe' : 'shared',
+        '--target',
+        options.target,
+        '-o',
+        output.path,
+      ],
     ],
     options.timeout,
     sampleRss: true,
   );
   final runs = <_Measurement>[];
+  _Measurement? hostVerification;
   Map<String, Object?>? artifact;
   String? failure;
   if (!compilation.failed) {
@@ -517,14 +578,34 @@ Future<_Row> _run(
             break;
           }
         }
-        if ((await _fileIdentity(output.path))['sha256'] !=
-            artifact['sha256']) {
-          failure = 'Output changed during execution.';
-        }
+      }
+      if (fixture.hostTest case final String hostTest when options.execute) {
+        hostVerification = await _measure(
+          Platform.resolvedExecutable,
+          ['test', '--reporter=expanded', hostTest],
+          options.runTimeout,
+          environment: {
+            'DARTC_TEST_NATIVE_ASSET_ROOT': Directory(
+              fixture.assetRoot(options.target),
+            ).absolute.path,
+          },
+        );
+      }
+      if ((runs.isNotEmpty || hostVerification != null) &&
+          (await _fileIdentity(output.path))['sha256'] != artifact['sha256']) {
+        failure = 'Output changed during execution.';
       }
     }
   }
-  return _Row(fixture, source, compilation, runs, artifact, failure);
+  return _Row(
+    fixture,
+    source,
+    compilation,
+    runs,
+    hostVerification,
+    artifact,
+    failure,
+  );
 }
 
 final class _Measurement(
@@ -574,13 +655,18 @@ Future<_Measurement> _measure(
   List<String> arguments,
   Duration timeout, {
   bool sampleRss = false,
+  Map<String, String>? environment,
 }) async {
   final watch = Stopwatch()..start();
   final out = _Capture();
   final err = _Capture();
   Process process;
   try {
-    process = await Process.start(executable, arguments);
+    process = await Process.start(
+      executable,
+      arguments,
+      environment: environment,
+    );
   } on ProcessException catch (error) {
     watch.stop();
     return _Measurement(
@@ -765,19 +851,23 @@ void _print(List<_Row> rows, _Baseline? baseline, _Options options) {
         ? ' (${_signed(row.compilation.elapsedUs - previous.elapsedUs)} us)'
         : '';
     final status =
-        row.compilation.timedOut || row.runs.any((run) => run.timedOut)
+        row.compilation.timedOut ||
+            (row.hostVerification?.timedOut ?? false) ||
+            row.runs.any((run) => run.timedOut)
         ? 'TIMEOUT'
         : row.failed
         ? 'FAIL'
         : baseline != null && row.regressed(baseline, options)
         ? 'REGRESSION'
         : 'ok';
+    final host = row.hostVerification;
+    final hostTime = host == null ? '' : ' (host test ${host.elapsedUs} us)';
     stdout.writeln(
       '${row.name.padRight(20)} '
       '${row.compilation.elapsedUs.toString().padLeft(10)} '
       '${(row.compilation.sampledMaxRssKiB?.toString() ?? '-').padLeft(15)} '
       '${row.bytes.toString().padLeft(10)} '
-      '${(row.runMedianUs?.toString() ?? '-').padLeft(12)} $status$delta',
+      '${(row.runMedianUs?.toString() ?? '-').padLeft(12)} $status$delta$hostTime',
     );
   }
   if (baseline != null) {
@@ -800,6 +890,24 @@ String _gitRevision() {
   return result.exitCode == 0 ? '${result.stdout}'.trim() : 'unknown';
 }
 
+Future<Map<String, Object?>> _fixtureIdentity(
+  _Fixture fixture, {
+  required bool execute,
+}) async {
+  final source = await _fileIdentity(fixture.path);
+  if (fixture.hostTest case final String test when execute) {
+    final files = {
+      for (final path in [test, 'test/support/native_assets.dart'])
+        path: (await _fileIdentity(path))['sha256'],
+    };
+    source['hostExpectationFiles'] = files;
+    source['hostExpectationSha256'] = sha256
+        .convert(utf8.encode(jsonEncode(files)))
+        .toString();
+  }
+  return source;
+}
+
 Future<Map<String, Object?>> _fileIdentity(String path) async {
   final file = File(path);
   return {
@@ -815,7 +923,10 @@ Map<String, String> _hostIdentity() => {
   'dart': Platform.version,
 };
 
-Future<Map<String, Object?>> _sourceIdentity({required bool built}) async {
+Future<Map<String, Object?>> _sourceIdentity({
+  required bool built,
+  required bool api,
+}) async {
   final files = <File>[if (built) File('tool/build.dart')];
   for (final path in ['bin', 'lib', 'sdk', if (built) 'tool/src']) {
     await for (final entry in Directory(
@@ -831,6 +942,7 @@ Future<Map<String, Object?>> _sourceIdentity({required bool built}) async {
     }
   }
   for (final path in [
+    if (api) _apiDriver,
     'pubspec.yaml',
     'pubspec.lock',
     '.dart_tool/package_config.json',
@@ -892,9 +1004,11 @@ Compiles the fixed fixtures under tool/bench/fixtures and records wall time,
 sampled direct-process RSS, output bytes and execution status in build/bench/latest.json.
 
 Options:
-  --only=a,b              Run selected fixtures only.
+  --only=a,b              Select fixtures. Shared host expectations include
+                          generic_member_carriers and generic_cell_storage.
   --compiler=path         Use a compiler executable (default:
                           dart run bin/dartc.dart).
+  --api                   Compile through the public Compiler API.
   --build                 Build build/bench/dartc and use it.
   --target=macos-arm64    Target passed to the compiler.
   --timeout=seconds       Compilation/build deadline (default: 120).
@@ -911,4 +1025,9 @@ Format 2 records microseconds, commands, binary/workload hashes and configuratio
 Source and SDK identity are recorded for source and --build compilers; an external
 --compiler has unknown source provenance. RSS is a 100 ms direct-process sample,
 not a peak or a process-tree measurement. No execution means no runtime result.
+
+For a POSIX wall-clock limit on the entire command and its process group:
+  python3 tool/bench_guard.py 150 dart run tool/bench.dart --only=hello --timeout=120 --run-repeats=1
+Allow time for the JSON report. If the outer deadline expires first, the report
+may be incomplete or absent.
 ''';

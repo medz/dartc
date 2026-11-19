@@ -62,6 +62,31 @@ docker run --rm --platform linux/arm64 \
 
 For Linux x64, use `linux-x64` for the builder and `TEST_TARGET`, and `linux/amd64` for Docker. Reuse an existing build from the same source revision instead of running the builder again.
 
+## Host expectations
+
+Use one fixed input while changing the compiler. The benchmark compiles locally
+and checks the executable's standard output or runs the fixture's existing FFI
+test against the freshly built library. Select the default CLI or the public
+Compiler API. Save each report to a separate path to compare outcomes.
+
+```sh
+python3 tool/bench_guard.py 150 dart run tool/bench.dart --only=print_integers --run-repeats=1 --output=build/bench/print-cli.json
+python3 tool/bench_guard.py 150 dart run tool/bench.dart --api --only=generic_member_carriers --output=build/bench/member-api.json
+```
+
+The expected output for `print_integers` is two lines, `42` then `43`.
+The member test selects between both receivers and checks the returned operand
+at odd and even recursion depths. Use `--only=generic_cell_storage` to check a
+write followed by a read through another native entry. Shared libraries run
+their FFI test once. The report records its exit status and elapsed time under
+`hostVerification`.
+
+The optional POSIX guard bounds the whole command and cleans up its process
+group. The benchmark defaults to 120 seconds for each compilation. Allow time
+for verification and report writing when setting the outer deadline. A timeout
+at the outer deadline exits with 124 and can precede the JSON report. Use a fresh
+report path or check its creation time before interpreting a result.
+
 ## Validation scope
 
 | Change | Required checks |
