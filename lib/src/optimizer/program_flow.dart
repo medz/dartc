@@ -1524,6 +1524,30 @@ final class ProgramFlow(
     final readers = <Value, Set<(Block, int)>>{};
     final boundAt = <(Block, int), Map<Value, FlowValue>>{};
     final owner = <Block, Block>{};
+    final loopEntries = <Block, Map<Jump, FlowState>>{};
+    // These identities are local to one evaluation of this body. A loop that
+    // can create allocations or invoke Dart retains its bounded call contexts.
+    final localTraversals = <Block>{};
+    final localBindings = <Block, Map<Object, int>>{};
+    bool staysLocal(Instruction operation) {
+      if (operation case DirectCall(:final target)) {
+        final implementation = program.implementationOf(target);
+        if (implementation is! IrExternal ||
+            implementation.capturesArguments ||
+            target.returnType != ValueType.voidType ||
+            !(implementation.memory is ReleasedMemory ||
+                implementation.memory is WrittenMemory)) {
+          return false;
+        }
+        return !implementation.effects.contains(Effect.allocates) &&
+            !implementation.effects.contains(Effect.callsUserCode);
+      }
+      return operation is! AllocatedObject &&
+          operation is! NativeLocalStorage &&
+          !operation.effects.contains(Effect.allocates) &&
+          !operation.effects.contains(Effect.callsUserCode);
+    }
+
     var key = entryKey;
     var local = <Value, FlowValue>{};
     final loops = _loops.putIfAbsent(body.target, () => LoopRanges(body));
@@ -1713,6 +1737,14 @@ final class ProgramFlow(
         for (final block in loop.blocks) {
           owner[block] = loop.header;
         }
+        if (loop.blocks.every(
+          (block) =>
+              block.instructions.every(staysLocal) &&
+              (block.end is! Invoke ||
+                  staysLocal((block.end as Invoke).operation)),
+        )) {
+          localTraversals.add(loop.header);
+        }
       }
     }
     void edge(
@@ -1729,6 +1761,9 @@ final class ProgramFlow(
       final header = owner[target];
       final guard = parameterGuards[target];
       if (selected == null && identical(target, header) && guard != null) {
+        if (localTraversals.contains(header) && owner[key.$1] != header) {
+          (loopEntries[target] ??= {})[jump] = state.copy();
+        }
         final argument = jump.arguments[guard.parameter];
         if (argument is! UnwindValue) {
           final value = read(argument);
@@ -1755,9 +1790,11 @@ final class ProgramFlow(
               value.constants.every(
                 (c) => c is ScalarConstant && c.value == guard.constant,
               )) {
-            // Keep two concrete loop inputs separate. Further identities use
-            // the regular joined input, including the effect of every visit.
-            final names = activation.loopBindings.putIfAbsent(target, () => {});
+            // Leaf traversals can distinguish the finite nodes present on entry
+            // without giving their callers or callees new invocation identities.
+            final localOnly = localTraversals.contains(target);
+            final names = (localOnly ? localBindings : activation.loopBindings)
+                .putIfAbsent(target, () => {});
             void forward(FlowValue alternative, int slot) {
               edge(
                 jump,
@@ -1778,9 +1815,21 @@ final class ProgramFlow(
               for (final address in value.addresses)
                 (address.base, FlowValue.address(address)),
             ]) {
-              final slot =
-                  names[identity] ??
-                  (names.length < 2 ? names[identity] = names.length + 1 : 0);
+              final int slot;
+              if (localOnly) {
+                final existing =
+                    loopEntries[target]?.values.any(
+                      (entry) => entry.hasSingletonAllocation(identity),
+                    ) ??
+                    false;
+                slot = existing
+                    ? names.putIfAbsent(identity, () => names.length + 1)
+                    : 0;
+              } else {
+                slot =
+                    names[identity] ??
+                    (names.length < 2 ? names[identity] = names.length + 1 : 0);
+              }
               forward(alternative, slot);
             }
             for (final constant in value.constants) {
@@ -2097,7 +2146,8 @@ final class ProgramFlow(
       key = pending.first;
       pending.remove(key);
       final block = key.$1;
-      activation.iterationContext = key.$2 == 0
+      activation.iterationContext =
+          key.$2 == 0 || localTraversals.contains(owner[key.$1])
           ? null
           : (owner[block]!, key.$2);
       local = {...?boundAt[key]};

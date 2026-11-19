@@ -21,35 +21,29 @@ void main() {
     final global = GlobalVariable(uri, 'marker', .integer, isLate: true);
     final root = FunctionTarget(uri, 'root', .integer, []);
     final entry = Block(),
-        allocate = Block(),
-        build = Block(),
         failed = Block(),
-        header = Block([ValueType.integer]),
-        body = Block(),
-        done = Block();
-    const zero = Constant.integer(0),
-        word = Constant.integer(8),
-        small = Constant.integer(16),
-        large = Constant.integer(32);
-    final tail = entry.emit(DirectCall(map, [small]));
-    entry.finish(
-      Branch(entry.emit(Equals(tail, zero)), Jump(failed), Jump(allocate)),
-    );
-    final first = allocate.emit(DirectCall(map, [large]));
-    allocate.finish(
-      Branch(allocate.emit(Equals(first, zero)), Jump(failed), Jump(build)),
-    );
+        header = Block([ValueType.integer]);
+    final body = Block(), done = Block();
+    const zero = Constant.integer(0), word = Constant.integer(8);
+    final allocations = <Block>[entry];
+    Value head = zero;
+    for (final bytes in [16, 32, 48, 64]) {
+      final current = allocations.last, next = Block();
+      final length = Constant.integer(bytes);
+      final address = current.emit(DirectCall(map, [length]));
+      current.finish(
+        Branch(current.emit(Equals(address, zero)), Jump(failed), Jump(next)),
+      );
+      next.emit(StoreNative(address, _i64, head));
+      next.emit(
+        StoreNative(next.emit(IntBinary(.add, address, word)), _i64, length),
+      );
+      head = address;
+      allocations.add(next);
+    }
     failed.finish(Throw(const Constant.string('map failed')));
-    build.emit(StoreNative(tail, _i64, zero));
-    build.emit(
-      StoreNative(build.emit(IntBinary(.add, tail, word)), _i64, small),
-    );
-    build.emit(StoreNative(first, _i64, tail));
-    build.emit(
-      StoreNative(build.emit(IntBinary(.add, first, word)), _i64, large),
-    );
-    build.emit(StoreGlobal(global, const Constant.integer(42)));
-    build.finish(Jump(header, [first]));
+    allocations.last.emit(StoreGlobal(global, const Constant.integer(42)));
+    allocations.last.finish(Jump(header, [head]));
     final cur = header.parameters.single;
     header.finish(
       Branch(header.emit(Equals(cur, zero)), Jump(done), Jump(body)),
@@ -64,7 +58,7 @@ void main() {
     final graph = IrProgram(
       [],
       [
-        IrFunction(root, [entry, allocate, build, failed, header, body, done]),
+        IrFunction(root, [...allocations, failed, header, body, done]),
       ],
       globals: [global],
       externals: [

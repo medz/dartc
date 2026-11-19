@@ -1026,6 +1026,13 @@ final class FlowState {
     };
   }
 
+  /// Whether this state holds a single allocation for the supplied identity.
+  bool hasSingletonAllocation(Object identity) => switch (identity) {
+    FlowObject() => _objects[identity]?.summary == false,
+    FlowRegion(:final allocation) => _regions[allocation]?.summary == false,
+    _ => false,
+  };
+
   /// Allocation identities whose state can be changed by an invocation.
   Iterable<FlowObject> get objects => _objects.keys;
 
