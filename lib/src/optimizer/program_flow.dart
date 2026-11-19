@@ -1699,6 +1699,17 @@ final class ProgramFlow(
       );
       point = state;
       final nextRanges = {...ranges, ...?refinements};
+      for (final proof in loopProofs.values) {
+        if (proof.exitBound case final bound?
+            when identical(bound.edge, jump)) {
+          final earlier = nextRanges[bound.counter];
+          final range = earlier == null
+              ? bound.range
+              : earlier.intersect(bound.range);
+          if (range == null) return;
+          nextRanges[bound.counter] = range;
+        }
+      }
       for (final entry
           in refinements?.entries ??
               const <MapEntry<Value, FlowIntegerRange>>[]) {

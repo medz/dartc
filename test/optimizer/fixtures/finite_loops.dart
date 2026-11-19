@@ -1,5 +1,13 @@
 import '../../frontend/lowering/fixtures/effects.dart' as effects;
 
+int roundCapacity(int needed) {
+  var size = 64;
+  while (size < needed) {
+    size *= 2;
+  }
+  return size;
+}
+
 int digits() {
   var result = 0;
   for (var index = 0; index < 4; index++) {

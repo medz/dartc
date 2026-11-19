@@ -238,7 +238,28 @@ final class LoopRange(
         return LoopRangeProof(this, {}, {}, {}, {});
       }
       final start = starts[counter]!, step = steps[counter];
-      if (step == null) continue;
+      if (step == null) {
+        if (guard != header || operator != _Comparison.lessThan) continue;
+        final range = _multiplicativeExitRange(
+          counter,
+          backs.singleOrNull?.arguments[slot],
+          start.constant,
+          limits!,
+        );
+        if (range == null) continue;
+        return LoopRangeProof(
+          this,
+          {},
+          {},
+          {},
+          {},
+          exitBound: (
+            edge: taken ? end.ifFalse : end.ifTrue,
+            counter: counter,
+            range: range,
+          ),
+        );
+      }
       BigInt? count;
       final stop = BigInt.from(limit);
       if (step.lower > 0 &&
@@ -313,13 +334,51 @@ final class LoopRange(
   }
 }
 
+// Bounds on the first product that reaches an invariant threshold. A positive
+// factor of at least two allows at most 63 products before signed overflow.
+FlowIntegerRange? _multiplicativeExitRange(
+  Value counter,
+  Value? update,
+  int? seed,
+  FlowIntegerRange limits,
+) {
+  if (seed == null ||
+      seed <= 0 ||
+      update is! IntBinary ||
+      update.operator != .multiply) {
+    return null;
+  }
+  final operand = identical(update.left, counter)
+      ? update.right
+      : identical(update.right, counter)
+      ? update.left
+      : null;
+  if (operand is! ScalarConstant || operand.value is! int) return null;
+  final factor = operand.value as int;
+  if (factor <= 1) return null;
+
+  int? firstAtLeast(int bound) {
+    var value = seed;
+    while (value < bound) {
+      if (value > FlowIntegerRange.maximum ~/ factor) return null;
+      value *= factor;
+    }
+    return value;
+  }
+
+  final last = firstAtLeast(limits.upper);
+  if (last == null) return null;
+  return FlowIntegerRange(firstAtLeast(limits.lower)!, last);
+}
+
 final class LoopRangeProof(
   final LoopRange loop,
   final Map<BlockParameter, FlowIntegerRange> all,
   final Map<BlockParameter, FlowIntegerRange> body,
   final Set<Block> iteration,
-  final Map<BlockParameter, Map<Value, FlowIntegerRange?>> offsets,
-) {
+  final Map<BlockParameter, Map<Value, FlowIntegerRange?>> offsets, {
+  final ({Jump edge, Value counter, FlowIntegerRange range})? exitBound,
+}) {
   /// Bypasses finite computation only when every exit has the same live values.
   Jump? discardedExit(
     ValueLiveness liveness,
