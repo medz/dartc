@@ -13,6 +13,33 @@ const _one = Constant.integer(1);
 const _two = Constant.integer(2);
 
 void main() {
+  test('a forwarded address keeps the range of its selected mapping', () {
+    const long = Constant.integer(16), short = Constant.integer(8);
+    final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
+    final first = FlowObject(DirectCall(map, [long]), _activation);
+    final second = FlowObject(DirectCall(map, [short]), _activation);
+    final size = FlowValue.constant(long);
+    final state = FlowState(IrProgram([], []))
+        .allocateMemory(first, size, repeated: false)
+        .normal!
+        .allocateMemory(second, FlowValue.constant(short), repeated: false)
+        .normal!;
+    final large = FlowValue.address(FlowAddress(FlowRegion(first), 0));
+    final small = FlowValue.address(FlowAddress(FlowRegion(second), 0));
+    final load = FlowSource(DirectCall(map, [long]), _activation);
+    final parameter = FlowSource(
+      Block([ValueType.integer]).parameters.single,
+      _activation,
+    );
+    state.bindAddress(load, large.join(small));
+    state.bindAddress(parameter, large);
+
+    expect(
+      state.boundsNativeRange(large.withSources([load, parameter]), size),
+      isTrue,
+    );
+  });
+
   for (final raw in [false, true]) {
     test(
       'program-state invalidation preserves typed and raw global capabilities ($raw)',

@@ -416,15 +416,53 @@ final class FlowState {
       return value;
     }
     FlowValue? address;
+    List<FlowValue>? alternatives;
     for (final source in value.sources) {
       if (_addresses[source] case final known?) {
-        address = address == null ? known : address.join(known);
+        if (address == null) {
+          address = known;
+        } else if (address != known) {
+          (alternatives ??= [address]).add(known);
+          address = address.join(known);
+        }
+      }
+    }
+    // These SSA sources equal the same value on every incoming path. Keep a
+    // closed set of address bits if each source includes all of its choices.
+    // An open or incomparable set keeps the conservative joined result.
+    if (alternatives != null && alternatives.every(_closedAddressChoices)) {
+      for (final candidate in alternatives) {
+        if (alternatives.every(
+          (other) =>
+              other.addresses.containsAll(candidate.addresses) &&
+              candidate.constants.every(
+                (c) => other.constants.any(
+                  (v) => v.structuralKey == c.structuralKey,
+                ),
+              ),
+        )) {
+          address = candidate.withReferences([address!.references]);
+          break;
+        }
       }
     }
     return address == null
         ? value
         : address.withSources(value.sources).withReferences([value.references]);
   }
+
+  bool _closedAddressChoices(FlowValue value) =>
+      value.addresses.isNotEmpty &&
+      value.objects.isEmpty &&
+      value.unknownTypes.isEmpty &&
+      value.managedBackings.isEmpty &&
+      !value.hasUnknownBacking &&
+      value.rawBackingTypes.isEmpty &&
+      value.addresses.every(
+        (a) =>
+            a.type == ValueType.integer && a.offset != null && !a.retainedBase,
+      ) &&
+      value.constants.every((c) => c is ScalarConstant && c.value is int);
 
   FlowValue _resolveScalarCarrier(FlowValue value) {
     final layout = memoryLayout?.nativeLayout;
