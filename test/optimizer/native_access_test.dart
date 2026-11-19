@@ -14,6 +14,60 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test('an initialized object at a native region base can have any class', () {
+    final allocate = FunctionTarget(_uri, 'reserve', .integer, [.integer]);
+    final initialize = FunctionTarget(_uri, 'initializeObject', .voidType, [
+      .integer,
+      .integer,
+    ]);
+    final classify = FunctionTarget(_uri, 'classify', .boolean, []);
+    final entry = Block(), success = Block(), failure = Block();
+    const bytes = Constant.integer(48);
+    final address = entry.emit(DirectCall(allocate, [bytes]));
+    entry.finish(
+      Branch(
+        entry.emit(Equals(address, const Constant.integer(0))),
+        Jump(failure),
+        Jump(success),
+      ),
+    );
+    failure.finish(const Return(Constant.boolean(false)));
+    success.emit(DirectCall(initialize, [address, bytes]));
+    final object = success.emit(ReferenceFromAddress(address, .object));
+    final isInteger = success.emit(TypeTest(object, .integer));
+    final boxed = Block(), ordinary = Block();
+    success.finish(Branch(isInteger, Jump(boxed), Jump(ordinary)));
+    boxed.finish(const Return(Constant.boolean(true)));
+    ordinary.finish(const Return(Constant.boolean(false)));
+    final program = IrProgram(
+      [],
+      [
+        IrFunction(classify, [entry, success, failure, boxed, ordinary]),
+      ],
+      externals: [
+        IrExternal(
+          allocate,
+          effects: {},
+          capturesArguments: false,
+          memory: const ExternalMemory.zeroed(0),
+        ),
+        IrExternal(
+          initialize,
+          effects: {Effect.writesStorage},
+          capturesArguments: false,
+          memory: const ExternalMemory.write(0, 1),
+        ),
+      ],
+    );
+    final facts = ProgramFlow(program, [
+      (target: classify, arguments: []),
+    ], memoryLayout: _layout).facts;
+    expect(
+      [facts.reachesBlock(boxed), facts.reachesBlock(ordinary)],
+      [true, true],
+    );
+  });
+
   test(
     'known ranges compose through reordered arguments and address arithmetic',
     () {

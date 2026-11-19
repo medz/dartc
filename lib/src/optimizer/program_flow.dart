@@ -2430,7 +2430,8 @@ final class ProgramFlow(
         var value = const FlowValue.bottom();
         for (final address in input.addresses) {
           value = value.join(
-            address.offset == 0
+            address.offset == 0 &&
+                    (address.base is FlowObject || address.base is Constant)
                 ? address.reference.check(resultType).value
                 : FlowValue.unknown(resultType)
                       .withReferences([address.reference]),
