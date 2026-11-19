@@ -97,6 +97,17 @@ for verification and report writing when setting the outer deadline. A timeout
 at the outer deadline exits with 124 and can precede the JSON report. Use a fresh
 report path or check its creation time before interpreting a result.
 
+Independent functional runs can overlap in separate build directories. For
+example, on a 16 GiB host, two jobs can each use a 3 GiB sampled group RSS
+budget, 180 CPU seconds per process and a 120-second wall deadline.
+
+```sh
+python3 tool/bench_guard.py --rss-mib 3072 --cpu-seconds 180 120 dart run tool/bench.dart --only=control_flow --timeout=95
+```
+
+Run comparable timing measurements separately. The guard checks group RSS
+every 250 ms and terminates the group on a limit or launcher exit.
+
 ## Validation scope
 
 | Change | Required checks |
