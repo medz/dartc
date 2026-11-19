@@ -91,6 +91,13 @@ after unload. The harness builds the callback provider in the same asset
 directory before running the host test and records that step in
 `hostPreparation`.
 
+Select `--only=checked_index_object,checked_index_static` to compile the same
+checked-index source as an object file and a static library. The harness links
+each artifact to its own C executable and checks the three signed results
+`7 81 -4`. Add `--api` to exercise the public compiler entry point. A report
+used with `--baseline` must include successful linking and execution for both
+selected artifacts.
+
 The optional POSIX guard bounds the whole command and cleans up its process
 group. The benchmark defaults to 120 seconds for each compilation. Allow time
 for verification and report writing when setting the outer deadline. A timeout

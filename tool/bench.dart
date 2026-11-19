@@ -206,7 +206,8 @@ _Baseline? _readBaseline(
       if (row['source']['hostExpectationSha256'] !=
               inputs[fixture.name]!['hostExpectationSha256'] ||
           !succeeded(row['hostVerification']) ||
-          fixture.hostProvider != null && !succeeded(row['hostPreparation'])) {
+          (fixture.linksHost || fixture.hostProvider != null) &&
+              !succeeded(row['hostPreparation'])) {
         throw FormatException(
           'Invalid benchmark baseline: ${fixture.name} requires a successful host test.',
         );
@@ -284,6 +285,18 @@ const fixtures = <_Fixture>[
     hostTest: 'test/compiler/checked_index_test.dart',
   ),
   _Fixture(
+    'checked_index_object',
+    'test/compiler/fixtures/checked_index.dart',
+    .object,
+    hostTest: 'tool/bench/fixtures/checked_index_host.c',
+  ),
+  _Fixture(
+    'checked_index_static',
+    'test/compiler/fixtures/checked_index.dart',
+    .archive,
+    hostTest: 'tool/bench/fixtures/checked_index_host.c',
+  ),
+  _Fixture(
     'control_flow',
     'test/compiler/fixtures/control_flow.dart',
     .shared,
@@ -326,12 +339,16 @@ final class const _Fixture(
   final List<String> hostTestImports = const [],
   final ({String fixture, String source})? hostProvider,
 }) {
+  bool get linksHost => kind == .object || kind == .archive;
+
   String assetRoot(String target) => 'build/bench/${_safe(target)}';
 
   String output(String target) {
     final directory = assetRoot(target);
     return switch (kind) {
       .executable => '$directory/$name',
+      .object => '$directory/compiler/$name.o',
+      .archive => '$directory/compiler/$name.a',
       .shared =>
         target.contains('linux')
             ? '$directory/compiler/$name.so'
@@ -343,6 +360,10 @@ final class const _Fixture(
 enum _Kind() {
   executable,
   shared,
+  object,
+  archive;
+
+  String get outputKind => this == .archive ? 'static' : name;
 }
 
 final class _Options(
@@ -573,12 +594,12 @@ Future<_Row> _run(
       ...compiler.prefix,
       fixture.path,
       if (options.api) ...[
-        fixture.kind.name,
+        fixture.kind.outputKind,
         options.target,
         output.path,
       ] else ...[
         '--kind',
-        fixture.kind == .executable ? 'exe' : 'shared',
+        fixture.kind == .executable ? 'exe' : fixture.kind.outputKind,
         '--target',
         options.target,
         '-o',
@@ -620,7 +641,16 @@ Future<_Row> _run(
             fixture.assetRoot(options.target),
           ).absolute.path,
         };
-        if (fixture.hostProvider case final provider?) {
+        final client = File('${output.path}.host');
+        if (fixture.linksHost) {
+          if (await client.exists()) await client.delete();
+          hostPreparation = await _measure('cc', [
+            hostTest,
+            output.path,
+            '-o',
+            client.path,
+          ], options.runTimeout);
+        } else if (fixture.hostProvider case final provider?) {
           hostPreparation = await _measure(
             Platform.resolvedExecutable,
             [
@@ -635,8 +665,12 @@ Future<_Row> _run(
         }
         if (!(hostPreparation?.failed ?? false)) {
           hostVerification = await _measure(
-            Platform.resolvedExecutable,
-            ['test', '--reporter=expanded', hostTest],
+            fixture.linksHost
+                ? client.absolute.path
+                : Platform.resolvedExecutable,
+            fixture.linksHost
+                ? const []
+                : ['test', '--reporter=expanded', hostTest],
             options.runTimeout,
             environment: environment,
           );
@@ -959,7 +993,7 @@ Future<Map<String, Object?>> _fixtureIdentity(
       for (final path in [
         test,
         ...fixture.hostTestImports,
-        'test/support/native_assets.dart',
+        if (!fixture.linksHost) 'test/support/native_assets.dart',
         if (fixture.hostProvider case final provider?) ...[
           provider.source,
           'tool/build_test_assets.dart',
@@ -1074,6 +1108,7 @@ Options:
   --only=a,b              Select fixtures. Shared host expectations include
                           checked_index, control_flow, generic_member_carriers,
                           generic_cell_storage and same_heap_finalizer.
+                          checked_index_object and checked_index_static link a C host.
   --compiler=path         Use a compiler executable (default:
                           dart run bin/dartc.dart).
   --api                   Compile through the public Compiler API.
