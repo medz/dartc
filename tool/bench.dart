@@ -195,14 +195,16 @@ _Baseline? _readBaseline(
       );
     }
     if (options.execute && fixture.hostTest != null) {
-      final verification = row['hostVerification'];
+      bool succeeded(Object? process) =>
+          process is Map &&
+          process['exitCode'] == 0 &&
+          process['timedOut'] == false &&
+          process['outputComplete'] == true &&
+          process['error'] == null;
       if (row['source']['hostExpectationSha256'] !=
               inputs[fixture.name]!['hostExpectationSha256'] ||
-          verification is! Map ||
-          verification['exitCode'] != 0 ||
-          verification['timedOut'] != false ||
-          verification['outputComplete'] != true ||
-          verification['error'] != null) {
+          !succeeded(row['hostVerification']) ||
+          fixture.hostProvider != null && !succeeded(row['hostPreparation'])) {
         throw FormatException(
           'Invalid benchmark baseline: ${fixture.name} requires a successful host test.',
         );
@@ -285,6 +287,16 @@ const fixtures = <_Fixture>[
     .shared,
     hostTest: 'test/compiler/generic_cell_storage_test.dart',
   ),
+  _Fixture(
+    'same_heap_finalizer',
+    'test/compiler/fixtures/same_heap_finalizer.dart',
+    .shared,
+    hostTest: 'test/compiler/same_heap_finalizer_test.dart',
+    hostProvider: (
+      fixture: 'native_finalizer_callback',
+      source: 'test/compiler/fixtures/native_finalizers_assets.dart',
+    ),
+  ),
 ];
 
 final class const _Fixture(
@@ -294,6 +306,7 @@ final class const _Fixture(
   final bool run = false,
   final String? expected,
   final String? hostTest,
+  final ({String fixture, String source})? hostProvider,
 }) {
   String assetRoot(String target) => 'build/bench/${_safe(target)}';
 
@@ -470,6 +483,7 @@ final class _Row(
   final _Measurement compilation,
   final List<_Measurement> runs,
   final _Measurement? hostVerification,
+  final _Measurement? hostPreparation,
   final Map<String, Object?>? artifact,
   final String? failure,
 ) {
@@ -488,6 +502,7 @@ final class _Row(
   bool get failed =>
       compilation.failed ||
       (hostVerification?.failed ?? false) ||
+      (hostPreparation?.failed ?? false) ||
       failure != null ||
       runs.any((run) => run.failed || !matches(run));
 
@@ -497,6 +512,7 @@ final class _Row(
     'artifact': artifact,
     'bytes': bytes,
     'runMedianUs': runMedianUs,
+    if (hostPreparation != null) 'hostPreparation': hostPreparation!.toJson(),
     if (hostVerification != null)
       'hostVerification': hostVerification!.toJson(),
     'runs': [
@@ -556,6 +572,7 @@ Future<_Row> _run(
   );
   final runs = <_Measurement>[];
   _Measurement? hostVerification;
+  _Measurement? hostPreparation;
   Map<String, Object?>? artifact;
   String? failure;
   if (!compilation.failed) {
@@ -580,16 +597,32 @@ Future<_Row> _run(
         }
       }
       if (fixture.hostTest case final String hostTest when options.execute) {
-        hostVerification = await _measure(
-          Platform.resolvedExecutable,
-          ['test', '--reporter=expanded', hostTest],
-          options.runTimeout,
-          environment: {
-            'DARTC_TEST_NATIVE_ASSET_ROOT': Directory(
-              fixture.assetRoot(options.target),
-            ).absolute.path,
-          },
-        );
+        final environment = {
+          'DARTC_TEST_NATIVE_ASSET_ROOT': Directory(
+            fixture.assetRoot(options.target),
+          ).absolute.path,
+        };
+        if (fixture.hostProvider case final provider?) {
+          hostPreparation = await _measure(
+            Platform.resolvedExecutable,
+            [
+              'run',
+              'tool/build_test_assets.dart',
+              options.target,
+              '--fixture=${provider.fixture}',
+            ],
+            options.runTimeout,
+            environment: environment,
+          );
+        }
+        if (!(hostPreparation?.failed ?? false)) {
+          hostVerification = await _measure(
+            Platform.resolvedExecutable,
+            ['test', '--reporter=expanded', hostTest],
+            options.runTimeout,
+            environment: environment,
+          );
+        }
       }
       if ((runs.isNotEmpty || hostVerification != null) &&
           (await _fileIdentity(output.path))['sha256'] != artifact['sha256']) {
@@ -603,6 +636,7 @@ Future<_Row> _run(
     compilation,
     runs,
     hostVerification,
+    hostPreparation,
     artifact,
     failure,
   );
@@ -853,6 +887,7 @@ void _print(List<_Row> rows, _Baseline? baseline, _Options options) {
     final status =
         row.compilation.timedOut ||
             (row.hostVerification?.timedOut ?? false) ||
+            (row.hostPreparation?.timedOut ?? false) ||
             row.runs.any((run) => run.timedOut)
         ? 'TIMEOUT'
         : row.failed
@@ -897,7 +932,14 @@ Future<Map<String, Object?>> _fixtureIdentity(
   final source = await _fileIdentity(fixture.path);
   if (fixture.hostTest case final String test when execute) {
     final files = {
-      for (final path in [test, 'test/support/native_assets.dart'])
+      for (final path in [
+        test,
+        'test/support/native_assets.dart',
+        if (fixture.hostProvider case final provider?) ...[
+          provider.source,
+          'tool/build_test_assets.dart',
+        ],
+      ])
         path: (await _fileIdentity(path))['sha256'],
     };
     source['hostExpectationFiles'] = files;

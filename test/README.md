@@ -81,6 +81,13 @@ write followed by a read through another native entry. Shared libraries run
 their FFI test once. The report records its exit status and elapsed time under
 `hostVerification`.
 
+Select `--only=same_heap_finalizer` to verify one heap across registration,
+allocation and lookup exports. The FFI test expects the callback count to go
+from zero after registration to one when allocation returns, and to stay at one
+after unload. The harness builds the callback provider in the same asset
+directory before running the host test and records that step in
+`hostPreparation`.
+
 The optional POSIX guard bounds the whole command and cleans up its process
 group. The benchmark defaults to 120 seconds for each compilation. Allow time
 for verification and report writing when setting the outer deadline. A timeout
