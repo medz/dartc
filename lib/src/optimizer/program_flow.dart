@@ -2027,8 +2027,31 @@ final class ProgramFlow(
             final selected = known ? ifTrue : ifFalse;
             edge(selected, guardStates[(block, known)] ?? state);
           } else {
-            final yes = _integerRefinements(condition, true, read);
-            final no = _integerRefinements(condition, false, read);
+            var predicate = condition;
+            if (condition is BlockParameter &&
+                block != body.entry &&
+                block.instructions.isEmpty &&
+                value.managedBackings.isEmpty &&
+                !value.hasUnknownBacking) {
+              final index = block.parameters.indexOf(condition);
+              if (loops.incoming[block] case [(final producer, final jump)]
+                  when index >= 0 && identical(producer.end, jump)) {
+                // Only the comparison just executed on this edge can constrain
+                // its operands here. A saved boolean may refer to an earlier turn.
+                final comparison = jump.arguments[index];
+                if (comparison is IntBinary &&
+                    identical(producer.instructions.lastOrNull, comparison) &&
+                    comparison.inputs.map(read).every(
+                      (operand) =>
+                          operand.managedBackings.isEmpty &&
+                          !operand.hasUnknownBacking,
+                    )) {
+                  predicate = comparison;
+                }
+              }
+            }
+            final yes = _integerRefinements(predicate, true, read);
+            final no = _integerRefinements(predicate, false, read);
             FlowState branch(bool outcome) {
               if (condition is! TypeTest) return state!;
               return state!.copy()..refineType(
