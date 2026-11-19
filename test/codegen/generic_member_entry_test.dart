@@ -20,7 +20,7 @@ void main() {
     () => prepareRuntime('test/compiler/fixtures/generic_member_carriers.dart'),
   );
 
-  test('a source recursive call reaches both physical entries before specialization', () {
+  void checkRecursiveEntries({required bool replay}) {
     final program = heapRuntime.program;
     final root = program.functions.singleWhere(
       (f) => f.target.name == 'selectWord',
@@ -33,7 +33,8 @@ void main() {
       nativeLayout: NativeLayout(Target.host()),
       executionShapes: p.executionShapes,
     );
-    final graph = MemberEntryLowering(types).run(
+    final pass = MemberEntryLowering(types).bind();
+    var graph = pass(
       ProgramFlow(
         program,
         const [],
@@ -41,11 +42,20 @@ void main() {
         memoryLayout: layout(program),
       ).facts,
     );
+    if (replay) {
+      final recipes = pass.realizations.toList();
+      pass.rebase(program);
+      graph = program;
+      for (final recipe in recipes) {
+        graph = recipe.apply(graph);
+      }
+    }
     final caller = graph.implementationOf(root.target) as IrFunction;
     final call = operations(caller).whereType<InstanceCall>().single;
     final adapter = graph.implementationOf(
       call.entryBinding!.entries.values.single,
     ) as IrFunction;
+    expect(adapter.entry.end, isA<Branch>());
     final guard = adapter.entry.end as Branch;
     final scalar = guard.ifTrue.target;
     final shared = guard.ifFalse.target;
@@ -71,6 +81,61 @@ void main() {
       expect(machine.run(caller, [mode, 13, -72, 3]), -72);
       expect(machine.run(caller, [mode, -9, 87, 2]), -9);
     }
+  }
+
+  test('a source recursive call reaches both physical entries before specialization',
+      () => checkRecursiveEntries(replay: false));
+  test('canonical replay preserves both physical entries of a recursive method',
+      () => checkRecursiveEntries(replay: true));
+
+  test('replay keeps a canonical member with explicit carriers and handler', () {
+    final program = heapRuntime.program;
+    final root = program.functions.singleWhere((f) => f.target.name == 'selectWord');
+    final source = program.functions.singleWhere((f) =>
+        f.target.owner?.name == 'Selector' && f.target.name == 'select');
+    final types = TypeImplementations(runtime: heapRuntime.types);
+    ProgramLayout layout(IrProgram p) => ProgramLayout(p.classes,
+        functions: p.functions, typeImplementations: types,
+        nativeLayout: NativeLayout(Target.host()), executionShapes: p.executionShapes);
+    final pass = MemberEntryLowering(types).bind();
+    pass(ProgramFlow(program, const [], openEntries: [root.target],
+        memoryLayout: layout(program)).facts);
+    final recipes = pass.realizations.toList();
+
+    final entry = Block(source.target.parameterTypes);
+    final ready = Block([ValueType.integer]), caught = Block();
+    final materialize = MaterializeValue(entry.parameters.last);
+    entry.finish(Invoke(materialize, onReturn: Jump(ready, [materialize]),
+        onThrow: Jump(caught)));
+    final payload = ready.emit(ProjectValue(ready.parameters.single, ExecutionShape.word));
+    ready.finish(Jump(source.entry, [...entry.parameters.take(3), payload]));
+    caught.finish(Return(entry.parameters[2]));
+    final custom = IrFunction(source.target, [entry, ready, caught, ...source.blocks],
+        execution: FunctionExecution({materialize: ExecutionShape.reference,
+          ready.parameters.single: ExecutionShape.reference, payload: ExecutionShape.word}));
+    var graph = IrProgram(program.classes,
+        [for (final f in program.functions) identical(f, source) ? custom : f],
+        globals: program.globals, externals: program.externals,
+        nativeBoundaries: program.nativeBoundaries, executionShapes: program.executionShapes);
+    pass.rebase(graph);
+    for (final recipe in recipes) {
+      graph = recipe.apply(graph);
+    }
+    final implementations = graph.functions.where((f) => f.target.executionSource == source.target);
+    final shared = implementations.single;
+    expect(shared.target.typeParameters, isNotEmpty);
+    final invoke = shared.entry.end as Invoke;
+    expect(shared.originOf(invoke.operation).source, custom.originOf(materialize).source);
+    expect(shared.originOf(operations(shared).whereType<ProjectValue>().single).source,
+        custom.originOf(payload).source);
+    expect(invoke.onThrow.target.end, isA<Return>());
+    expect((invoke.onThrow.target.end as Return).value, shared.entry.parameters[2]);
+    final shapes = graph.executionShapes!;
+    expect(shapes.shapeOf(shared, invoke.operation), ExecutionShape.reference);
+    expect(shapes.shapeOf(shared, invoke.onReturn!.target.parameters.single),
+        ExecutionShape.reference);
+    expect(ProgramFlow(graph, const [], openEntries: [root.target],
+        memoryLayout: layout(graph)).facts.roots, {root.target});
   });
 
   for (final direct in [false, true]) {

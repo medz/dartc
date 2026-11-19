@@ -46,6 +46,10 @@ final class _MemberEntries(final TypeImplementations types) {
   final _entryTargets = <Object, FunctionTarget>{};
   final _bodies = <FunctionTarget, IrFunction>{};
   final _bodyTargets = <FunctionTarget, FunctionTarget>{};
+  // During replay a prior choice may bind a recursive call in its own source
+  // method. A new concrete entry must bind that call for its own carriers.
+  // Only a still-live intermediate body needs its original template.
+  var _unboundMembers = Expando<IrFunction>();
   final _variants = <(FunctionTarget, FunctionType), IrFunction>{};
   final _variantTargets = <(FunctionTarget, FunctionType), FunctionTarget>{};
   final _executions = <FunctionTarget, ExecutionSignature>{};
@@ -55,6 +59,7 @@ final class _MemberEntries(final TypeImplementations types) {
     _entries.clear();
     _bodies.clear();
     _variants.clear();
+    _unboundMembers = Expando<IrFunction>();
     _executions.clear();
     _adopt(program);
   }
@@ -125,8 +130,10 @@ final class _MemberEntries(final TypeImplementations types) {
     }
   }
 
-  IrProgram lower(ProgramFlowFacts facts) =>
-      _rewrite(facts.program, facts: facts);
+  IrProgram lower(ProgramFlowFacts facts) {
+    _unboundMembers = Expando<IrFunction>();
+    return _rewrite(facts.program, facts: facts);
+  }
 
   IrProgram _rewrite(
     IrProgram program, {
@@ -407,6 +414,11 @@ final class _MemberEntries(final TypeImplementations types) {
               operations: operations,
               lowered: lowered,
             ).run();
+      if (facts == null &&
+          !identical(rewritten, body) &&
+          body.target.kind.isVirtual) {
+        _unboundMembers[rewritten] = _unboundMembers[body] ?? body;
+      }
       changed |= !identical(rewritten, body);
       functions.add(rewritten);
     }
@@ -596,11 +608,12 @@ final class _MemberEntries(final TypeImplementations types) {
     }
     // A finite set of actually demanded, closed scalar signatures. Lexical
     // closures still use their original captured environment and shared body.
+    final template = body is IrFunction ? _unboundMembers[body] ?? body : null;
     final concreteEntry =
-        body is IrFunction &&
-            body.bodyKind == FunctionBodyKind.synchronous &&
-            body.closures.isEmpty &&
-            body.execution == null &&
+        template != null &&
+            template.bodyKind == FunctionBodyKind.synchronous &&
+            template.closures.isEmpty &&
+            template.execution == null &&
             !shapes.entries.containsKey(source) &&
             compatible &&
             raw.isNotEmpty &&
@@ -608,7 +621,7 @@ final class _MemberEntries(final TypeImplementations types) {
             actualTypes.entries.every(
               (e) => e.key.bound.substitute(actualTypes).accepts(e.value),
             )
-        ? _concreteBody(body, actualTypes, shapes)
+        ? _concreteBody(template, actualTypes, shapes)
         : null;
     void invoke(
       Block block,
