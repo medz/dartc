@@ -17,13 +17,17 @@ final class FlowMemory {
   final List<(int, int)> _zeroes;
   final StateMap<int, _Byte> _bytes;
   final FlowValue _retained;
+  // Byte-wise joins need not preserve the encoding of a whole native word.
+  // Keep its alternatives only while every path supplies all eight bytes.
+  final StateMap<int, FlowValue> _words;
 
   new(this.start, this.length)
     : _zeroes = length == null || length == 0
           ? const []
           : [(start, start + length)],
       _bytes = const .empty(),
-      _retained = const .bottom();
+      _retained = const .bottom(),
+      _words = const .empty();
 
   /// Entry bytes supplied by an explicit storage contract; null means unknown.
   factory bytes(List<int?> bytes) {
@@ -50,7 +54,38 @@ final class FlowMemory {
     );
   }
 
-  new _(this.start, this.length, this._zeroes, this._bytes, this._retained);
+  new _(
+    this.start,
+    this.length,
+    this._zeroes,
+    this._bytes,
+    this._retained, [
+    this._words = const StateMap.empty(),
+  ]);
+
+  StateMap<int, FlowValue> _untouchedWords(int offset, int size) {
+    var keep = _words;
+    if (keep.isEmpty || size == 0) return keep;
+    final end = offset + size;
+    if (size <= 8) {
+      for (var key = offset - 7; key < end; key++) {
+        keep = keep.withoutKey(key);
+      }
+    } else {
+      for (final key in _words.keys) {
+        if (key < end && offset < key + 8) keep = keep.withoutKey(key);
+      }
+    }
+    return keep;
+  }
+
+  FlowValue? _zeroWord(int offset) {
+    if (!contains(offset, 8)) return null;
+    for (var i = 0; i < 8; i++) {
+      if (_at(offset + i) != _zero) return null;
+    }
+    return _zero.value;
+  }
 
   bool contains(int offset, int size) =>
       size >= 0 &&
@@ -122,6 +157,7 @@ final class FlowMemory {
     for (final boundary in {
       for (final (begin, end) in _zeroes) ...[begin, end],
       for (final byte in _bytes.keys) ...[byte, byte + 1],
+      for (final word in _words.keys) ...[word, word + 8],
     }) {
       // A read window changes only when it crosses a byte-fact boundary.
       for (var index = 0; index < size; index++) {
@@ -155,6 +191,9 @@ final class FlowMemory {
     if (!contains(offset, size)) {
       return FlowValue.unknown(FfiTypes.valueType(type))
           .withReferences([references.carrierReferences]);
+    }
+    if (_words[offset] case final word? when type.integerLayout?.bytes == 8) {
+      return word;
     }
     final bytes = [for (var i = 0; i < size; i++) _at(offset + i)];
     final data = ByteData(size);
@@ -259,7 +298,14 @@ final class FlowMemory {
     for (var i = 0; i < ObjectHeader.alignment; i++) {
       bytes = bytes.withEntry(offset + i, _Byte(value, null, i));
     }
-    return FlowMemory._(start, length, _zeroes, bytes, _retained);
+    return FlowMemory._(
+      start,
+      length,
+      _zeroes,
+      bytes,
+      _retained,
+      _untouchedWords(offset, ObjectHeader.alignment),
+    );
   }
 
   FlowMemory write(
@@ -298,7 +344,17 @@ final class FlowMemory {
           ? bytes.withoutKey(offset + i)
           : bytes.withEntry(offset + i, byte);
     }
-    return FlowMemory._(start, length, _zeroes, bytes, _retained);
+    var words = _untouchedWords(offset, size);
+    if (type.integerLayout?.bytes == 8) {
+      // Concrete bytes cannot retain the SSA source or backing of their integer.
+      final bits = constant != null
+          ? FlowValue.constant(constant)
+          : value.managedBackings.isEmpty && !value.hasUnknownBacking
+          ? value
+          : value.withManagedBackings(const []).withSources(const []);
+      if (bits != _zero.value) words = words.withEntry(offset, bits);
+    }
+    return FlowMemory._(start, length, _zeroes, bytes, _retained, words);
   }
 
   /// Forgets only the overwritten range and preserves disjoint storage.
@@ -322,7 +378,14 @@ final class FlowMemory {
     for (final key in _bytes.keys) {
       if (offset <= key && key < end) bytes = bytes.withoutKey(key);
     }
-    return FlowMemory._(start, length, zeroes, bytes, _retained.join(retained));
+    return FlowMemory._(
+      start,
+      length,
+      zeroes,
+      bytes,
+      _retained.join(retained),
+      _untouchedWords(offset, size),
+    );
   }
 
   /// Copies the source snapshot, including overlap, in work proportional to facts.
@@ -343,12 +406,19 @@ final class FlowMemory {
         bytes = bytes.withEntry(entry.key + shift, entry.value);
       }
     }
+    var words = cleared._words;
+    for (final entry in source._words.entries) {
+      if (from <= entry.key && entry.key + 8 <= from + size) {
+        words = words.withEntry(entry.key + shift, entry.value);
+      }
+    }
     return FlowMemory._(
       start,
       length,
       _coalesce(zeroes),
       bytes,
       cleared._retained,
+      words,
     );
   }
 
@@ -360,7 +430,7 @@ final class FlowMemory {
     final retained = _retained.join(value);
     return retained == _retained
         ? this
-        : FlowMemory._(start, length, _zeroes, _bytes, retained);
+        : FlowMemory._(start, length, _zeroes, _bytes, retained, _words);
   }
 
   FlowMemory map(FlowValue Function(FlowValue) transform) {
@@ -373,9 +443,12 @@ final class FlowMemory {
       ),
     );
     final retained = transform(_retained);
-    return identical(bytes, _bytes) && retained == _retained
+    final words = _words.mapValues((_, word) => transform(word));
+    return identical(bytes, _bytes) &&
+            identical(words, _words) &&
+            retained == _retained
         ? this
-        : FlowMemory._(start, length, _zeroes, bytes, retained);
+        : FlowMemory._(start, length, _zeroes, bytes, retained, words);
   }
 
   FlowMemory join(FlowMemory other, {bool widen = false}) {
@@ -411,12 +484,20 @@ final class FlowMemory {
       final byte = (a ?? _at(key)).join(b ?? other._at(key), widen: widen);
       return byte == merged._at(key) ? null : byte;
     });
+    final words = _words.merge(other._words, (offset, left, right) {
+      if (!merged.contains(offset, 8)) return null;
+      left ??= _zeroWord(offset);
+      right ??= other._zeroWord(offset);
+      if (left == null || right == null) return null;
+      return left.join(right, widen: widen);
+    });
     return FlowMemory._(
       start,
       merged.length,
       merged._zeroes,
       bytes,
       merged._retained,
+      words,
     );
   }
 
@@ -427,6 +508,7 @@ final class FlowMemory {
           start == other.start &&
           length == other.length &&
           _bytes == other._bytes &&
+          _words == other._words &&
           _retained == other._retained &&
           _zeroes.length == other._zeroes.length &&
           _zeroes.indexed.every((e) => e.$2 == other._zeroes[e.$1]);
@@ -437,6 +519,7 @@ final class FlowMemory {
     length,
     Object.hashAll(_zeroes),
     _bytes,
+    _words,
     _retained,
   );
 }

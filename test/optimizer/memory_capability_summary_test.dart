@@ -1,12 +1,33 @@
+import 'dart:ffi' show Int64;
+
+import 'package:dartc/abi.dart';
+import 'package:dartc/interop.dart';
 import 'package:dartc/ir.dart';
 import 'package:dartc/src/optimizer/flow_memory.dart';
 import 'package:dartc/src/optimizer/flow_value.dart';
+import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
   final type = ClassType(null, 'Payload');
   FlowObject object() =>
       FlowObject(NewPayload(type, const Constant.integer(0)), Object());
+
+  test('joined native words retain null or the actual address', () {
+    final layout = NativeLayout(Target.host());
+    final word = NativeScalarType(Int64);
+    final empty = FlowMemory(0, 24);
+    final allocation = object();
+    final address = FlowValue.address(FlowAddress(allocation, 0));
+    final zero = FlowValue.constant(const Constant.integer(0));
+    final stored = empty.write(3, word, address, layout);
+    for (final joined in [empty.join(stored), stored.join(empty)]) {
+      final expected = address.join(zero);
+      expect(joined.read(3, word, layout), expected);
+      final copied = empty.copyFrom(13, joined, 3, 8);
+      expect(copied.read(13, word, layout), expected);
+    }
+  });
 
   test('memory capability summaries belong to their byte version', () {
     final a = object(), b = object();
