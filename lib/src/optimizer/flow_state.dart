@@ -16,6 +16,9 @@ final class const FlowResult({
   final FlowState? normal,
   final FlowState? exceptional,
 
+  /// Integer bounds on the caller's existing SSA values after a normal return.
+  final Map<Value, FlowIntegerRange> normalRanges = const {},
+
   /// Failure may disappear only when the allocation itself is eliminated.
   final bool allocationFailureOnly = false,
 

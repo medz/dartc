@@ -701,6 +701,14 @@ final class ProgramFlow(
     final invoked = FlowResult(
       value: mapValue(callee.returned, exit: callee.normal),
       normal: apply(callee.normalSummary, normal: true),
+      normalRanges: callee.normalParameterRanges.isEmpty
+          ? const {}
+          : {
+              for (final entry in callee.normalParameterRanges.entries)
+                for (final source in arguments[entry.key].sources)
+                  if (identical(source.activation, caller))
+                    source.value: entry.value,
+            },
       exceptional: thrownState,
       allocationFailureOnly: !callee.hasSemanticFailure,
       exception: mapValue(callee.exception, exit: callee.exceptional),
@@ -1713,17 +1721,7 @@ final class ProgramFlow(
         }
       }
       if (incomingRanges[jump.target] case final previous?) {
-        for (final value in previous.keys.toList()) {
-          final next = nextRanges[value];
-          if (next == null) {
-            previous.remove(value);
-            changed = true;
-          } else {
-            final joined = previous[value]!.join(next, widen: widen);
-            changed |= joined != previous[value];
-            previous[value] = joined;
-          }
-        }
+        changed = _joinRanges(previous, nextRanges, widen: widen) || changed;
       } else {
         incomingRanges[jump.target] = nextRanges;
         changed = true;
@@ -1909,6 +1907,7 @@ final class ProgramFlow(
           result = FlowResult(
             value: bounded,
             normal: bounded.isBottom ? null : result.normal,
+            normalRanges: result.normalRanges,
             exceptional: result.exceptional,
             allocationFailureOnly: result.allocationFailureOnly,
             exception: result.exception,
@@ -1962,6 +1961,13 @@ final class ProgramFlow(
         }
         state = result.normal;
         if (state == null) break;
+        if (result.normalRanges.isNotEmpty) {
+          ranges.addAll(result.normalRanges);
+          state.refineIntegers({
+            for (final entry in result.normalRanges.entries)
+              FlowSource(entry.key, activation): entry.value,
+          });
+        }
       }
       if (state == null) continue;
       point = state;
@@ -1979,10 +1985,26 @@ final class ProgramFlow(
           );
           summaryChanged |= joined != activation.returned;
           activation.returned = joined;
+          final parameterRanges = <int, FlowIntegerRange>{
+            for (final (i, parameter) in body.entry.parameters.indexed)
+              if (ranges[parameter] case final range?
+                  when range != FlowIntegerRange.full &&
+                      activation.arguments[i].managedBackings.isEmpty &&
+                      !activation.arguments[i].hasUnknownBacking)
+                i: range,
+          };
           if (activation.normalSummary == null) {
+            activation.normalParameterRanges.addAll(parameterRanges);
             activation.normalSummary = _StateSummary(entryState, state);
             summaryChanged = true;
           } else {
+            summaryChanged =
+                _joinRanges(
+                  activation.normalParameterRanges,
+                  parameterRanges,
+                  widen: activation.recursive,
+                ) ||
+                summaryChanged;
             summaryChanged =
                 activation.normalSummary!.join(
                   entryState,
@@ -2029,7 +2051,7 @@ final class ProgramFlow(
         case Invoke(:final operation, :final onReturn, :final onThrow):
           final result = evaluate(operation);
           if (onReturn != null && result.normal != null) {
-            edge(onReturn, result.normal!);
+            edge(onReturn, result.normal!, refinements: result.normalRanges);
           }
           if (result.exceptional case final thrown?) {
             edge(
@@ -5412,6 +5434,7 @@ final class _Activation(final IrCallable body) {
   }
 
   FlowState? input;
+  final normalParameterRanges = <int, FlowIntegerRange>{};
   _StateSummary? normalSummary;
   _StateSummary? exceptionalSummary;
   Object? firstExceptionSite;
@@ -5485,10 +5508,42 @@ final _typeError = FlowValue.unknown(ValueType.typeError);
 FlowState? _joinState(FlowState? a, FlowState? b) =>
     a == null ? b?.copy() : (a.copy()..join(b ?? a));
 
+// Missing entries denote an unrestricted value on the incoming path.
+bool _joinRanges<K>(
+  Map<K, FlowIntegerRange> known,
+  Map<K, FlowIntegerRange> incoming, {
+  bool widen = false,
+}) {
+  var changed = false;
+  for (final key in known.keys.toList()) {
+    final range = incoming[key];
+    if (range == null) {
+      known.remove(key);
+      changed = true;
+    } else {
+      final joined = known[key]!.join(range, widen: widen);
+      changed |= joined != known[key];
+      known[key] = joined;
+    }
+  }
+  return changed;
+}
+
 FlowResult _joinResult(FlowResult left, FlowResult right) {
   return FlowResult(
     value: left.value.join(right.value),
     normal: _joinState(left.normal, right.normal),
+    normalRanges: left.normal == null
+        ? right.normalRanges
+        : right.normal == null
+        ? left.normalRanges
+        : left.normalRanges.isEmpty || right.normalRanges.isEmpty
+        ? const {}
+        : {
+            for (final entry in left.normalRanges.entries)
+              if (right.normalRanges[entry.key] case final other?)
+                entry.key: entry.value.join(other),
+          },
     exceptional: _joinState(left.exceptional, right.exceptional),
     allocationFailureOnly:
         !left.hasSemanticFailure && !right.hasSemanticFailure,
