@@ -193,6 +193,11 @@ final class FlowValue {
   /// Address alternatives, separate from completely unknown scalar values.
   final Set<FlowAddress> addresses;
 
+  /// The address bits of a recovered managed reference, when known on every
+  /// incoming alternative. This proof alone makes no claim about the class,
+  /// contents, lifetime or readable extent at that address.
+  final FlowValue? recoveredAddress;
+
   /// Bounds for values whose identity or contents are not established.
   final Set<ValueType> unknownTypes;
 
@@ -227,6 +232,7 @@ final class FlowValue {
       hasUnknownBacking = false,
       rawBackingTypes = const {},
       unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -241,6 +247,7 @@ final class FlowValue {
       hasUnknownBacking = false,
       rawBackingTypes = const {},
       unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -255,6 +262,7 @@ final class FlowValue {
       hasUnknownBacking = false,
       rawBackingTypes = const {},
       unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -262,13 +270,14 @@ final class FlowValue {
       _integers = null,
       _references = null;
 
-  new unknown(ValueType type, {bool external = false})
+  new unknown(ValueType type, {bool external = false, FlowAddress? at})
     : _constants = const {},
       objects = const {},
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
       unknownReceiverClasses = null,
+      recoveredAddress = at == null ? null : FlowValue.address(at),
       unknownTypes = Set.unmodifiable({type}),
       externalUnknownTypes = external && _mayCarryReference(type)
           ? Set.unmodifiable({type})
@@ -276,7 +285,7 @@ final class FlowValue {
       sources = const {},
       addresses = const {},
       _integers = null,
-      _references = null;
+      _references = at?.reference;
 
   new address(FlowAddress address)
     : _constants = const {},
@@ -285,6 +294,7 @@ final class FlowValue {
       hasUnknownBacking = false,
       rawBackingTypes = const {},
       unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -319,6 +329,7 @@ final class FlowValue {
     this.hasUnknownBacking = false,
     Set<ValueType> rawBackingTypes = const {},
     Set<ClassType>? receiverClasses,
+    this.recoveredAddress,
   ]) : _constants = Map.unmodifiable(constants),
        objects = Set.unmodifiable(objects),
        managedBackings = Set.unmodifiable(managedBackings),
@@ -356,6 +367,7 @@ final class FlowValue {
           hasUnknownBacking,
           rawBackingTypes,
           unknownReceiverClasses,
+          recoveredAddress,
         );
 
   /// Constants identified structurally, without invoking user equality.
@@ -456,6 +468,7 @@ final class FlowValue {
         hasUnknownBacking,
         rawBackingTypes,
         unknownReceiverClasses,
+        recoveredAddress,
       );
     }
     if (existing == null) return this;
@@ -508,6 +521,7 @@ final class FlowValue {
       hasUnknownBacking,
       rawBackingTypes,
       unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -519,6 +533,7 @@ final class FlowValue {
         _references == null) {
       return this;
     }
+    final recovered = recoveredAddress?.mapObjects(transform);
     final mapped = objects.map(transform).toSet();
     final backings = managedBackings.map(transform).toSet();
     final references = _references?.mapObjects(transform);
@@ -541,7 +556,7 @@ final class FlowValue {
         backings.containsAll(managedBackings) &&
         mappedAddresses.length == addresses.length &&
         mappedAddresses.containsAll(addresses) &&
-        references == _references) {
+        references == _references && recovered == recoveredAddress) {
       return this;
     }
     return FlowValue._(
@@ -557,6 +572,7 @@ final class FlowValue {
       hasUnknownBacking,
       rawBackingTypes,
       unknownReceiverClasses,
+      recovered,
     );
   }
 
@@ -608,6 +624,7 @@ final class FlowValue {
             hasUnknownBacking,
             rawBackingTypes,
             unknownReceiverClasses,
+            recoveredAddress,
           )
         : this;
   }
@@ -632,6 +649,7 @@ final class FlowValue {
       hasUnknownBacking,
       rawBackingTypes,
       unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -675,6 +693,7 @@ final class FlowValue {
       hasUnknownBacking,
       rawBackingTypes,
       unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -799,6 +818,7 @@ final class FlowValue {
       hasUnknownBacking,
       retained,
       unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -830,6 +850,7 @@ final class FlowValue {
       selected.hasUnknownBacking,
       selected.rawBackingTypes,
       selected.unknownReceiverClasses,
+      selected.recoveredAddress,
     );
   }
 
@@ -997,6 +1018,7 @@ final class FlowValue {
               dispatchClass == null
                   ? unknownReceiverClasses
                   : {dispatchClass.declaration},
+              recoveredAddress,
             ),
       mayFail: mayFail,
     );
@@ -1108,6 +1130,12 @@ final class FlowValue {
       unknownBacking,
       rawBackings,
       receiverClasses,
+      values.every((value) => value.recoveredAddress != null)
+          ? FlowValue.joined(
+              values.map((value) => value.recoveredAddress!),
+              widen: widen,
+            )
+          : null,
     );
   }
 
@@ -1141,7 +1169,8 @@ final class FlowValue {
           sources.length == other.sources.length &&
           sources.containsAll(other.sources) &&
           _integers == other._integers &&
-          _references == other._references;
+          _references == other._references &&
+          recoveredAddress == other.recoveredAddress;
 
   @override
   int get hashCode => Object.hash(
@@ -1159,6 +1188,7 @@ final class FlowValue {
     Object.hashAllUnordered(sources),
     _integers,
     _references,
+    recoveredAddress,
   );
 }
 

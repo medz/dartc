@@ -489,6 +489,41 @@ void main() {
     },
   );
 
+  test('a reference recovered inside a page retains its actual address', () {
+    final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
+    final addressOf = FunctionTarget(_uri, 'addressOf', .integer, [.object]);
+    final get = Block([.object]);
+    get.finish(Return(get.emit(ReferenceAddress(get.parameters.single))));
+    final root = FunctionTarget(_uri, 'slotAddress', .integer, [.integer]);
+    final entry = Block([.integer]), success = Block(), failure = Block();
+    final page = entry.emit(DirectCall(map, [const Constant.integer(4096)]));
+    entry.finish(Branch(
+      entry.emit(Equals(page, const Constant.integer(0))),
+      Jump(failure),
+      Jump(success),
+    ));
+    failure.finish(Throw(const Constant.string('map failed')));
+    final offset = success.emit(IntBinary(
+      .multiply, entry.parameters.single, const Constant.integer(64),
+    ));
+    final slot = success.emit(IntBinary(.add, page, offset));
+    final object = success.emit(ReferenceFromAddress(slot, .object));
+    success.finish(Return(success.emit(DirectCall(addressOf, [object]))));
+    final program = IrProgram([], [
+      IrFunction(root,[entry, success, failure]), IrFunction(addressOf,[get]),
+    ], externals:[IrExternal(map, effects: const {}, capturesArguments: false,
+        memory: const ExternalMemory.zeroed(0))]);
+    final facts = ProgramFlow(program, [
+      (target: root, arguments: [FlowValue.integerRange(FlowIntegerRange(0, 63))]),
+    ], memoryLayout: _layout).facts;
+    final result = facts.returnedBy(root);
+    expect(result.unknownTypes, isEmpty);
+    final address = result.addresses.single;
+    expect(address.base, facts.valueOf(slot).addresses.single.base);
+    expect(address.offsets, facts.valueOf(slot).addresses.single.offsets);
+    expect(address.offsets, FlowIntegerRange(0, 4032, strideBits: 6));
+  });
+
   test('an initialized object at a native region base can have any class', () {
     final allocate = FunctionTarget(_uri, 'reserve', .integer, [.integer]);
     final initialize = FunctionTarget(_uri, 'initializeObject', .voidType, [

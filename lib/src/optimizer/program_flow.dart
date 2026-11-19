@@ -3087,8 +3087,9 @@ final class ProgramFlow(
             address.offset == 0 &&
                     (address.base is FlowObject || address.base is Constant)
                 ? address.reference.check(resultType).value
-                : FlowValue.unknown(resultType)
-                      .withReferences([address.reference]),
+                : address.base is FlowRegion && !address.retainedBase
+                ? FlowValue.unknown(resultType, at: address)
+                : FlowValue.unknown(resultType).withReferences([address.reference]),
           );
         }
         for (final constant in input.constants) {
@@ -6305,6 +6306,9 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
 }
 
 FlowValue _referenceAddress(FlowValue input) {
+  if (input.recoveredAddress case final address?) {
+    return address.withReferences([input.references]);
+  }
   final carrier = input.carrierReferences;
   var value = const FlowValue.bottom();
   for (final constant in carrier.constants) {
