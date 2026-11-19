@@ -14,6 +14,192 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  for (final hasSecond in [false, true]) {
+    test('cleanup visits each known non-null node (second=$hasSecond)', () {
+      final uri = Uri.parse('memory:nullable-cleanup');
+      final map = FunctionTarget(uri, 'map', .integer, [.integer]);
+      final unmap = FunctionTarget(uri, 'unmap', .voidType, [
+        .integer,
+        .integer,
+      ]);
+      final global = GlobalVariable(uri, 'flag', .integer, isLate: true);
+      final target = FunctionTarget(uri, 'dispose', .integer, []);
+      final entry = Block(target.parameterTypes);
+      final start = Block([ValueType.integer]);
+      final loop = Block([ValueType.string.nullable]);
+      final body = Block(), exit = Block(), failed = Block();
+      final base = entry.emit(DirectCall(map, [const Constant.integer(8)]));
+      final missing = entry.emit(Equals(base, const Constant.integer(0)));
+      entry.finish(Branch(missing, Jump(failed), Jump(start, [base])));
+      failed.finish(Throw(const Constant.string('map failed')));
+      start.emit(StoreGlobal(global, const Constant.integer(42)));
+      start.finish(Jump(loop, [const Constant.string('first')]));
+      final hasNext = loop.emit(
+        TypeTest(loop.parameters.single, .nullType, negated: true),
+      );
+      loop.finish(Branch(hasNext, Jump(body), Jump(exit)));
+      final release = Block(), last = Block();
+      const first = Constant.string('first');
+      if (hasSecond) {
+        final atFirst = body.emit(Equals(loop.parameters.single, first));
+        body.finish(Branch(atFirst, Jump(release), Jump(last)));
+        last.emit(StoreGlobal(global, const Constant.integer(73)));
+        last.finish(Return(last.emit(LoadGlobal(global))));
+      } else {
+        body.finish(Jump(release));
+      }
+      release.emit(
+        DirectCall(unmap, [start.parameters.single, const Constant.integer(8)]),
+      );
+      release.finish(
+        Jump(loop, [
+          hasSecond
+              ? const Constant.string('last')
+              : const Constant.nullValue(),
+        ]),
+      );
+      exit.finish(Return(exit.emit(LoadGlobal(global))));
+      final program = IrProgram(
+        [],
+        [
+          IrFunction(target, [
+            entry,
+            start,
+            loop,
+            body,
+            release,
+            if (hasSecond) last,
+            exit,
+            failed,
+          ]),
+        ],
+        globals: [global],
+        externals: [
+          IrExternal(
+            map,
+            effects: const {.writesStorage},
+            memory: const .zeroed(0),
+          ),
+          IrExternal(
+            unmap,
+            effects: const {.writesStorage},
+            memory: const .release(0, 1),
+            capturesArguments: false,
+          ),
+        ],
+      );
+      final flow = ProgramFlow(program, [
+        (target: target, arguments: []),
+      ], memoryLayout: _layout).facts;
+      expect(
+        flow.returnedBy(target).constant,
+        hasSecond ? const Constant.integer(73) : const Constant.integer(42),
+      );
+    });
+  }
+
+  test(
+    'distinct throws retain the lifetime required by exceptional cleanup',
+    () {
+      final uri = Uri.parse('memory:exit-lifetimes');
+      final flag = GlobalVariable(uri, 'flag', .integer, isLate: true);
+      final head = GlobalVariable(uri, 'head', .integer, isLate: true);
+      final map = FunctionTarget(uri, 'map', .integer, [.integer]);
+      final unmap = FunctionTarget(uri, 'unmap', .voidType, [
+        .integer,
+        .integer,
+      ]);
+      const size = Constant.integer(8), zero = Constant.integer(0);
+      final root = FunctionTarget(uri, 'root', .integer, [.boolean, .boolean]);
+      final throws = FunctionTarget(uri, 'throwWhileSettingUp', .never, [
+        .integer,
+        .boolean,
+        .boolean,
+      ]);
+      final cleanup = FunctionTarget(uri, 'cleanup', .voidType, []);
+      final choose = Block(throws.parameterTypes),
+          retire = Block(),
+          live = Block();
+      final initiallyLive = Block(), written = Block();
+      choose.finish(Branch(choose.parameters[1], Jump(retire), Jump(live)));
+      retire.emit(StoreGlobal(head, zero));
+      retire.emit(DirectCall(unmap, [choose.parameters.first, size]));
+      retire.finish(Throw(const Constant.string('retired')));
+      live.emit(StoreGlobal(head, choose.parameters.first));
+      live.finish(
+        Branch(choose.parameters[2], Jump(initiallyLive), Jump(written)),
+      );
+      initiallyLive.finish(Throw(const Constant.string('live')));
+      written.emit(
+        StoreNative(
+          choose.parameters.first,
+          NativeScalarType(Int64),
+          const Constant.integer(12),
+        ),
+      );
+      written.finish(Throw(const Constant.string('written')));
+
+      final close = Block(), release = Block(), finish = Block();
+      final page = close.emit(LoadGlobal(head));
+      close.finish(
+        Branch(close.emit(Equals(page, zero)), Jump(finish), Jump(release)),
+      );
+      release.emit(DirectCall(unmap, [page, size]));
+      release.finish(Jump(finish));
+      finish.finish(const Return());
+
+      final entry = Block(root.parameterTypes),
+          ready = Block([ValueType.integer]),
+          bad = Block(),
+          caught = Block();
+      final raw = entry.emit(DirectCall(map, [size]));
+      entry.finish(
+        Branch(entry.emit(Equals(raw, zero)), Jump(bad), Jump(ready, [raw])),
+      );
+      bad.finish(Throw(const Constant.string('map failed')));
+      ready.emit(StoreGlobal(flag, const Constant.integer(42)));
+      ready.finish(
+        Invoke(
+          DirectCall(throws, [ready.parameters.first, ...entry.parameters]),
+          onReturn: null,
+          onThrow: Jump(caught),
+        ),
+      );
+      caught.emit(DirectCall(cleanup, []));
+      caught.finish(Return(caught.emit(LoadGlobal(flag))));
+      final ir = IrProgram(
+        [],
+        [
+          IrFunction(root, [entry, ready, bad, caught]),
+          IrFunction(throws, [choose, retire, live, initiallyLive, written]),
+          IrFunction(cleanup, [close, release, finish]),
+        ],
+        globals: [flag, head],
+        externals: [
+          IrExternal(
+            map,
+            effects: const {.writesStorage},
+            memory: const .zeroed(0),
+          ),
+          IrExternal(
+            unmap,
+            effects: const {.writesStorage},
+            memory: const .release(0, 1),
+            capturesArguments: false,
+          ),
+        ],
+      );
+      final facts = ProgramFlow(ir, [
+        (
+          target: root,
+          arguments: [FlowValue.unknown(.boolean), FlowValue.unknown(.boolean)],
+        ),
+      ], memoryLayout: _layout).facts;
+      expect(facts.reachesBlock(release), isTrue);
+      expect(facts.returnedBy(root).constant, const Constant.integer(42));
+    },
+  );
+
   test('an initialized object at a native region base can have any class', () {
     final allocate = FunctionTarget(_uri, 'reserve', .integer, [.integer]);
     final initialize = FunctionTarget(_uri, 'initializeObject', .voidType, [
