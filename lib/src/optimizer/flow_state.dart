@@ -559,10 +559,10 @@ final class FlowState {
       );
       return value == _initial(global) ? null : value;
     });
-    final objects = _objects.isEmpty
-        ? incoming._objects
-        : incoming._objects.isEmpty
+    final objects = incoming._objects.isEmpty
         ? _objects
+        : _objects.isEmpty
+        ? incoming._objects
         : _objects.merge(
             incoming._objects,
             (_, left, right) => left == null

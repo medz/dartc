@@ -19,6 +19,17 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('joining a separately renamed empty input keeps it unchanged', () {
+    final input = FlowState(_program, memoryLayout: _layout);
+    final cell = NewCell(CellType(.integer), const Constant.integer(0));
+    final firstName = FlowObject(cell, Object());
+    final secondName = FlowObject(cell, Object());
+    final first = input.mapObjects({firstName: secondName});
+    final second = input.mapObjects({secondName: firstName});
+    expect(first.structuralKey, second.structuralKey);
+    expect(first.join(second), isFalse);
+  });
+
   test('returned mappings that share a caller identity remain writable', () {
     final site = DirectCall(FunctionTarget(null, 'map', .integer, []), []);
     final prior = FlowObject(site, Object());
