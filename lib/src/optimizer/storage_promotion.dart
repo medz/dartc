@@ -60,10 +60,12 @@ final class const ProgramStoragePromotion() extends ProgramPass {
 
 /// Promotes private cells whose complete set of uses is local reads and writes.
 final class _LocalCells(final IrFunction function, final ExecutionShapes? executionShapes) {
+  late final shapes = executionShapes ?? ExecutionShapes.defaults;
   final incoming = <Block, List<Jump>>{};
   final owners = <Jump, Block>{};
   final aliases = <Value, NewCell>{};
   final cells = <NewCell>{};
+  final lastWrites = <(Block, NewCell), Value?>{};
   final entries = <(Block, NewCell), Value>{};
   final phis = <BlockParameter, ({Block block, Map<Jump, Value> incoming})>{};
 
@@ -76,10 +78,14 @@ final class _LocalCells(final IrFunction function, final ExecutionShapes? execut
       ],
     ];
     for (final operation in operations) {
-      if (operation case NewCell(
-        type: CellType(isLate: false, isFinal: false),
-        initial: Value(),
-      )) {
+      if (operation is NewCell) {
+        final type = operation.type as CellType;
+        final initial = operation.initial;
+        if (type.isFinal ||
+            type.isLate && initial == null ||
+            initial != null && !_canCarry(type, initial)) {
+          continue;
+        }
         cells.add(operation);
         aliases[operation] = operation;
       }
@@ -110,7 +116,15 @@ final class _LocalCells(final IrFunction function, final ExecutionShapes? execut
     for (final operation in operations) {
       for (final input in operation.inputs) {
         final cell = aliases[input];
-        if (cell != null && operation is! ReadCell && operation is! WriteCell) {
+        if (cell == null) continue;
+        final type = cell.type as CellType;
+        if (operation is ReadCell) {
+          if (shapes.shapeOf(function, operation) != type.slotShape) {
+            cells.remove(cell);
+          }
+        } else if (operation is WriteCell && identical(input, operation.cell)) {
+          if (!_canCarry(type, operation.value)) cells.remove(cell);
+        } else {
           cells.remove(cell);
         }
       }
@@ -136,25 +150,40 @@ final class _LocalCells(final IrFunction function, final ExecutionShapes? execut
     if (cells.isEmpty) return function;
     final replacements = <Value, Value>{};
     final removed = <Instruction>{...cells};
+    final incomingReads = <ReadCell, (Block, NewCell)>{};
     for (final block in function.blocks) {
-      final current = <NewCell, Value>{};
       for (final operation in [
         ...block.instructions,
         if (block.end case Invoke(:final operation)) operation,
       ]) {
         if (operation is NewCell && cells.contains(operation)) {
-          current[operation] = operation.initial!;
-        } else if (operation is ReadCell || operation is WriteCell) {
-          final cell = aliases[operation.inputs.first];
-          if (!cells.contains(cell)) continue;
-          removed.add(operation);
-          if (operation is WriteCell) {
-            current[cell!] = operation.value;
+          lastWrites[(block, operation)] = operation.initial;
+          continue;
+        }
+        if (operation is! ReadCell && operation is! WriteCell) continue;
+        final cell = aliases[operation.inputs.first];
+        if (cell == null || !cells.contains(cell)) continue;
+        final key = (block, cell);
+        removed.add(operation);
+        if (operation is WriteCell) {
+          lastWrites[key] = operation.value;
+        } else if (operation is ReadCell) {
+          if (!lastWrites.containsKey(key)) {
+            incomingReads[operation] = key;
+          } else if (lastWrites[key] case final value?) {
+            replacements[operation] = value;
           } else {
-            replacements[operation] = current[cell] ?? atEntry(block, cell!);
+            // Leave the original read for definite-assignment validation.
+            return function;
           }
         }
       }
+    }
+    for (final MapEntry(key: read, value: (block, cell))
+        in incomingReads.entries) {
+      final value = atEntry(block, cell);
+      if (value == null) return function;
+      replacements[read] = value;
     }
     return FunctionRewrite(
       function,
@@ -165,26 +194,48 @@ final class _LocalCells(final IrFunction function, final ExecutionShapes? execut
     ).run();
   }
 
-  Value atEntry(Block block, NewCell cell) {
+  bool _canCarry(CellType cell, Value value) {
+    // SSA promotion cannot insert a representation conversion at a removed write.
+    if (shapes.shapeOf(function, value) != cell.slotShape) return false;
+    if (!cell.isLate) return true;
+    // The late-cell check observes the runtime type beneath an unchecked view.
+    while (value is TypeView || value is UncheckedCast) {
+      value = value is TypeView
+          ? value.operand
+          : (value as UncheckedCast).operand;
+    }
+    final target = cell.content;
+    if (target.freeTypeParameters.isNotEmpty) return false;
+    if (value is Constant) {
+      return target.runtimeCheckType.accepts(value.runtimeValueType);
+    }
+    // A widened parameter can hide a different reified signature or type argument.
+    final nominal = target.nonNullable;
+    return nominal is ClassType &&
+        nominal.typeParameters.isEmpty &&
+        target.runtimeCheckType.accepts(value.type.runtimeValueBound);
+  }
+
+  Value? atEntry(Block block, NewCell cell) {
     final key = (block, cell);
     if (entries[key] case final value?) return value;
-    final parameter = blockParameters([(cell.type as CellType).content]).single;
+    final edges = incoming[block];
+    if (block == function.entry || edges == null) return null;
+    final type = cell.type as CellType;
+    final parameter = blockParameters([type.content]).single;
+    if (shapes.shapeOf(function, parameter) != type.slotShape) return null;
     entries[key] = parameter;
     final values = <Jump, Value>{};
     phis[parameter] = (block: block, incoming: values);
-    for (final edge in incoming[block] ?? const <Jump>[]) {
+    for (final edge in edges) {
       final owner = owners[edge]!;
-      Value? value;
-      for (final operation in [
-        ...owner.instructions,
-        if (owner.end case Invoke(:final operation)) operation,
-      ]) {
-        if (identical(operation, cell)) value = cell.initial!;
-        if (operation is WriteCell && aliases[operation.cell] == cell) {
-          value = operation.value;
-        }
-      }
-      values[edge] = value ?? atEntry(owner, cell);
+      final source = (owner, cell);
+      // A fresh unbound cell kills the previous iteration's reaching write.
+      final value = lastWrites.containsKey(source)
+          ? lastWrites[source]
+          : atEntry(owner, cell);
+      if (value == null) return null;
+      values[edge] = value;
     }
     return parameter;
   }
