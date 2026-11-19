@@ -1784,7 +1784,8 @@ final class ProgramFlow(
       final header = owner[target];
       final guard = parameterGuards[target];
       if (selected == null && identical(target, header) && guard != null) {
-        if (localTraversals.contains(header) && owner[key.$1] != header) {
+        if ((localTraversals.contains(header) || guard.constant == null) &&
+            owner[key.$1] != header) {
           (loopEntries[target] ??= {})[jump] = state.copy();
         }
         final argument = jump.arguments[guard.parameter];
@@ -1839,7 +1840,25 @@ final class ProgramFlow(
                 (address.base, FlowValue.address(address)),
             ]) {
               final int slot;
-              if (localOnly) {
+              final node =
+                  !localOnly &&
+                      identity is FlowObject &&
+                      loopEntries[target]?.values.any(
+                            (entry) => entry.containsObject(identity),
+                          ) ==
+                          true
+                  ? _managedNodeOrigin(identity)
+                  : null;
+              if (node != null) {
+                // The original two fallback lanes use 1 and 2. Source labels
+                // are tuples of instructions in this fixed graph and stay
+                // stable across recursive evaluation and native re-entry.
+                final origins = activation.loopOrigins.putIfAbsent(
+                  target,
+                  () => {},
+                );
+                slot = origins.putIfAbsent(node, () => origins.length + 3);
+              } else if (localOnly) {
                 final existing =
                     loopEntries[target]?.values.any(
                       (entry) => entry.hasSingletonAllocation(identity),
@@ -2511,6 +2530,36 @@ final class ProgramFlow(
       }
     }
     if (summaryChanged) _pending.addAll(activation.readers);
+  }
+
+  // Identify an existing managed allocation by its creation site, its
+  // outermost call site and the invocation that requested managed storage.
+  // This groups equal origins even when the actual allocations are distinct.
+  // No activation, runtime value or unbounded call string forms a label.
+  (Instruction, Instruction?, Instruction?)? _managedNodeOrigin(
+    FlowObject object,
+  ) {
+    if (!_owners.containsKey(object.site) ||
+        object.variant != null ||
+        object.type is FunctionType) {
+      return null;
+    }
+    final seen = <Instruction>{};
+    Instruction? published, allocation;
+    var current = object;
+    while (current.activation is _AllocationContext) {
+      final context = current.activation as _AllocationContext;
+      final call = context.site.operation;
+      if (!_owners.containsKey(call) || !seen.add(call)) return null;
+      published ??= call;
+      if (call is ManagedStorageAllocation || call is Construct) {
+        allocation = call;
+      }
+      current = context.original;
+    }
+    return current.activation is _Activation
+        ? (object.site, published, allocation)
+        : null;
   }
 
   ValueLiveness _valueLiveness(IrFunction body) =>
@@ -5845,6 +5894,8 @@ final class _StateSummary(FlowState before, FlowState after) {
 
 final class _Activation(final IrCallable body) {
   final loopBindings = <Block, Map<Object, int>>{};
+  final loopOrigins =
+      <Block, Map<(Instruction, Instruction?, Instruction?), int>>{};
   (Block, int)? iterationContext;
   _ContextKey? inputKey;
   // Caller-owned identities are stable across applications of this input

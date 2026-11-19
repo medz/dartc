@@ -14,6 +14,94 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test(
+    'release through a Dart call follows each previously built list node',
+    () {
+      final uri = Uri.parse('memory:ordinary-node-release');
+      final node = ClassType(uri, 'Node');
+      final address = InstanceField(node, 'address', .integer);
+      final next = InstanceField(node, 'next', node.nullable);
+      final map = FunctionTarget(uri, 'map', .integer, [.integer]);
+      final unmap = FunctionTarget(uri, 'unmap', .voidType, [
+        .integer,
+        .integer,
+      ]);
+      final make = FunctionTarget(uri, 'prepend', node, [node.nullable]);
+      final drop = FunctionTarget(uri, 'releaseNode', .voidType, [node]);
+      final root = FunctionTarget(uri, 'choose', .integer, []);
+      final flag = GlobalVariable(uri, 'flag', .integer, isLate: true);
+      const length = Constant.integer(4096), zero = Constant.integer(0);
+      final create = Block(make.parameterTypes),
+          valid = Block(),
+          failed = Block();
+      final base = create.emit(DirectCall(map, [length]));
+      create.finish(
+        Branch(create.emit(Equals(base, zero)), Jump(failed), Jump(valid)),
+      );
+      failed.finish(Throw(const Constant.string('map failed')));
+      final allocation = valid.emit(NewPayload(node, zero));
+      valid.emit(StoreField(address, allocation, base));
+      valid.emit(StoreField(next, allocation, create.parameters.single));
+      valid.finish(Return(allocation));
+      final dispose = Block(drop.parameterTypes);
+      dispose.emit(
+        DirectCall(unmap, [
+          dispose.emit(LoadField(address, dispose.parameters.single)),
+          length,
+        ]),
+      );
+      dispose.finish(const Return());
+      final build = Block(),
+          header = Block([node.nullable]),
+          body = Block([node]),
+          done = Block();
+      Value head = const Constant.nullValue();
+      for (var i = 0; i < 4; i++) {
+        head = build.emit(DirectCall(make, [head]));
+      }
+      build.emit(StoreGlobal(flag, const Constant.integer(42)));
+      build.finish(Jump(header, [head]));
+      final present = header.emit(
+        TypeTest(header.parameters.single, .nullType, negated: true),
+      );
+      header.finish(
+        Branch(present, Jump(body, [present.refinement(true)!]), Jump(done)),
+      );
+      final following = body.emit(LoadField(next, body.parameters.single));
+      body.emit(DirectCall(drop, [body.parameters.single]));
+      body.finish(Jump(header, [following]));
+      done.finish(Return(done.emit(LoadGlobal(flag))));
+      final ir = IrProgram(
+        [
+          IrClass(node, [address, next]),
+        ],
+        [
+          IrFunction(root, [build, header, body, done]),
+          IrFunction(make, [create, valid, failed]),
+          IrFunction(drop, [dispose]),
+        ],
+        globals: [flag],
+        externals: [
+          IrExternal(
+            map,
+            effects: const {.writesStorage},
+            memory: const .zeroed(0),
+          ),
+          IrExternal(
+            unmap,
+            effects: const {.writesStorage},
+            memory: const .release(0, 1),
+            capturesArguments: false,
+          ),
+        ],
+      );
+      final facts = ProgramFlow(ir, [
+        (target: root, arguments: <FlowValue>[]),
+      ], memoryLayout: _layout).facts;
+      expect(facts.returnedBy(root).constant, const Constant.integer(42));
+    },
+  );
+
   test('native address list preserves each live control page', () {
     final uri = Uri.parse('memory:control-list');
     final map = FunctionTarget(uri, 'map', .integer, [.integer]);
