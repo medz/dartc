@@ -76,17 +76,27 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       return added;
     }
 
+    final sourceStages = stages.where((stage) => stage.kind != .lowering).toList();
+    final loweringStages = stages.where((stage) => stage.kind == .lowering).toList();
     IrProgram normalize(IrProgram input) {
-      bool changed;
-      do {
-        changed = false;
-        for (final stage in stages) {
-          final next = stage.run.normalize(input);
-          changed |= !identical(next, input);
-          input = next;
+      while (true) {
+        // Materializing captures can hide lexical calls and prevent SSA promotion.
+        // Exhaust source-level normalization before choosing physical storage.
+        bool changed;
+        do {
+          changed = false;
+          for (final stage in sourceStages) {
+            final next = stage.run.normalize(input);
+            changed |= !identical(next, input);
+            input = next;
+          }
+        } while (changed);
+        final source = input;
+        for (final stage in loweringStages) {
+          input = stage.run.normalize(input);
         }
-      } while (changed);
-      return input;
+        if (identical(input, source)) return input;
+      }
     }
 
     var facts = analyze(normalize(program));
