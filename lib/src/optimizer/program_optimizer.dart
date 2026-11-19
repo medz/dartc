@@ -179,7 +179,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
         }
 
         for (final stage in stages) {
-          if (stage.kind != .lowering) continue;
+          if (stage.kind != .lowering || stage.run.requiresRetainedUse) continue;
           if (!stage.run.isReplayable) {
             flush();
             lowered |= apply(stage.run);
