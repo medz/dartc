@@ -4417,9 +4417,7 @@ final class ProgramFlow(
   }
 
   FlowValue _receiverValue(FlowValue value, ClassType type) {
-    if (type != ValueType.nullClass) return value.check(type).value;
-    return FlowValue.constant(const Constant.nullValue())
-        .withSources(value.sources);
+    return value.forReceiverClass(type);
   }
 
   Iterable<ClassType> _receiverTypes(FlowValue value) sync* {

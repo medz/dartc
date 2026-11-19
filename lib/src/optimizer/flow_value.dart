@@ -762,6 +762,36 @@ final class FlowValue {
     );
   }
 
+  /// Selects the known alternatives whose runtime class supplied a dispatch
+  /// target. Unknown bounds still describe all instances allowed by the bound.
+  FlowValue forReceiverClass(ClassType type) {
+    if (type == ValueType.nullClass) {
+      return FlowValue.constant(const Constant.nullValue()).withSources(sources);
+    }
+    final selected = check(type).value;
+    bool matches(ValueType actual) =>
+        actual == type || actual is FunctionType && type == ValueType.function;
+    if (selected.constants.every((c) => matches(c.provenValueType)) &&
+        selected.objects.every((o) => matches(o.type)) &&
+        selected.addresses.every((a) => matches(a.type))) {
+      return selected;
+    }
+    return FlowValue._(
+      Map.of(selected._constants)
+        ..removeWhere((_, value) => !matches(value.provenValueType)),
+      selected.objects.where((object) => matches(object.type)).toSet(),
+      selected.unknownTypes,
+      selected.sources,
+      selected._references,
+      selected.addresses.where((address) => matches(address.type)).toSet(),
+      selected._integers,
+      selected.externalUnknownTypes,
+      selected.managedBackings,
+      selected.hasUnknownBacking,
+      selected.rawBackingTypes,
+    );
+  }
+
   /// Filters a static execution bound or an explicit runtime type test.
   ///
   /// Aliases and the original constants survive either kind of successful check.
