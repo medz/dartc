@@ -81,6 +81,9 @@ write followed by a read through another native entry. Shared libraries run
 their FFI test once. The report records its exit status and elapsed time under
 `hostVerification`.
 
+Use `--only=control_flow` to compare the compiled library with the Dart SDK
+on branches, loops, exception cleanup, recursion and deferred local values.
+
 Select `--only=same_heap_finalizer` to verify one heap across registration,
 allocation and lookup exports. The FFI test expects the callback count to go
 from zero after registration to one when allocation returns, and to stay at one

@@ -172,7 +172,9 @@ _Baseline? _readBaseline(
         row['error'] != null ||
         row['failure'] != null ||
         row['source'] is! Map ||
-        (row['source'] as Map)['sha256'] != inputs[fixture.name]!['sha256']) {
+        (row['source'] as Map)['sha256'] != inputs[fixture.name]!['sha256'] ||
+        jsonEncode(row['source']['imports']) !=
+            jsonEncode(inputs[fixture.name]!['imports'])) {
       throw FormatException(
         'Invalid benchmark baseline: ${fixture.name} requires an unchanged successful workload.',
       );
@@ -276,6 +278,14 @@ const _apiDriver = 'tool/bench/compile_api.dart';
 const fixtures = <_Fixture>[
   ...defaultFixtures,
   _Fixture(
+    'control_flow',
+    'test/compiler/fixtures/control_flow.dart',
+    .shared,
+    imports: ['test/optimizer/fixtures/zone_state.dart'],
+    hostTest: 'test/compiler/control_flow_test.dart',
+    hostTestImports: ['test/compiler/fixtures/control_flow_ffi.dart'],
+  ),
+  _Fixture(
     'generic_member_carriers',
     'test/compiler/fixtures/generic_member_carriers.dart',
     .shared,
@@ -305,7 +315,9 @@ final class const _Fixture(
   final _Kind kind, {
   final bool run = false,
   final String? expected,
+  final List<String> imports = const [],
   final String? hostTest,
+  final List<String> hostTestImports = const [],
   final ({String fixture, String source})? hostProvider,
 }) {
   String assetRoot(String target) => 'build/bench/${_safe(target)}';
@@ -930,10 +942,17 @@ Future<Map<String, Object?>> _fixtureIdentity(
   required bool execute,
 }) async {
   final source = await _fileIdentity(fixture.path);
+  if (fixture.imports.isNotEmpty) {
+    source['imports'] = {
+      for (final path in fixture.imports)
+        path: (await _fileIdentity(path))['sha256'],
+    };
+  }
   if (fixture.hostTest case final String test when execute) {
     final files = {
       for (final path in [
         test,
+        ...fixture.hostTestImports,
         'test/support/native_assets.dart',
         if (fixture.hostProvider case final provider?) ...[
           provider.source,
@@ -1047,7 +1066,8 @@ sampled direct-process RSS, output bytes and execution status in build/bench/lat
 
 Options:
   --only=a,b              Select fixtures. Shared host expectations include
-                          generic_member_carriers and generic_cell_storage.
+                          control_flow, generic_member_carriers,
+                          generic_cell_storage and same_heap_finalizer.
   --compiler=path         Use a compiler executable (default:
                           dart run bin/dartc.dart).
   --api                   Compile through the public Compiler API.
