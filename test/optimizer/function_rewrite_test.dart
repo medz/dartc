@@ -836,6 +836,57 @@ void main() {
     }
   });
 
+  test('a narrowed reference keeps its carrier after a test is folded', () {
+    final target = FunctionTarget(_uri, 'checked', .string, [.object]);
+    final entry = Block(target.parameterTypes);
+    final yes = Block([ValueType.string]), no = Block();
+    final predicate = entry.emit(TypeTest(entry.parameters.single, .string));
+    entry.finish(
+      Branch(predicate, Jump(yes, [predicate.refinement(true)!]), Jump(no)),
+    );
+    yes.finish(Return(yes.parameters.single));
+    no.finish(const Return(Constant.string('fallback')));
+    final function = IrFunction(
+      target,
+      [entry, yes, no],
+      execution: FunctionExecution({predicate: ExecutionShape.word}),
+    );
+    final shapes = ExecutionShapes.defaults;
+    shapes.verify(function);
+    final rewritten = FunctionRewrite(
+      function,
+      replacements: {predicate: const Constant.boolean(true)},
+    ).run();
+    shapes.verify(rewritten);
+    final interpreter = IrInterpreter(IrProgram([], [rewritten]), {});
+    expect(interpreter.run(rewritten, ['kept']), 'kept');
+  });
+
+  test('folding an unrelated branch still rejects an invalid read carrier', () {
+    final target = FunctionTarget(_uri, 'read', .integer, [.integer]);
+    final entry = Block(target.parameterTypes), yes = Block(), no = Block();
+    final cell = entry.emit(NewCell(CellType(.integer), entry.parameters.single));
+    final read = entry.emit(ReadCell(cell));
+    final condition = entry.emit(
+      IntBinary(.lessThan, entry.parameters.single, const Constant.integer(1)),
+    );
+    entry.finish(Branch(condition, Jump(yes), Jump(no)));
+    yes.finish(Return(read));
+    no.finish(Return(read));
+    final function = IrFunction(
+      target,
+      [entry, yes, no],
+      execution: FunctionExecution({read: ExecutionShape.reference}),
+    );
+    expect(
+      () => FunctionRewrite(
+        function,
+        replacements: {condition: const Constant.boolean(true)},
+      ).run(),
+      throwsStateError,
+    );
+  });
+
   test('a collapsed type-test edge retains a valid refined operand', () {
     final target = FunctionTarget(_uri, 'refine', .integer, [.object]);
     final entry = Block(target.parameterTypes),

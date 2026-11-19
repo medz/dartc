@@ -139,6 +139,7 @@ final class _MemberEntries(final TypeImplementations types) {
     var changed = false;
     final functions = <IrFunction>[];
     for (final body in program.functions) {
+      var rewriteShapes = shapes;
       final operations = <Instruction, Instruction>{};
       final lowered =
           <
@@ -289,6 +290,12 @@ final class _MemberEntries(final TypeImplementations types) {
                 targets.entries.every((e) => old.entries[e.key] == e.value)) {
               continue;
             }
+            // A direct adapter can return a reference for a semantic scalar.
+            // Its call must be cloned against the entry signature just built.
+            rewriteShapes = ExecutionShapes(
+              entries: {...shapes.entries, ..._executions},
+              slots: shapes.slots,
+            );
             final binding = MemberEntryBinding(
               signature,
               execution,
@@ -296,10 +303,7 @@ final class _MemberEntries(final TypeImplementations types) {
               names,
               op.typeArguments.length,
               targets,
-              executionShapes: ExecutionShapes(
-                entries: {...shapes.entries, ..._executions},
-                slots: shapes.slots,
-              ),
+              executionShapes: rewriteShapes,
             );
             if (old != null) {
               operations[site] = InstanceCall(
@@ -399,7 +403,7 @@ final class _MemberEntries(final TypeImplementations types) {
           ? body
           : FunctionRewrite(
               body,
-              executionShapes: shapes,
+              executionShapes: rewriteShapes,
               operations: operations,
               lowered: lowered,
             ).run();

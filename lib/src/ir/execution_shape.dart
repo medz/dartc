@@ -238,6 +238,16 @@ final class ExecutionShapes({
   }) {
     if (values[value] case final shape?) return shape;
     if (function?.execution?.values[value] case final shape?) return shape;
+    return producerShapeOf(function, value, values: values);
+  }
+
+  /// Derives the carrier from the producer before applying a binding for [value].
+  /// Operand bindings, entry signatures, and storage layouts still apply.
+  ExecutionShape producerShapeOf(
+    IrFunction? function,
+    Value value, {
+    Map<Value, ExecutionShape> values = const {},
+  }) {
     return switch (value) {
       MaterializeValue() ||
       MaterializedValue() ||
@@ -384,9 +394,7 @@ final class ExecutionShapes({
         if (operationIncluded != null && !operationIncluded(operation)) {
           continue;
         }
-        final actual = actualShapes.remove(operation)!;
-        final intrinsic = shapeOf(null, operation, values: actualShapes);
-        actualShapes[operation] = actual;
+        final intrinsic = producerShapeOf(null, operation, values: actualShapes);
         if (shapeOf(function, operation) != intrinsic) {
           throw StateError(
             'An execution binding contradicts its actual producer.',

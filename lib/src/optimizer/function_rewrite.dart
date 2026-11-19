@@ -266,6 +266,17 @@ final class FunctionRewrite(
     })
     jump;
 
+    void copyExecution(IrFunction owner, Instruction source, Instruction copy) {
+      final recorded = owner.execution?.values[source];
+      if (recorded == null) return;
+      if (recorded != shapes.producerShapeOf(owner, source)) {
+        throw StateError('An execution binding contradicts its actual producer.');
+      }
+      // Substitution can change the result carrier of a valid producer.
+      executionValues[copy] =
+          shapes.producerShapeOf(null, copy, values: executionValues);
+    }
+
     void locate(
       Object source,
       Object copy,
@@ -284,15 +295,6 @@ final class FunctionRewrite(
       semanticOrigins[copy] = origin;
       if (source is Instruction && copy is Instruction && owner == function) {
         instructionSources?[copy] = source;
-      }
-      if (source is Value && copy is Value) {
-        if (!(owner == function &&
-            source is Instruction &&
-            operations.containsKey(source))) {
-          if (owner.execution?.values[source] case final shape?) {
-            executionValues[copy] = shape;
-          }
-        }
       }
       final location =
           owner.sourceLocations[source] ??
@@ -440,6 +442,7 @@ final class FunctionRewrite(
       Instruction clone(Instruction source) => copied.putIfAbsent(source, () {
         final result = copyWithCarrier(source.mapInputs(read, environment: environment));
         locate(source, result, body, call);
+        copyExecution(body, source, result);
         return result;
       });
       read = (source) {
@@ -632,6 +635,9 @@ final class FunctionRewrite(
       values[original] = result;
       if (discardable.contains(original)) discardedEffects.add(result);
       locate(original, result, function);
+      // Only a copied producer inherits its execution binding. An instruction
+      // created at the same source location can produce a different value.
+      if (identical(template, original)) copyExecution(function, original, result);
       return result;
     }
 
