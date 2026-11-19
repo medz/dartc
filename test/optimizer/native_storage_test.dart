@@ -19,6 +19,35 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('a fresh mapping keeps its header when an absent input is released', () {
+    final site = DirectCall(FunctionTarget(null, 'map', .integer, []), []);
+    final oldPage = FlowObject(site, Object()),
+        newPage = FlowObject(site, Object());
+    final caller = FlowState(_program, memoryLayout: _layout);
+    final held = caller.allocateMemory(oldPage, _integer(16), repeated: false);
+    final before = held.normal!.copy(resetWrites: true);
+    final oldAddress = FlowValue.address(held.value.addresses.single);
+    final released = before.overwriteNative(
+      oldAddress,
+      _integer(16),
+      release: true,
+    );
+    final created = released.allocateMemory(
+      newPage,
+      _integer(16),
+      repeated: false,
+    );
+    final fresh = FlowValue.address(created.value.addresses.single);
+    final after = _store(created.normal!, fresh, _i64, _integer(42));
+    final output = caller.applySummary(
+      before,
+      after,
+      mapObject: (_) => oldPage,
+      mapValue: (value) => value.mapObjects((_) => oldPage),
+    );
+    expect(_load(output, oldAddress, _i64).integers?.constant, 42);
+  });
+
   test('joining a separately renamed empty input keeps it unchanged', () {
     final input = FlowState(_program, memoryLayout: _layout);
     final cell = NewCell(CellType(.integer), const Constant.integer(0));

@@ -904,6 +904,7 @@ final class FlowState {
         mapValue(after._externalAliases),
       );
     }
+    final absentInputs = <FlowObject>{};
     final changedRegions = <FlowObject, _ObjectState>{};
     for (final identity in {
       for (final change in after._regions.differences(before._regions))
@@ -920,6 +921,17 @@ final class FlowState {
       // A fresh mapping is unique inside the invocation. Its bounded name in
       // the caller may also denote a mapping returned by an earlier call.
       final occupied = _regions[owner];
+      // This summary may include inputs supplied by a different caller.
+      // A write to its old mapping cannot affect a fresh allocation in this
+      // caller merely because both map to the same bounded result identity.
+      if (prior != null &&
+          occupied == null &&
+          identity.site is DirectCall &&
+          !_externalMemory.containsKey((identity.site as DirectCall).target) &&
+          !after._written(identity, _mappedRegions)) {
+        absentInputs.add(identity);
+        continue;
+      }
       if (prior == null && occupied != null) {
         exit = occupied.join(exit).withFlags(summary: true);
       } else if (occupied != null &&
@@ -949,6 +961,7 @@ final class FlowState {
       }
     }
     for (final owner in after._writes.entries) {
+      if (absentInputs.contains(owner.key)) continue;
       final mapped = owner.key is FlowObject
           ? mapObject(owner.key as FlowObject)
           : owner.key;
@@ -1057,6 +1070,7 @@ final class FlowState {
       summary: repeated,
     );
     final previous = next._regions[region];
+    next._recordWrite(region, _mappedRegions);
     next._recordWrite(region, _regionWrites);
     next._regions = next._regions.withEntry(
       region,
@@ -3047,6 +3061,7 @@ final _cell = Object();
 final _globalWrites = Object();
 final _objectMemoryWrites = Object();
 final _regionWrites = Object();
+final _mappedRegions = Object();
 final _captureWrites = Object();
 final _null = FlowValue.constant(const Constant.nullValue());
 final _typeError = FlowValue.unknown(ValueType.typeError);
