@@ -112,8 +112,9 @@ final class AllocationLowering(
             case Construct(callableStorage: final storage?):
               body = heap.callableConstruction(storage, operation.type);
               environment = {
-                for (final parameter in body.target.typeParameters)
+                for (final parameter in operation.type.freeTypeParameters)
                   parameter: parameter,
+                body.target.typeParameters.last: operation.typeDescriptor!.type,
               };
             case Construct(
               :final initializer,

@@ -4,6 +4,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/cell_initialization.dart';
+import 'package:dartc/src/codegen/type_values.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -12,6 +13,52 @@ void main() {
   setUpAll(prepareRuntime);
   final uri = Uri.parse('memory:allocation-lowering');
 
+  test(
+    'actual createClosure leaves lexical T in the allocated function header',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final outer = FunctionTarget(
+        uri,
+        'outer',
+        .voidType,
+        [],
+        typeParameters: [t],
+      );
+      final local = FunctionTarget(
+        uri,
+        'local',
+        t,
+        [t],
+        kind: .closure,
+        enclosing: outer,
+        sourceOffset: 12,
+      );
+      final cb = Block(local.parameterTypes);
+      cb.finish(Return(cb.parameters.last));
+      final source = IrProgram([], [
+        IrFunction(outer, [Block()..finish(const Return())]),
+        IrFunction(local, [cb]),
+      ]);
+      final impl = CallableImplementations()..extend(source);
+      final generator = impl.closureConstruction(local);
+      final program = IrProgram(
+        [...impl.storage.classes, ...TypeValues().classes],
+        [...source.functions, ...impl.storage.functions, generator],
+      );
+      final target = generator.target;
+      final lowered = AllocationLowering(heapRuntime).lower(program, [target]);
+      final out = lowered.implementationOf(target) as IrFunction;
+      final header = out.blocks
+          .expand((block) => block.instructions)
+          .whereType<StoreObjectReference>()
+          .single;
+      Value descriptor = header.value;
+      while (descriptor is TypeView || descriptor is UncheckedCast) {
+        descriptor = (descriptor as Instruction).inputs.single;
+      }
+      expect((descriptor as ReifyType).template, local.signature);
+    },
+  );
   test(
     'cell construction and copy use the common zeroed allocation contract',
     () {

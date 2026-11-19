@@ -65,9 +65,17 @@ final class HeapPlan({
   IrFunction callableConstruction(CallableStorage storage, ValueType type) =>
       _callableConstructions.putIfAbsent((storage, type), () {
         final initializer = storage.initializer!;
-        final target = FunctionTarget(null, 'constructFunction', type, [
-          ...initializer.signature.parameters, TypeMetadata.type,
-        ], typeParameters: type.freeTypeParameters.toList());
+        // The source Construct has proved the descriptor's identity. Keep its
+        // precise static view when this shared body is expanded at that site.
+        final descriptor = TypeParameterType('Descriptor')
+          ..initializeBound(ValueType.object.nullable);
+        final target = FunctionTarget(
+          null,
+          'constructFunction',
+          type,
+          [...initializer.signature.parameters, descriptor],
+          typeParameters: {...type.freeTypeParameters, descriptor},
+        );
         final entry = Block(target.parameterTypes);
         final object = _allocate(entry, storage.type, type,
             entry.parameters.last, const Constant.integer(0),
