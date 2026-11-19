@@ -114,59 +114,90 @@ void main() {
     expect(facts.returnedBy(target).constant, const Constant.integer(42));
   });
 
-  test('only a published mapping has a readable initialized header', () {
-    final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
-    final make = FunctionTarget(_uri, 'make', .integer, []);
-    final root = FunctionTarget(_uri, 'entry', .integer, []);
-    const zero = Constant.integer(0);
-    const size = Constant.integer(65536);
-    final entry = Block(), exhausted = Block(), initialized = Block();
-    final page = entry.emit(DirectCall(map, [size]));
-    entry.finish(
-      Branch(
-        entry.emit(Equals(page, zero)),
-        Jump(exhausted),
-        Jump(initialized),
-      ),
+  for (final unwind in [false, true]) {
+    test(
+      unwind
+          ? 'a caught mapping retains its published header'
+          : 'only a published mapping has a readable initialized header',
+      () {
+        final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
+        final make = FunctionTarget(
+          _uri,
+          'make',
+          unwind ? .never : .integer,
+          [],
+        );
+        final root = FunctionTarget(_uri, 'entry', .integer, []);
+        const zero = Constant.integer(0);
+        const size = Constant.integer(65536);
+        final entry = Block(), exhausted = Block(), initialized = Block();
+        final page = entry.emit(DirectCall(map, [size]));
+        entry.finish(
+          Branch(
+            entry.emit(Equals(page, zero)),
+            Jump(exhausted),
+            Jump(initialized),
+          ),
+        );
+        exhausted.finish(unwind ? Throw(zero) : Return(zero));
+        final slot = initialized.emit(
+          IntBinary(.add, page, const Constant.integer(8)),
+        );
+        initialized.emit(StoreNative(slot, _i64, size));
+        initialized.finish(unwind ? Throw(page) : Return(page));
+        final invoke = Block(), absent = Block(), present = Block();
+        final caught = Block([ValueType.object]);
+        final call = DirectCall(make, []);
+        final Value actual;
+        final Block check;
+        if (unwind) {
+          invoke.finish(
+            Invoke(
+              call,
+              onReturn: null,
+              onThrow: Jump(caught, [UnwindValue.exception]),
+            ),
+          );
+          check = caught;
+          actual = caught.emit(
+            UncheckedCast(caught.parameters.single, .integer),
+          );
+        } else {
+          check = invoke;
+          actual = invoke.emit(call);
+        }
+        check.finish(
+          Branch(check.emit(Equals(actual, zero)), Jump(absent), Jump(present)),
+        );
+        absent.finish(Return(zero));
+        final read = present.emit(
+          LoadNative(
+            present.emit(IntBinary(.add, actual, const Constant.integer(8))),
+            _i64,
+          ),
+        );
+        present.finish(Return(read));
+        final graph = IrProgram(
+          [],
+          [
+            IrFunction(make, [entry, exhausted, initialized]),
+            IrFunction(root, [invoke, if (unwind) caught, absent, present]),
+          ],
+          externals: [
+            IrExternal(
+              map,
+              effects: const {Effect.writesStorage},
+              memory: const ExternalMemory.zeroed(0),
+            ),
+          ],
+        );
+        final facts = ProgramFlow(graph, [
+          (target: root, arguments: <FlowValue>[]),
+        ], memoryLayout: _layout).facts;
+        expect(facts.valueOf(read).constant, size);
+      },
     );
-    exhausted.finish(Return(zero));
-    final slot = initialized.emit(
-      IntBinary(.add, page, const Constant.integer(8)),
-    );
-    initialized.emit(StoreNative(slot, _i64, size));
-    initialized.finish(Return(page));
-    final invoke = Block(), absent = Block(), present = Block();
-    final actual = invoke.emit(DirectCall(make, []));
-    invoke.finish(
-      Branch(invoke.emit(Equals(actual, zero)), Jump(absent), Jump(present)),
-    );
-    absent.finish(Return(zero));
-    final read = present.emit(
-      LoadNative(
-        present.emit(IntBinary(.add, actual, const Constant.integer(8))),
-        _i64,
-      ),
-    );
-    present.finish(Return(read));
-    final graph = IrProgram(
-      [],
-      [
-        IrFunction(make, [entry, exhausted, initialized]),
-        IrFunction(root, [invoke, absent, present]),
-      ],
-      externals: [
-        IrExternal(
-          map,
-          effects: const {Effect.writesStorage},
-          memory: const ExternalMemory.zeroed(0),
-        ),
-      ],
-    );
-    final facts = ProgramFlow(graph, [
-      (target: root, arguments: <FlowValue>[]),
-    ], memoryLayout: _layout).facts;
-    expect(facts.valueOf(read).constant, size);
-  });
+  }
 
   test('one throw site preserves both incoming mapping lifetimes', () {
     final uri = Uri.parse('memory:same-exit');

@@ -2031,13 +2031,20 @@ final class ProgramFlow(
       bool allocationFailureOnly = false,
     }) {
       final alternatives = _exceptionSources[state];
-      state = state.copy(nativeContext: entryState.nativeContext);
+      FlowState unwind(FlowState input) {
+        final exit = input.copy(nativeContext: entryState.nativeContext);
+        if (escapes && !_nativeActivations.contains(activation)) {
+          exit.escape([exception, stackTrace]);
+        }
+        return exit.returningMappings(entryState, [exception, stackTrace]);
+      }
+
+      state = unwind(state);
       if (!allocationFailureOnly && !activation.hasSemanticFailure) {
         activation.hasSemanticFailure = true;
         summaryChanged = true;
       }
       if (escapes && !_nativeActivations.contains(activation)) {
-        state.escape([exception, stackTrace]);
         _admitEscaped(state);
       }
       final previous = activation.exceptionalSummary;
@@ -2051,13 +2058,7 @@ final class ProgramFlow(
           final covered =
               alternatives != null &&
               alternatives.values.any((alternative) {
-                final upper = alternative.copy(
-                  nativeContext: entryState.nativeContext,
-                );
-                if (escapes && !_nativeActivations.contains(activation)) {
-                  upper.escape([exception, stackTrace]);
-                }
-                return !upper.join(previous.exit);
+                return !unwind(alternative).join(previous.exit);
               });
           if (!covered) {
             lanes[activation.firstExceptionSite!] = _StateSummary(
@@ -2073,12 +2074,7 @@ final class ProgramFlow(
         for (final pair in incoming.entries) {
           final snapshot = alternatives == null
               ? pair.value
-              : pair.value.copy(nativeContext: entryState.nativeContext);
-          if (alternatives != null &&
-              escapes &&
-              !_nativeActivations.contains(activation)) {
-            snapshot.escape([exception, stackTrace]);
-          }
+              : unwind(pair.value);
           // A throw site can execute both before and after a mapping is
           // retired. Reuse compatible summaries across sites and keep at most
           // two distinct exit names per original source across repeated calls.
