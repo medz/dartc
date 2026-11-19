@@ -57,6 +57,7 @@ final class ProgramFlow(
   final _ancestry = _CallAncestry();
   final _callSites = <(_Activation, Instruction, FunctionTarget), _CallSite>{};
   final _pending = <_Activation>{};
+  bool _lostCaller = false;
   final _owners = <Object, FunctionTarget>{};
   final _cyclic = <FunctionTarget, Set<Block>>{};
   final _loops = <FunctionTarget, LoopRanges>{};
@@ -189,10 +190,16 @@ final class ProgramFlow(
     }
     if (!changed) return false;
     _facts = null;
+    var untilTrace = 0;
     while (_pending.isNotEmpty) {
       final activation = _pending.first;
       _pending.remove(activation);
       _evaluate(activation);
+      if (_lostCaller && (--untilTrace <= 0 || _pending.isEmpty)) {
+        _releaseDisconnected();
+        _lostCaller = false;
+        untilTrace = _pending.length;
+      }
     }
     for (final activation in _activeContexts) {
       for (final entry in activation.storageViews.entries) {
@@ -768,32 +775,66 @@ final class ProgramFlow(
     final pending = [activation];
     while (pending.isNotEmpty) {
       final old = pending.removeLast();
-      if (old.readers.isNotEmpty ||
+      if (!_calls.contains(old) ||
           _roots.containsValue(old) ||
-          _escapedCalls.containsValue(old) ||
-          !_calls.remove(old)) {
+          _escapedCalls.containsValue(old)) {
         continue;
       }
-      _pending.remove(old);
-      if (old.inputKey case final key?) {
-        final bucket = _inputs[key]!;
-        bucket.remove(old);
-        if (bucket.isEmpty) _inputs.remove(key);
-        old.inputKey = null;
+      if (old.readers.isNotEmpty) {
+        _lostCaller = true;
+      } else {
+        _retire(old, pending);
       }
-      for (final entry in old.calls.entries) {
-        for (final target
-            in entry.value.map((call) => call.body.target).toSet()) {
-          final site = _callSites.remove((old, entry.key, target));
-          if (site == null) continue;
-          for (final called in {
-            for (final input in site.contexts.values) ?input.activation,
-          }) {
-            called.callSites.remove(site);
-            called.readers.remove(old);
-            pending.add(called);
-          }
+    }
+  }
+
+  // A cycle can retain its readers after the last invocation from a root was
+  // redirected. Trace only between evaluations, after call sites are rebound.
+  void _releaseDisconnected() {
+    final reachable = {
+      ..._roots.values,
+      ..._escapedCalls.values,
+    };
+    final frontier = reachable.toList();
+    for (var i = 0; i < frontier.length; i++) {
+      for (final calls in frontier[i].calls.values) {
+        for (final callee in calls) {
+          if (reachable.add(callee)) frontier.add(callee);
         }
+      }
+    }
+    for (final old in _calls.where((a) => !reachable.contains(a)).toList()) {
+      _retire(old);
+    }
+  }
+
+  void _retire(_Activation old, [List<_Activation>? children]) {
+    // Published allocations still own their creator's capture, type argument,
+    // and bound method facts through their original allocation identity.
+    _calls.remove(old);
+    _pending.remove(old);
+    if (old.inputKey case final key?) {
+      final bucket = _inputs[key]!;
+      bucket.remove(old);
+      if (bucket.isEmpty) _inputs.remove(key);
+      old.inputKey = null;
+    }
+    // Native reentry also installs summary readers on callable roots.
+    for (final root in [
+      ..._escapingActivations,
+      ..._roots.values,
+    ]) {
+      root.readers.remove(old);
+    }
+    for (final entry in old.calls.entries) {
+      for (final called in entry.value) {
+        final site = _callSites[(old, entry.key, called.body.target)];
+        called.callSites.remove(site);
+        called.readers.remove(old);
+        children?.add(called);
+      }
+      for (final called in entry.value) {
+        _callSites.remove((old, entry.key, called.body.target));
       }
     }
   }
