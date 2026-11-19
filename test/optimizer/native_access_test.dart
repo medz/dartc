@@ -14,6 +14,60 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test('only a published mapping has a readable initialized header', () {
+    final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
+    final make = FunctionTarget(_uri, 'make', .integer, []);
+    final root = FunctionTarget(_uri, 'entry', .integer, []);
+    const zero = Constant.integer(0);
+    const size = Constant.integer(65536);
+    final entry = Block(), exhausted = Block(), initialized = Block();
+    final page = entry.emit(DirectCall(map, [size]));
+    entry.finish(
+      Branch(
+        entry.emit(Equals(page, zero)),
+        Jump(exhausted),
+        Jump(initialized),
+      ),
+    );
+    exhausted.finish(Return(zero));
+    final slot = initialized.emit(
+      IntBinary(.add, page, const Constant.integer(8)),
+    );
+    initialized.emit(StoreNative(slot, _i64, size));
+    initialized.finish(Return(page));
+    final invoke = Block(), absent = Block(), present = Block();
+    final actual = invoke.emit(DirectCall(make, []));
+    invoke.finish(
+      Branch(invoke.emit(Equals(actual, zero)), Jump(absent), Jump(present)),
+    );
+    absent.finish(Return(zero));
+    final read = present.emit(
+      LoadNative(
+        present.emit(IntBinary(.add, actual, const Constant.integer(8))),
+        _i64,
+      ),
+    );
+    present.finish(Return(read));
+    final graph = IrProgram(
+      [],
+      [
+        IrFunction(make, [entry, exhausted, initialized]),
+        IrFunction(root, [invoke, absent, present]),
+      ],
+      externals: [
+        IrExternal(
+          map,
+          effects: const {Effect.writesStorage},
+          memory: const ExternalMemory.zeroed(0),
+        ),
+      ],
+    );
+    final facts = ProgramFlow(graph, [
+      (target: root, arguments: <FlowValue>[]),
+    ], memoryLayout: _layout).facts;
+    expect(facts.valueOf(read).constant, size);
+  });
+
   test('one throw site preserves both incoming mapping lifetimes', () {
     final uri = Uri.parse('memory:same-exit');
     const eight = Constant.integer(8), zero = Constant.integer(0);

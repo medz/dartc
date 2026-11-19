@@ -603,6 +603,30 @@ final class FlowState {
   @override
   int get hashCode => structuralKey.hashCode;
 
+  /// Local mappings that were never published on this exit cannot contribute
+  /// bytes to a mapping published by a different return from the same call.
+  FlowState returningMappings(FlowState entry, Iterable<FlowValue> roots) {
+    if (identical(_regions, entry._regions)) return this;
+    final fresh = [
+      for (final region in _regions.keys)
+        if (entry._regions[region] == null && region.site is DirectCall) region,
+    ];
+    if (fresh.isEmpty) return this;
+    final visible = project([...entry.allocations, ...roots]);
+    var regions = _regions;
+    var writes = _writes;
+    for (final region in fresh) {
+      if (visible._regions[region] != null) continue;
+      regions = regions.withoutKey(region);
+      writes = writes.withoutKey(region);
+    }
+    return identical(regions, _regions)
+        ? this
+        : (copy()
+            .._regions = regions
+            .._writes = writes);
+  }
+
   /// Projects a call input, or only storage proven observable by [access].
   /// Ordinary calls retain globals and external reachability.
   FlowState project(Iterable<FlowValue> roots, {FlowStorageAccess? access}) {

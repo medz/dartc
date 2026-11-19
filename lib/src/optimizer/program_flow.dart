@@ -2104,6 +2104,10 @@ final class ProgramFlow(
             state.escape([returned, ?_constructedReturns[activation]]);
             _admitEscaped(state);
           }
+          state = state.returningMappings(entryState, [
+            returned,
+            ?_constructedReturns[activation],
+          ]);
           final joined = activation.returned.join(
             returned,
             widen: activation.recursive,
