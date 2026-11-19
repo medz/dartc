@@ -659,6 +659,7 @@ final class ProgramFlow(
               ...suppliedState.allocations,
               callee.returned,
               callee.exception,
+              if (!normal) callee.stackTrace,
             ]),
             mapObject: mapObject,
             mapValue: (value) =>
