@@ -51,7 +51,7 @@ final class _NativeFinalizer(
     implements NativeFinalizer {
   this
     : super(
-        allocator.events().finalizers,
+        allocator.finalizers(),
         callback.asFunction<void Function(Pointer<Void>)>(isLeaf: true),
         isNative: true,
       ) {

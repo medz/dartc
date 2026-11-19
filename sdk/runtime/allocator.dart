@@ -167,6 +167,10 @@ Allocator _allocator(int context) {
   }
 }
 
+/// Finalizers share the active heap's queue. Collections and shutdown
+/// deliver native records while they still own that heap.
+FinalizationQueue finalizers() => _allocator(Memory.context()).finalization;
+
 /// Registers event delivery when scheduling facilities are first used.
 EventLoop events() {
   final allocator = _allocator(Memory.context());
