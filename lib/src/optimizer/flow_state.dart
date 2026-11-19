@@ -473,6 +473,16 @@ final class FlowState {
     _nativeContext = transform(_nativeContext);
   }
 
+  /// Whether joining these native mappings would discard a known extent.
+  bool losesNativeExtent(FlowState other) {
+    if (identical(_regions, other._regions)) return false;
+    for (final entry in _regions.differences(other._regions)) {
+      final here = entry.after?.memory, there = entry.before?.memory;
+      if (here != null && there != null && here.length != there.length) return true;
+    }
+    return false;
+  }
+
   /// Adds an executable alternative, skipping unchanged storage subtrees.
   /// [widen] drops expanding numeric bounds at a loop or recursive boundary.
   bool join(FlowState incoming, {bool widen = false}) {

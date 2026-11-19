@@ -73,6 +73,7 @@ final class ProgramFlow(
   final _nativeLookups = <_Activation>{};
   final _constructedReturns = <_Activation, FlowValue>{};
   ProgramFlowFacts? _facts;
+  final _exceptionSources = Expando<Map<Object, FlowState>>();
 
   this {
     _externalMemory = {
@@ -361,7 +362,25 @@ final class ProgramFlow(
     bool checkAllArguments = false,
     // Helper invocations need not return the enclosing operation's value.
     FlowSource? resultSource,
+    Object? exceptionalSource,
   }) {
+    final alternatives = _exceptionSources[input];
+    if (exceptionalSource == null && alternatives != null && alternatives.length > 1 &&
+        operation is DirectCall && program.implementationOf(source.implementation) is IrFunction) {
+      var joined = _unreachable;
+      final normal = <Object, FlowState>{};
+      for (final arm in alternatives.entries) {
+        final invoked = _invoke(caller, block, operation, source, arguments, arm.value,
+            environment: environment, checkAllArguments: checkAllArguments,
+            resultSource: resultSource, exceptionalSource: arm.key);
+        joined = _joinResult(joined, invoked);
+        if (invoked.normal case final state?) normal[arm.key] = state;
+      }
+      if (joined.normal case final state? when normal.isNotEmpty) {
+        _exceptionSources[state] = normal;
+      }
+      return joined;
+    }
     if (arguments.any((value) => value.isBottom)) return _unreachable;
     final target = source.implementation;
     if (operation case FunctionCall(target: final bound?)
@@ -472,7 +491,7 @@ final class ProgramFlow(
         environment,
         site,
         repeated,
-        aliasKey,
+        exceptionalSource == null ? aliasKey : (exceptionalSource, aliasKey),
       );
       final invocation = site.contexts.putIfAbsent(
         local,
@@ -672,10 +691,17 @@ final class ProgramFlow(
             mapValue: (value) =>
                 mapValue(value, normal: normal, exit: summary.exit),
           );
+    final thrownState = apply(callee.exceptionalSummary);
+    final sourceExits = callee.exceptionSources;
+    if (thrownState != null && sourceExits != null) {
+      _exceptionSources[thrownState] = {
+        for (final pair in sourceExits.entries) pair.key: apply(pair.value)!,
+      };
+    }
     final invoked = FlowResult(
       value: mapValue(callee.returned, exit: callee.normal),
       normal: apply(callee.normalSummary, normal: true),
-      exceptional: apply(callee.exceptionalSummary),
+      exceptional: thrownState,
       allocationFailureOnly: !callee.hasSemanticFailure,
       exception: mapValue(callee.exception, exit: callee.exceptional),
       stackTrace: mapValue(callee.stackTrace, exit: callee.exceptional),
@@ -1560,6 +1586,30 @@ final class ProgramFlow(
       }
     }
 
+    // A loop backedge can retire the previously selected mapping and supply
+    // zero as its successor. A pure guard may consume each predecessor's
+    // binding before its storage is joined with unrelated alternatives.
+    final guardStates = <(Block, bool), FlowState>{};
+    final parameterGuards = <Block, ({int parameter, int constant, bool negated})>{};
+    for (final loop in loops.loops) {
+      final header = loop.header;
+      if (header.instructions.length != 1 ||
+          header.end is! Branch) continue;
+      final branch = header.end as Branch;
+      final test = branch.condition;
+      if (test is! Equals || !identical(header.instructions.single, test) ||
+          test.mayCallUserCode) continue;
+      for (final (parameter, constant) in [(test.left, test.right), (test.right, test.left)]) {
+        if (constant case ScalarConstant(value: final int n)
+            when parameter is BlockParameter && parameter.type == ValueType.integer) {
+          final index = header.parameters.indexOf(parameter);
+          if (index >= 0) {
+            parameterGuards[header] = (parameter: index, constant: n, negated: test.negated);
+          }
+        }
+      }
+    }
+
     void edge(
       Jump jump,
       FlowState state, {
@@ -1602,7 +1652,15 @@ final class ProgramFlow(
       // Stored aliases refer to the previous binding when a loop re-enters.
       final nextState = state.copy()
         ..retainSources((source) => availableAt(source, jump.target));
+      if (_exceptionSources[state] case final alternatives?) {
+        _exceptionSources[nextState] = {
+          for (final entry in alternatives.entries)
+            entry.key: (entry.value.copy()..retainSources((source) => availableAt(source, jump.target))),
+        };
+      }
       var changed = false;
+      final guard = parameterGuards[jump.target];
+      bool? guardValue;
       for (final (index, parameter) in jump.target.parameters.indexed) {
         var value = switch (jump.arguments[index]) {
           UnwindValue.exception => exception ?? FlowValue.unknown(.object),
@@ -1621,6 +1679,14 @@ final class ProgramFlow(
             when range != FlowIntegerRange.full) {
           nextRanges[parameter] = range;
         }
+        if (guard != null && guard.parameter == index &&
+            value.managedBackings.isEmpty && !value.hasUnknownBacking) {
+          if (value.constant case ScalarConstant(value: final int actual)) {
+            guardValue = (actual == guard.constant) != guard.negated;
+          } else if (value.integers case final range? when !range.contains(guard.constant)) {
+            guardValue = guard.negated;
+          }
+        }
         changed =
             mergeValue(
               parameter,
@@ -1633,6 +1699,19 @@ final class ProgramFlow(
         for (final entry in nextRanges.entries)
           FlowSource(entry.key, activation): entry.value,
       });
+      if (guard != null) {
+        for (final outcome in const [true, false]) {
+          if (guardValue != null && outcome != guardValue) continue;
+          final key = (jump.target, outcome);
+          final previous = guardStates[key];
+          if (previous == null) {
+            guardStates[key] = nextState.copy();
+            changed = true;
+          } else {
+            changed = previous.join(nextState, widen: widen) || changed;
+          }
+        }
+      }
       if (incomingRanges[jump.target] case final previous?) {
         for (final value in previous.keys.toList()) {
           final next = nextRanges[value];
@@ -1650,6 +1729,18 @@ final class ProgramFlow(
         changed = true;
       }
       if (incoming[jump.target] case final previous?) {
+        final before = _exceptionSources[previous];
+        final additional = _exceptionSources[nextState];
+        if (before != null) {
+          if (additional == null || additional.keys.any((key) => !before.containsKey(key))) {
+            _exceptionSources[previous] = null;
+            changed = true;
+          } else {
+            for (final entry in additional.entries) {
+              changed = before[entry.key]!.join(entry.value, widen: widen) || changed;
+            }
+          }
+        }
         changed = previous.join(nextState, widen: widen) || changed;
       } else {
         incoming[jump.target] = nextState;
@@ -1659,11 +1750,13 @@ final class ProgramFlow(
     }
 
     void exceptional(
+      Object source,
       FlowState state,
       FlowValue exception,
       FlowValue stackTrace, {
       bool allocationFailureOnly = false,
     }) {
+      final alternatives = _exceptionSources[state];
       state = state.copy(nativeContext: entryState.nativeContext);
       if (!allocationFailureOnly && !activation.hasSemanticFailure) {
         activation.hasSemanticFailure = true;
@@ -1672,6 +1765,53 @@ final class ProgramFlow(
       if (escapes && !_nativeActivations.contains(activation)) {
         state.escape([exception, stackTrace]);
         _admitEscaped(state);
+      }
+      if (!activation.exceptionSourcesMerged) {
+        final previous = activation.exceptionalSummary;
+        var lanes = activation.exceptionSources;
+        if (lanes == null && (alternatives != null ||
+            previous != null && activation.firstExceptionSite != source &&
+                previous.exit.losesNativeExtent(state))) {
+          lanes = activation.exceptionSources = {};
+          if (previous != null) {
+            final covered = alternatives != null && alternatives.values.any((alternative) {
+              final upper = alternative.copy(nativeContext: entryState.nativeContext);
+              if (escapes && !_nativeActivations.contains(activation)) {
+                upper.escape([exception, stackTrace]);
+              }
+              return !upper.join(previous.exit);
+            });
+            if (!covered) {
+              lanes[activation.firstExceptionSite!] = _StateSummary(previous.entry, previous.exit);
+            }
+          }
+          summaryChanged = true;
+        }
+        if (lanes != null) {
+          final incoming = alternatives ?? {source: state};
+          for (final pair in incoming.entries) {
+            final snapshot = alternatives == null ? pair.value :
+                pair.value.copy(nativeContext: entryState.nativeContext);
+            if (alternatives != null && escapes && !_nativeActivations.contains(activation)) {
+              snapshot.escape([exception, stackTrace]);
+            }
+            final lane = lanes[pair.key];
+            if (lane != null) {
+              summaryChanged |= lane.join(entryState, snapshot, widen: activation.recursive);
+            } else if (lanes.length < 2) {
+              lanes[pair.key] = _StateSummary(entryState, snapshot);
+              summaryChanged = true;
+            } else {
+              activation.exceptionSources = null;
+              activation.exceptionSourcesMerged = true;
+              summaryChanged = true;
+              break;
+            }
+          }
+        } else {
+          final first = activation.firstExceptionSite;
+          activation.firstExceptionSite = first == null || first == source ? source : activation;
+        }
       }
       final joinedException = activation.exception.join(exception);
       final joinedTrace = activation.stackTrace.join(stackTrace);
@@ -1700,7 +1840,11 @@ final class ProgramFlow(
       readingBlock = block;
       ranges = {...incomingRanges[block]!};
       activation.blocks.add(block);
-      FlowState? state = incoming[block]!.copy();
+      final current = incoming[block]!;
+      FlowState? state = current.copy();
+      if (_exceptionSources[current] case final alternatives?) {
+        _exceptionSources[state] = alternatives;
+      }
       FlowResult evaluate(Instruction operation) {
         point = state!;
         activation.before[operation] = state.copy();
@@ -1809,6 +1953,7 @@ final class ProgramFlow(
         final result = evaluate(operation);
         if (result.exceptional case final thrown?) {
           exceptional(
+            operation,
             thrown,
             result.exception,
             result.stackTrace,
@@ -1857,7 +2002,8 @@ final class ProgramFlow(
           final value = read(condition);
           if (value.isBottom) break;
           if (value.constant case ScalarConstant(value: final bool known)) {
-            edge(known ? ifTrue : ifFalse, state);
+            final selected = known ? ifTrue : ifFalse;
+            edge(selected, guardStates[(block, known)] ?? state);
           } else {
             final yes = _integerRefinements(condition, true, read);
             final no = _integerRefinements(condition, false, read);
@@ -1872,8 +2018,13 @@ final class ProgramFlow(
               );
             }
 
-            if (yes != null) edge(ifTrue, branch(true), refinements: yes);
-            if (no != null) edge(ifFalse, branch(false), refinements: no);
+            final guarded = parameterGuards.containsKey(block);
+            if (yes != null && (!guarded || guardStates.containsKey((block, true)))) {
+              edge(ifTrue, guardStates[(block, true)] ?? branch(true), refinements: yes);
+            }
+            if (no != null && (!guarded || guardStates.containsKey((block, false)))) {
+              edge(ifFalse, guardStates[(block, false)] ?? branch(false), refinements: no);
+            }
           }
         case Invoke(:final operation, :final onReturn, :final onThrow):
           final result = evaluate(operation);
@@ -1894,13 +2045,14 @@ final class ProgramFlow(
               ? FlowValue.unknown(.stackTrace)
               : read(stackTrace);
           if (onThrow == null) {
-            exceptional(state, value, trace);
+            exceptional(block.end, state, value, trace);
           } else {
             edge(onThrow, state, exception: value, stackTrace: trace);
           }
         case ExhaustivenessFailure(:final onThrow):
           if (onThrow == null) {
             exceptional(
+              block.end,
               state,
               FlowValue.unknown(.object),
               FlowValue.unknown(.stackTrace),
@@ -2029,10 +2181,11 @@ final class ProgramFlow(
     final folded = _fold(operation, inputs, program);
     if (folded != null) {
       activation.operationEffects[operation] = const {};
-      return FlowResult(
-        value: FlowValue.constant(folded),
-        normal: state.copy(),
-      );
+      final normal = state.copy();
+      if (_exceptionSources[state] case final alternatives?) {
+        _exceptionSources[normal] = alternatives;
+      }
+      return FlowResult(value: FlowValue.constant(folded), normal: normal);
     }
     if (!_deferredAllocationProjection(operation) &&
         (operation is AllocatedObject ||
@@ -5261,6 +5414,9 @@ final class _Activation(final IrCallable body) {
   FlowState? input;
   _StateSummary? normalSummary;
   _StateSummary? exceptionalSummary;
+  Object? firstExceptionSite;
+  bool exceptionSourcesMerged = false;
+  Map<Object, _StateSummary>? exceptionSources;
   FlowState? get normal => normalSummary?.exit;
   FlowState? get exceptional => exceptionalSummary?.exit;
   FlowValue returned = const FlowValue.bottom();
