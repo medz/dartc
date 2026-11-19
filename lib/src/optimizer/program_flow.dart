@@ -495,7 +495,11 @@ final class ProgramFlow(
         environment,
         site,
         repeated,
-        exceptionalSource == null ? aliasKey : (exceptionalSource, aliasKey),
+        caller.iterationContext == null
+            ? exceptionalSource == null
+                  ? aliasKey
+                  : (exceptionalSource, aliasKey)
+            : (caller.iterationContext, exceptionalSource, aliasKey),
       );
       final invocation = site.contexts.putIfAbsent(
         local,
@@ -511,6 +515,14 @@ final class ProgramFlow(
       plain = prepared.arguments;
       suppliedState = prepared.state;
       final previous = invocation.activation;
+      final owns =
+          previous != null &&
+          previous.callSites.length == 1 &&
+          !site.recursive &&
+          !site.contexts.values.any(
+            (other) =>
+                other != invocation && identical(previous, other.activation),
+          );
       if (prepared.reset) {
         site.joined.remove(local);
         callee = _Activation(body);
@@ -533,16 +545,12 @@ final class ProgramFlow(
           // Recursive summaries are deliberately unindexed: retain their joined
           // call-site identity instead of repeatedly starting another SCC.
           site.joined.add(local);
-          callee = previous.callSites.length == 1
-              ? previous
-              : _Activation(body);
+          callee = owns ? previous : _Activation(body);
           callee.shareInput = false;
         } else {
           callee =
               _inputs[precise]?.firstOrNull ??
-              (previous != null && previous.callSites.length == 1
-                  ? previous
-                  : _Activation(body));
+              (owns ? previous : _Activation(body));
         }
       }
       _calls.add(callee);
@@ -1504,15 +1512,20 @@ final class ProgramFlow(
         !identical(source.activation, activation) ||
         !block.parameters.contains(source.value) &&
             activation.dominance.atEntry(source.value, block);
-    final incoming = <Block, FlowState>{
-      body.entry: entryState.copy()
+    final entryKey = (body.entry, 0);
+    final incoming = <(Block, int), FlowState>{
+      entryKey: entryState.copy()
         ..retainSources((source) => availableAt(source, body.entry)),
     };
-    final incomingRanges = <Block, Map<Value, FlowIntegerRange>>{
-      body.entry: {},
+    final incomingRanges = <(Block, int), Map<Value, FlowIntegerRange>>{
+      entryKey: {},
     };
-    final pending = <Block>{body.entry};
-    final readers = <Value, Set<Block>>{};
+    final pending = <(Block, int)>{entryKey};
+    final readers = <Value, Set<(Block, int)>>{};
+    final boundAt = <(Block, int), Map<Value, FlowValue>>{};
+    final owner = <Block, Block>{};
+    var key = entryKey;
+    var local = <Value, FlowValue>{};
     final loops = _loops.putIfAbsent(body.target, () => LoopRanges(body));
     final loopProofs = <LoopRange, LoopRangeProof>{};
     final evaluated = <Value>{};
@@ -1613,10 +1626,12 @@ final class ProgramFlow(
         case UnwindValue() || CallFrameValue():
           return FlowValue.unknown(value.type);
         default:
-          (readers[value] ??= {}).add(readingBlock);
+          (readers[value] ??= {}).add(key);
           final known = constrained(
             point.resolveValue(
-              activation.values[value] ?? const FlowValue.bottom(),
+              local[value] ??
+                  activation.values[value] ??
+                  const FlowValue.bottom(),
             ),
           );
           if (known.managedBackings.isNotEmpty || known.hasUnknownBacking) {
@@ -1640,7 +1655,7 @@ final class ProgramFlow(
     // A loop backedge can retire the previously selected mapping and supply
     // zero as its successor. A pure guard may consume each predecessor's
     // binding before its storage is joined with unrelated alternatives.
-    final guardStates = <(Block, bool), FlowState>{};
+    final guardStates = <(Block, int, bool), FlowState>{};
     final parameterGuards =
         <Block, ({int parameter, int? constant, bool negated})>{};
     for (final loop in loops.loops) {
@@ -1686,18 +1701,112 @@ final class ProgramFlow(
       }
     }
 
+    for (final loop in loops.loops) {
+      if (parameterGuards[loop.header] case final guard?
+          when guard.constant == null || guard.constant == 0) {
+        if (loops.loops.any(
+          (other) =>
+              !identical(other, loop) && other.blocks.any(loop.blocks.contains),
+        )) {
+          continue;
+        }
+        for (final block in loop.blocks) {
+          owner[block] = loop.header;
+        }
+      }
+    }
     void edge(
       Jump jump,
       FlowState state, {
       FlowValue? exception,
       FlowValue? stackTrace,
       Map<Value, FlowIntegerRange>? refinements,
+      int? selected,
+      FlowValue? binding,
     }) {
+      point = state;
+      final target = jump.target;
+      final header = owner[target];
+      final guard = parameterGuards[target];
+      if (selected == null && identical(target, header) && guard != null) {
+        final argument = jump.arguments[guard.parameter];
+        if (argument is! UnwindValue) {
+          final value = read(argument);
+          final objects =
+              guard.constant == null &&
+              value.objects.isNotEmpty &&
+              value.addresses.isEmpty;
+          final addresses =
+              guard.constant == 0 &&
+              value.objects.isEmpty &&
+              value.addresses.isNotEmpty &&
+              value.addresses.every(
+                (address) =>
+                    address.base is FlowRegion &&
+                    address.type == ValueType.integer &&
+                    address.offset == 0 &&
+                    !address.retainedBase,
+              );
+          if ((objects || addresses) &&
+              value.unknownTypes.isEmpty &&
+              value.managedBackings.isEmpty &&
+              !value.hasUnknownBacking &&
+              value.rawBackingTypes.isEmpty &&
+              value.constants.every(
+                (c) => c is ScalarConstant && c.value == guard.constant,
+              )) {
+            // Keep two concrete loop inputs separate. Further identities use
+            // the regular joined input, including the effect of every visit.
+            final names = activation.loopBindings.putIfAbsent(target, () => {});
+            void forward(FlowValue alternative, int slot) {
+              edge(
+                jump,
+                state,
+                exception: exception,
+                stackTrace: stackTrace,
+                refinements: refinements,
+                selected: slot,
+                binding: alternative.withSources(value.sources).withReferences([
+                  value.references,
+                ]),
+              );
+            }
+
+            for (final (identity, alternative) in [
+              for (final object in value.objects)
+                (object as Object, FlowValue.object(object)),
+              for (final address in value.addresses)
+                (address.base, FlowValue.address(address)),
+            ]) {
+              final slot =
+                  names[identity] ??
+                  (names.length < 2 ? names[identity] = names.length + 1 : 0);
+              forward(alternative, slot);
+            }
+            for (final constant in value.constants) {
+              forward(FlowValue.constant(constant), 0);
+            }
+            return;
+          }
+        }
+      }
+      final lane =
+          selected ??
+          (header != null && header == owner[key.$1] && target != header
+              ? key.$2
+              : 0);
+      final targetKey = (target, lane);
+      final bindings = <Value, FlowValue>{
+        if (lane != 0)
+          for (final e in local.entries)
+            if (!target.parameters.contains(e.key) &&
+                activation.dominance.atEntry(e.key, target))
+              e.key: e.value,
+      };
       // Re-entry can change a nested loop's starting values and invariant bound.
       loopProofs.removeWhere(
         (loop, _) => loop.header == jump.target && !loop.backs.contains(jump),
       );
-      point = state;
       final nextRanges = {...ranges, ...?refinements};
       for (final proof in loopProofs.values) {
         if (proof.exitBound case final bound?
@@ -1746,15 +1855,17 @@ final class ProgramFlow(
         };
       }
       var changed = false;
-      final guard = parameterGuards[jump.target];
       bool? guardValue;
       for (final (index, parameter) in jump.target.parameters.indexed) {
-        var value = switch (jump.arguments[index]) {
-          UnwindValue.exception => exception ?? FlowValue.unknown(.object),
-          UnwindValue.stackTrace =>
-            stackTrace ?? FlowValue.unknown(.stackTrace),
-          final argument => read(argument),
-        };
+        var value = binding != null && guard?.parameter == index
+            ? binding
+            : switch (jump.arguments[index]) {
+                UnwindValue.exception =>
+                  exception ?? FlowValue.unknown(.object),
+                UnwindValue.stackTrace =>
+                  stackTrace ?? FlowValue.unknown(.stackTrace),
+                final argument => read(argument),
+              };
         if (nextRanges[jump.arguments[index]] case final range?) {
           value = value.restrictIntegers(range);
         }
@@ -1762,6 +1873,9 @@ final class ProgramFlow(
           value.sources.where((source) => availableAt(source, jump.target)),
         );
         nextState.bindAddress(FlowSource(parameter, activation), value);
+        if (lane != 0) {
+          bindings[parameter] = value.withSource(parameter, activation);
+        }
         nextRanges.remove(parameter);
         if (value.integers case final range?
             when range != FlowIntegerRange.full) {
@@ -1802,7 +1916,7 @@ final class ProgramFlow(
       if (guard != null) {
         for (final outcome in const [true, false]) {
           if (guardValue != null && outcome != guardValue) continue;
-          final key = (jump.target, outcome);
+          final key = (jump.target, lane, outcome);
           final previous = guardStates[key];
           if (previous == null) {
             guardStates[key] = nextState.copy();
@@ -1812,13 +1926,13 @@ final class ProgramFlow(
           }
         }
       }
-      if (incomingRanges[jump.target] case final previous?) {
+      if (incomingRanges[targetKey] case final previous?) {
         changed = _joinRanges(previous, nextRanges, widen: widen) || changed;
       } else {
-        incomingRanges[jump.target] = nextRanges;
+        incomingRanges[targetKey] = nextRanges;
         changed = true;
       }
-      if (incoming[jump.target] case final previous?) {
+      if (incoming[targetKey] case final previous?) {
         final before = _exceptionSources[previous];
         final additional = _exceptionSources[nextState];
         if (before != null) {
@@ -1833,10 +1947,31 @@ final class ProgramFlow(
         }
         changed = previous.join(nextState, widen: widen) || changed;
       } else {
-        incoming[jump.target] = nextState;
+        incoming[targetKey] = nextState;
         changed = true;
       }
-      if (changed) pending.add(jump.target);
+      if (lane != 0) {
+        final prior = boundAt[targetKey];
+        if (prior == null) {
+          boundAt[targetKey] = bindings;
+          changed = true;
+        } else {
+          for (final value in prior.keys.toList()) {
+            final newer = bindings[value];
+            if (newer == null) {
+              prior.remove(value);
+              changed = true;
+              continue;
+            }
+            final joined = prior[value]!.join(newer, widen: widen);
+            if (joined != prior[value]) {
+              prior[value] = joined;
+              changed = true;
+            }
+          }
+        }
+      }
+      if (changed) pending.add(targetKey);
     }
 
     void exceptional(
@@ -1959,19 +2094,30 @@ final class ProgramFlow(
     }
 
     while (pending.isNotEmpty) {
-      final block = pending.first;
-      pending.remove(block);
+      key = pending.first;
+      pending.remove(key);
+      final block = key.$1;
+      activation.iterationContext = key.$2 == 0
+          ? null
+          : (owner[block]!, key.$2);
+      local = {...?boundAt[key]};
       readingBlock = block;
-      ranges = {...incomingRanges[block]!};
+      ranges = {...incomingRanges[key]!};
       activation.blocks.add(block);
-      final current = incoming[block]!;
+      final current = incoming[key]!;
       FlowState? state = current.copy();
       if (_exceptionSources[current] case final alternatives?) {
         _exceptionSources[state] = alternatives;
       }
       FlowResult evaluate(Instruction operation) {
         point = state!;
-        activation.before[operation] = state.copy();
+        final priorEffects = activation.operationEffects[operation];
+        final priorView = activation.storageViews[operation];
+        final priorEnv = activation.environmentReads[operation];
+        final combine = owner.containsKey(block);
+        activation.before[operation] = combine
+            ? (_joinState(activation.before[operation], state)!)
+            : state.copy();
         if (body.typeBindings.isNotEmpty) {
           body.typeInputsOf(operation).forEach(read);
         }
@@ -2041,6 +2187,19 @@ final class ProgramFlow(
             effects: result.effects,
           );
         }
+        if (key.$2 != 0) {
+          local[operation] = result.value.withSource(operation, activation);
+        }
+        if (combine) {
+          if (priorEffects != null) {
+            activation.operationEffects[operation] = {
+              ...priorEffects,
+              ...?activation.operationEffects[operation],
+            };
+          }
+          if (priorView == false) activation.storageViews[operation] = false;
+          if (priorEnv == false) activation.environmentReads[operation] = false;
+        }
         mergeValue(operation, result.value.withSource(operation, activation));
         ranges.remove(operation);
         if (result.value.integers case final range?
@@ -2050,7 +2209,9 @@ final class ProgramFlow(
           ranges[operation] = range;
         }
         if (result.normal != null) {
-          activation.after[operation] = result.normal!.copy();
+          activation.after[operation] = combine
+              ? _joinState(activation.after[operation], result.normal)!
+              : result.normal!.copy();
         }
         if (result.hasSemanticFailure) {
           activation.semanticFailures.add(operation);
@@ -2063,7 +2224,9 @@ final class ProgramFlow(
               (activation.traces[operation] ?? const FlowValue.bottom()).join(
                 result.stackTrace,
               );
-          activation.thrown[operation] = result.exceptional!.copy();
+          activation.thrown[operation] = combine
+              ? _joinState(activation.thrown[operation], result.exceptional)!
+              : result.exceptional!.copy();
         }
         final exits =
             activation.exits[operation] ?? (normal: false, exceptional: false);
@@ -2155,7 +2318,7 @@ final class ProgramFlow(
           if (value.isBottom) break;
           if (value.constant case ScalarConstant(value: final bool known)) {
             final selected = known ? ifTrue : ifFalse;
-            edge(selected, guardStates[(block, known)] ?? state);
+            edge(selected, guardStates[(block, key.$2, known)] ?? state);
           } else {
             var predicate = condition;
             if (condition is BlockParameter &&
@@ -2183,7 +2346,7 @@ final class ProgramFlow(
             final yes = _integerRefinements(predicate, true, read);
             final no = _integerRefinements(predicate, false, read);
             FlowState branch(bool outcome) {
-              final selected = guardStates[(block, outcome)] ?? state!;
+              final selected = guardStates[(block, key.$2, outcome)] ?? state!;
               if (condition is! TypeTest) return selected;
               return selected.copy()..refineType(
                 read(condition.operand).sources,
@@ -2196,11 +2359,11 @@ final class ProgramFlow(
 
             final guarded = parameterGuards.containsKey(block);
             if (yes != null &&
-                (!guarded || guardStates.containsKey((block, true)))) {
+                (!guarded || guardStates.containsKey((block, key.$2, true)))) {
               edge(ifTrue, branch(true), refinements: yes);
             }
             if (no != null &&
-                (!guarded || guardStates.containsKey((block, false)))) {
+                (!guarded || guardStates.containsKey((block, key.$2, false)))) {
               edge(ifFalse, branch(false), refinements: no);
             }
           }
@@ -5583,6 +5746,8 @@ final class _StateSummary(FlowState before, FlowState after) {
 }
 
 final class _Activation(final IrCallable body) {
+  final loopBindings = <Block, Map<Object, int>>{};
+  (Block, int)? iterationContext;
   _ContextKey? inputKey;
   // Caller-owned identities are stable across applications of this input
   // version. _supply invalidates the closure whenever arguments or state grow.
