@@ -51,6 +51,7 @@ const _compilerLibraries = {
   'bound_methods',
   'function_instantiation',
   'control_flow',
+  'checked_index',
   'nullability',
   'stack_calls',
   'integer_operations',

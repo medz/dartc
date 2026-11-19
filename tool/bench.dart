@@ -278,6 +278,12 @@ const _apiDriver = 'tool/bench/compile_api.dart';
 const fixtures = <_Fixture>[
   ...defaultFixtures,
   _Fixture(
+    'checked_index',
+    'test/compiler/fixtures/checked_index.dart',
+    .shared,
+    hostTest: 'test/compiler/checked_index_test.dart',
+  ),
+  _Fixture(
     'control_flow',
     'test/compiler/fixtures/control_flow.dart',
     .shared,
@@ -1066,7 +1072,7 @@ sampled direct-process RSS, output bytes and execution status in build/bench/lat
 
 Options:
   --only=a,b              Select fixtures. Shared host expectations include
-                          control_flow, generic_member_carriers,
+                          checked_index, control_flow, generic_member_carriers,
                           generic_cell_storage and same_heap_finalizer.
   --compiler=path         Use a compiler executable (default:
                           dart run bin/dartc.dart).
