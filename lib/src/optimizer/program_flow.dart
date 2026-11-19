@@ -4015,7 +4015,8 @@ final class ProgramFlow(
         FlowObject(operation, activation, type: resultType),
         inputs[lengthParameter],
         repeated:
-            activation.repeated || _loopBlocks(activation.body).contains(block),
+            activation.recursive ||
+            _loopBlocks(activation.body).contains(block),
       ),
       _ => null,
     };

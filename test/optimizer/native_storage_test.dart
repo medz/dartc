@@ -19,6 +19,29 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('returned mappings that share a caller identity remain writable', () {
+    final site = DirectCall(FunctionTarget(null, 'map', .integer, []), []);
+    final prior = FlowObject(site, Object());
+    final fresh = FlowObject(site, Object());
+    final input = FlowState(_program, memoryLayout: _layout);
+    final held = input.allocateMemory(prior, _integer(16), repeated: false);
+    final heldAddress = FlowValue.address(held.value.addresses.single);
+    final caller = _store(held.normal!, heldAddress, _i64, _integer(17));
+    final mapped = input.allocateMemory(fresh, _integer(16), repeated: false);
+    final mappedAddress = FlowValue.address(mapped.value.addresses.single);
+    final exit = _store(mapped.normal!, mappedAddress, _i64, _integer(91));
+
+    final returned = caller.applySummary(
+      input,
+      exit,
+      mapObject: (_) => prior,
+      mapValue: (value) => value.mapObjects((_) => prior),
+    );
+    final updated = _store(returned, heldAddress, _i64, _integer(63));
+    final possible = _load(updated, heldAddress, _i64).integers!;
+    expect([17, 63, 91].every(possible.contains), isTrue);
+  });
+
   test('a cursor and its page agree after conditional initialization', () {
     final target = FunctionTarget(null, 'samePage', .boolean, [.boolean]);
     final entry = Block(target.parameterTypes), initialize = Block();

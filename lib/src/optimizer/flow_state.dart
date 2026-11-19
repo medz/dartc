@@ -832,21 +832,36 @@ final class FlowState {
         mapValue(after._externalAliases),
       );
     }
+    final changedRegions = <FlowObject, _ObjectState>{};
     for (final identity in {
       for (final change in after._regions.differences(before._regions))
         change.key,
       for (final key in after._writes.keys.whereType<FlowObject>())
         if (after._written(key, _regionWrites)) key,
     }) {
-      if (after._regions[identity] case final region?) {
-        if (before._regions[identity] == null ||
-            after._written(identity, _regionWrites)) {
-          result._regions = result._regions.withEntry(
-            mapObject(identity),
-            region.map(mapValue),
-          );
-        }
+      final region = after._regions[identity];
+      if (region == null) continue;
+      final prior = before._regions[identity];
+      if (prior != null && !after._written(identity, _regionWrites)) continue;
+      final owner = mapObject(identity);
+      var exit = region.map(mapValue);
+      // A fresh mapping is unique inside the invocation. Its bounded name in
+      // the caller may also denote a mapping returned by an earlier call.
+      final occupied = _regions[owner];
+      if (prior == null && occupied != null) {
+        exit = occupied.join(exit).withFlags(summary: true);
+      } else if (occupied != null &&
+          prior != null &&
+          (occupied.summary || occupied != prior.map(mapValue))) {
+        exit = occupied.join(exit);
       }
+      if (changedRegions[owner] case final other?) {
+        exit = other.join(exit).withFlags(summary: true);
+      }
+      changedRegions[owner] = exit;
+    }
+    for (final entry in changedRegions.entries) {
+      result._regions = result._regions.withEntry(entry.key, entry.value);
     }
     for (final change in after._addresses.differences(before._addresses)) {
       if (change.after case final address?) {
