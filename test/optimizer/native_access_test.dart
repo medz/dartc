@@ -14,6 +14,110 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test('one throw site preserves both incoming mapping lifetimes', () {
+    final uri = Uri.parse('memory:same-exit');
+    const eight = Constant.integer(8), zero = Constant.integer(0);
+    final head = GlobalVariable(uri, 'head', .integer, isLate: true);
+    final marker = GlobalVariable(uri, 'marker', .integer, isLate: true);
+    final reserve = FunctionTarget(uri, 'reserve', .integer, [.integer]);
+    final release = FunctionTarget(uri, 'release', .voidType, [
+      .integer,
+      .integer,
+    ]);
+    final fail = FunctionTarget(uri, 'fail', .never, [.integer, .boolean]);
+    final choice = Block(fail.parameterTypes), closed = Block(), open = Block();
+    choice.finish(Branch(choice.parameters.last, Jump(closed), Jump(open)));
+    closed.emit(DirectCall(release, [choice.parameters.first, eight]));
+    closed.finish(Throw(const Constant.string('closed')));
+    open.finish(Throw(const Constant.string('open')));
+
+    final attempt = FunctionTarget(uri, 'attempt', .never, [
+      .integer,
+      .integer,
+      .boolean,
+      .boolean,
+    ]);
+    final setup = Block(attempt.parameterTypes),
+        retire = Block(),
+        live = Block();
+    setup.finish(Branch(setup.parameters[2], Jump(retire), Jump(live)));
+    retire.emit(StoreGlobal(head, zero));
+    retire.emit(DirectCall(release, [setup.parameters.first, eight]));
+    live.emit(StoreGlobal(head, setup.parameters.first));
+    for (final path in [retire, live]) {
+      final terminal = path.emit(
+        DirectCall(fail, [setup.parameters[1], setup.parameters.last]),
+      );
+      path.finish(Unreachable(terminal));
+    }
+
+    final dispose = FunctionTarget(uri, 'dispose', .voidType, []);
+    final inspect = Block(), drop = Block(), done = Block();
+    final address = inspect.emit(LoadGlobal(head));
+    inspect.finish(
+      Branch(inspect.emit(Equals(address, zero)), Jump(done), Jump(drop)),
+    );
+    drop.emit(DirectCall(release, [address, eight]));
+    drop.finish(Jump(done));
+    done.finish(const Return());
+
+    final root = FunctionTarget(uri, 'root', .integer, [.boolean, .boolean]);
+    final start = Block(root.parameterTypes),
+        second = Block(),
+        go = Block(),
+        bad = Block(),
+        caught = Block();
+    final page = start.emit(DirectCall(reserve, [eight]));
+    start.finish(
+      Branch(start.emit(Equals(page, zero)), Jump(bad), Jump(second)),
+    );
+    final scratch = second.emit(DirectCall(reserve, [eight]));
+    second.finish(
+      Branch(second.emit(Equals(scratch, zero)), Jump(bad), Jump(go)),
+    );
+    bad.finish(Throw(const Constant.string('no storage')));
+    go.emit(StoreGlobal(marker, const Constant.integer(42)));
+    go.finish(
+      Invoke(
+        DirectCall(attempt, [page, scratch, ...start.parameters]),
+        onReturn: null,
+        onThrow: Jump(caught),
+      ),
+    );
+    caught.emit(DirectCall(dispose, []));
+    caught.finish(Return(caught.emit(LoadGlobal(marker))));
+    final ir = IrProgram(
+      [],
+      [
+        IrFunction(root, [start, second, go, bad, caught]),
+        IrFunction(attempt, [setup, retire, live]),
+        IrFunction(fail, [choice, closed, open]),
+        IrFunction(dispose, [inspect, drop, done]),
+      ],
+      globals: [head, marker],
+      externals: [
+        IrExternal(
+          reserve,
+          effects: const {.writesStorage},
+          memory: const .zeroed(0),
+        ),
+        IrExternal(
+          release,
+          effects: const {.writesStorage},
+          memory: const .release(0, 1),
+          capturesArguments: false,
+        ),
+      ],
+    );
+    final facts = ProgramFlow(ir, [
+      (
+        target: root,
+        arguments: [FlowValue.unknown(.boolean), FlowValue.unknown(.boolean)],
+      ),
+    ], memoryLayout: _layout).facts;
+    expect(facts.returnedBy(root).constant, const Constant.integer(42));
+  });
+
   for (final hasSecond in [false, true]) {
     test('cleanup visits each known non-null node (second=$hasSecond)', () {
       final uri = Uri.parse('memory:nullable-cleanup');

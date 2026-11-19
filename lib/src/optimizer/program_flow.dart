@@ -1860,7 +1860,6 @@ final class ProgramFlow(
       if (lanes == null &&
           (alternatives != null ||
               previous != null &&
-                  activation.firstExceptionSite != source &&
                   previous.exit.losesNativeExtent(state))) {
         lanes = activation.exceptionSources = {};
         if (previous != null) {
@@ -1895,38 +1894,40 @@ final class ProgramFlow(
               !_nativeActivations.contains(activation)) {
             snapshot.escape([exception, stackTrace]);
           }
-          final lane = lanes[pair.key];
-          if (lane != null) {
-            summaryChanged |= lane.join(
+          // A throw site can execute both before and after a mapping is
+          // retired. Reuse compatible summaries across sites and keep at most
+          // two distinct exit names per original source across repeated calls.
+          final key = pair.key;
+          final preferred = lanes[key];
+          final compatible = lanes.values.where(
+            (lane) => !lane.exit.losesNativeExtent(snapshot),
+          );
+          final exact =
+              preferred != null && !preferred.exit.losesNativeExtent(snapshot);
+          if (!exact &&
+              compatible.any(
+                (lane) =>
+                    !lane.entry.copy().join(entryState) &&
+                    !lane.exit.copy().join(snapshot),
+              )) {
+            continue;
+          }
+          final shared = exact ? preferred : compatible.firstOrNull;
+          final other = switch (key) {
+            (_LifetimeExit.alternate, final Object original) => original,
+            _ => (_LifetimeExit.alternate, key),
+          };
+          final destination = preferred == null ? key : other;
+          final summary = shared ?? lanes[destination];
+          if (summary == null) {
+            lanes[destination] = _StateSummary(entryState, snapshot);
+            summaryChanged = true;
+          } else {
+            summaryChanged |= summary.join(
               entryState,
               snapshot,
               widen: activation.recursive,
             );
-          } else {
-            // Several throw sites can leave the same mappings live. Join
-            // their ordinary state but keep incompatible extents separate,
-            // so cleanup can still select a live mapping.
-            final compatible = lanes.values.where(
-              (lane) => !lane.exit.losesNativeExtent(snapshot),
-            );
-            if (compatible.any(
-              (lane) =>
-                  !lane.entry.copy().join(entryState) &&
-                  !lane.exit.copy().join(snapshot),
-            )) {
-              continue;
-            }
-            final shared = compatible.firstOrNull;
-            if (shared == null) {
-              lanes[pair.key] = _StateSummary(entryState, snapshot);
-              summaryChanged = true;
-            } else {
-              summaryChanged |= shared.join(
-                entryState,
-                snapshot,
-                widen: activation.recursive,
-              );
-            }
           }
         }
       } else {
@@ -5562,6 +5563,8 @@ Set<Object>? _callableOrigins(FlowValue value) {
   }
   return origins.isEmpty ? null : origins;
 }
+
+enum _LifetimeExit { alternate }
 
 final class _StateSummary(FlowState before, FlowState after) {
   final FlowState entry = before.copy();
