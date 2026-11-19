@@ -189,6 +189,10 @@ final class FlowValue {
   /// Bounds for values whose identity or contents are not established.
   final Set<ValueType> unknownTypes;
 
+  /// Runtime class declarations permitted by an earlier virtual dispatch on
+  /// the unknown alternatives. Null admits every class within their bounds.
+  final Set<ClassType>? unknownReceiverClasses;
+
   /// Unknown references originating outside this execution's local heap.
   ///
   /// These bounds can alias modeled objects only through a capability already
@@ -215,6 +219,7 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -228,6 +233,7 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -241,6 +247,7 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -254,6 +261,7 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
       unknownTypes = Set.unmodifiable({type}),
       externalUnknownTypes = external && _mayCarryReference(type)
           ? Set.unmodifiable({type})
@@ -269,6 +277,7 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -302,10 +311,14 @@ final class FlowValue {
     Set<FlowObject> managedBackings = const {},
     this.hasUnknownBacking = false,
     Set<ValueType> rawBackingTypes = const {},
+    Set<ClassType>? receiverClasses,
   ]) : _constants = Map.unmodifiable(constants),
        objects = Set.unmodifiable(objects),
        managedBackings = Set.unmodifiable(managedBackings),
        rawBackingTypes = Set.unmodifiable(rawBackingTypes),
+       unknownReceiverClasses = receiverClasses == null || unknownTypes.isEmpty
+           ? null
+           : Set.unmodifiable(receiverClasses),
        unknownTypes = Set.unmodifiable(unknownTypes),
        externalUnknownTypes = Set.unmodifiable(
          externalUnknownTypes
@@ -335,6 +348,7 @@ final class FlowValue {
           managedBackings,
           hasUnknownBacking,
           rawBackingTypes,
+          unknownReceiverClasses,
         );
 
   /// Constants identified structurally, without invoking user equality.
@@ -434,6 +448,7 @@ final class FlowValue {
         managedBackings,
         hasUnknownBacking,
         rawBackingTypes,
+        unknownReceiverClasses,
       );
     }
     if (existing == null) return this;
@@ -452,7 +467,10 @@ final class FlowValue {
   /// An exact allocation cannot gain a subclass merely through a broader view.
   /// Physical carriers of functions and records belong to representation.
   bool mayHaveInstance(ClassType type) {
-    if (unknownTypes.any((bound) => bound.mayHaveInstance(type))) return true;
+    if ((unknownReceiverClasses?.contains(type.declaration) ?? true) &&
+        unknownTypes.any((bound) => bound.mayHaveInstance(type))) {
+      return true;
+    }
     return [
       ...constants.map((value) => value.runtimeValueType),
       ...objects.map((value) => value.type),
@@ -482,6 +500,7 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
   }
 
@@ -529,6 +548,7 @@ final class FlowValue {
       backings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
   }
 
@@ -574,6 +594,7 @@ final class FlowValue {
             managedBackings,
             hasUnknownBacking,
             rawBackingTypes,
+            unknownReceiverClasses,
           )
         : this;
   }
@@ -597,6 +618,7 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
   }
 
@@ -618,6 +640,7 @@ final class FlowValue {
               const {},
               false,
               value.rawBackingTypes,
+              value.unknownReceiverClasses,
             ),
           )
           .join(value.references);
@@ -638,6 +661,7 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
   }
 
@@ -668,6 +692,7 @@ final class FlowValue {
       backings,
       unknown,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
   }
 
@@ -711,6 +736,7 @@ final class FlowValue {
       const {},
       false,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
     return FlowValue.joined([
       retained,
@@ -759,16 +785,17 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       retained,
+      unknownReceiverClasses,
     );
   }
 
-  /// Selects the known alternatives whose runtime class supplied a dispatch
-  /// target. Unknown bounds still describe all instances allowed by the bound.
+  /// Selects the alternatives whose runtime class supplied a dispatch target.
+  /// A selected unknown receiver retains its class when the method dispatches again.
   FlowValue forReceiverClass(ClassType type) {
     if (type == ValueType.nullClass) {
       return FlowValue.constant(const Constant.nullValue()).withSources(sources);
     }
-    final selected = check(type).value;
+    final selected = check(type, dispatchClass: type).value;
     bool matches(ValueType actual) =>
         actual == type || actual is FunctionType && type == ValueType.function;
     if (selected.constants.every((c) => matches(c.provenValueType)) &&
@@ -789,6 +816,7 @@ final class FlowValue {
       selected.managedBackings,
       selected.hasUnknownBacking,
       selected.rawBackingTypes,
+      selected.unknownReceiverClasses,
     );
   }
 
@@ -801,6 +829,7 @@ final class FlowValue {
   ({FlowValue value, bool mayFail}) check(
     ValueType type, {
     bool negated = false,
+    ClassType? dispatchClass,
     bool runtimeTypes = false,
     ValueType? Function(FlowObject object)? runtimeTypeOf,
   }) {
@@ -884,6 +913,14 @@ final class FlowValue {
     const nullValue = Constant.nullValue();
     for (final storedBound in unknownTypes) {
       final bound = runtimeTypes ? storedBound.runtimeValueBound : storedBound;
+      if (dispatchClass != null &&
+          (!(unknownReceiverClasses?.contains(dispatchClass.declaration) ??
+                  true) ||
+              !bound.mayHaveInstance(dispatchClass) &&
+                  !(dispatchClass == ValueType.function &&
+                      bound.nonNullable is FunctionType))) {
+        continue;
+      }
       void addUnknown(ValueType bound) {
         unknown.add(bound);
         (externalUnknownTypes.contains(storedBound) ? external : unrestricted)
@@ -944,6 +981,9 @@ final class FlowValue {
               backings,
               hasUnknownBacking,
               rawBackingTypes,
+              dispatchClass == null
+                  ? unknownReceiverClasses
+                  : {dispatchClass.declaration},
             ),
       mayFail: mayFail,
     );
@@ -979,6 +1019,8 @@ final class FlowValue {
     final scalars = <ValueType, Object>{};
     final addresses = <(Object, ValueType), FlowAddress>{};
     var integers = values.first.integers;
+    Set<ClassType>? receiverClasses = {};
+
     for (final (index, value) in values.indexed) {
       if (index != 0) {
         final other = value.integers;
@@ -993,6 +1035,13 @@ final class FlowValue {
           hasBacking &&
           (value.hasUnknownBacking || value.managedBackings.isEmpty);
       unknown.addAll(value.unknownTypes);
+      if (value.unknownTypes.isNotEmpty) {
+        if (value.unknownReceiverClasses case final allowed?) {
+          receiverClasses?.addAll(allowed);
+        } else {
+          receiverClasses = null;
+        }
+      }
       external.addAll(value.externalUnknownTypes);
       unrestricted.addAll(
         value.unknownTypes.difference(value.externalUnknownTypes),
@@ -1004,6 +1053,7 @@ final class FlowValue {
         final type = entry.value.type;
         if (scalars.containsKey(type) && scalars[type] != entry.key) {
           unknown.add(type);
+          if (type is ClassType) receiverClasses?.add(type.declaration);
         } else {
           scalars[type] = entry.key;
         }
@@ -1043,6 +1093,7 @@ final class FlowValue {
       backings,
       unknownBacking,
       rawBackings,
+      receiverClasses,
     );
   }
 
@@ -1061,6 +1112,14 @@ final class FlowValue {
           rawBackingTypes.containsAll(other.rawBackingTypes) &&
           addresses.length == other.addresses.length &&
           addresses.containsAll(other.addresses) &&
+          (unknownReceiverClasses == null
+              ? other.unknownReceiverClasses == null
+              : other.unknownReceiverClasses != null &&
+                    unknownReceiverClasses!.length ==
+                        other.unknownReceiverClasses!.length &&
+                    unknownReceiverClasses!.containsAll(
+                      other.unknownReceiverClasses!,
+                    )) &&
           unknownTypes.length == other.unknownTypes.length &&
           unknownTypes.containsAll(other.unknownTypes) &&
           externalUnknownTypes.length == other.externalUnknownTypes.length &&
@@ -1079,6 +1138,9 @@ final class FlowValue {
     Object.hashAllUnordered(rawBackingTypes),
     Object.hashAllUnordered(addresses),
     Object.hashAllUnordered(unknownTypes),
+    unknownReceiverClasses == null
+        ? null
+        : Object.hashAllUnordered(unknownReceiverClasses!),
     Object.hashAllUnordered(externalUnknownTypes),
     Object.hashAllUnordered(sources),
     _integers,

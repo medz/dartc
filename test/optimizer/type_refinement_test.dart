@@ -171,6 +171,25 @@ void main() {
     ]).use((input) async => (await Lowering().lower(input)).program);
   });
 
+  test(
+    'open nested dispatch returns only values from the selected receiver',
+    () {
+      final read = sourceProgram.functions.singleWhere(
+        (body) => body.target.name == 'readOpen',
+      );
+      final facts = ProgramFlow(sourceProgram, [
+        (
+          target: read.target,
+          arguments: [FlowValue.unknown(read.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(
+        facts.returnedBy(read.target).integers,
+        FlowIntegerRange(1, 3, strideBits: 1, residue: 1),
+      );
+    },
+  );
+
   test('open generic dispatch excludes unrelated exact constant receivers', () {
     final function = sourceProgram.functions.singleWhere(
       (body) => body.target.name == 'readCount',

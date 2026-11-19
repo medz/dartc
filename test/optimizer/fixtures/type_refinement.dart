@@ -58,3 +58,18 @@ int nullableInput(Object? value) => nullResult<Object?>(value);
 
 abstract class Marker();
 bool possibleInterface(Reader value) => value is Marker;
+
+class DelegatingReader() {
+  int read() => readValue();
+  int readValue() => 1;
+}
+
+class IndependentReader() implements DelegatingReader {
+  @override
+  int read() => 3;
+
+  @override
+  int readValue() => 9;
+}
+
+int readOpen(DelegatingReader reader) => reader.read();

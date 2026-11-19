@@ -4458,12 +4458,18 @@ final class ProgramFlow(
       if (nominal is ClassType && seen.add(nominal)) yield nominal;
     }
     for (final bound in value.unknownTypes) {
-      if (bound.mayBeNull && seen.add(ValueType.nullClass)) {
+      bool allowed(ClassType type) =>
+          value.unknownReceiverClasses?.contains(type.declaration) ?? true;
+      if (bound.mayBeNull &&
+          allowed(ValueType.nullClass) &&
+          seen.add(ValueType.nullClass)) {
         yield ValueType.nullClass;
       }
       if (bound.nonNullable is FunctionType ||
           bound.nonNullable == ValueType.function) {
-        if (seen.add(ValueType.function)) yield ValueType.function;
+        if (allowed(ValueType.function) && seen.add(ValueType.function)) {
+          yield ValueType.function;
+        }
         continue;
       }
       const primitiveTypes = <ClassType>[
@@ -4484,7 +4490,7 @@ final class ProgramFlow(
                 declaration.type,
         ],
       )) {
-        if (seen.add(type)) yield type;
+        if (allowed(type) && seen.add(type)) yield type;
       }
     }
   }
