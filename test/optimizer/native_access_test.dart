@@ -637,6 +637,23 @@ void main() {
     },
   );
 
+  test('the selected slot in a word with only its sign bit set is 63', () {
+    final root = FunctionTarget(_uri, 'marked', .integer, [.integer]);
+    final entry = Block([.integer]), found = Block(), missing = Block();
+    final slot = entry.parameters.single;
+    final count = entry.emit(IntBinary(.bitAnd, slot, const Constant.integer(63)));
+    final bit = entry.emit(IntBinary(.shiftLeft, const Constant.integer(1), count));
+    final present = entry.emit(IntBinary(.bitAnd, const Constant.integer(-0x8000000000000000), bit));
+    entry.finish(Branch(entry.emit(Equals(present, const Constant.integer(0))), Jump(missing), Jump(found)));
+    missing.finish(Throw(const Constant.string('not marked')));
+    found.finish(Return(slot));
+    final program = IrProgram([], [IrFunction(root,[entry,found,missing])]);
+    final facts = ProgramFlow(program, [
+      (target:root,arguments:[FlowValue.integerRange(FlowIntegerRange(0,63))]),
+    ]).facts;
+    expect((facts.returnedBy(root).constant as ScalarConstant?)?.value, 63);
+  });
+
   test('a reference recovered inside a page retains its actual address', () {
     final map = FunctionTarget(_uri, 'map', .integer, [.integer]);
     final addressOf = FunctionTarget(_uri, 'addressOf', .integer, [.object]);

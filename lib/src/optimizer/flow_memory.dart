@@ -559,6 +559,7 @@ final class FlowMemory {
     int size, {
     FlowValue retained = const .bottom(),
     bool extentProven = false,
+    bool keepKnownZeroes = false,
   }) {
     // An independently proven dynamic extent may extend beyond this version's
     // guaranteed prefix. Only sparse facts intersecting the store can change.
@@ -566,7 +567,7 @@ final class FlowMemory {
     final end = offset + size;
     final zeroes = <(int, int)>[];
     for (final (low, high) in _zeroes) {
-      if (high <= offset || low >= end) {
+      if (keepKnownZeroes || high <= offset || low >= end) {
         zeroes.add((low, high));
       } else {
         if (low < offset) zeroes.add((low, offset));
@@ -575,7 +576,11 @@ final class FlowMemory {
     }
     var bytes = _bytes;
     for (final key in _bytes.keys) {
-      if (offset <= key && key < end) bytes = bytes.withoutKey(key);
+      if (key < offset || key >= end) continue;
+      if (keepKnownZeroes && bytes[key] == _zero) continue;
+      bytes = keepKnownZeroes && _defaultAt(key) == _zero
+          ? bytes.withEntry(key, _unknown)
+          : bytes.withoutKey(key);
     }
     return FlowMemory._(
       start,

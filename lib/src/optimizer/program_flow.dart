@@ -2163,6 +2163,22 @@ final class ProgramFlow(
             ) ||
             changed;
       }
+      for (final entry in refinements?.entries ?? const <MapEntry<Value, FlowIntegerRange>>[]) {
+        if (entry.value.constant != 0) continue;
+        final original = read(entry.key);
+        if (original.addresses.length != 1 || original.unknownTypes.isNotEmpty ||
+            original.objects.isNotEmpty || original.constants.any((c) => c is! ScalarConstant || c.value != 0)) continue;
+        final address = original.addresses.single;
+        if (address case FlowAddress(base: FlowRegion(:final allocation), offset: 0, retainedBase: false)) {
+          if (!identical(allocation.activation, activation) || allocation.site is! DirectCall) continue;
+          final call = allocation.site as DirectCall;
+          if (program.implementationOf(call.target) case IrExternal(memory: ZeroedMemory())) {
+            if (identical(entry.key, call) || original.sources.contains(FlowSource(call, activation))) {
+              nextState.discardFailedMapping(allocation);
+            }
+          }
+        }
+      }
       nextState.refineIntegers({
         for (final entry in nextRanges.entries)
           FlowSource(entry.key, activation): entry.value,
@@ -6601,6 +6617,9 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
     ]) {
       if (excluded == null || !range.contains(excluded)) continue;
       if (range.constant == excluded) return null;
+      if (excluded == 0 && value is IntBinary && value.operator == .bitAnd) {
+        if (!_refineSetBit(value, read, result)) return null;
+      }
       if (range.lower == excluded) {
         result[value] = FlowIntegerRange(excluded + 1, range.upper);
       } else if (range.upper == excluded) {
@@ -6618,6 +6637,45 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
     return result;
   }
   return {};
+}
+
+// On the nonzero edge of mask & (1 << count), only set bits can be selected.
+// A masked count restricts the original index when it already fits that mask.
+bool _refineSetBit(
+  IntBinary test,
+  FlowValue Function(Value) read,
+  Map<Value, FlowIntegerRange> result,
+) {
+  for (final (bits, shifted) in [(test.left, test.right), (test.right, test.left)]) {
+    if (shifted is! IntBinary || shifted.operator != .shiftLeft) continue;
+    final mask = read(bits), one = read(shifted.left), count = read(shifted.right);
+    if ([mask, one, count, read(shifted), read(test)].any(
+      (v) => v.managedBackings.isNotEmpty || v.hasUnknownBacking,
+    )) continue;
+    final pattern = mask.integers?.constant, range = count.integers;
+    if (one.integers?.constant != 1 || pattern == null || range == null) continue;
+    FlowIntegerRange? positions;
+    for (var pos = 0; pos < 64; pos++) {
+      if ((pattern & (1 << pos)) == 0 || !range.contains(pos)) continue;
+      final single = FlowIntegerRange(pos, pos);
+      positions = positions == null ? single : positions.join(single);
+    }
+    if (positions == null) return false;
+    result[shifted.right] = positions;
+    if (shifted.right case IntBinary(operator: .bitAnd, :final left, :final right)) {
+      for (final (index, maskCount) in [(left, right), (right, left)]) {
+        if (maskCount is! ScalarConstant || maskCount.value != 63) continue;
+        final original = read(index), indexRange = original.integers;
+        if (original.managedBackings.isNotEmpty || original.hasUnknownBacking ||
+            indexRange == null || indexRange.lower < 0 || indexRange.upper >= 64) continue;
+        final narrowed = indexRange.intersect(positions);
+        if (narrowed == null) return false;
+        result[index] = narrowed;
+      }
+    }
+    break;
+  }
+  return true;
 }
 
 ({FlowValue value, bool mayThrow})? _integerOperation(

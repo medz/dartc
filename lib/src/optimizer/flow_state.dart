@@ -1333,6 +1333,14 @@ final class FlowState {
     );
   }
 
+  /// A fresh, non-repeated mapping does not exist on the zero-return path.
+  /// Earlier mappings at a reused site still belong to the incoming state.
+  void discardFailedMapping(FlowObject region) {
+    if (_regions[region]?.summary != false) return;
+    _regions = _regions.withoutKey(region);
+    _writes = _writes.withoutKey(region);
+  }
+
   /// Captures of this allocation, preserving shared cell identities.
   List<FlowValue>? capturesOf(FlowObject object) {
     if (object.callableStorage case final storage?) {
@@ -2533,6 +2541,7 @@ final class FlowState {
               offsets.lower,
               offsets.upper - offsets.lower + size!,
               retained: stored,
+              keepKnownZeroes: zeroBytes,
             ));
       var updated = (native ? next._regions : next._objects)[object]!
           .withMemory(

@@ -136,7 +136,7 @@ final class Page(
     if (_pending == 0) return null;
     while (_cursor < capacity) {
       final slot = _cursor++, bit = 1 << (slot & 63);
-      if (_pending & bit == 0) continue;
+      if (_allocated & bit == 0 || _pending & bit == 0) continue;
       _pending &= ~bit;
       return objects.objectAt(this, slot);
     }
@@ -300,7 +300,8 @@ final class Heap(
       roots.traceConditional(this, this);
       for (var page = _pages; page != null; page = page._next) {
         for (var slot = 0; slot < page.capacity; slot++) {
-          if (page._marked & (1 << (slot & 63)) == 0) continue;
+          final bit = 1 << (slot & 63);
+          if (page._allocated & bit == 0 || page._marked & bit == 0) continue;
           final object = objects.objectAt(page, slot);
           objects.traceConditional(object, this, this);
         }
@@ -313,7 +314,8 @@ final class Heap(
     roots.clearWeak(this);
     for (var page = _pages; page != null; page = page._next) {
       for (var slot = 0; slot < page.capacity; slot++) {
-        if (page._marked & (1 << (slot & 63)) == 0) continue;
+        final bit = 1 << (slot & 63);
+        if (page._allocated & bit == 0 || page._marked & bit == 0) continue;
         final object = objects.objectAt(page, slot);
         objects.clearWeak(object, this);
       }
