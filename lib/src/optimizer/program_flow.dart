@@ -332,7 +332,11 @@ final class ProgramFlow(
       entry.target,
       () => _Activation(program.implementationOf(entry.target)!),
     );
-    activation.repeated |= open;
+    if (open && !activation.repeated) {
+      activation.repeated = true;
+      activation.inputRevision++;
+      _pending.add(activation);
+    }
     activation.mergeEnvironment(const {});
     final arguments = entry.arguments.map((value) => value.asExternal()).toList();
     _supply(activation, arguments, FlowState(
@@ -687,6 +691,18 @@ final class ProgramFlow(
     // summary of subsequent allocations while that name remains reachable.
     final regionNames = <(FlowObject, bool), FlowObject>{};
     final reservedRegions = <FlowObject, FlowObject>{};
+    if (normalReturns != null && callee.hasMultipleReturns &&
+        !callee.hasCurrentExits) {
+      callee.normalReturns ??= {};
+    }
+    if (!callee.hasCurrentExits) {
+      // The argument type check precedes the call and can throw even while
+      // the body is waiting to be evaluated for its new input.
+      return failedCheck
+          ? FlowResult(exceptional: input.copy(), exception: _typeError)
+          : _unreachable;
+    }
+
     FlowObject mapObject(FlowObject object, FlowState? exit) {
       if (object.site is NativeDataAddress ||
           object.site is ModuleObjectReference ||
@@ -780,12 +796,8 @@ final class ProgramFlow(
           .withSources(sources);
     }
 
-    // Re-evaluation will notify the caller even if only the solved input
-    // changed. An older result describes a different invocation.
-    bool stale(_StateSummary? summary) => summary == null ||
-        summary.inputRevision != callee.inputRevision;
     FlowState? apply(_StateSummary? summary, {bool normal = false}) =>
-        summary == null || stale(summary)
+        summary == null
         ? null
         : input.applySummary(
             summary.entry,
@@ -807,7 +819,6 @@ final class ProgramFlow(
       if (callee.normalSummary == null) callee.normalReturns ??= {};
       if (callee.normalReturns case final exits?) {
         for (final returned in exits.values) {
-          if (stale(returned.state)) continue;
           normalReturns.add((
             mapValue(returned.value, exit: returned.state.exit),
             apply(returned.state, normal: true)!,
@@ -817,15 +828,13 @@ final class ProgramFlow(
     }
     final thrownState = apply(callee.exceptionalSummary);
     final sourceExits = callee.exceptionSources;
-    if (thrownState != null && sourceExits != null && !sourceExits.values.any(stale)) {
+    if (thrownState != null && sourceExits != null) {
       _exceptionSources[thrownState] = {
         for (final pair in sourceExits.entries) pair.key: apply(pair.value)!,
       };
     }
     final invoked = FlowResult(
-      value: stale(callee.normalSummary)
-          ? const FlowValue.bottom()
-          : mapValue(callee.returned, exit: callee.normal),
+      value: mapValue(callee.returned, exit: callee.normal),
       normal: apply(callee.normalSummary, normal: true),
       normalRanges: callee.normalParameterRanges.isEmpty
           ? const {}
@@ -1624,7 +1633,7 @@ final class ProgramFlow(
     }
     // Recursive supply may grow activation.input while this body is evaluated.
     // Each published exit remains paired with the entry actually analyzed.
-    final inputRevision = activation.inputRevision;
+    activation.beginEvaluation();
     final entryState = activation.input!.copy();
     // A changed callee input can select a different summary and allocation
     // identity. Rebuild local SSA values with their point states so a previous
@@ -2264,7 +2273,7 @@ final class ProgramFlow(
                 return !unwind(alternative).join(previous.exit);
               });
           if (!covered) {
-            lanes[activation.firstExceptionSite!] = _StateSummary(previous.entry, previous.exit, previous.inputRevision);
+            lanes[activation.firstExceptionSite!] = _StateSummary(previous.entry, previous.exit);
           }
         }
         summaryChanged = true;
@@ -2288,7 +2297,6 @@ final class ProgramFlow(
           if (!exact &&
               compatible.any(
                 (lane) =>
-                    lane.inputRevision == inputRevision &&
                     !lane.entry.copy().join(entryState) &&
                     !lane.exit.copy().join(snapshot),
               )) {
@@ -2305,14 +2313,12 @@ final class ProgramFlow(
             lanes[destination] = _StateSummary(
               entryState,
               snapshot,
-              inputRevision,
             );
             summaryChanged = true;
           } else {
             summaryChanged |= summary.join(
               entryState,
               snapshot,
-              inputRevision: inputRevision,
               widen: activation.recursive,
             );
           }
@@ -2329,14 +2335,13 @@ final class ProgramFlow(
       activation.exception = joinedException;
       activation.stackTrace = joinedTrace;
       if (activation.exceptionalSummary == null) {
-        activation.exceptionalSummary = _StateSummary(entryState, state, inputRevision);
+        activation.exceptionalSummary = _StateSummary(entryState, state);
         summaryChanged = true;
       } else {
         summaryChanged =
             activation.exceptionalSummary!.join(
               entryState,
               state,
-              inputRevision: inputRevision,
               widen: activation.recursive,
             ) ||
             summaryChanged;
@@ -2542,14 +2547,14 @@ final class ProgramFlow(
             if (summary == null) {
               exits[block] = _NormalReturn(
                 returned,
-                _StateSummary(entryState, state, inputRevision),
+                _StateSummary(entryState, state),
               );
               summaryChanged = true;
             } else {
               final joined = summary.value.join(returned, widen: activation.recursive);
               summaryChanged |= joined != summary.value;
               summary.value = joined;
-              summaryChanged = summary.state.join(entryState, state, inputRevision: inputRevision, widen: activation.recursive) || summaryChanged;
+              summaryChanged = summary.state.join(entryState, state, widen: activation.recursive) || summaryChanged;
             }
           }
           final joined = activation.returned.join(
@@ -2568,7 +2573,7 @@ final class ProgramFlow(
           };
           if (activation.normalSummary == null) {
             activation.normalParameterRanges.addAll(parameterRanges);
-            activation.normalSummary = _StateSummary(entryState, state, inputRevision);
+            activation.normalSummary = _StateSummary(entryState, state);
             summaryChanged = true;
           } else {
             summaryChanged =
@@ -2582,8 +2587,7 @@ final class ProgramFlow(
                 activation.normalSummary!.join(
                   entryState,
                   state,
-                  inputRevision: inputRevision,
-                  widen: activation.recursive,
+                      widen: activation.recursive,
                 ) ||
                 summaryChanged;
           }
@@ -6168,8 +6172,7 @@ final class _NormalReturn(var FlowValue value, final _StateSummary state);
 
 enum _LifetimeExit { alternate }
 
-final class _StateSummary(FlowState before, FlowState after, this.inputRevision) {
-  int inputRevision;
+final class _StateSummary(FlowState before, FlowState after) {
   final FlowState entry = before.copy();
   final FlowState exit = after.copy();
   ({List<FlowValue> roots, FlowState? state})? _projection;
@@ -6186,13 +6189,11 @@ final class _StateSummary(FlowState before, FlowState after, this.inputRevision)
   }
 
 
-  bool join(FlowState before, FlowState after, {required bool widen, required int inputRevision}) {
-    final refreshed = this.inputRevision != inputRevision;
-    this.inputRevision = inputRevision;
+  bool join(FlowState before, FlowState after, {required bool widen}) {
     final changed = entry.join(before, widen: widen);
     final exitChanged = exit.join(after, widen: widen);
     if (exitChanged) _projection = null;
-    return exitChanged || changed || refreshed;
+    return exitChanged || changed;
   }
 }
 
@@ -6339,6 +6340,26 @@ final class _Activation(final IrCallable body) {
   bool _hasEnvironment = false;
   bool repeated = false;
   bool recursive = false;
+
+  int _exitRevision = -1;
+  bool get hasCurrentExits => _exitRevision == inputRevision;
+
+  // A larger input can change which calls return or throw. Keep the published
+  // SSA facts, but solve every exit and its payload against the new entry.
+  void beginEvaluation() {
+    if (hasCurrentExits) return;
+    _exitRevision = inputRevision;
+    normalSummary = null;
+    exceptionalSummary = null;
+    firstExceptionSite = null;
+    exceptionSources = null;
+    normalParameterRanges.clear();
+    normalReturns?.clear();
+    returned = const FlowValue.bottom();
+    exception = const FlowValue.bottom();
+    stackTrace = const FlowValue.bottom();
+    hasSemanticFailure = false;
+  }
 
   bool mergeEnvironment(Map<TypeParameterType, ValueType> incoming) {
     final complete = _completeEnvironment(body.target, incoming);

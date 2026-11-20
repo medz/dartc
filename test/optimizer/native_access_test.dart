@@ -14,6 +14,40 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test('clearing a native word still applies when the caller input grows', () {
+    final data = NativeData(List.filled(8, 0), alignment: 8);
+    final reset = FunctionTarget(_uri, 'reset', .voidType, []);
+    final clear = Block();
+    clear.emit(
+      StoreNative(
+        clear.emit(NativeDataAddress(data)),
+        _i64,
+        const Constant.integer(0),
+      ),
+    );
+    clear.finish(const Return());
+
+    final entry = FunctionTarget(_uri, 'entry', .integer, [.integer]);
+    final root = Block(entry.parameterTypes);
+    final address = root.emit(NativeDataAddress(data));
+    root.emit(StoreNative(address, _i64, root.parameters.single));
+    root.emit(DirectCall(reset, []));
+    root.finish(Return(root.emit(LoadNative(address, _i64))));
+    final graph = IrProgram([], [
+      IrFunction(entry, [root]),
+      IrFunction(reset, [clear]),
+    ]);
+    FlowEntry input(int value) => (
+      target: entry,
+      arguments: [FlowValue.constant(Constant.integer(value))],
+    );
+
+    final flow = ProgramFlow(graph, [input(17)], memoryLayout: _layout);
+    expect(flow.facts.returnedBy(entry).integers?.constant, 0);
+    flow.extend(entries: [input(91)]);
+    expect(flow.facts.returnedBy(entry).integers?.constant, 0);
+  });
+
   test(
     'release through a Dart call follows each previously built list node',
     () {
