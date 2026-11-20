@@ -7,6 +7,87 @@ import '../support/ir_interpreter.dart';
 final _uri = Uri.parse('memory:input-normalization');
 
 void main() {
+  test('shared writers preserve each returned closure when inputs grow', () {
+    final slot = GlobalVariable(_uri, 'slot', .integer, isLate: true);
+    final factory = FunctionTarget(
+      _uri,
+      'factory',
+      FunctionType(.integer, []),
+      [.integer],
+    );
+    final cell = CellType(.integer);
+    final closure = FunctionTarget(
+      _uri,
+      'get',
+      .integer,
+      [],
+      kind: .closure,
+      enclosing: factory,
+      sourceOffset: 1,
+      captures: [cell],
+    );
+    final get = Block(closure.parameterTypes);
+    get.finish(Return(get.emit(ReadCell(get.parameters[1]))));
+    final writer = Block(factory.parameterTypes);
+    writer.emit(StoreGlobal(slot, writer.parameters.single));
+    final storage = writer.emit(NewCell(cell, writer.parameters.single));
+    writer.finish(Return(writer.emit(MakeClosure(closure, [storage]))));
+    final functions = [
+      IrFunction(factory, [writer]),
+      IrFunction(closure, [get]),
+    ];
+    final roots = <FunctionTarget>[],
+        calls = <FunctionCall>[],
+        values = <Value>[];
+    final loads = <LoadGlobal>[];
+    for (var i = 0; i < 4; i++) {
+      final root = FunctionTarget(_uri, 'root$i', .integer, [.integer]);
+      final entry = Block(root.parameterTypes);
+      final value = entry.emit(DirectCall(factory, [entry.parameters.single]));
+      final call = entry.emit(FunctionCall(value, []));
+      loads.add(entry.emit(LoadGlobal(slot)));
+      entry.finish(Return(call));
+      functions.add(IrFunction(root, [entry]));
+      roots.add(root);
+      calls.add(call);
+      values.add(value);
+    }
+    List<FlowEntry> inputs(Iterable<FunctionTarget> targets, int value) => [
+      for (final target in targets)
+        (
+          target: target,
+          arguments: [FlowValue.constant(Constant.integer(value))],
+        ),
+    ];
+    final flow = ProgramFlow(
+      IrProgram([], functions, globals: [slot]),
+      inputs(roots, 1),
+    );
+    expect(flow.facts.activationsOf(factory), hasLength(1));
+    for (final upper in [2, 3]) {
+      for (final (targets, complete) in [
+        (roots.take(2), false),
+        (roots.skip(2), true),
+      ]) {
+        flow.extend(entries: inputs(targets, upper));
+        final facts = flow.facts;
+        expect(facts.activationsOf(factory), hasLength(complete ? 1 : 2));
+        final seen = <FlowObject>{};
+        for (var i = 0; i < roots.length; i++) {
+          final expected = FlowIntegerRange(
+            1,
+            complete || i < 2 ? upper : upper - 1,
+          );
+          expect(facts.valueOf(loads[i]).integers, expected);
+          expect(facts.returnedBy(roots[i]).integers, expected);
+          expect(facts.targetsOf(calls[i]), {closure});
+          expect(facts.hasUnknownCall(calls[i]), isFalse);
+          expect(seen.add(facts.valueOf(values[i]).objects.single), isTrue);
+        }
+      }
+    }
+  });
+
   test(
     'equivalent input graphs share a summary and restore caller identities',
     () {

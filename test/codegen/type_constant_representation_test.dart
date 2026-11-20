@@ -73,6 +73,36 @@ void main() {
     },
   );
 
+  test('checked owner arguments recover closed projected descriptors', () {
+    final storage = layout();
+    final parameter = TypeParameterType('U')..initializeBound(.number);
+    final target = FunctionTarget(null, 'memberEntry', .typeType, [
+      TypeMetadata.type,
+    ]);
+    final entry = Block(target.parameterTypes);
+    final normal = Block(), failed = Block();
+    final raw = entry.parameters.single;
+    final check = CheckedTypeArgument(parameter, raw, {parameter: raw});
+    entry.finish(Invoke(check, onReturn: Jump(normal), onThrow: Jump(failed)));
+    final reified = normal.emit(ReifyType(box.instantiate([parameter])));
+    normal.finish(Return(reified));
+    failed.finish(Return(TypeConstant(.never)));
+    final body = IrFunction(target, [entry, normal, failed],
+        typeBindings: [TypeBinding.checked(check)]);
+    final program = IrProgram(classes, [body]);
+    for (final type in [ValueType.integer, ValueType.string]) {
+      final descriptor = storage.types.constant(type);
+      final facts = ProgramFlow(program, [
+        (target: target, arguments: [FlowValue.constant(descriptor)]),
+      ], memoryLayout: storage).facts;
+      final accepted = type == ValueType.integer;
+      expect(facts.exitsOf(check), (normal: accepted, exceptional: !accepted));
+      final result = facts.returnedBy(target).constant as TypeConstant;
+      expect(result.representedType,
+          accepted ? box.instantiate([type]) : ValueType.never);
+    }
+  });
+
   test('nested type fields preserve canonical identity in analysis and interpretation', () {
     final storage = layout();
     final argument = TypeConstant(ValueType.integer);

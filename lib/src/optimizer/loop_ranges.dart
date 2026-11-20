@@ -9,6 +9,12 @@ final class LoopRanges(final IrFunction function) {
   late final dominance = ValueDominance(function);
   late final loops = <LoopRange>[];
 
+  /// Pure comparisons that can be evaluated with each predecessor's value.
+  final entryComparisons =
+      <Block, ({Equals operation, BlockParameter input, Constant constant})>{};
+
+  final guardedCalls = <DirectCall>{};
+
   this {
     for (final block in function.blocks) {
       incoming.putIfAbsent(block, () => []);
@@ -46,7 +52,52 @@ final class LoopRanges(final IrFunction function) {
         continue;
       }
       loops.add(LoopRange(this, header, blocks, backs));
+      if (_comparison(header) case final comparison?) {
+        entryComparisons[header] = comparison;
+      }
     }
+    for (final block in function.blocks) {
+      final source = switch (block.end) {
+        final Jump jump when block.instructions.lastOrNull is DirectCall => (
+          block.instructions.last as DirectCall,
+          jump,
+        ),
+        Invoke(operation: final DirectCall call, onReturn: final jump?) => (
+          call,
+          jump,
+        ),
+        _ => null,
+      };
+      if (source == null) continue;
+      final (call, jump) = source;
+      final guard = _comparison(jump.target);
+      if (guard == null ||
+          jump.arguments[jump.target.parameters.indexOf(guard.input)] != call) {
+        continue;
+      }
+      guardedCalls.add(call);
+      entryComparisons[jump.target] = guard;
+    }
+  }
+
+  static ({Equals operation, BlockParameter input, Constant constant})?
+  _comparison(Block header) {
+    if (header.end case Branch(condition: final Equals comparison)
+        when header.instructions.length == 1 &&
+            header.instructions.single == comparison &&
+            comparison.effects.isEmpty) {
+      for (final (input, constant) in [
+        (comparison.left, comparison.right),
+        (comparison.right, comparison.left),
+      ]) {
+        if (input is BlockParameter &&
+            header.parameters.contains(input) &&
+            constant is Constant) {
+          return (operation: comparison, input: input, constant: constant);
+        }
+      }
+    }
+    return null;
   }
 }
 

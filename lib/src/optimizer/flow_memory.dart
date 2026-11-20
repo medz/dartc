@@ -12,28 +12,76 @@ import 'state_map.dart';
 
 typedef NativeWordProofs = (bool Function(FlowValue), bool Function(FlowValue));
 
+/// Byte intervals a call may have written. Whole-object changes include a
+/// new mapping, release, and any access whose destination is unknown.
+final class FlowWrites {
+  final StateMap<int, int>? _ranges;
+  const FlowWrites.all() : _ranges = null;
+  const FlowWrites._(this._ranges);
+  factory FlowWrites.bytes(int offset, int end) =>
+      FlowWrites._(const StateMap<int, int>.empty().withEntry(offset, end));
+
+  FlowWrites join(FlowWrites other) {
+    final ranges = _ranges, incoming = other._ranges;
+    if (ranges == null || identical(ranges, incoming)) return this;
+    if (incoming == null) return other;
+    var joined = ranges;
+    for (final item in incoming.entries) {
+      var start = item.key, end = item.value;
+      final exact = joined[start];
+      if (exact != null && exact >= end) continue;
+      for (final old in joined.entries) {
+        if (old.value < start || old.key > end) continue;
+        if (old.key < start) start = old.key;
+        if (old.value > end) end = old.value;
+        joined = joined.withoutKey(old.key);
+      }
+      joined = joined.withEntry(start, end);
+    }
+    return joined == ranges ? this : FlowWrites._(joined);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is FlowWrites && _ranges == other._ranges;
+  @override
+  int get hashCode => _ranges.hashCode;
+}
+
 /// Byte facts for one allocation, without materializing its unused zeroes.
 final class FlowMemory {
   final int start;
+  /// The number of bytes present on every live alternative.
   final int? length;
+
+  /// The largest complete extent. Releasing only [length] may leave a tail.
+  final int? maximumLength;
   final List<(int, int)> _zeroes;
   final StateMap<int, _Byte> _bytes;
   final FlowValue _retained;
-  // Byte-wise joins need not preserve the encoding of a whole native word.
-  // Keep its alternatives only while every path supplies all eight bytes.
+  // Correlations between bytes of a complete native 64-bit integer store.
+  // A join of zero and an address can retain both complete words even when
+  // the individual bytes no longer decode to either value.
   final StateMap<int, FlowValue> _words;
 
+  // Members shared a literal-zero row on every predecessor. Their other
+  // alternatives may have different address bases or displacements.
   final _WordGroups _groups;
   Map<int, int> get _presence => _groups.members;
 
-  new(this.start, this.length)
-    : _zeroes = length == null || length == 0
+  new(this.start, this.length, {int? maximumLength})
+    : maximumLength = maximumLength ?? length,
+      _zeroes = length == null || length == 0
           ? const []
           : [(start, start + length)],
       _bytes = const .empty(),
       _retained = const .bottom(),
       _words = const .empty(),
-      _groups = _WordGroups.empty;
+      _groups = _WordGroups.empty {
+    if (maximumLength != null && (length == null || maximumLength < length!)) {
+      throw ArgumentError('A maximum extent must cover its guaranteed prefix.');
+    }
+  }
 
   /// Entry bytes supplied by an explicit storage contract; null means unknown.
   factory bytes(List<int?> bytes) {
@@ -54,6 +102,7 @@ final class FlowMemory {
     return FlowMemory._(
       0,
       bytes.length,
+      bytes.length,
       [(0, bytes.length)],
       StateMap.fromEntries(values),
       const .bottom(),
@@ -63,6 +112,7 @@ final class FlowMemory {
   new _(
     this.start,
     this.length,
+    this.maximumLength,
     this._zeroes,
     this._bytes,
     this._retained, [
@@ -70,22 +120,28 @@ final class FlowMemory {
     _WordGroups? groups,
   ]) : _groups = groups ?? _WordGroups.empty;
 
-  StateMap<int, FlowValue> _untouchedWords(int offset, int size) {
-    var keep = _words;
-    if (keep.isEmpty || size == 0) return keep;
+  StateMap<int, T> _untouched<T extends Object>(
+    StateMap<int, T> facts,
+    int offset,
+    int size,
+  ) {
+    var keep = facts;
+    if (facts.isEmpty || size == 0) return keep;
     final end = offset + size;
     if (size <= 8) {
       for (var key = offset - 7; key < end; key++) {
         keep = keep.withoutKey(key);
       }
     } else {
-      for (final key in _words.keys) {
+      for (final key in facts.keys) {
         if (key < end && offset < key + 8) keep = keep.withoutKey(key);
       }
     }
     return keep;
   }
 
+  // Only members still bound to this read may transfer a later test to their
+  // siblings. A semantic write always drops the affected membership.
   FlowMemory rememberWord(int offset, FlowSource source) {
     if (_groups.links[offset] == null) return this;
     final word = _words[offset]!;
@@ -98,6 +154,7 @@ final class FlowMemory {
         : FlowMemory._(
             start,
             length,
+            maximumLength,
             _zeroes,
             _bytes,
             _retained,
@@ -146,6 +203,7 @@ final class FlowMemory {
         : FlowMemory._(
             start,
             length,
+            maximumLength,
             _zeroes,
             _bytes,
             _retained,
@@ -177,8 +235,7 @@ final class FlowMemory {
       for (final difference in _words.differences(other._words)) difference.key,
     }) {
       if (words[offset] == null) continue;
-      final a = _presenceOf(offset, proofs?.$1),
-          b = other._presenceOf(offset, proofs?.$2);
+      final a = _presenceOf(offset, proofs?.$1), b = other._presenceOf(offset, proofs?.$2);
       if (a == null || b == null || a is bool && b is bool && a == b) continue;
       (bins[(a, b)] ??= []).add(offset);
     }
@@ -263,7 +320,6 @@ final class FlowMemory {
     for (final boundary in {
       for (final (begin, end) in _zeroes) ...[begin, end],
       for (final byte in _bytes.keys) ...[byte, byte + 1],
-      for (final word in _words.keys) ...[word, word + 8],
     }) {
       // A read window changes only when it crosses a byte-fact boundary.
       for (var index = 0; index < size; index++) {
@@ -286,10 +342,35 @@ final class FlowMemory {
     for (final byte in _bytes.values) byte.references,
   ]);
 
+  /// Capabilities in the bytes copied by an ABI aggregate argument.
+  FlowValue referencesIn(FlowIntegerRange offsets, int size) =>
+      containsRange(offsets, size)
+      ? FlowValue.joined([
+          if (!hasCompleteRead(offsets, size)) _retained,
+          for (final entry in _bytes.entries)
+            if (entry.key >= offsets.lower && entry.key < offsets.upper + size)
+              entry.value.references,
+        ])
+      : references;
+
   _Byte _defaultAt(int offset) =>
       _zeroes.any((r) => r.$1 <= offset && offset < r.$2) ? _zero : _unknown;
 
   _Byte _at(int offset) => _bytes[offset] ?? _defaultAt(offset);
+
+  (NativeScalarType, NativeLayout, FlowValue)? _scalarPayload;
+
+  /// Each immutable memory version owns the bits used to resolve a boxed
+  /// scalar. Reading it through another storage type or layout decodes afresh.
+  FlowValue readScalarPayload(NativeScalarType storage, NativeLayout layout) {
+    final cached = _scalarPayload;
+    if (cached != null && cached.$1 == storage && identical(cached.$2, layout)) {
+      return cached.$3;
+    }
+    final value = read(ObjectHeader.fieldsOffset, storage, layout);
+    _scalarPayload = (storage, layout, value);
+    return value;
+  }
 
   FlowValue read(int offset, NativeTypeRef storage, NativeLayout layout) {
     final type = storage.resolveAbi(layout.target.abi);
@@ -407,10 +488,11 @@ final class FlowMemory {
     return FlowMemory._(
       start,
       length,
+      maximumLength,
       _zeroes,
       bytes,
       _retained,
-      _untouchedWords(offset, ObjectHeader.alignment),
+      _untouched(_words, offset, ObjectHeader.alignment),
       _groups.remove(offset, ObjectHeader.alignment),
     );
   }
@@ -421,6 +503,7 @@ final class FlowMemory {
     FlowValue value,
     NativeLayout layout,
   ) {
+    value = value.nativeScalar;
     final type = storage.resolveAbi(layout.target.abi);
     final size = layout.of(type).size;
     if (!contains(offset, size)) return invalidate();
@@ -451,19 +534,17 @@ final class FlowMemory {
           ? bytes.withoutKey(offset + i)
           : bytes.withEntry(offset + i, byte);
     }
-    var words = _untouchedWords(offset, size);
+    var words = _untouched(_words, offset, size);
     if (type.integerLayout?.bytes == 8) {
-      // Concrete bytes cannot retain the SSA source or backing of their integer.
-      final bits = constant != null
-          ? FlowValue.constant(constant)
-          : value.managedBackings.isEmpty && !value.hasUnknownBacking
-          ? value
-          : value.withManagedBackings(const []).withSources(const []);
+      // Concrete bytes carry the integer bits alone. A source that once
+      // produced the integer is not an address stored in those bytes.
+      final bits = constant == null ? value : FlowValue.constant(constant);
       if (bits != _zero.value) words = words.withEntry(offset, bits);
     }
     return FlowMemory._(
       start,
       length,
+      maximumLength,
       _zeroes,
       bytes,
       _retained,
@@ -477,8 +558,11 @@ final class FlowMemory {
     int offset,
     int size, {
     FlowValue retained = const .bottom(),
+    bool extentProven = false,
   }) {
-    if (!contains(offset, size)) return invalidate();
+    // An independently proven dynamic extent may extend beyond this version's
+    // guaranteed prefix. Only sparse facts intersecting the store can change.
+    if (!extentProven && !contains(offset, size)) return invalidate();
     final end = offset + size;
     final zeroes = <(int, int)>[];
     for (final (low, high) in _zeroes) {
@@ -496,10 +580,11 @@ final class FlowMemory {
     return FlowMemory._(
       start,
       length,
+      maximumLength,
       zeroes,
       bytes,
       _retained.join(retained),
-      _untouchedWords(offset, size),
+      _untouched(_words, offset, size),
       _groups.remove(offset, size),
     );
   }
@@ -531,6 +616,7 @@ final class FlowMemory {
     return FlowMemory._(
       start,
       length,
+      maximumLength,
       _coalesce(zeroes),
       bytes,
       cleared._retained,
@@ -539,8 +625,51 @@ final class FlowMemory {
     );
   }
 
-  FlowMemory invalidate() =>
-      FlowMemory._(start, length, const [], const .empty(), references);
+  /// Merges the callee's effects into a still-live caller allocation. A
+  /// current byte range outside the summary input may contain later writes.
+  /// A mapping or unbounded effect uses the full conservative join.
+  FlowMemory applyWrites(FlowMemory entry, FlowMemory exit, FlowWrites writes, {bool currentInput = false}) {
+    final ranges = writes._ranges;
+    if (ranges == null || start != entry.start || start != exit.start ||
+        length == null || length != entry.length || length != exit.length) {
+      return join(exit);
+    }
+    // A range can agree with the entry while contradicting a different
+    // range's branch condition or a relation between two words. Check the
+    // whole allocation before reusing the exit as a strong update.
+    final covered = currentInput && (this == entry || join(entry) == entry);
+    final source = covered ? exit : join(exit);
+    var result = this;
+    for (final span in ranges.entries) {
+      final from = span.key, size = span.value - from;
+      if (!contains(from, size)) return join(exit);
+      result = result.copyFrom(from, source, from, size);
+    }
+    if (!covered || exit._groups.links.isEmpty) return result;
+    final copied = <int, List<int>>{};
+    for (final member in exit._presence.entries) {
+      if (ranges.entries.any((span) => span.key <= member.key && member.key + 8 <= span.value)) {
+        (copied[member.value] ??= []).add(member.key);
+      }
+    }
+    if (!copied.values.any((group) => group.length > 1)) return result;
+    final kept = <int, List<int>>{};
+    for (final member in result._presence.entries) {
+      (kept[member.value] ??= []).add(member.key);
+    }
+    return FlowMemory._(start, length, maximumLength, result._zeroes, result._bytes,
+        result._retained, result._words,
+        _WordGroups.from([...kept.values, ...copied.values]));
+  }
+
+  FlowMemory invalidate({bool release = false}) => FlowMemory._(
+    start,
+    release ? null : length,
+    release ? null : maximumLength,
+    const [],
+    const .empty(),
+    references,
+  );
 
   /// Keeps read-time capabilities when copied bytes have no complete encoding.
   FlowMemory retainReferences(FlowValue value) {
@@ -550,6 +679,7 @@ final class FlowMemory {
         : FlowMemory._(
             start,
             length,
+            maximumLength,
             _zeroes,
             _bytes,
             retained,
@@ -573,7 +703,16 @@ final class FlowMemory {
             identical(words, _words) &&
             retained == _retained
         ? this
-        : FlowMemory._(start, length, _zeroes, bytes, retained, words, _groups);
+        : FlowMemory._(
+            start,
+            length,
+            maximumLength,
+            _zeroes,
+            bytes,
+            retained,
+            words,
+            _groups,
+          );
   }
 
   FlowMemory join(
@@ -605,6 +744,11 @@ final class FlowMemory {
           : length! < other.length!
           ? length
           : other.length,
+      maximumLength == null || other.maximumLength == null
+          ? null
+          : maximumLength! > other.maximumLength!
+          ? maximumLength
+          : other.maximumLength,
       _coalesce(zeroes),
       const .empty(),
       _retained.join(other._retained, widen: widen),
@@ -623,13 +767,12 @@ final class FlowMemory {
     return FlowMemory._(
       start,
       merged.length,
+      merged.maximumLength,
       merged._zeroes,
       bytes,
       merged._retained,
       words,
-      nativeWords != null ||
-              !_groups.links.isEmpty ||
-              !other._groups.links.isEmpty
+      nativeWords != null || !_groups.links.isEmpty || !other._groups.links.isEmpty
           ? _joinPresence(other, words, nativeWords)
           : null,
     );
@@ -641,6 +784,7 @@ final class FlowMemory {
       other is FlowMemory &&
           start == other.start &&
           length == other.length &&
+          maximumLength == other.maximumLength &&
           _bytes == other._bytes &&
           _words == other._words &&
           _groups.links == other._groups.links &&
@@ -652,6 +796,7 @@ final class FlowMemory {
   late final int hashCode = Object.hash(
     start,
     length,
+    maximumLength,
     Object.hashAll(_zeroes),
     _bytes,
     _words,
@@ -721,6 +866,8 @@ final class _Byte(
   int get hashCode => Object.hash(value, type, index, known);
 }
 
+// Circular links in increasing offset order give equivalent partitions the
+// same state key. Removing a member changes only its two neighbors.
 final class _WordGroups(final StateMap<int, (int, int)> links) {
   static final empty = _WordGroups(const .empty());
 
@@ -768,7 +915,6 @@ final class _WordGroups(final StateMap<int, (int, int)> links) {
         next = next.withEntry(after, (before, next[after]!.$2));
       }
     }
-
     final end = offset + size;
     if (size <= 8) {
       for (var key = offset - 7; key < end; key++) {

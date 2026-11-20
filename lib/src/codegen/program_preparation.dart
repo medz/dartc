@@ -425,6 +425,12 @@ extension PreparedProgramEmission on PreparedProgram {
     _facts.checkProgram(program);
   }
 
+  void checkStackMapContexts({required bool hasContexts}) {
+    if (_facts case final ProgramFlowFacts facts) {
+      facts.checkStackMapContexts(runtime?.stackContext, hasContexts: hasContexts);
+    }
+  }
+
   void checkNativeSymbol(String name) {
     if (!_nativeNames.contains(name)) {
       throw StateError('Unprepared native dependency: $name');

@@ -4,6 +4,7 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/assembler/arm64.dart';
 import 'package:dartc/codegen.dart'
     show
+        MemberEntryLowering,
         RepresentationLowering,
         AllocationLowering,
         CallableLowering,
@@ -15,6 +16,7 @@ import 'package:dartc/optimizer.dart';
 import 'package:dartc/src/codegen/cell_lowering.dart';
 import 'package:dartc/src/codegen/checked_casts.dart';
 import 'package:dartc/src/codegen/constant_data.dart';
+import 'package:dartc/src/codegen/function_allocation.dart';
 import 'package:dartc/src/codegen/function_emitter.dart';
 import 'package:dartc/src/codegen/function_selection.dart';
 import 'package:dartc/src/codegen/heap_plan.dart';
@@ -56,6 +58,71 @@ void main() {
     )..include(source);
     return selection.functions[function.target]!;
   }
+
+  test('lowered member frames retain their asynchronous continuation', () {
+    final uri = Uri.parse('memory:continuation');
+    for (final asynchronous in [true, false]) {
+      final owner = ClassType(
+        uri,
+        'Receiver',
+        interfaces: [if (asynchronous) heapRuntime.stackContext!],
+      );
+      final member = FunctionTarget(
+        uri,
+        'run',
+        .voidType,
+        [],
+        owner: owner,
+        kind: .method,
+      );
+      final inspect = FunctionTarget(uri, 'inspect', .voidType, []);
+      final methodEntry = Block(member.parameterTypes);
+      final inspectCall = methodEntry.emit(DirectCall(inspect, []));
+      methodEntry.finish(const Return());
+      final method = IrFunction(member, [methodEntry]);
+      final root = FunctionTarget(uri, 'root', .voidType, [owner]);
+      final entry = Block(root.parameterTypes);
+      entry.emit(InstanceCall(member, entry.parameters.single, const []));
+      entry.finish(const Return());
+      final source = IrProgram(
+        [
+          IrClass(owner, [], members: [member]),
+        ],
+        [
+          method,
+          IrFunction(root, [entry]),
+        ],
+        externals: [IrExternal(inspect)],
+      );
+      final bound = MemberEntryLowering(TypeImplementations())
+          .run(ProgramFlow(source, const [], openEntries: [root]).facts);
+      final layout = layouts(bound.classes);
+      final selection = ProgramSelection(
+        layout,
+        HeapPlan(runtime: heapRuntime),
+        CheckedCasts(failure: heapRuntime.typeCheckFailure),
+        MemberCalls(bound, {...bound.functions.map((f) => f.target), inspect}),
+        layout.instances,
+      );
+      final implementation = bound.functions.singleWhere(
+        (f) => f.target.executionSource == member,
+      );
+      selection.include(implementation);
+      final selected = selection.functions[implementation.target]!;
+      final allocation = FunctionAllocation(
+        FunctionSelection(selected, _Constraints()),
+      );
+      final roots = allocation.safepoints[inspectCall]!;
+      if (asynchronous) {
+        expect(selected.stackContext, same(selected.entryParameters.first));
+        expect(allocation.contextOffset, isNotNull);
+        expect(roots.offsets, contains(allocation.contextOffset));
+      } else {
+        expect(selected.stackContext, isNull);
+        expect(allocation.contextOffset, isNull);
+      }
+    }
+  });
 
   for (final (name, scalar, constant, register, word)
       in <(String, ValueType, Constant, CpuRegister, int)>[

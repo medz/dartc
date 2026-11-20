@@ -8,6 +8,7 @@ Pointer<NativeFinalizerFunction>? savedCallback;
 Resource? retained;
 List<Resource>? resources;
 TypedData? nativeView;
+Uint8List? retainedBytes;
 Pointer<Int64> Function()? closure;
 int observed = -1;
 
@@ -38,6 +39,7 @@ void configure(Pointer<NativeFinalizerFunction> callback) {
   retained = null;
   resources = null;
   nativeView = null;
+  retainedBytes = null;
   closure = null;
 }
 
@@ -116,6 +118,29 @@ int collect(Pointer<Int64> state) {
   churn();
   return state.value;
 }
+
+final class AllocationWitness() implements Finalizable {}
+
+@Export<Void Function(Pointer<Int64>)>()
+void registerWitness(Pointer<Int64> state) {
+  owner!.attach(AllocationWitness(), state.cast(), externalSize: 1 << 24);
+}
+
+// Retaining the payload across entries makes its runtime-sized storage live.
+void retainBytes(int length, int value) {
+  final bytes = Uint8List(length);
+  bytes[length - 1] = value;
+  retainedBytes = bytes;
+}
+
+@Export<Int64 Function(Pointer<Int64>, Int64, Uint8)>()
+int allocateAndObserve(Pointer<Int64> state, int length, int value) {
+  retainBytes(length, value);
+  return state.value;
+}
+
+@Export<Uint8 Function(Int64)>()
+int readByte(int index) => retainedBytes![index];
 
 @Export<Int64 Function()>()
 int callClosure() => closure!().value;

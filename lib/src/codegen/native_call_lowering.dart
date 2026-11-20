@@ -260,6 +260,7 @@ final class NativeCallLowering({
           arguments,
           resultStorage: resultStorage,
           isLeaf: operation.isLeaf,
+          borrowedArguments: operation.borrowedOwners.keys,
         ),
       );
     }

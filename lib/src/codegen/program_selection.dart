@@ -121,13 +121,7 @@ final class ProgramSelection(
 
   void _bind(SelectedFunction body) {
     body.prune();
-    final owner = body.target.owner;
-    final context = heap.runtime?.stackContext;
-    if (body.target.awaiterCapture != null ||
-        body.target.kind.hasReceiver &&
-            owner != null &&
-            context != null &&
-            owner.asInstanceOf(context) != null) {
+    if (body.target.retainsStackContext(heap.runtime?.stackContext)) {
       body.stackContext = body.entryParameters.first;
     }
 

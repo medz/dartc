@@ -34,7 +34,7 @@ final class ScalarFunction<R extends Object>(
     void Function(Fixup, int)? constantSymbol,
     void Function(Fixup, ModuleObject)? moduleObjectAddress,
     void Function(Fixup, ClassType)? descriptorAddress,
-    void Function(Fixup)? stackMapAddress,
+    void Function(Fixup, bool contextFreeOnly)? stackMapAddress,
     void Function(Fixup)? moduleRootsAddress,
     void Function(Fixup, int)? codeAddress,
   }) {
@@ -197,7 +197,10 @@ final class ScalarFunction<R extends Object>(
               emitter.loadStack(result!, frame.returnAddressOffset);
           }
         } else if (instruction is StackMapAddress) {
-          emitter.address(result!, stackMapAddress!);
+          emitter.address(result!, (fixup) => stackMapAddress!(fixup, instruction.contextFreeOnly));
+          if (instruction.contextFreeOnly) {
+            emitter.loadMemory(result, result, bytes: 8, signed: false);
+          }
         } else if (instruction is ModuleRootsAddress) {
           emitter.address(result!, moduleRootsAddress!);
         } else if (instruction case ObjectDescriptorAddress(

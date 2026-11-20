@@ -10,6 +10,80 @@ import 'package:dartc/target.dart';
 import 'package:test/test.dart';
 
 void main() {
+  for (final prior in [false, true]) {
+    for (final form in ['zero', 'unbounded', 'address']) {
+      test(
+        'an external integer keeps its actual address alternatives ($form, prior=$prior)',
+        () {
+          final uri = Uri.parse('memory:external-integer');
+          final callback = FunctionTarget(uri, 'callback', .integer, [
+            .integer,
+          ]);
+          final body = Block(callback.parameterTypes);
+          body.finish(Return(body.parameters.single));
+          final save = FunctionTarget(uri, 'save', .voidType, [.integer]);
+          final host = FunctionTarget(uri, 'host', .integer, [
+            callback.signature,
+            if (!prior) .integer,
+          ]);
+          final root = FunctionTarget(uri, 'root', .integer, [.integer]);
+          final entry = Block(root.parameterTypes);
+          final table = entry.emit(StackMapAddress());
+          final pointer = entry.emit(
+            IntBinary(.add, table, const Constant.integer(40)),
+          );
+          final bits = switch (form) {
+            'zero' => entry.emit(IntBinary(.subtract, pointer, pointer)),
+            'unbounded' => entry.emit(
+              IntBinary(.bitXor, pointer, entry.parameters.single),
+            ),
+            _ => pointer,
+          };
+          if (prior) entry.emit(DirectCall(save, [bits]));
+          final result = entry.emit(
+            DirectCall(host, [FunctionConstant(callback), if (!prior) bits]),
+          );
+          entry.finish(Return(result));
+          final facts = ProgramFlow(
+            IrProgram(
+              [],
+              [
+                IrFunction(root, [entry]),
+                IrFunction(callback, [body]),
+              ],
+              externals: [
+                IrExternal(save, effects: const {}),
+                IrExternal(host),
+              ],
+            ),
+            [
+              (target: root, arguments: [FlowValue.unknown(.integer)]),
+            ],
+          ).facts;
+          final base = facts.valueOf(table).addresses.single.base;
+          if (form == 'zero') {
+            expect(
+              facts.valueOf(bits).constant?.structuralKey,
+              const Constant.integer(0).structuralKey,
+            );
+          }
+          for (final v in [facts.valueOf(result), facts.returnedBy(callback)]) {
+            final addresses = v.addresses.where((p) => p.base == base);
+            if (form == 'address') {
+              expect(addresses.single.offset, 40);
+            } else {
+              expect(addresses, isEmpty);
+            }
+            expect(
+              v.references.addresses.any((p) => p.base == base),
+              form != 'zero',
+            );
+          }
+        },
+      );
+    }
+  }
+
   for (final broad in [false, true]) {
     test('scalar payload preserves external alternatives ($broad)', () {
       final box = ClassType(null, 'Private');

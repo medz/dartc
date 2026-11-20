@@ -37,6 +37,8 @@ sealed class const ValueType() {
           return visit(lexicalType) && visit(bound);
         case FutureOrType(:final argument, :final futureType):
           return visit(argument) || visit(futureType);
+        case FunctionType():
+          return type.asInstanceOf(function) != null;
         case RecordType():
           return type.asInstanceOf(record) != null;
         case ClassType bound:
@@ -1025,7 +1027,7 @@ final class FunctionType._(
   }
 
   @override
-  int get hashCode => _typeHash(this, const {});
+  late final int hashCode = _typeHash(this, const {});
 
   @override
   String get dartName {
@@ -1169,12 +1171,21 @@ final class const ClassType._(
         : parent.substitute(typeEnvironment) as ClassType;
   }
 
+  List<ClassType> get _interfaceTemplates {
+    final declared = _hierarchy?.interfaces ?? _interfaces;
+    if (identical(this, ValueType.number) ||
+        identical(this, ValueType.string)) {
+      return [
+        ValueType.comparable.instantiate([this]),
+        ...declared,
+      ];
+    }
+    return declared;
+  }
+
   List<ClassType> get interfaces => [
-    if (this == ValueType.number || this == ValueType.string)
-      ValueType.comparable.instantiate([this]),
-    for (final type
-        in (declaration._hierarchy?.interfaces ?? declaration._interfaces))
-      type.substitute(typeEnvironment) as ClassType,
+    for (final template in declaration._interfaceTemplates)
+      template.substitute(typeEnvironment) as ClassType,
   ];
   @override
   String get dartName => typeArguments.isEmpty
@@ -1220,7 +1231,15 @@ final class const ClassType._(
   /// Projects this view onto a superclass or implemented interface declaration.
   ClassType? asInstanceOf(ClassType owner, [Set<ClassType>? visited]) {
     if (identical(declaration, owner.declaration)) return this;
-    visited ??= {};
+    // After verification, every applied view follows the same declared edges.
+    // Only the chosen path needs type substitution.
+    if (visited == null) {
+      final hierarchy = _verifiedHierarchies[declaration];
+      if (hierarchy != null) {
+        return hierarchy.paths[owner.declaration]?.apply(this);
+      }
+    }
+    visited ??= Set.identity();
     if (!visited.add(declaration)) return null;
     final parent = superclass?.asInstanceOf(owner, visited);
     if (parent != null) return parent;
@@ -1249,6 +1268,46 @@ final class const ClassType._(
   @override
   int get hashCode =>
       Object.hash(identityHashCode(declaration), Object.hashAll(typeArguments));
+}
+
+// Verification seals every reachable declaration. Weak keys let a completed
+// compilation release its hierarchy; a root indexes only its own ancestors.
+final _verifiedHierarchies = Expando<_VerifiedHierarchy>();
+
+final class _VerifiedHierarchy(final ClassType declaration) {
+  late final paths = _build();
+
+  Map<ClassType, _SupertypePath> _build() {
+    final result = Map<ClassType, _SupertypePath>.identity();
+    void visit(ClassType template, _SupertypePath? previous) {
+      final owner = template.declaration;
+      if (result.containsKey(owner)) return;
+      final path = _SupertypePath(template, previous);
+      result[owner] = path;
+      final superclass = owner._hierarchy?.superclass ?? owner._superclass;
+      if (superclass != null) visit(superclass, path);
+      for (final interface in owner._interfaceTemplates) {
+        visit(interface, path);
+      }
+    }
+
+    visit(declaration, null);
+    return result;
+  }
+}
+
+final class _SupertypePath(
+  final ClassType template,
+  final _SupertypePath? previous,
+) {
+  ClassType apply(ClassType receiver) {
+    final parent = previous;
+    if (parent == null) return receiver;
+    final view = parent.apply(receiver);
+    return view.typeParameters.isEmpty
+        ? template
+        : template.substitute(view.typeEnvironment) as ClassType;
+  }
 }
 
 final class _ClassHierarchy() {
@@ -1337,7 +1396,11 @@ void sealTypes(Iterable<ValueType> roots) {
   roots.forEach(visit);
   for (final type in types) {
     if (type is TypeParameterType) type._sealed = true;
-    if (type is ClassType) type._hierarchy?.sealed = true;
+    if (type is ClassType) {
+      final declaration = type.declaration;
+      declaration._hierarchy?.sealed = true;
+      _verifiedHierarchies[declaration] ??= _VerifiedHierarchy(declaration);
+    }
   }
 }
 

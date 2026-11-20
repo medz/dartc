@@ -28,13 +28,15 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     Iterable<FlowEntry> entries, {
     Iterable<FunctionTarget> openEntries = const [],
     Iterable<FunctionTarget> escapingReturns = const [],
+    FunctionTarget? terminalEntry,
     Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
     FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
     FunctionTarget? allocationFailure,
     FunctionTarget? managedAllocator,
+    ClassType? stackContext,
     Map<FunctionTarget, List<int?>> initialMemory = const {},
   }) {
-    var initial = [
+    final initial = [
       for (final entry in entries)
         (
           target: entry.target,
@@ -50,17 +52,64 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       for (final entry in initialMemory.entries)
         entry.key: List<int?>.unmodifiable(entry.value),
     });
-    ProgramFlowFacts analyze(IrProgram input) => ProgramFlow(
-      input,
+    ProgramFlowFacts execute(ClassType? context) => _run(
+      program,
       initial,
-      openEntries: open,
-      escapingReturns: escaping,
-      nativeEntries: callbacks,
-      memoryLayout: memoryLayoutFor?.call(input),
-      allocationFailure: allocationFailure,
-      managedAllocator: managedAllocator,
-      initialMemory: memory,
-    ).facts;
+      open,
+      escaping,
+      terminalEntry,
+      callbacks,
+      memory,
+      memoryLayoutFor,
+      allocationFailure,
+      managedAllocator,
+      context,
+    );
+    try {
+      return execute(stackContext);
+    } on _StackContextsDiscovered {
+      // A previous rewrite may have folded a header read. A new frame producer
+      // must see the original caller and both of its original edges.
+      return execute(null);
+    }
+  }
+
+  ProgramFlowFacts _run(
+    IrProgram program,
+    List<FlowEntry> entries,
+    Set<FunctionTarget> open,
+    Set<FunctionTarget> escaping,
+    FunctionTarget? terminalEntry,
+    Map<NativeCallbackTarget, FunctionTarget> callbacks,
+    Map<FunctionTarget, List<int?>> memory,
+    FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
+    FunctionTarget? allocationFailure,
+    FunctionTarget? managedAllocator,
+    ClassType? stackContext,
+  ) {
+    var initial = List.of(entries);
+    var usedEmptyStackMaps = false;
+    ProgramFlowFacts analyze(IrProgram input) {
+      final facts = ProgramFlow(
+        input,
+        initial,
+        openEntries: open,
+        escapingReturns: escaping,
+        terminalEntry: terminalEntry,
+        nativeEntries: callbacks,
+        memoryLayout: memoryLayoutFor?.call(input),
+        allocationFailure: allocationFailure,
+        managedAllocator: managedAllocator,
+        initialMemory: memory,
+        stackContext: stackContext,
+      ).facts;
+      if (usedEmptyStackMaps && facts.mayHaveStackContexts) {
+        throw const _StackContextsDiscovered();
+      }
+      usedEmptyStackMaps |= facts.usedEmptyStackMaps;
+      return facts;
+    }
+
     final stages = [
       for (final pass in passes) (kind: pass.kind, run: pass.bind()),
     ];
@@ -252,3 +301,5 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     }
   }
 }
+
+final class const _StackContextsDiscovered();

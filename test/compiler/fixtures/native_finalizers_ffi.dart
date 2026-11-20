@@ -30,6 +30,18 @@ final class NativeFinalizers() {
         Int64 Function(Pointer<Int64>),
         int Function(Pointer<Int64>)
       >('collect');
+  late final registerWitness = _library
+      .lookupFunction<
+        Void Function(Pointer<Int64>),
+        void Function(Pointer<Int64>)
+      >('registerWitness');
+  late final allocateAndObserve = _library
+      .lookupFunction<
+        Int64 Function(Pointer<Int64>, Int64, Uint8),
+        int Function(Pointer<Int64>, int, int)
+      >('allocateAndObserve');
+  late final readByte = _library
+      .lookupFunction<Uint8 Function(Int64), int Function(int)>('readByte');
   late final callClosure = _library
       .lookupFunction<Int64 Function(), int Function()>('callClosure');
   late final releaseClosure = _library

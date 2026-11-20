@@ -1,4 +1,5 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/optimizer.dart' show FunctionRewrite;
 import 'package:dartc/codegen.dart';
 import 'package:dartc/abi.dart';
 import 'package:dartc/target.dart';
@@ -463,19 +464,8 @@ void main() {
             externals: runtime.externals,
           ),
         );
-      final binding = owner.bindDynamic(original, [target]);
-      final call = DynamicDispatch(
-        function,
-        original.selector,
-        const [],
-        const {},
-        original.typeArguments,
-        failure,
-        const {},
-        binding,
-      );
       entry.finish(
-        Invoke(call, onReturn: Jump(result, [call]), onThrow: Jump(caught)),
+        Invoke(original, onReturn: Jump(result, [original]), onThrow: Jump(caught)),
       );
       result.finish(
         Return(
@@ -501,7 +491,19 @@ void main() {
               : const Constant.boolean(false),
         ),
       );
-      final body = IrFunction(root, [entry, result, caught]);
+      final caller = IrFunction(root, [entry, result, caught]);
+      final binding = owner.bindDynamic(original, [target], caller: caller);
+      final call = DynamicDispatch(
+        function,
+        original.selector,
+        const [],
+        const {},
+        original.typeArguments,
+        failure,
+        const {},
+        binding,
+      );
+      final body = FunctionRewrite(caller, operations: {original: call}).run();
       final classes = [...runtime.classes, ...owner.storage.classes];
       final program = IrProgram(
         classes,

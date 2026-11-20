@@ -1679,6 +1679,78 @@ void main() {
     },
   );
 
+  test('a tail store uses the byte count of its own managed allocation', () {
+    final caller = Block([ValueType.integer, ValueType.integer]);
+    final bytes = caller.parameters.first;
+    final payload = NewPayload(_type, bytes);
+    final fixed = _layout.objectLayout(_type).size;
+    final other = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final allocated = _step(other.state, payload,
+        operands: [FlowValue.integerRange(FlowIntegerRange(16, 64))]);
+    for (final length in caller.parameters) {
+      final last = IntBinary(.add, length, Constant.integer(fixed - 1));
+      final store = StoreObjectData(payload, last, _u8, const Constant.integer(91));
+      final inputs = [
+        allocated.value,
+        FlowValue.integerRange(FlowIntegerRange(fixed + 15, fixed + 63)),
+        _integer(91),
+      ];
+      final state = allocated.normal!;
+      expect(state.boundsNativeWrite(store, inputs), identical(length, bytes));
+      final written = _step(state, store, operands: inputs).normal!;
+      expect(_number(_load(written, other.address, _i64)),
+          identical(length, bytes) ? 0 : null);
+    }
+  });
+
+  test('normal caller joins both legal reads of array index one', () {
+    final root = FunctionTarget(null, 'readSecondAfterTail', .integer, [
+      .boolean,
+    ]);
+    final entry = Block(root.parameterTypes);
+    final joined = Block([ValueType.integer]);
+    entry.finish(
+      Branch(
+        entry.parameters.single,
+        Jump(joined, [const Constant.integer(16)]),
+        Jump(joined, [const Constant.integer(24)]),
+      ),
+    );
+    final n = joined.parameters.single;
+    final fixed = _layout.objectLayout(_type).size;
+    final first = joined.emit(NewPayload(_type, const Constant.integer(8)));
+    final last = joined.emit(NewPayload(_type, const Constant.integer(8)));
+    final old = joined.emit(ReferenceAddress(first));
+    final fresh = joined.emit(ReferenceAddress(last));
+    final array = joined.emit(NewPayload(_type, n));
+    joined.emit(StoreObjectData(array, Constant.integer(fixed + 8), _i64, old));
+    final offset = joined.emit(IntBinary(.add, n, Constant.integer(fixed - 8)));
+    joined.emit(StoreObjectData(array, offset, _i64, fresh));
+    final observed = joined.emit(
+      LoadObjectData(array, Constant.integer(fixed + 8), _i64),
+    );
+    joined.finish(Return(observed));
+    final facts = ProgramFlow(
+      IrProgram(
+        [IrClass(_type, [])],
+        [
+          IrFunction(root, [entry, joined]),
+        ],
+      ),
+      [
+        (target: root, arguments: [FlowValue.unknown(.boolean)]),
+      ],
+      memoryLayout: _layout,
+    ).facts;
+    final result = facts.returnedBy(root);
+    final aliases = {
+      ...result.references.objects,
+      ...result.addresses.map((a) => a.base),
+    };
+    expect(aliases, contains(facts.valueOf(first).objects.single));
+    expect(aliases, contains(facts.valueOf(last).objects.single));
+  });
+
   test('external writes invalidate exposed storage, unbounded addresses do not guess bounds', () {
     final a = _allocate(FlowState(_program, memoryLayout: _layout), 8);
     final b = _allocate(a.state, 8);

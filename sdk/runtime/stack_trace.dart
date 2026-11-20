@@ -48,6 +48,7 @@ final class CapturedStackTrace(
 @RuntimeEntry(.captureStackTrace)
 StackTrace captureStackTrace(int sp, int pc) {
   final frames = StackFrames(Memory.context())..start(sp, pc);
+  final hasContexts = frames.mayHaveContexts(Memory.contextFreeStackMap());
   CapturedStackTrace? head;
   while (frames.moveNext()) {
     if (!frames.isBoundary) {
@@ -57,6 +58,7 @@ StackTrace captureStackTrace(int sp, int pc) {
         null,
         source: frames.description,
       );
+      if (!hasContexts) continue;
       var context = frames.continuation;
       if (context is Function) {
         final visited = Set<Function>.identity();
