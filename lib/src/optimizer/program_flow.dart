@@ -6461,13 +6461,21 @@ FlowValue _runtimeTypeValue(FlowValue input, FlowState state) {
         : FlowValue.unknown(TypeMetadata.type);
   }
 
-  FlowValue scalar(ValueType type) =>
-      type == ValueType.integer ||
-          type == ValueType.floating ||
-          type == ValueType.boolean ||
-          type == ValueType.nullType
-      ? known(type)
-      : FlowValue.unknown(TypeMetadata.type);
+  FlowValue scalar(ValueType type) {
+    final base = type.nullableBase ?? type;
+    final FlowValue actual;
+    if (base == ValueType.number) {
+      actual = known(ValueType.integer).join(known(ValueType.floating));
+    } else if (base == ValueType.integer ||
+        base == ValueType.floating ||
+        base == ValueType.boolean ||
+        base == ValueType.nullType) {
+      actual = known(base);
+    } else {
+      return FlowValue.unknown(TypeMetadata.type);
+    }
+    return type == base ? actual : actual.join(known(ValueType.nullType));
+  }
 
   return FlowValue.joined([
     for (final constant in input.constants) known(constant.runtimeValueType),

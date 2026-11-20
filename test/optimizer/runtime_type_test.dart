@@ -111,15 +111,30 @@ void main() {
     );
   });
 
-  test('closed scalar bounds identify their runtime representation', () {
-    for (final type in [
-      ValueType.integer,
-      ValueType.floating,
-      ValueType.boolean,
-      ValueType.nullType,
-    ]) {
-      expect(_type(_input(type, FlowValue.unknown(type))), type);
+  test('closed scalar bounds retain each possible runtime descriptor', () {
+    final bounds = <ValueType, Set<ValueType>>{
+      ValueType.integer: {ValueType.integer},
+      ValueType.floating: {ValueType.floating},
+      ValueType.boolean: {ValueType.boolean},
+      ValueType.number: {ValueType.integer, ValueType.floating},
+    };
+    for (final MapEntry(:key, :value) in bounds.entries) {
+      for (final type in [key, key.nullable]) {
+        final actual = _input(type, FlowValue.unknown(type));
+        expect(actual.unknownTypes, isEmpty, reason: type.dartName);
+        expect(
+          actual.constants
+              .map((c) => (c as TypeConstant).representedType)
+              .toSet(),
+          {...value, if (type != key) ValueType.nullType},
+          reason: type.dartName,
+        );
+      }
     }
+    expect(
+      _type(_input(ValueType.nullType, FlowValue.unknown(ValueType.nullType))),
+      ValueType.nullType,
+    );
   });
 
   test(
@@ -133,7 +148,7 @@ void main() {
         box,
         t,
         record,
-        ValueType.integer.nullable,
+        box.nullable,
         ValueType.string,
       ]) {
         final result = _input(
