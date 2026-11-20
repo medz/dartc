@@ -19,10 +19,15 @@ final class ProgramRealization(
 final class ProgramTransform(
   final IrProgram Function(ProgramFlowFacts) _run, {
   IrProgram Function(IrProgram)? normalize,
+  this.requiresRetainedUse = false,
   Constant Function(Constant)? rebindEntryConstant,
   Iterable<ProgramRealization> Function()? realizations,
   void Function(IrProgram)? rebase,
 }) {
+  /// Discover this replayable implementation after eliminating unobserved uses.
+  /// Replaying a retained site restores its full effects on the canonical graph.
+  final bool requiresRetainedUse;
+
   final _normalize = normalize;
   final _rebindEntryConstant = rebindEntryConstant;
   final _realizations = realizations;

@@ -8,6 +8,65 @@ import 'fixtures/type_refinement.dart' as source;
 
 void main() {
   final uri = Uri.parse('memory:type-refinement');
+  test('null equality guards refine the same nullable value on each edge', () {
+    final type = ClassType(uri, 'Guarded');
+    for (final comparison in ['equals', 'reversed', 'notEquals', 'identical']) {
+      final root = FunctionTarget(uri, 'guarded', .boolean, [type.nullable]);
+      final entry = Block(root.parameterTypes);
+      final value = entry.parameters.single;
+      const nil = Constant.nullValue();
+      final condition = entry.emit(switch (comparison) {
+        'identical' => Identical(nil, value),
+        'reversed' => Equals(nil, value),
+        'notEquals' => Equals(value, nil, negated: true),
+        _ => Equals(value, nil),
+      });
+      final absent = Block(), present = Block(), merged = Block([type.nullable]);
+      final negated = comparison == 'notEquals';
+      entry.finish(Branch(condition, Jump(negated ? present : absent),
+          Jump(negated ? absent : present)));
+      final nonNull = present.emit(TypeTest(value, type));
+      present.finish(Jump(merged, [value]));
+      final onlyNull = absent.emit(TypeTest(value, .nullType));
+      absent.finish(Jump(merged, [value]));
+      final both = merged.emit(TypeTest(merged.parameters.single, type));
+      merged.finish(Return(both));
+      final program = IrProgram([IrClass(type, [])], [
+        IrFunction(root, [entry, absent, present, merged]),
+      ]);
+      final facts = ProgramFlow(program, [], openEntries: [root]).facts;
+      expect((facts.valueOf(nonNull).constant as ScalarConstant?)?.value, true,
+          reason: comparison);
+      expect((facts.valueOf(onlyNull).constant as ScalarConstant?)?.value, true,
+          reason: comparison);
+      expect(facts.valueOf(both).constant, isNull, reason: comparison);
+    }
+  });
+
+  test('a loop header receives fresh null alternatives after a guarded edge', () {
+    final type = ClassType(uri, 'Element');
+    final next = FunctionTarget(uri, 'next', type.nullable, []);
+    final root = FunctionTarget(uri, 'visit', .boolean, [type.nullable]);
+    final entry = Block(root.parameterTypes);
+    final header = Block([type.nullable]), body = Block(), done = Block();
+    entry.finish(Jump(header, entry.parameters));
+    final element = header.parameters.single;
+    final headerType = header.emit(TypeTest(element, type));
+    header.finish(Branch(header.emit(Equals(element, const Constant.nullValue())),
+        Jump(done), Jump(body)));
+    final guarded = body.emit(TypeTest(element, type));
+    final another = body.emit(DirectCall(next, []));
+    body.finish(Jump(header, [another]));
+    done.finish(Return(headerType));
+    final program = IrProgram([IrClass(type, [])], [
+      IrFunction(root, [entry, header, body, done]),
+    ], externals: [IrExternal(next)]);
+    final facts = ProgramFlow(program, [], openEntries: [root]).facts;
+    expect((facts.valueOf(guarded).constant as ScalarConstant?)?.value, true);
+    expect(facts.valueOf(headerType).constant, isNull);
+    expect(facts.reachesOperation(another), isTrue);
+  });
+
   test(
     'generic external and unknown function results use their call environment',
     () {
@@ -170,6 +229,25 @@ void main() {
       'test/optimizer/fixtures/type_refinement.dart',
     ]).use((input) async => (await Lowering().lower(input)).program);
   });
+
+  test(
+    'open nested dispatch returns only values from the selected receiver',
+    () {
+      final read = sourceProgram.functions.singleWhere(
+        (body) => body.target.name == 'readOpen',
+      );
+      final facts = ProgramFlow(sourceProgram, [
+        (
+          target: read.target,
+          arguments: [FlowValue.unknown(read.target.parameterTypes.single)],
+        ),
+      ]).facts;
+      expect(
+        facts.returnedBy(read.target).integers,
+        FlowIntegerRange(1, 3, strideBits: 1, residue: 1),
+      );
+    },
+  );
 
   test('open generic dispatch excludes unrelated exact constant receivers', () {
     final function = sourceProgram.functions.singleWhere(

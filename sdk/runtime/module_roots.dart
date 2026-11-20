@@ -5,34 +5,30 @@ import 'memory.dart';
 
 /// Walks every mutable module object, including objects with no heap page.
 final class ModuleRoots(final int context) {
-  int _cursor = 0, _remaining = 0;
-  int address = 0;
+  int _table = 0, _count = 0, _index = 0;
 
   void start() {
-    address = 0;
     final table = Pointer<Int64>.fromAddress(
       context + RuntimeContext.globalRoots,
     ).value;
-    if (table == 0) {
-      _cursor = 0;
-      _remaining = 0;
-      return;
-    }
-    _remaining = Pointer<Int64>.fromAddress(table + ModuleRootTable.count)
-        .value;
-    if (_remaining < 0) Memory.fail();
-    _cursor = table + ModuleRootTable.entries;
+    _table = table;
+    _index = 0;
+    if (table == 0) return;
+    _count = Pointer<Int64>.fromAddress(table + ModuleRootTable.count).value;
+    if (_count < 0) Memory.fail();
   }
 
-  bool moveNext() {
-    if (_remaining == 0) {
-      address = 0;
-      return false;
-    }
-    address = Pointer<Int64>.fromAddress(_cursor).value;
+  /// Returns the next module object address, or zero when exhausted.
+  int nextAddress() {
+    final table = _table;
+    if (table == 0) return 0;
+    final index = _index;
+    if (index >= _count) return 0;
+    final address = Pointer<Int64>.fromAddress(
+      table + ModuleRootTable.entries + index * ModuleRootTable.entrySize,
+    ).value;
     if (address == 0) Memory.fail();
-    _cursor += ModuleRootTable.entrySize;
-    _remaining--;
-    return true;
+    _index = index + 1;
+    return address;
   }
 }

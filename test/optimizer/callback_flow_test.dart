@@ -13,6 +13,53 @@ final _native = FunctionType(FfiTypes.int64, [FfiTypes.int64]);
 final _consume = FunctionTarget(_uri, 'consume', .voidType, [.integer]);
 
 void main() {
+  for (final raw in [false, true]) {
+    for (final leaf in [false, true]) {
+      test(
+        'an indirect native callee reenters only when permitted (raw=$raw, leaf=$leaf)',
+        () {
+          final callback = FunctionTarget(_uri, 'target', .integer, [.integer]);
+          final body = Block(callback.parameterTypes)
+            ..finish(const Return(Constant.integer(55)));
+          final declaration = StaticCallbackTarget(
+            callback,
+            _native,
+            exceptionalReturn: const Constant.integer(-1),
+          );
+          final root = FunctionTarget(_uri, 'root', .voidType, []);
+          final entry = Block();
+          final address = entry.emit(NativeCallbackAddress(declaration));
+          final signature = NativeSignature(Int64, [Int64]);
+          final pointerType = FfiTypes.resolve(
+            NativePointerType(NativeFunctionType(signature)),
+          );
+          final call = entry.emit(
+            raw
+                ? RawNativeCall(address, signature, const [
+                    Constant.integer(1),
+                  ], isLeaf: leaf)
+                : NativeCall(
+                    entry.emit(PointerFromAddress(address, pointerType)),
+                    const [Constant.integer(1)],
+                    isLeaf: leaf,
+                  ),
+          );
+          entry.finish(const Return());
+          final facts = ProgramFlow(
+            IrProgram([], [
+              IrFunction(callback, [body]),
+              IrFunction(root, [entry]),
+            ]),
+            [(target: root, arguments: [])],
+          ).facts;
+          expect(facts.definitions.contains(callback), !leaf);
+          expect(facts.hasUnknownCall(call), isFalse);
+          expect(facts.effectsOf(call).contains(Effect.callsUserCode), !leaf);
+        },
+      );
+    }
+  }
+
   for (final exposed in [false, true]) {
     test(
       'entry coverage follows an actually escaped native wrapper ($exposed)',

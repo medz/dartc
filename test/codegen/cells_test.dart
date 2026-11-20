@@ -252,18 +252,10 @@ void main() {
             IrFunction(declaration, [entry, yes, no, done]),
           ]);
           if (initial || both) {
-            expect(
-              generator
-                  .generate(
-                    Compiler(generator.target).prepare(
-                      program,
-                      runtime: heapRuntime,
-                      roots: [declaration],
-                    ),
-                  )
-                  .sections,
-              isNotEmpty,
-            );
+            final prepared = Compiler(generator.target)
+                .prepare(program, runtime: heapRuntime, roots: [declaration]);
+            expect(prepared.definitions, isNot(contains(heapRuntime.allocate)));
+            expect(generator.generate(prepared).sections, isNotEmpty);
           } else {
             expect(
               () => generator.generate(

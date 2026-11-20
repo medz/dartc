@@ -17,7 +17,6 @@ void main() {
 
   setUp(() async {
     workspace = await Directory.systemTemp.createTemp('dartc-bench-test-');
-    await Directory('${workspace.path}/.git').create();
     compiler = await fixture.copy('${workspace.path}/compiler');
     final input = File('${workspace.path}/tool/bench/fixtures/hello.dart');
     await input.parent.create(recursive: true);
@@ -347,8 +346,7 @@ void main() {
   test(
     'an invalid lock parent fails immediately with its filesystem cause',
     () async {
-      await Directory('${workspace.path}/.git').delete();
-      await File('${workspace.path}/.git').writeAsString('not a git directory');
+      await File('${workspace.path}/build').writeAsString('occupied');
       final process = await Process.start(Platform.resolvedExecutable, [
         '--packages=$packages',
         bench,
@@ -371,7 +369,7 @@ void main() {
       expect(timedOut, isFalse, reason: '$output\n$error');
       expect(code, isNot(0));
       expect(error, contains('FileSystemException'));
-      expect(error, contains('dartc-bench.lock'));
+      expect(error, contains('build'));
       expect(error, isNot(contains('Another dartc benchmark')));
       expect(File('${workspace.path}/compiler-ran').existsSync(), isFalse);
     },

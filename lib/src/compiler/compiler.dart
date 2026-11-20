@@ -108,9 +108,10 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     runtime = runtime?.rebind(program);
     program = ProgramNormalization(program, runtime: runtime).run();
     runtime = runtime?.rebind(program);
+    final ordinaryRoots = {...roots, if (entryPoint != null) entryPoint.function};
     var boundaries = NativeBoundaries(
       program,
-      roots: {...roots, if (entryPoint != null) entryPoint.function},
+      roots: ordinaryRoots,
       imports: {
         for (final entry in imports.entries) entry.key: entry.value.signature,
       },
@@ -150,6 +151,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
       callables,
       nativeViews,
       openEntries: boundaries.roots,
+      cleanupIsOrdinaryRoot: ordinaryRoots.contains(boundaries.cleanup),
     );
     return ProgramPreparation(
       target,
@@ -174,6 +176,7 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
     NativeViews nativeViews, {
     Iterable<FlowEntry> entries = const [],
     Iterable<FunctionTarget> openEntries = const [],
+    bool cleanupIsOrdinaryRoot = false,
   }) =>
       ProgramOptimizer([
         const ProgramSimplification(),
@@ -206,12 +209,16 @@ final class Compiler(final Target target, {final SdkSources? resources}) {
         program,
         entries,
         openEntries: openEntries,
+        terminalEntry: cleanupIsOrdinaryRoot || boundaries.exports.containsKey(boundaries.cleanup)
+            ? null
+            : boundaries.cleanup,
         nativeEntries: {
           for (final entry in boundaries.callbacks.entries)
             entry.key: entry.value.target,
         },
         allocationFailure: runtime?.allocationFailure,
         managedAllocator: runtime?.allocate,
+        stackContext: runtime?.stackContext,
         memoryLayoutFor: (program) {
           final binding = runtime?.rebind(program);
           types.rebind(binding?.types);

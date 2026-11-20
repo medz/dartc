@@ -51,7 +51,7 @@ final class FlowObject(
       storageView == other.storageView;
 
   @override
-  int get hashCode => Object.hash(
+  late final int hashCode = Object.hash(
     identityHashCode(site),
     identityHashCode(activation),
     type,
@@ -82,7 +82,12 @@ final class FlowAddress.ranged(
   final Object base,
   FlowIntegerRange? offsets, {
   final ValueType type = ValueType.integer,
+  // A retained base grants access to storage without supplying its address bits.
+  final bool retainedBase = false,
 }) {
+  new _retained(Object base)
+    : this.ranged(base, FlowIntegerRange(0, 0), retainedBase: true);
+
   /// Inclusive byte offsets, or null when the displacement is unbounded.
   final FlowIntegerRange? offsets = offsets == FlowIntegerRange.full
       ? null
@@ -120,13 +125,14 @@ final class FlowAddress.ranged(
   };
 
   /// The capability retained by this address, without a concrete numeric value.
-  FlowValue get reference => switch (base) {
+  FlowValue get reference => _reference ?? const FlowValue.bottom();
+
+  FlowValue? get _reference => switch (base) {
     final FlowObject object => FlowValue.object(object),
     final Constant constant => FlowValue.constant(constant),
-    ClassType() => const FlowValue.bottom(),
-    FunctionTarget() => const FlowValue.bottom(),
+    ClassType() || FunctionTarget() => null,
     FlowRegion() => FlowValue._(const {}, const {}, const {}, const {}, null, {
-      FlowAddress(base, 0),
+      FlowAddress._retained(base),
     }),
     FlowMetadata() => FlowValue._(
       const {},
@@ -134,7 +140,7 @@ final class FlowAddress.ranged(
       const {},
       const {},
       null,
-      {FlowAddress(base, 0)},
+      {FlowAddress._retained(base)},
     ),
     final NativeCallbackTarget target => FlowValue._(
       const {},
@@ -142,7 +148,7 @@ final class FlowAddress.ranged(
       const {},
       const {},
       null,
-      {FlowAddress(target, 0)},
+      {FlowAddress._retained(target)},
     ),
     _ => throw StateError('Invalid address base.'),
   };
@@ -152,10 +158,11 @@ final class FlowAddress.ranged(
       other is FlowAddress &&
       identity == other.identity &&
       offsets == other.offsets &&
-      type == other.type;
+      type == other.type &&
+      retainedBase == other.retainedBase;
 
   @override
-  int get hashCode => Object.hash(identity, offsets, type);
+  int get hashCode => Object.hash(identity, offsets, type, retainedBase);
 }
 
 /// Values arriving on executable paths, including explicit unknown bounds.
@@ -186,8 +193,17 @@ final class FlowValue {
   /// Address alternatives, separate from completely unknown scalar values.
   final Set<FlowAddress> addresses;
 
+  /// The address bits of a recovered managed reference, when known on every
+  /// incoming alternative. This proof alone makes no claim about the class,
+  /// contents, lifetime or readable extent at that address.
+  final FlowValue? recoveredAddress;
+
   /// Bounds for values whose identity or contents are not established.
   final Set<ValueType> unknownTypes;
+
+  /// Runtime class declarations permitted by an earlier virtual dispatch on
+  /// the unknown alternatives. Null admits every class within their bounds.
+  final Set<ClassType>? unknownReceiverClasses;
 
   /// Unknown references originating outside this execution's local heap.
   ///
@@ -215,6 +231,8 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -228,6 +246,8 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -241,6 +261,8 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
@@ -248,12 +270,14 @@ final class FlowValue {
       _integers = null,
       _references = null;
 
-  new unknown(ValueType type, {bool external = false})
+  new unknown(ValueType type, {bool external = false, FlowAddress? at})
     : _constants = const {},
       objects = const {},
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
+      recoveredAddress = at == null ? null : FlowValue.address(at),
       unknownTypes = Set.unmodifiable({type}),
       externalUnknownTypes = external && _mayCarryReference(type)
           ? Set.unmodifiable({type})
@@ -261,7 +285,7 @@ final class FlowValue {
       sources = const {},
       addresses = const {},
       _integers = null,
-      _references = null;
+      _references = at?.reference;
 
   new address(FlowAddress address)
     : _constants = const {},
@@ -269,12 +293,14 @@ final class FlowValue {
       managedBackings = const {},
       hasUnknownBacking = false,
       rawBackingTypes = const {},
+      unknownReceiverClasses = null,
+      recoveredAddress = null,
       unknownTypes = const {},
       externalUnknownTypes = const {},
       sources = const {},
       addresses = Set.unmodifiable({address}),
       _integers = null,
-      _references = address.reference;
+      _references = address._reference;
 
   /// A scalar integer constrained by executable paths.
   factory integerRange(FlowIntegerRange range) => switch (range.constant) {
@@ -302,10 +328,15 @@ final class FlowValue {
     Set<FlowObject> managedBackings = const {},
     this.hasUnknownBacking = false,
     Set<ValueType> rawBackingTypes = const {},
+    Set<ClassType>? receiverClasses,
+    this.recoveredAddress,
   ]) : _constants = Map.unmodifiable(constants),
        objects = Set.unmodifiable(objects),
        managedBackings = Set.unmodifiable(managedBackings),
        rawBackingTypes = Set.unmodifiable(rawBackingTypes),
+       unknownReceiverClasses = receiverClasses == null || unknownTypes.isEmpty
+           ? null
+           : Set.unmodifiable(receiverClasses),
        unknownTypes = Set.unmodifiable(unknownTypes),
        externalUnknownTypes = Set.unmodifiable(
          externalUnknownTypes
@@ -335,7 +366,42 @@ final class FlowValue {
           managedBackings,
           hasUnknownBacking,
           rawBackingTypes,
+          unknownReceiverClasses,
+          recoveredAddress,
         );
+
+  /// External scalar transmission uses its actual bits. An established number
+  /// can still retain evaluation dependencies that do not cross this boundary.
+  FlowValue get externalBits {
+    final exact = constant;
+    if (exact is ScalarConstant &&
+        ExecutionShapes.forType(exact.type).isScalar &&
+        !references.isBottom) {
+      return FlowValue.constant(exact);
+    }
+    return this;
+  }
+
+  /// A value outside code can produce after observing this reachable graph.
+  /// A base retained for access to storage does not give its numeric offset.
+  FlowValue externalValue(ValueType type) {
+    var visible = check(type).value.asExternal();
+    if (visible.addresses.any((address) => address.retainedBase)) {
+      visible = FlowValue._(
+        visible._constants, visible.objects, visible.unknownTypes, const {},
+        visible._references,
+        visible.addresses.where((address) => !address.retainedBase).toSet(),
+        visible._integers, visible.externalUnknownTypes, visible.managedBackings,
+        visible.hasUnknownBacking, visible.rawBackingTypes, visible.unknownReceiverClasses,
+      );
+    }
+    return FlowValue.unknown(type, external: true).join(visible)
+        .withSources(const [])
+        .withReferences([
+          if (type.accepts(ValueType.integer) || FfiTypes.isPointer(type.nonNullable))
+            references,
+        ]);
+  }
 
   /// Constants identified structurally, without invoking user equality.
   Iterable<Constant> get constants => _constants.values;
@@ -434,6 +500,8 @@ final class FlowValue {
         managedBackings,
         hasUnknownBacking,
         rawBackingTypes,
+        unknownReceiverClasses,
+        recoveredAddress,
       );
     }
     if (existing == null) return this;
@@ -447,12 +515,85 @@ final class FlowValue {
         ._withRawBackingTypes(rawBackingTypes);
   }
 
+  /// Known receiver classes, retaining each allocation's type arguments.
+  Iterable<ClassType> get knownReceiverTypes sync* {
+    for (final type in [
+      ...constants.map((value) => value.provenValueType),
+      ...objects.map((value) => value.type),
+      ...addresses.map((value) => value.type),
+    ]) {
+      if (_receiverClass(type) case final nominal?) yield nominal;
+    }
+  }
+
+  static ClassType? _receiverClass(ValueType type) => switch (type) {
+    _ when type == ValueType.nullType => ValueType.nullClass,
+    FunctionType() => ValueType.function,
+    ClassType() => type,
+    _ => null,
+  };
+
+  /// Selects the values that supplied one dispatch class and type environment.
+  /// A subtype test would also admit receivers dispatched to another body.
+  FlowValue receiverFor(ClassType type) {
+    final allowed = unknownReceiverClasses?.contains(type.declaration) ?? true;
+    if (type == ValueType.nullClass) {
+      final nullable = _constants.containsKey(const Constant.nullValue().structuralKey) ||
+          allowed && unknownTypes.any((bound) => bound.mayBeNull);
+      return nullable
+          ? FlowValue.constant(const Constant.nullValue()).withSources(sources)
+          : const FlowValue.bottom();
+    }
+    final constants = {
+      for (final entry in _constants.entries)
+        if (_receiverClass(entry.value.provenValueType) == type)
+          entry.key: entry.value,
+    };
+    final objects = this.objects
+        .where((object) => _receiverClass(object.type) == type)
+        .toSet();
+    final addresses = this.addresses.where((address) => address.type == type).toSet();
+    final bounds = <ValueType>{};
+    final external = <ValueType>{}, unrestricted = <ValueType>{};
+    for (final bound in unknownTypes) {
+      if (!allowed ||
+          !bound.mayHaveInstance(type) &&
+              !(type == ValueType.function && bound.nonNullable is FunctionType)) {
+        continue;
+      }
+      final narrowed = type.accepts(bound.nonNullable) ? bound.nonNullable : type;
+      bounds.add(narrowed);
+      (externalUnknownTypes.contains(bound) ? external : unrestricted).add(narrowed);
+    }
+    if (constants.isEmpty && objects.isEmpty && addresses.isEmpty && bounds.isEmpty) {
+      return const FlowValue.bottom();
+    }
+    return FlowValue._(
+      constants,
+      objects,
+      bounds,
+      sources,
+      _references,
+      addresses,
+      _integers,
+      external.difference(unrestricted),
+      managedBackings.where((backing) => _receiverClass(backing.type) == type).toSet(),
+      hasUnknownBacking,
+      rawBackingTypes,
+      {type.declaration},
+      recoveredAddress,
+    );
+  }
+
   /// Whether a nominal receiver candidate matches known values or unknown bounds.
   ///
   /// An exact allocation cannot gain a subclass merely through a broader view.
   /// Physical carriers of functions and records belong to representation.
   bool mayHaveInstance(ClassType type) {
-    if (unknownTypes.any((bound) => bound.mayHaveInstance(type))) return true;
+    if ((unknownReceiverClasses?.contains(type.declaration) ?? true) &&
+        unknownTypes.any((bound) => bound.mayHaveInstance(type))) {
+      return true;
+    }
     return [
       ...constants.map((value) => value.runtimeValueType),
       ...objects.map((value) => value.type),
@@ -482,6 +623,8 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -493,6 +636,7 @@ final class FlowValue {
         _references == null) {
       return this;
     }
+    final recovered = recoveredAddress?.mapObjects(transform);
     final mapped = objects.map(transform).toSet();
     final backings = managedBackings.map(transform).toSet();
     final references = _references?.mapObjects(transform);
@@ -506,6 +650,7 @@ final class FlowValue {
           },
           address.offsets,
           type: address.type,
+          retainedBase: address.retainedBase,
         ),
     };
     if (mapped.length == objects.length &&
@@ -514,7 +659,7 @@ final class FlowValue {
         backings.containsAll(managedBackings) &&
         mappedAddresses.length == addresses.length &&
         mappedAddresses.containsAll(addresses) &&
-        references == _references) {
+        references == _references && recovered == recoveredAddress) {
       return this;
     }
     return FlowValue._(
@@ -529,6 +674,8 @@ final class FlowValue {
       backings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
+      recovered,
     );
   }
 
@@ -557,7 +704,7 @@ final class FlowValue {
     final mappedAddresses = {
       for (final address in addresses)
         if (address.base case final Constant value)
-          FlowAddress.ranged(rebind(value), address.offsets, type: address.type)
+          FlowAddress.ranged(rebind(value), address.offsets, type: address.type, retainedBase: address.retainedBase)
         else
           address,
     };
@@ -574,6 +721,8 @@ final class FlowValue {
             managedBackings,
             hasUnknownBacking,
             rawBackingTypes,
+            unknownReceiverClasses,
+            recoveredAddress,
           )
         : this;
   }
@@ -597,6 +746,8 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -618,6 +769,7 @@ final class FlowValue {
               const {},
               false,
               value.rawBackingTypes,
+              value.unknownReceiverClasses,
             ),
           )
           .join(value.references);
@@ -638,8 +790,17 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       rawBackingTypes,
+      unknownReceiverClasses,
+      recoveredAddress,
     );
   }
+
+  /// The scalar bits copied to native storage after resolving this value.
+  /// Later changes to a managed carrier cannot change the copy. Explicit
+  /// address provenance still belongs to those bits.
+  FlowValue get nativeScalar => managedBackings.isEmpty && !hasUnknownBacking
+      ? this
+      : withManagedBackings(const []).withSources(const []);
 
   /// Attaches the actual physical allocation to the same semantic value.
   ///
@@ -668,6 +829,7 @@ final class FlowValue {
       backings,
       unknown,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
   }
 
@@ -711,6 +873,7 @@ final class FlowValue {
       const {},
       false,
       rawBackingTypes,
+      unknownReceiverClasses,
     );
     return FlowValue.joined([
       retained,
@@ -759,6 +922,8 @@ final class FlowValue {
       managedBackings,
       hasUnknownBacking,
       retained,
+      unknownReceiverClasses,
+      recoveredAddress,
     );
   }
 
@@ -914,6 +1079,8 @@ final class FlowValue {
               backings,
               hasUnknownBacking,
               rawBackingTypes,
+              unknownReceiverClasses,
+              recoveredAddress,
             ),
       mayFail: mayFail,
     );
@@ -947,8 +1114,10 @@ final class FlowValue {
     final unrestricted = <ValueType>{};
     final sources = values.first.sources.toSet();
     final scalars = <ValueType, Object>{};
-    final addresses = <(Object, ValueType), FlowAddress>{};
+    final addresses = <(Object, ValueType, bool), FlowAddress>{};
     var integers = values.first.integers;
+    Set<ClassType>? receiverClasses = {};
+
     for (final (index, value) in values.indexed) {
       if (index != 0) {
         final other = value.integers;
@@ -963,6 +1132,13 @@ final class FlowValue {
           hasBacking &&
           (value.hasUnknownBacking || value.managedBackings.isEmpty);
       unknown.addAll(value.unknownTypes);
+      if (value.unknownTypes.isNotEmpty) {
+        if (value.unknownReceiverClasses case final allowed?) {
+          receiverClasses?.addAll(allowed);
+        } else {
+          receiverClasses = null;
+        }
+      }
       external.addAll(value.externalUnknownTypes);
       unrestricted.addAll(
         value.unknownTypes.difference(value.externalUnknownTypes),
@@ -974,12 +1150,13 @@ final class FlowValue {
         final type = entry.value.type;
         if (scalars.containsKey(type) && scalars[type] != entry.key) {
           unknown.add(type);
+          if (type is ClassType) receiverClasses?.add(type.declaration);
         } else {
           scalars[type] = entry.key;
         }
       }
       for (final address in value.addresses) {
-        final key = (address.identity, address.type);
+        final key = (address.identity, address.type, address.retainedBase);
         final previous = addresses[key];
         addresses[key] = previous == null || previous == address
             ? address
@@ -989,6 +1166,7 @@ final class FlowValue {
                     ? null
                     : previous.offsets!.join(address.offsets!, widen: widen),
                 type: address.type,
+                retainedBase: address.retainedBase,
               );
       }
     }
@@ -1013,6 +1191,13 @@ final class FlowValue {
       backings,
       unknownBacking,
       rawBackings,
+      receiverClasses,
+      values.every((value) => value.recoveredAddress != null)
+          ? FlowValue.joined(
+              values.map((value) => value.recoveredAddress!),
+              widen: widen,
+            )
+          : null,
     );
   }
 
@@ -1031,6 +1216,11 @@ final class FlowValue {
           rawBackingTypes.containsAll(other.rawBackingTypes) &&
           addresses.length == other.addresses.length &&
           addresses.containsAll(other.addresses) &&
+          (unknownReceiverClasses == null
+              ? other.unknownReceiverClasses == null
+              : other.unknownReceiverClasses != null &&
+                unknownReceiverClasses!.length == other.unknownReceiverClasses!.length &&
+                unknownReceiverClasses!.containsAll(other.unknownReceiverClasses!)) &&
           unknownTypes.length == other.unknownTypes.length &&
           unknownTypes.containsAll(other.unknownTypes) &&
           externalUnknownTypes.length == other.externalUnknownTypes.length &&
@@ -1038,7 +1228,8 @@ final class FlowValue {
           sources.length == other.sources.length &&
           sources.containsAll(other.sources) &&
           _integers == other._integers &&
-          _references == other._references;
+          _references == other._references &&
+          recoveredAddress == other.recoveredAddress;
 
   @override
   int get hashCode => Object.hash(
@@ -1049,10 +1240,12 @@ final class FlowValue {
     Object.hashAllUnordered(rawBackingTypes),
     Object.hashAllUnordered(addresses),
     Object.hashAllUnordered(unknownTypes),
+    unknownReceiverClasses == null ? null : Object.hashAllUnordered(unknownReceiverClasses!),
     Object.hashAllUnordered(externalUnknownTypes),
     Object.hashAllUnordered(sources),
     _integers,
     _references,
+    recoveredAddress,
   );
 }
 

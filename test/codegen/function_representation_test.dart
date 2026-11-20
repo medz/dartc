@@ -209,6 +209,17 @@ void main() {
           )
           .functions
           .single;
+      final boundary = lowered.blocks
+          .expand((block) => block.instructions)
+          .whereType<RawNativeCall>()
+          .single;
+      expect(boundary.borrowedArguments, {0});
+      expect(
+        (boundary.mapInputs(
+          (value) => value,
+        ) as RawNativeCall).borrowedArguments,
+        {0},
+      );
       final body = FunctionRepresentation(
         lowered,
         layouts,

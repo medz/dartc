@@ -66,6 +66,48 @@ void main() {
     });
   }
 
+  test(
+    'a successful check constrains the caller only on its normal edge',
+    () async {
+      final checked = await AnalysisSession([
+        'test/compiler/fixtures/checked_index.dart',
+      ]).use((input) async => (await Lowering().lower(input)).program);
+      final target = checked.functions
+          .singleWhere((f) => f.target.name == 'checkedIndex')
+          .target;
+      final optimized = ProgramOptimizer(const [ProgramSimplification()])
+          .run(checked, [
+            (
+              target: target,
+              arguments: [
+                FlowValue.unknown(.integer),
+                FlowValue.unknown(.boolean),
+              ],
+            ),
+          ])
+          .program;
+      final caller = optimized.implementationOf(target) as IrFunction;
+      final machine = IrInterpreter(optimized, {});
+      expect(
+        [
+          machine.run(caller, [6, true]),
+          machine.run(caller, [-4, true]),
+          machine.run(caller, [-4, false]),
+        ],
+        [7, 81, -4],
+      );
+      expect(
+        caller.blocks.where(
+          (block) => switch (block.end) {
+            Return(value: ScalarConstant(value: 701)) => true,
+            _ => false,
+          },
+        ),
+        isEmpty,
+      );
+    },
+  );
+
   test('checked aliases constrain later reads of the same stored value', () {
     final function = body('guardedAliases');
     final facts = ProgramFlow(program, [

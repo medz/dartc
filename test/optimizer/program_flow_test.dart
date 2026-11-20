@@ -11,6 +11,79 @@ import '../support/numeric_order.dart';
 final _uri = Uri.parse('memory:program-flow');
 
 void main() {
+  test('nullable references use objects initialized on the arriving paths', () {
+    final box = ClassType(_uri, 'Box');
+    final field = InstanceField(box, 'value', .integer);
+    final root = FunctionTarget(_uri, 'choose', .integer, [.boolean, .boolean]);
+    final identity = FunctionTarget(_uri, 'identity', .integer, [.integer]);
+    final delegate = Block(identity.parameterTypes);
+    delegate.finish(Return(delegate.parameters.single));
+
+    final entry = Block(root.parameterTypes);
+    final early = Block(), first = Block(), absent = Block();
+    final delayed = List.generate(7, (_) => Block());
+    final joined = Block([box.nullable]),
+        present = Block([box]),
+        empty = Block();
+    entry.finish(
+      Branch(entry.parameters.first, Jump(early), Jump(delayed.first)),
+    );
+    early.finish(Branch(entry.parameters.last, Jump(first), Jump(absent)));
+    absent.finish(Jump(joined, [const Constant.nullValue()]));
+    for (var i = 1; i < delayed.length; i++) {
+      delayed[i - 1].finish(Jump(delayed[i]));
+    }
+    for (final (block, number) in [(first, 40), (delayed.last, 42)]) {
+      final value = block.emit(NewPayload(box, const Constant.integer(0)));
+      block.emit(StoreField(field, value, Constant.integer(number)));
+      block.finish(Jump(joined, [value]));
+    }
+
+    final tested = joined.emit(TypeTest(joined.parameters.single, box));
+    joined.finish(
+      Branch(tested, Jump(present, [tested.refinement(true)!]), Jump(empty)),
+    );
+    empty.finish(const Return(Constant.integer(41)));
+    final loaded = present.emit(LoadField(field, present.parameters.single));
+    present.finish(Return(present.emit(DirectCall(identity, [loaded]))));
+    final body = IrFunction(root, [
+      entry,
+      early,
+      first,
+      absent,
+      ...delayed,
+      joined,
+      present,
+      empty,
+    ]);
+    final program = IrProgram(
+      [
+        IrClass(box, [field]),
+      ],
+      [
+        body,
+        IrFunction(identity, [delegate]),
+      ],
+    );
+    final facts = ProgramFlow(program, [
+      (
+        target: root,
+        arguments: [FlowValue.unknown(.boolean), FlowValue.unknown(.boolean)],
+      ),
+    ]).facts;
+    final expected = [
+      for (final args in [
+        [true, true],
+        [true, false],
+        [false, false],
+      ])
+        IrInterpreter(program, {}).run(body, args),
+    ];
+    expect(expected, [40, 41, 42]);
+    final range = facts.returnedBy(root).integers;
+    expect([range?.lower, range?.upper], [40, 42]);
+  });
+
   test('entry coverage requires independent full inputs, including ranges', () {
     final entry = FunctionTarget(_uri, 'entry', .integer, [.integer]);
     final internal = FunctionTarget(_uri, 'internal', .integer, [.integer]);

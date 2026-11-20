@@ -18,6 +18,44 @@ void main() {
     expect(ValueType.boolean.asInstanceOf(ValueType.comparable), isNull);
   });
 
+  test('verified supertype paths apply each receiver’s own arguments', () {
+    final uri = Uri.parse('memory:supertype-path');
+    TypeParameterType parameter(String name) =>
+        TypeParameterType(name)..initializeBound(.object.nullable);
+    final element = parameter('E');
+    final base = ClassType(uri, 'Base', typeParameters: [element]);
+    final item = parameter('I');
+    final middle = ClassType.declare(uri, 'Middle', typeParameters: [item]);
+    final leaf = parameter('T');
+    final child = ClassType(
+      uri,
+      'Child',
+      typeParameters: [leaf],
+      interfaces: [
+        middle.instantiate([leaf.nullable]),
+      ],
+    );
+    final integers = child.instantiate([ValueType.integer]);
+    // An early negative query must not survive late hierarchy initialization.
+    expect(integers.asInstanceOf(base), isNull);
+    middle.initializeHierarchy(
+      interfaces: [
+        base.instantiate([item]),
+      ],
+    );
+    IrProgram(
+      [],
+      [],
+      globals: [GlobalVariable(uri, 'root', integers.nullable)],
+    );
+    for (final value in [ValueType.integer, ValueType.string]) {
+      final view = child.instantiate([value]);
+      expect(view.asInstanceOf(base), base.instantiate([value.nullable]));
+      expect(view.asInstanceOf(base, {middle}), isNull);
+      expect(view.asInstanceOf(base), view.asInstanceOf(base, {}));
+    }
+  });
+
   test('Null members bind the null value without requiring a heap object', () {
     final target = FunctionTarget(
       Uri.parse('dart:core'),

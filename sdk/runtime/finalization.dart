@@ -37,6 +37,12 @@ base class FinalizerHandle<T>(
   void _invoke(Object? token) => _callback(token as T);
 }
 
+// The empty slot denotes a token already removed by detach or delivery.
+// An attached caller may independently register a null token.
+enum _NullToken() {
+  value,
+}
+
 /// Retains its token, but neither its target nor the collector's registry links.
 final class FinalizationRecord(
   final FinalizerRegistration owner,
@@ -51,7 +57,7 @@ final class FinalizationRecord(
   Object? detachKey = detachKey;
   @WeakSlot()
   FinalizationRecord? _registryNext;
-  Object? _token = token;
+  Object? _token = token ?? _NullToken.value;
   FinalizationRecord? _ownerPrevious, _ownerNext, _queueNext;
   FinalizationState _state = .attached;
 
@@ -69,7 +75,6 @@ final class FinalizationRecord(
     _ownerNext = null;
     target = null;
     detachKey = null;
-    _token = null;
   }
 }
 
@@ -118,9 +123,7 @@ final class FinalizationQueue() implements Finalization {
     for (var record = owner._first; record != null;) {
       final next = record._ownerNext;
       if (identical(record.detachKey, key)) {
-        _externalBytes -= record.externalSize;
-        record._unlink();
-        record._state = .detached;
+        _finish(record, deliver: false);
       }
       record = next;
     }
@@ -174,19 +177,24 @@ final class FinalizationQueue() implements Finalization {
       _head = record._queueNext;
       if (_head == null) _tail = null;
       record._queueNext = null;
-      if (record._state != .queued) continue;
-      _deliver(record);
-      return true;
+      if (_finish(record, deliver: true)) return true;
     }
     return false;
   }
 
-  void _deliver(FinalizationRecord record) {
-    final token = record._token;
+  // A linked record may have been cancelled since it was enqueued.
+  // Claim its token and finish accounting before invoking user code.
+  bool _finish(FinalizationRecord record, {required bool deliver}) {
+    final stored = record._token;
+    if (stored == null) return false;
+    record._token = null;
     _externalBytes -= record.externalSize;
     record._unlink();
-    record._state = .delivered;
-    record.owner._invoke(token);
+    record._state = deliver ? .delivered : .detached;
+    if (deliver) {
+      record.owner._invoke(identical(stored, _NullToken.value) ? null : stored);
+    }
+    return true;
   }
 
   /// Runs native callbacks after collection, before returning to Dart execution.
@@ -202,7 +210,7 @@ final class FinalizationQueue() implements Finalization {
         }
         if (_tail == record) _tail = previous;
         record._queueNext = null;
-        if (record._state == .queued) _deliver(record);
+        _finish(record, deliver: true);
         previous = null;
         record = _head;
       } else {
@@ -220,13 +228,7 @@ final class FinalizationQueue() implements Finalization {
       _records = record._registryNext;
       record._registryNext = null;
       if (record._state == .attached) {
-        if (record.owner.isNative) {
-          _deliver(record);
-        } else {
-          _externalBytes -= record.externalSize;
-          record._unlink();
-          record._state = .detached;
-        }
+        _finish(record, deliver: record.owner.isNative);
       }
     }
     for (var record = _head; record != null; record = _head) {
@@ -234,13 +236,7 @@ final class FinalizationQueue() implements Finalization {
       if (_head == null) _tail = null;
       record._queueNext = null;
       if (record._state == .queued) {
-        if (record.owner.isNative) {
-          _deliver(record);
-        } else {
-          _externalBytes -= record.externalSize;
-          record._unlink();
-          record._state = .detached;
-        }
+        _finish(record, deliver: record.owner.isNative);
       }
     }
   }

@@ -62,6 +62,62 @@ docker run --rm --platform linux/arm64 \
 
 For Linux x64, use `linux-x64` for the builder and `TEST_TARGET`, and `linux/amd64` for Docker. Reuse an existing build from the same source revision instead of running the builder again.
 
+## Host expectations
+
+Use one fixed input while changing the compiler. The benchmark compiles locally
+and checks the executable's standard output or runs the fixture's existing FFI
+test against the freshly built library. Select the default CLI or the public
+Compiler API. Save each report to a separate path to compare outcomes.
+
+```sh
+python3 tool/bench_guard.py 150 dart run tool/bench.dart --only=print_integers --run-repeats=1 --output=build/bench/print-cli.json
+python3 tool/bench_guard.py 150 dart run tool/bench.dart --api --only=generic_member_carriers --output=build/bench/member-api.json
+```
+
+The expected output for `print_integers` is two lines, `42` then `43`.
+The member test selects between both receivers and checks the returned operand
+at odd and even recursion depths. Use `--only=generic_cell_storage` to check a
+write followed by a read through another native entry. Shared libraries run
+their FFI test once. The report records its exit status and elapsed time under
+`hostVerification`.
+
+Use `--only=control_flow` to compare the compiled library with the Dart SDK
+on branches, loops, exception cleanup, recursion and deferred local values.
+
+Select `--only=same_heap_finalizer` to verify one heap across registration,
+allocation and lookup exports. The FFI test expects the callback count to go
+from zero after registration to one when allocation returns, and to stay at one
+after unload. The harness builds the callback provider in the same asset
+directory before running the host test and records that step in
+`hostPreparation`.
+
+Select `--only=checked_index_object,checked_index_static` to compile the same
+checked-index source as an object file and a static library. The harness links
+each artifact to its own C executable and checks the three signed results
+`7 81 -4`. Add `--api` to exercise the public compiler entry point. A report
+used with `--baseline` must include successful linking and execution for both
+selected artifacts.
+
+The optional POSIX guard bounds the whole command and cleans up its process
+group. The benchmark defaults to 120 seconds for each compilation. Allow time
+for verification and report writing when setting the outer deadline. A timeout
+at the outer deadline exits with 124 and can precede the JSON report. Use a fresh
+report path or check its creation time before interpreting a result.
+
+The harness locks its own `build/bench` directory while writing artifacts and
+reports. Source archives and independent checkouts can run concurrently in
+separate build directories. The operating system releases the lock when the
+harness exits. For
+example, on a 16 GiB host, two jobs can each use a 3 GiB sampled group RSS
+budget, 180 CPU seconds per process and a 120-second wall deadline.
+
+```sh
+python3 tool/bench_guard.py --rss-mib 3072 --cpu-seconds 180 120 dart run tool/bench.dart --only=control_flow --timeout=95
+```
+
+Run comparable timing measurements separately. The guard checks group RSS
+every 250 ms and terminates the group on a limit or launcher exit.
+
 ## Validation scope
 
 | Change | Required checks |

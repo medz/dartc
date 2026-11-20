@@ -81,7 +81,7 @@ void main() {
   test('module registry enumerates all identities on every scan', () {
     final roots = ModuleRoots(storage.context);
     roots.start();
-    expect(roots.moveNext(), isFalse);
+    expect(roots.nextAddress(), 0);
     final entries = [
       storage.allocate(40),
       storage.allocate(40),
@@ -100,15 +100,22 @@ void main() {
     for (var scan = 0; scan < 3; scan++) {
       roots.start();
       final actual = <int>[];
-      while (roots.moveNext()) {
-        actual.add(roots.address);
+      while (true) {
+        final address = roots.nextAddress();
+        if (address == 0) break;
+        actual.add(address);
       }
       expect(actual, entries);
-      expect(roots.address, 0);
+      expect(roots.nextAddress(), 0);
     }
+    word(table + ModuleRootTable.count).value = 1;
+    roots.start();
+    word(table + ModuleRootTable.count).value = entries.length;
+    expect(roots.nextAddress(), entries.first);
+    expect(roots.nextAddress(), 0);
     word(storage.context + RuntimeContext.globalRoots).value = 0;
     roots.start();
-    expect(roots.moveNext(), isFalse);
+    expect(roots.nextAddress(), 0);
   });
 
   test('native roots own managed, collecting and closed phase transitions', () {

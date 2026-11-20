@@ -19,6 +19,119 @@ final _i64 = NativeScalarType(Int64);
 const _placeholder = Constant.integer(0);
 
 void main() {
+  test('a fresh mapping keeps its header when an absent input is released', () {
+    final site = DirectCall(FunctionTarget(null, 'map', .integer, []), []);
+    final oldPage = FlowObject(site, Object()),
+        newPage = FlowObject(site, Object());
+    final caller = FlowState(_program, memoryLayout: _layout);
+    final held = caller.allocateMemory(oldPage, _integer(16), repeated: false);
+    final before = held.normal!.copy(resetWrites: true);
+    final oldAddress = FlowValue.address(held.value.addresses.single);
+    final released = before.overwriteNative(
+      oldAddress,
+      _integer(16),
+      release: true,
+    );
+    final created = released.allocateMemory(
+      newPage,
+      _integer(16),
+      repeated: false,
+    );
+    final fresh = FlowValue.address(created.value.addresses.single);
+    final after = _store(created.normal!, fresh, _i64, _integer(42));
+    final output = caller.applySummary(
+      before,
+      after,
+      mapObject: (_) => oldPage,
+      mapValue: (value) => value.mapObjects((_) => oldPage),
+    );
+    expect(_load(output, oldAddress, _i64).integers?.constant, 42);
+  });
+
+  test('joining a separately renamed empty input keeps it unchanged', () {
+    final input = FlowState(_program, memoryLayout: _layout);
+    final cell = NewCell(CellType(.integer), const Constant.integer(0));
+    final firstName = FlowObject(cell, Object());
+    final secondName = FlowObject(cell, Object());
+    final first = input.mapObjects({firstName: secondName});
+    final second = input.mapObjects({secondName: firstName});
+    expect(first.structuralKey, second.structuralKey);
+    expect(first.join(second), isFalse);
+  });
+
+  test('returned mappings that share a caller identity remain writable', () {
+    final site = DirectCall(FunctionTarget(null, 'map', .integer, []), []);
+    final prior = FlowObject(site, Object());
+    final fresh = FlowObject(site, Object());
+    final input = FlowState(_program, memoryLayout: _layout);
+    final held = input.allocateMemory(prior, _integer(16), repeated: false);
+    final heldAddress = FlowValue.address(held.value.addresses.single);
+    final caller = _store(held.normal!, heldAddress, _i64, _integer(17));
+    final mapped = input.allocateMemory(fresh, _integer(16), repeated: false);
+    final mappedAddress = FlowValue.address(mapped.value.addresses.single);
+    final exit = _store(mapped.normal!, mappedAddress, _i64, _integer(91));
+
+    final returned = caller.applySummary(
+      input,
+      exit,
+      mapObject: (_) => prior,
+      mapValue: (value) => value.mapObjects((_) => prior),
+    );
+    final updated = _store(returned, heldAddress, _i64, _integer(63));
+    final possible = _load(updated, heldAddress, _i64).integers!;
+    expect([17, 63, 91].every(possible.contains), isTrue);
+  });
+
+  test('a cursor and its page agree after conditional initialization', () {
+    final target = FunctionTarget(null, 'samePage', .boolean, [.boolean]);
+    final entry = Block(target.parameterTypes), initialize = Block();
+    final inspect = Block(), empty = Block(), active = Block();
+    final fields = NativeData(List.filled(16, 0), alignment: 8);
+    final storage = NativeData(List.filled(16, 0), alignment: 8);
+    final baseSlot = entry.emit(NativeDataAddress(fields));
+    final cursorSlot = entry.emit(
+      IntBinary(.add, baseSlot, const Constant.integer(8)),
+    );
+    entry.finish(
+      Branch(entry.parameters.single, Jump(initialize), Jump(inspect)),
+    );
+    final page = initialize.emit(NativeDataAddress(storage));
+    initialize.emit(StoreNative(baseSlot, _i64, page));
+    final cursor = initialize.emit(
+      IntBinary(.add, page, const Constant.integer(8)),
+    );
+    initialize.emit(StoreNative(cursorSlot, _i64, cursor));
+    initialize.finish(Jump(inspect));
+    final mark = inspect.emit(LoadNative(cursorSlot, _i64));
+    inspect.finish(
+      Branch(
+        inspect.emit(Equals(mark, const Constant.integer(0))),
+        Jump(empty),
+        Jump(active),
+      ),
+    );
+    for (final block in [empty, active]) {
+      final base = block.emit(LoadNative(baseSlot, _i64));
+      block.finish(
+        Return(
+          block.emit(
+            Equals(base, const Constant.integer(0), negated: block == active),
+          ),
+        ),
+      );
+    }
+    final program = IrProgram([], [
+      IrFunction(target, [entry, initialize, inspect, empty, active]),
+    ]);
+    final facts = ProgramFlow(program, [
+      (target: target, arguments: [FlowValue.unknown(.boolean)]),
+    ], memoryLayout: _layout).facts;
+    expect(
+      (facts.returnedBy(target).constant as ScalarConstant?)?.value,
+      isTrue,
+    );
+  });
+
   test(
     'input renaming preserves native references, offsets and write effects',
     () {
@@ -1565,6 +1678,78 @@ void main() {
       expect(_load(repeated, address, _u8).constant, isNull);
     },
   );
+
+  test('a tail store uses the byte count of its own managed allocation', () {
+    final caller = Block([ValueType.integer, ValueType.integer]);
+    final bytes = caller.parameters.first;
+    final payload = NewPayload(_type, bytes);
+    final fixed = _layout.objectLayout(_type).size;
+    final other = _allocate(FlowState(_program, memoryLayout: _layout), 8);
+    final allocated = _step(other.state, payload,
+        operands: [FlowValue.integerRange(FlowIntegerRange(16, 64))]);
+    for (final length in caller.parameters) {
+      final last = IntBinary(.add, length, Constant.integer(fixed - 1));
+      final store = StoreObjectData(payload, last, _u8, const Constant.integer(91));
+      final inputs = [
+        allocated.value,
+        FlowValue.integerRange(FlowIntegerRange(fixed + 15, fixed + 63)),
+        _integer(91),
+      ];
+      final state = allocated.normal!;
+      expect(state.boundsNativeWrite(store, inputs), identical(length, bytes));
+      final written = _step(state, store, operands: inputs).normal!;
+      expect(_number(_load(written, other.address, _i64)),
+          identical(length, bytes) ? 0 : null);
+    }
+  });
+
+  test('normal caller joins both legal reads of array index one', () {
+    final root = FunctionTarget(null, 'readSecondAfterTail', .integer, [
+      .boolean,
+    ]);
+    final entry = Block(root.parameterTypes);
+    final joined = Block([ValueType.integer]);
+    entry.finish(
+      Branch(
+        entry.parameters.single,
+        Jump(joined, [const Constant.integer(16)]),
+        Jump(joined, [const Constant.integer(24)]),
+      ),
+    );
+    final n = joined.parameters.single;
+    final fixed = _layout.objectLayout(_type).size;
+    final first = joined.emit(NewPayload(_type, const Constant.integer(8)));
+    final last = joined.emit(NewPayload(_type, const Constant.integer(8)));
+    final old = joined.emit(ReferenceAddress(first));
+    final fresh = joined.emit(ReferenceAddress(last));
+    final array = joined.emit(NewPayload(_type, n));
+    joined.emit(StoreObjectData(array, Constant.integer(fixed + 8), _i64, old));
+    final offset = joined.emit(IntBinary(.add, n, Constant.integer(fixed - 8)));
+    joined.emit(StoreObjectData(array, offset, _i64, fresh));
+    final observed = joined.emit(
+      LoadObjectData(array, Constant.integer(fixed + 8), _i64),
+    );
+    joined.finish(Return(observed));
+    final facts = ProgramFlow(
+      IrProgram(
+        [IrClass(_type, [])],
+        [
+          IrFunction(root, [entry, joined]),
+        ],
+      ),
+      [
+        (target: root, arguments: [FlowValue.unknown(.boolean)]),
+      ],
+      memoryLayout: _layout,
+    ).facts;
+    final result = facts.returnedBy(root);
+    final aliases = {
+      ...result.references.objects,
+      ...result.addresses.map((a) => a.base),
+    };
+    expect(aliases, contains(facts.valueOf(first).objects.single));
+    expect(aliases, contains(facts.valueOf(last).objects.single));
+  });
 
   test('external writes invalidate exposed storage, unbounded addresses do not guess bounds', () {
     final a = _allocate(FlowState(_program, memoryLayout: _layout), 8);

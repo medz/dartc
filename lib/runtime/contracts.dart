@@ -100,6 +100,7 @@ enum MemoryOperation() {
   copyExecutable,
   flushInstructions,
   abi,
+  contextFreeStackMap,
 }
 
 /// The position-independent native entry page and its adjacent metadata page.

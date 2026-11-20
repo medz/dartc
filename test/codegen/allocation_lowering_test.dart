@@ -4,6 +4,8 @@ import 'package:dartc/abi.dart';
 import 'package:dartc/layout.dart';
 import 'package:dartc/target.dart';
 import 'package:dartc/src/codegen/cell_initialization.dart';
+import 'package:dartc/src/codegen/closure_storage.dart';
+import 'package:dartc/src/codegen/type_values.dart';
 import 'package:test/test.dart';
 
 import '../support/runtime.dart';
@@ -11,6 +13,176 @@ import '../support/runtime.dart';
 void main() {
   setUpAll(prepareRuntime);
   final uri = Uri.parse('memory:allocation-lowering');
+
+  test(
+    'actual createClosure leaves lexical T in the allocated function header',
+    () {
+      final t = TypeParameterType('T')..initializeBound(.object.nullable);
+      final outer = FunctionTarget(
+        uri,
+        'outer',
+        .voidType,
+        [],
+        typeParameters: [t],
+      );
+      final local = FunctionTarget(
+        uri,
+        'local',
+        t,
+        [t],
+        kind: .closure,
+        enclosing: outer,
+        sourceOffset: 12,
+      );
+      final cb = Block(local.parameterTypes);
+      cb.finish(Return(cb.parameters.last));
+      final source = IrProgram([], [
+        IrFunction(outer, [Block()..finish(const Return())]),
+        IrFunction(local, [cb]),
+      ]);
+      final impl = CallableImplementations()..extend(source);
+      final generator = impl.closureConstruction(local);
+      final closure = _instructions(generator).whereType<Construct>().single;
+      final shape = closure.callableStorage!;
+      final program = IrProgram(
+        [...impl.storage.classes, ...TypeValues().classes],
+        [...source.functions, ...impl.storage.functions, generator],
+      );
+      final target = generator.target;
+      final lowered = AllocationLowering(heapRuntime).lower(program, [target]);
+      final out = lowered.implementationOf(target) as IrFunction;
+      final type = _sourceValue(_descriptorHeader(out, shape)) as ReifyType;
+      expect(type.template, local.signature);
+      expect(type.template.freeTypeParameters, contains(same(t)));
+      expect(target.typeParameters, contains(same(t)));
+      final init = _instructions(out).whereType<InitializeObject>().single;
+      final environment = _sourceValue(init.inputs.last) as ReifyType;
+      expect(environment.template, same(t));
+    },
+  );
+  test('genuine descriptors preserve their operand and share the physical header writer', () {
+    final outer = FunctionTarget(uri, 'outer', .voidType, []);
+    final local = FunctionTarget(
+      uri,
+      'local',
+      .integer,
+      [.integer],
+      kind: .closure,
+      enclosing: outer,
+      sourceOffset: 12,
+    );
+    final code = Block(local.parameterTypes);
+    code.finish(Return(code.parameters.last));
+    final storage = ClosureStorage([]);
+    final shape = storage.ensureClosure(local).storage;
+    final functions = <IrFunction>[];
+    final roots = <FunctionTarget>[];
+    final cases = [
+      'constant',
+      'lexical',
+      'known',
+      'wide',
+      'direct runtime type',
+    ];
+    for (final form in cases) {
+      final target = FunctionTarget(uri, form, local.signature, [
+        TypeMetadata.type,
+        local.signature,
+      ]);
+      roots.add(target);
+      final entry = Block(target.parameterTypes);
+      final Value descriptor = switch (form) {
+        'constant' => TypeConstant(local.signature),
+        'lexical' => entry.emit(ReifyType(local.signature)),
+        'known' => entry.parameters.first,
+        'wide' => entry.emit(
+          TypeView(
+            entry.emit(TypeView(entry.parameters.first, .typeType)),
+            ValueType.object.nullable,
+          ),
+        ),
+        _ => entry.emit(ObjectRuntimeType(entry.parameters.last, direct: true)),
+      };
+      final operation = entry.emit(
+        Construct.callable(
+          shape,
+          [entry.emit(FunctionEntryTableAddress(local))],
+          local.signature,
+          descriptor,
+        ),
+      );
+      entry.finish(Return(operation));
+      functions.add(IrFunction(target, [entry]));
+    }
+    final program = IrProgram(
+      [...storage.classes, ...TypeValues().classes],
+      [
+        IrFunction(outer, [Block()..finish(const Return())]),
+        IrFunction(local, [code]),
+        ...storage.functions,
+        ...functions,
+      ],
+    );
+    final lowered = AllocationLowering(heapRuntime).lower(program, roots);
+    final templates = <FunctionTarget>{};
+    for (final (i, target) in roots.indexed) {
+      final out = lowered.implementationOf(target) as IrFunction;
+      final descriptor = _sourceValue(_descriptorHeader(out, shape));
+      final header = _instructions(out).whereType<StoreObjectReference>().single;
+      templates.add(out.originOf(header).source.owner);
+      switch (cases[i]) {
+        case 'constant':
+          expect((descriptor as TypeConstant).representedType, local.signature);
+        case 'lexical':
+          expect((descriptor as ReifyType).template, local.signature);
+        case 'known' || 'wide':
+          expect(descriptor, same(out.entry.parameters.first));
+        default:
+          expect(
+            (descriptor as ObjectRuntimeType).operand,
+            same(out.entry.parameters.last),
+          );
+      }
+    }
+    expect(templates, hasLength(1));
+  });
+  test('a user Type implementation does not qualify as a descriptor', () {
+    final custom = ClassType(
+      uri,
+      'UserType',
+      interfaces: [ValueType.typeType],
+    );
+    final outer = FunctionTarget(uri, 'scope', .voidType, []);
+    final local = FunctionTarget(
+      uri,
+      'local',
+      .voidType,
+      [],
+      kind: .closure,
+      enclosing: outer,
+      sourceOffset: 12,
+    );
+    final shape = ClosureStorage([]).ensureClosure(local).storage;
+    final block = Block([custom, .typeType, .object]);
+    for (final value in [
+      block.parameters[0],
+      block.parameters[1],
+      TypeView(block.parameters[0], .typeType),
+      TypeView(block.parameters[0], ValueType.object.nullable),
+      ObjectRuntimeType(block.parameters.last),
+    ]) {
+      expect(value.isTypeDescriptor, isFalse);
+      expect(
+        () => Construct.callable(
+          shape,
+          [FunctionEntryTableAddress(local)],
+          local.signature,
+          value,
+        ),
+        throwsArgumentError,
+      );
+    }
+  });
 
   test(
     'cell construction and copy use the common zeroed allocation contract',
@@ -228,4 +400,30 @@ void main() {
       );
     },
   );
+}
+
+Iterable<Instruction> _instructions(IrFunction body) sync* {
+  for (final block in body.blocks) {
+    yield* block.instructions;
+    if (block.end case Invoke(:final operation)) yield operation;
+  }
+}
+
+Value _descriptorHeader(IrFunction function, CallableStorage storage) {
+  final header = _instructions(function).whereType<StoreObjectReference>().single;
+  expect((header.byteOffset as ScalarConstant).value, ObjectHeader.typeOffset);
+  final allocation = _instructions(function).whereType<AllocatedObject>().single;
+  expect(header.object, same(allocation));
+  expect(allocation.callableStorage, same(storage));
+  final init = _instructions(function).whereType<InitializeObject>().single;
+  expect(init.initializer, same(storage.initializer));
+  expect(init.receiver, same(allocation));
+  return header.value;
+}
+
+Value _sourceValue(Value value) {
+  while (value is TypeView || value is UncheckedCast) {
+    value = (value as Instruction).inputs.single;
+  }
+  return value;
 }

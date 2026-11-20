@@ -118,7 +118,7 @@ base class ScalarCodeGenerator<R extends Object>(
       }
     }
 
-    final rootAddresses = <(int, Fixup)>[];
+    final rootAddresses = <(int, Fixup)>[], contextFreeAddresses = <(int, Fixup)>[];
     void call(Fixup fixup, FunctionTarget callee) {
       final index = indices[callee];
       if (index == null) {
@@ -224,8 +224,9 @@ base class ScalarCodeGenerator<R extends Object>(
                   ),
                 );
               },
-              stackMapAddress: (fixup) =>
-                  rootAddresses.add((code.length, fixup)),
+              stackMapAddress: (fixup, contextFreeOnly) =>
+                  (contextFreeOnly ? contextFreeAddresses : rootAddresses)
+                      .add((code.length, fixup)),
               moduleRootsAddress: (fixup) =>
                   moduleRootAddresses.add((code.length, fixup)),
               moduleObjectAddress: (fixup, declaration) {
@@ -545,12 +546,25 @@ base class ScalarCodeGenerator<R extends Object>(
       );
       sections.add(Section.finalizers(List.filled(8, 0)));
     }
+    prepared.checkStackMapContexts(hasContexts: maps.hasContexts);
     final rootSymbol = maps.finish(
       sections,
       symbols,
       relocations,
-      required: rootAddresses.isNotEmpty,
+      required: rootAddresses.isNotEmpty || contextFreeAddresses.isNotEmpty,
     );
+    if (contextFreeAddresses.isNotEmpty) {
+      final slot = symbols.length;
+      symbols.add(.new('.dartc.contextFreeStackMap', sections.length, 0, 8,
+          kind: .data, binding: .local));
+      if (!maps.hasContexts) {
+        relocations.add(.address(sections.length, 0, rootSymbol!));
+      }
+      sections.add(Section.readOnlyData(Uint8List(8), alignment: 8));
+      for (final (start, fixup) in contextFreeAddresses) {
+        relocations.add(.instruction(0, start + fixup.offset, fixup.encoding, slot));
+      }
+    }
     for (final (start, fixup) in rootAddresses) {
       relocations.add(
         .instruction(0, start + fixup.offset, fixup.encoding, rootSymbol!),

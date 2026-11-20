@@ -55,6 +55,18 @@ void main() {
     expect(native.collect(native.state), 2);
   });
 
+  test('allocating on an inherited heap delivers its native record inline', () {
+    native.registerWitness(native.state);
+    expect(native.state.value, 0);
+    // This fresh module has no page in the requested payload's size class.
+    // The preceding registration accounts external bytes above the GC budget.
+    const length = 128 * 1024;
+    expect(native.allocateAndObserve(native.state, length, 73), 1);
+    expect(native.readByte(length - 1), 73);
+    expect(native.readByte(0), 0);
+    expect(native.unload(), 1);
+  });
+
   test('unload finalizes reachable native resources exactly once', () {
     native.attach(native.state, 0);
     expect(native.collect(native.state), 0);

@@ -213,6 +213,19 @@ final class FunctionTarget(
     typeParameters: typeParameters,
   );
 
+  /// The language declaration whose body supplies this frame and receiver.
+  FunctionTarget get sourceDeclaration =>
+      executionSource?.sourceDeclaration ?? this;
+
+  /// Whether this frame's first entry value links to its asynchronous caller.
+  bool retainsStackContext(ClassType? context) {
+    final source = sourceDeclaration;
+    return source.awaiterCapture != null ||
+        context != null &&
+            source.kind.hasReceiver &&
+            source.owner!.asInstanceOf(context) != null;
+  }
+
   /// The lexical type parameters declared by this function.
   List<TypeParameterType> get typeParameters => signature.typeParameters;
 

@@ -203,6 +203,18 @@ void main() {
     });
   }
 
+  test('a growing capacity exits at the first power above the threshold', () {
+    final function = body('roundCapacity');
+    final facts = ProgramFlow(program, [
+      (
+        target: function.target,
+        arguments: [FlowValue.constant(const Constant.integer(168))],
+      ),
+    ]).facts;
+    expect(facts.returnedBy(function.target).integers?.constant, 256);
+    expect(source.roundCapacity(168), 256);
+  });
+
   test('loop elimination preserves exit values and arithmetic failures', () {
     final function = body('runtimeExitValue'),
         facts = optimize(body('runtimeExitValue'));

@@ -9,6 +9,12 @@ final class LoopRanges(final IrFunction function) {
   late final dominance = ValueDominance(function);
   late final loops = <LoopRange>[];
 
+  /// Pure comparisons that can be evaluated with each predecessor's value.
+  final entryComparisons =
+      <Block, ({Equals operation, BlockParameter input, Constant constant})>{};
+
+  final guardedCalls = <DirectCall>{};
+
   this {
     for (final block in function.blocks) {
       incoming.putIfAbsent(block, () => []);
@@ -46,7 +52,52 @@ final class LoopRanges(final IrFunction function) {
         continue;
       }
       loops.add(LoopRange(this, header, blocks, backs));
+      if (_comparison(header) case final comparison?) {
+        entryComparisons[header] = comparison;
+      }
     }
+    for (final block in function.blocks) {
+      final source = switch (block.end) {
+        final Jump jump when block.instructions.lastOrNull is DirectCall => (
+          block.instructions.last as DirectCall,
+          jump,
+        ),
+        Invoke(operation: final DirectCall call, onReturn: final jump?) => (
+          call,
+          jump,
+        ),
+        _ => null,
+      };
+      if (source == null) continue;
+      final (call, jump) = source;
+      final guard = _comparison(jump.target);
+      if (guard == null ||
+          jump.arguments[jump.target.parameters.indexOf(guard.input)] != call) {
+        continue;
+      }
+      guardedCalls.add(call);
+      entryComparisons[jump.target] = guard;
+    }
+  }
+
+  static ({Equals operation, BlockParameter input, Constant constant})?
+  _comparison(Block header) {
+    if (header.end case Branch(condition: final Equals comparison)
+        when header.instructions.length == 1 &&
+            header.instructions.single == comparison &&
+            comparison.effects.isEmpty) {
+      for (final (input, constant) in [
+        (comparison.left, comparison.right),
+        (comparison.right, comparison.left),
+      ]) {
+        if (input is BlockParameter &&
+            header.parameters.contains(input) &&
+            constant is Constant) {
+          return (operation: comparison, input: input, constant: constant);
+        }
+      }
+    }
+    return null;
   }
 }
 
@@ -238,7 +289,28 @@ final class LoopRange(
         return LoopRangeProof(this, {}, {}, {}, {});
       }
       final start = starts[counter]!, step = steps[counter];
-      if (step == null) continue;
+      if (step == null) {
+        if (guard != header || operator != _Comparison.lessThan) continue;
+        final range = _multiplicativeExitRange(
+          counter,
+          backs.singleOrNull?.arguments[slot],
+          start.constant,
+          limits!,
+        );
+        if (range == null) continue;
+        return LoopRangeProof(
+          this,
+          {},
+          {},
+          {},
+          {},
+          exitBound: (
+            edge: taken ? end.ifFalse : end.ifTrue,
+            counter: counter,
+            range: range,
+          ),
+        );
+      }
       BigInt? count;
       final stop = BigInt.from(limit);
       if (step.lower > 0 &&
@@ -313,13 +385,51 @@ final class LoopRange(
   }
 }
 
+// Bounds on the first product that reaches an invariant threshold. A positive
+// factor of at least two allows at most 63 products before signed overflow.
+FlowIntegerRange? _multiplicativeExitRange(
+  Value counter,
+  Value? update,
+  int? seed,
+  FlowIntegerRange limits,
+) {
+  if (seed == null ||
+      seed <= 0 ||
+      update is! IntBinary ||
+      update.operator != .multiply) {
+    return null;
+  }
+  final operand = identical(update.left, counter)
+      ? update.right
+      : identical(update.right, counter)
+      ? update.left
+      : null;
+  if (operand is! ScalarConstant || operand.value is! int) return null;
+  final factor = operand.value as int;
+  if (factor <= 1) return null;
+
+  int? firstAtLeast(int bound) {
+    var value = seed;
+    while (value < bound) {
+      if (value > FlowIntegerRange.maximum ~/ factor) return null;
+      value *= factor;
+    }
+    return value;
+  }
+
+  final last = firstAtLeast(limits.upper);
+  if (last == null) return null;
+  return FlowIntegerRange(firstAtLeast(limits.lower)!, last);
+}
+
 final class LoopRangeProof(
   final LoopRange loop,
   final Map<BlockParameter, FlowIntegerRange> all,
   final Map<BlockParameter, FlowIntegerRange> body,
   final Set<Block> iteration,
-  final Map<BlockParameter, Map<Value, FlowIntegerRange?>> offsets,
-) {
+  final Map<BlockParameter, Map<Value, FlowIntegerRange?>> offsets, {
+  final ({Jump edge, Value counter, FlowIntegerRange range})? exitBound,
+}) {
   /// Bypasses finite computation only when every exit has the same live values.
   Jump? discardedExit(
     ValueLiveness liveness,

@@ -108,6 +108,12 @@ HeapRuntime bindRuntime(LoweringResult lowered, Target targetPlatform) {
       case .exitProcess:
         primitives[target] = .exitProcess;
         continue;
+      case .contextFreeStackMap:
+        if (target.kind != .function || target.typeParameters.isNotEmpty ||
+            target.signature != FunctionType(.integer, [])) {
+          throw ArgumentError('Invalid stack-map query signature.');
+        }
+        value = block.emit(StackMapAddress(contextFreeOnly: true));
       case .context:
         if (target.kind != .function ||
             target.typeParameters.isNotEmpty ||

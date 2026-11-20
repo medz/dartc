@@ -92,8 +92,10 @@ final class NativeRoots(final int context, final ObjectAccess objects)
       objects.visitStrong(Memory.objectAt<Object>(_control.address), visitor);
     }
     _modules.start();
-    while (_modules.moveNext()) {
-      objects.visitStrong(Memory.objectAt<Object>(_modules.address), visitor);
+    while (true) {
+      final address = _modules.nextAddress();
+      if (address == 0) break;
+      objects.visitStrong(Memory.objectAt<Object>(address), visitor);
     }
     _frames.start(_entrySp, _entryPc);
     while (_frames.moveNext()) {
@@ -116,12 +118,10 @@ final class NativeRoots(final int context, final ObjectAccess objects)
       );
     }
     _modules.start();
-    while (_modules.moveNext()) {
-      objects.traceConditional(
-        Memory.objectAt<Object>(_modules.address),
-        live,
-        visitor,
-      );
+    while (true) {
+      final address = _modules.nextAddress();
+      if (address == 0) break;
+      objects.traceConditional(Memory.objectAt<Object>(address), live, visitor);
     }
   }
 
@@ -133,8 +133,10 @@ final class NativeRoots(final int context, final ObjectAccess objects)
       objects.clearWeak(Memory.objectAt<Object>(_control.address), live);
     }
     _modules.start();
-    while (_modules.moveNext()) {
-      objects.clearWeak(Memory.objectAt<Object>(_modules.address), live);
+    while (true) {
+      final address = _modules.nextAddress();
+      if (address == 0) break;
+      objects.clearWeak(Memory.objectAt<Object>(address), live);
     }
   }
 

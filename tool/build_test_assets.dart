@@ -51,6 +51,7 @@ const _compilerLibraries = {
   'bound_methods',
   'function_instantiation',
   'control_flow',
+  'checked_index',
   'nullability',
   'stack_calls',
   'integer_operations',
@@ -96,6 +97,7 @@ const _compilerLibraries = {
   'expandos',
   'finalizers',
   'native_finalizers',
+  'same_heap_finalizer',
   'native_symbols',
   'string_operations',
   'numeric_boxes',
@@ -113,6 +115,7 @@ const _compilerLibraries = {
 Set<String> selectCompilerFixtures(Iterable<String> names) {
   const available = {
     ..._compilerLibraries,
+    'native_finalizer_callback',
     'entry',
     'console',
     'allocators',
@@ -159,6 +162,10 @@ Set<String> selectCompilerFixtures(Iterable<String> names) {
     throw ArgumentError('Unknown compiler fixtures: ${unknown.join(', ')}');
   }
   if (selected.isEmpty) return available;
+  if (selected.contains('native_finalizers') ||
+      selected.contains('same_heap_finalizer')) {
+    selected.add('native_finalizer_callback');
+  }
   if (selected.contains('native_imports') ||
       selected.contains('pointer_values')) {
     selected.add('native_function_pointers');
@@ -553,10 +560,12 @@ Future<void> main(List<String> args) async {
       'native_floats',
       'pointer_arithmetic',
     };
-    if (selected.contains('native_finalizers')) {
+    if (selected.contains('native_finalizer_callback')) {
       await shared([
         nativeFinalizerCallback(target),
       ], assets.library('compiler/native_finalizer_callback'));
+    }
+    if (selected.contains('native_finalizers')) {
       final entry = await Compiler(target).compile(
         ['test/compiler/fixtures/native_finalizers_entry.dart'],
         output: const .executable(),

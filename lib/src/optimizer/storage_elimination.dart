@@ -181,6 +181,32 @@ storageDiscardable(ProgramFlowFacts facts) {
           _ => const .bottom(),
         });
         switch (operation) {
+          case NativeCall(:final arguments, :final signature) ||
+              RawNativeCall(:final arguments, :final signature):
+            // C can observe input bytes even when it only receives an ABI
+            // copy or cannot retain a borrowed pointer after the call.
+            final inputs = <FlowValue>[];
+            for (final (index, argument) in arguments.indexed) {
+              final type = signature.parameters[index];
+              final input = point.before.nativeArgument(
+                facts.valueOf(argument), type, raw: operation is RawNativeCall,
+              );
+              inputs.add(input.capability);
+              if (input.copiedFrom case final address?) {
+                readNative(address, type, point.before);
+                observations = observations.join(address.references);
+              }
+            }
+            final reachable = point.before.exposedFrom(inputs);
+            visible = visible.join(reachable);
+            observations = observations.join(reachable);
+            if (operation case RawNativeCall(
+              resultStorage: final destination?,
+            )) {
+              observations = observations.join(
+                facts.valueOf(destination).references,
+              );
+            }
           case ObjectRuntimeType(:final operand, direct: true) ||
               TypeTest(operand: final operand) ||
               TypeCast(operand: final operand):
@@ -325,6 +351,12 @@ storageDiscardable(ProgramFlowFacts facts) {
             readNative(facts.valueOf(address), nativeType, point.before);
           case CopyNative(:final source, :final nativeType):
             readNative(facts.valueOf(source), nativeType, point.before);
+          case NativeView(
+            address: final source?,
+            copy: true,
+            type: ClassType(nativeType: final storage?),
+          ):
+            readNative(facts.valueOf(source), storage, point.before);
           case StringLength(:final string) || StringCodeUnitAt(:final string):
             payloads = payloads.join(facts.valueOf(string));
           case StringConcat(:final left, :final right):

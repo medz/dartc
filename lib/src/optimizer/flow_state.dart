@@ -16,6 +16,9 @@ final class const FlowResult({
   final FlowState? normal,
   final FlowState? exceptional,
 
+  /// Integer bounds on the caller's existing SSA values after a normal return.
+  final Map<Value, FlowIntegerRange> normalRanges = const {},
+
   /// Failure may disappear only when the allocation itself is eliminated.
   final bool allocationFailureOnly = false,
 
@@ -141,7 +144,87 @@ final class FlowState {
   // not evidence that this invocation exposed or retained those objects.
   FlowValue _externalAliases;
   FlowValue _nativeContext;
-  StateMap<Object, StateMap<Object, bool>> _writes = const .empty();
+  // Several declarations can occupy one mapping. Without final linker page
+  // boundaries, their original placements share one module-level lifetime.
+  // Null means the module still occupies its original mapping. Otherwise the
+  // retained values can have been written to any neighboring declaration.
+  FlowValue? _moduleReplacement;
+
+  bool get _hasModuleStorage =>
+      _nativeData.isNotEmpty ||
+      _moduleObjects.isNotEmpty ||
+      _declaredGlobals.isNotEmpty;
+
+  /// Between exported calls the outside owner can use a module data address
+  /// in a page-sized release. A contracted IR call receives only its own
+  /// declared storage footprint and does not go through this publication.
+  void publishMappingCapabilities() {
+    if (!_hasModuleStorage || identical(_escaped, const FlowValue.bottom())) return;
+    final exposed = exposedValues;
+    if (_namesModuleData(exposed)) _retireModuleMappings(exposed.references);
+  }
+
+  bool _namesModuleData(FlowValue value) => value.addresses.any((address) {
+    final base = address.base;
+    return base is FlowRegion && base.allocation.site is NativeDataAddress ||
+        base is FlowObject && base.site is ModuleObjectReference;
+  });
+
+  void _retireModuleMappings(FlowValue written, {bool recordWrites = true}) {
+    if (!_hasModuleStorage) return;
+    _moduleReplacement = _moduleReplacement?.join(written) ?? written;
+    if (recordWrites) _recordWrite(null, _moduleStorageEffect);
+    // The loader keeps fixed managed identities and their headers. A retained
+    // data address can still give the host a replacement page containing their
+    // writable bytes, including a lowered global's binding flag.
+    final replacements = <ValueType, FlowValue>{};
+    FlowValue replacement(ValueType type) => replacements.putIfAbsent(
+      type, () => _moduleReplacement!.externalValue(type),
+    );
+    for (final global in _declaredGlobals) {
+      final previous = _globals[global] ?? _initial(global);
+      _setGlobal(global, previous.withExternalBytes(
+        replacement(global.type), mayUnbind: !global.isInitiallyBound,
+      ));
+      if (recordWrites) _recordWrite(null, global);
+    }
+    for (final owner in _moduleObjects.values) {
+      final current = _objects[owner];
+      if (current == null) continue;
+      var result = current;
+      for (final entry in current.slots.entries) {
+        final field = entry.key as InstanceField;
+        result = result.withSlot(field, entry.value.withExternalBytes(
+          replacement(field.typeFor(owner.storageType!)), mayUnbind: field.isLate,
+        ));
+        if (recordWrites) _recordWrite(owner, field);
+      }
+      final memory = current.memory;
+      final length = memory?.length;
+      if (memory != null && length != null && length > ObjectHeader.fieldsOffset) {
+        result = result.withMemory(memory.forget(
+          ObjectHeader.fieldsOffset, length - ObjectHeader.fieldsOffset,
+          retained: _moduleReplacement!,
+        ));
+        if (recordWrites) _recordWrite(owner, _objectMemoryWrites);
+      }
+      _objects = _objects.withEntry(owner, result);
+    }
+    for (final binding in _nativeData.values) {
+      final owner = binding.allocation;
+      final region = _regions[owner];
+      if (region == null) continue;
+      if (recordWrites) _recordWrite(owner, _regionWrites);
+      _regions = _regions.withEntry(
+        owner,
+        region.withMemory(
+          region.memory!.invalidate(release: true).retainReferences(_moduleReplacement!),
+        ).withFlags(sawRelease: true),
+      );
+    }
+  }
+
+  StateMap<Object, StateMap<Object, FlowWrites>> _writes = const .empty();
 
   new(
     this.program, {
@@ -240,6 +323,7 @@ final class FlowState {
     this._escaped,
     this._externalAliases,
     this._nativeContext,
+    this._moduleReplacement,
     this._writes,
   );
 
@@ -262,6 +346,7 @@ final class FlowState {
         _escaped,
         _externalAliases,
         nativeContext ?? _nativeContext,
+        _moduleReplacement,
         resetWrites ? const .empty() : _writes,
       );
 
@@ -309,6 +394,7 @@ final class FlowState {
       value(_escaped),
       value(_externalAliases),
       value(_nativeContext),
+      _moduleReplacement == null ? null : value(_moduleReplacement!),
       StateMap.fromEntries([
         for (final entry in _writes.entries)
           MapEntry(
@@ -327,6 +413,7 @@ final class FlowState {
       [
         _escaped,
         _externalAliases,
+        ?_moduleReplacement,
         _nativeContext,
         for (final object in _moduleObjects.values)
           if (_objects[object] != null) FlowValue.object(object),
@@ -392,6 +479,16 @@ final class FlowState {
     }
   }
 
+  /// Keeps an SSA block argument paired with the storage on its incoming edge.
+  void bindAddress(FlowSource parameter, FlowValue value) {
+    if (value.addresses.isNotEmpty &&
+        value.managedBackings.isEmpty &&
+        !value.hasUnknownBacking &&
+        value.types.every((type) => type == ValueType.integer)) {
+      _addresses = _addresses.withEntry(parameter, value.withSources(const []));
+    }
+  }
+
   /// Applies current storage and address facts, not facts from an earlier use.
   FlowValue resolveValue(FlowValue value) {
     if (value.managedBackings.isNotEmpty || value.hasUnknownBacking) {
@@ -403,15 +500,53 @@ final class FlowState {
       return value;
     }
     FlowValue? address;
+    List<FlowValue>? alternatives;
     for (final source in value.sources) {
       if (_addresses[source] case final known?) {
-        address = address == null ? known : address.join(known);
+        if (address == null) {
+          address = known;
+        } else if (address != known) {
+          (alternatives ??= [address]).add(known);
+          address = address.join(known);
+        }
+      }
+    }
+    // These SSA sources equal the same value on every incoming path. Keep a
+    // closed set of address bits if each source includes all of its choices.
+    // An open or incomparable set keeps the conservative joined result.
+    if (alternatives != null && alternatives.every(_closedAddressChoices)) {
+      for (final candidate in alternatives) {
+        if (alternatives.every(
+          (other) =>
+              other.addresses.containsAll(candidate.addresses) &&
+              candidate.constants.every(
+                (c) => other.constants.any(
+                  (v) => v.structuralKey == c.structuralKey,
+                ),
+              ),
+        )) {
+          address = candidate.withReferences([address!.references]);
+          break;
+        }
       }
     }
     return address == null
         ? value
         : address.withSources(value.sources).withReferences([value.references]);
   }
+
+  bool _closedAddressChoices(FlowValue value) =>
+      value.addresses.isNotEmpty &&
+      value.objects.isEmpty &&
+      value.unknownTypes.isEmpty &&
+      value.managedBackings.isEmpty &&
+      !value.hasUnknownBacking &&
+      value.rawBackingTypes.isEmpty &&
+      value.addresses.every(
+        (a) =>
+            a.type == ValueType.integer && a.offset != null && !a.retainedBase,
+      ) &&
+      value.constants.every((c) => c is ScalarConstant && c.value is int);
 
   FlowValue _resolveScalarCarrier(FlowValue value) {
     final layout = memoryLayout?.nativeLayout;
@@ -421,8 +556,7 @@ final class FlowState {
       payloads.add(
         layout == null || memory == null
             ? FlowValue.unknown(backing.type)
-            : memory.read(
-                ObjectHeader.fieldsOffset,
+            : memory.readScalarPayload(
                 ExecutionShapes.scalarStorageOf(backing.type),
                 layout,
               ),
@@ -434,6 +568,18 @@ final class FlowState {
   /// Applies path bounds to storage still equal to the checked SSA definitions.
   void refineIntegers(Map<FlowSource, FlowIntegerRange> ranges) {
     if (ranges.isEmpty) return;
+    if (ranges.keys.any((source) => source.value is LoadNative)) {
+      _regions = _regions.mapValues((_, region) {
+        if (region.summary || region.memory == null) return region;
+        final narrowed = region.memory!.refineWords(ranges, (
+          source,
+          value,
+        ) {
+          _addresses = _addresses.withEntry(source, value);
+        });
+        return region.withMemory(narrowed);
+      });
+    }
     _mapValues((value) {
       for (final source in value.sources) {
         if (ranges[source] case final range?) {
@@ -473,6 +619,16 @@ final class FlowState {
     _nativeContext = transform(_nativeContext);
   }
 
+  /// Whether joining these native mappings would discard a known extent.
+  bool losesNativeExtent(FlowState other) {
+    if (identical(_regions, other._regions)) return false;
+    for (final entry in _regions.differences(other._regions)) {
+      final here = entry.after?.memory, there = entry.before?.memory;
+      if (here != null && there != null && here.length != there.length) return true;
+    }
+    return false;
+  }
+
   /// Adds an executable alternative, skipping unchanged storage subtrees.
   /// [widen] drops expanding numeric bounds at a loop or recursive boundary.
   bool join(FlowState incoming, {bool widen = false}) {
@@ -489,10 +645,10 @@ final class FlowState {
       );
       return value == _initial(global) ? null : value;
     });
-    final objects = _objects.isEmpty
-        ? incoming._objects
-        : incoming._objects.isEmpty
+    final objects = incoming._objects.isEmpty
         ? _objects
+        : _objects.isEmpty
+        ? incoming._objects
         : _objects.merge(
             incoming._objects,
             (_, left, right) => left == null
@@ -516,7 +672,11 @@ final class FlowState {
           ? right
           : right == null
           ? left
-          : left.join(right, widen: widen),
+          : left.join(
+              right,
+              widen: widen,
+              nativeWords: left.summary || right.summary ? null : (isMappedAddress, incoming.isMappedAddress),
+            ),
     );
     final addresses = _addresses.merge(
       incoming._addresses,
@@ -529,14 +689,20 @@ final class FlowState {
           ? right
           : right == null
           ? left
-          : left.merge(right, (_, _, _) => true),
+          : left.merge(right, (_, a, b) => a == null ? b : b == null ? a : a.join(b)),
     );
+    final priorModule = _moduleReplacement;
+    final incomingModule = incoming._moduleReplacement;
+    final module = incomingModule == null
+        ? priorModule
+        : priorModule?.join(incomingModule, widen: widen) ?? incomingModule;
     final changed =
         !identical(globals, _globals) ||
         !identical(objects, _objects) ||
         !identical(regions, _regions) ||
         !identical(addresses, _addresses) ||
         !identical(writes, _writes) ||
+        module != priorModule ||
         nativeContext != _nativeContext ||
         escaped != _escaped ||
         externalAliases != _externalAliases;
@@ -548,6 +714,12 @@ final class FlowState {
     _externalAliases = externalAliases;
     _nativeContext = nativeContext;
     _writes = writes;
+    // A projection may omit a declaration that still exists in the other arm.
+    // Drop its original bounds when the module lifetime differs across arms.
+    if (module != null && priorModule != incomingModule) {
+      // Joining abstract inputs does not execute a write in the callee.
+      _retireModuleMappings(module, recordWrites: false);
+    }
     return changed;
   }
 
@@ -565,6 +737,7 @@ final class FlowState {
     _escaped,
     _externalAliases,
     _nativeContext,
+    _moduleReplacement,
   );
 
   @override
@@ -574,6 +747,30 @@ final class FlowState {
 
   @override
   int get hashCode => structuralKey.hashCode;
+
+  /// Local mappings that were never published on this exit cannot contribute
+  /// bytes to a mapping published by a different return from the same call.
+  FlowState returningMappings(FlowState entry, Iterable<FlowValue> roots) {
+    if (identical(_regions, entry._regions)) return this;
+    final fresh = [
+      for (final region in _regions.keys)
+        if (entry._regions[region] == null && region.site is DirectCall) region,
+    ];
+    if (fresh.isEmpty) return this;
+    final visible = project([...entry.allocations, ...roots]);
+    var regions = _regions;
+    var writes = _writes;
+    for (final region in fresh) {
+      if (visible._regions[region] != null) continue;
+      regions = regions.withoutKey(region);
+      writes = writes.withoutKey(region);
+    }
+    return identical(regions, _regions)
+        ? this
+        : (copy()
+            .._regions = regions
+            .._writes = writes);
+  }
 
   /// Projects a call input, or only storage proven observable by [access].
   /// Ordinary calls retain globals and external reachability.
@@ -595,9 +792,20 @@ final class FlowState {
     final nativeContext = access == null || access.context
         ? _nativeContext
         : const FlowValue.bottom();
-    final reachable = _reachable(
-      [
+    // All reachability queries in this projection observe the same storage.
+    // Module roots below are materialized before the lazy frontier is read.
+    late final externalObjects = _externalAliasObjects();
+    Set<FlowObject> externalFrontier() => externalObjects;
+    FlowValue reachableFrom(Iterable<FlowValue> values) => _reachable(
+      values,
+      expose: false,
+      access: access,
+      constants: false,
+      externalFrontier: externalFrontier,
+    );
+    var reachable = reachableFrom([
         ...roots,
+        ?_moduleReplacement,
         nativeContext,
         if (access == null || access.memory)
           for (final target in _externalMemory.keys) externalResult(target)!,
@@ -609,22 +817,25 @@ final class FlowState {
             _moduleReference(declaration),
         escaped,
         for (final slot in globals.values) ...[slot.value, slot.initializer],
-      ],
-      expose: false,
-      access: access,
-      constants: false,
-    );
+    ]);
+    if (access != null && access.writes) {
+      // A projected receiver retains the storage reached through its fields,
+      // even when the receiver was selected by an unknown raw address.
+      while (true) {
+        final extra = _unknownAliases(
+          reachable, memory: access.memory, externalFrontier: externalFrontier,
+        ).where((object) => !reachable.objects.contains(object) &&
+            _readSlots(object, _objects[object]!, access).isNotEmpty).toList();
+        if (extra.isEmpty) break;
+        reachable = reachable.join(reachableFrom(extra.map(FlowValue.object)));
+      }
+    }
+
     final externalAliases = reachable.externalUnknownTypes.isEmpty
         ? const FlowValue.bottom()
-        : FlowValue.joined(_externalAliasObjects().map(FlowValue.object));
+        : FlowValue.joined(externalObjects.map(FlowValue.object));
     var objects = const StateMap<FlowObject, _ObjectState>.empty();
-    // Unknown writes use the same provenance boundary as capability traversal.
-    for (final object in {
-      ...reachable.objects,
-      if (access?.writes == true)
-        for (final object in _unknownAliases(reachable, memory: access!.memory))
-          if (_readSlots(object, _objects[object]!, access).isNotEmpty) object,
-    }) {
+    for (final object in reachable.objects) {
       if (_objects[object] case final state?) {
         objects = objects.withEntry(
           object,
@@ -637,6 +848,7 @@ final class FlowState {
                   access.memory || reachable.managedBackings.contains(object)
                       ? state.memory
                       : null,
+                  state.sawRelease,
                 ),
         );
       }
@@ -647,7 +859,7 @@ final class FlowState {
           if (_regions[allocation] case final region?)
             MapEntry(allocation, region),
     ]);
-    var writes = const StateMap<Object, StateMap<Object, bool>>.empty();
+    var writes = const StateMap<Object, StateMap<Object, FlowWrites>>.empty();
     for (final entry in _writes.entries) {
       if (entry.key case final FlowObject object) {
         if (objects[object] != null || regions[object] != null) {
@@ -656,9 +868,13 @@ final class FlowState {
       } else {
         final slots = access == null
             ? entry.value
-            : StateMap<Object, bool>.fromEntries(
+            : StateMap<Object, FlowWrites>.fromEntries(
                 entry.value.entries.where(
-                  (slot) => access.globals.contains(slot.key),
+                  (slot) => access.globals.contains(slot.key) ||
+                      slot.key == _retiredRangeEffect ||
+                      slot.key == _historicalWriteEffect ||
+                      slot.key == _unprovenRangeEffect ||
+                      slot.key == _moduleStorageEffect,
                 ),
               );
         if (!slots.isEmpty) writes = writes.withEntry(entry.key, slots);
@@ -689,6 +905,7 @@ final class FlowState {
       escaped,
       externalAliases,
       nativeContext,
+      _moduleReplacement,
       writes,
     );
   }
@@ -703,6 +920,7 @@ final class FlowState {
     FlowState after, {
     required FlowObject Function(FlowObject) mapObject,
     required FlowValue Function(FlowValue) mapValue,
+    bool? currentInput,
   }) {
     if (!before._writes.isEmpty) {
       throw ArgumentError('A summary entry must exclude caller write history.');
@@ -716,6 +934,11 @@ final class FlowState {
       );
     }
     final result = copy();
+    // Without a pre-checked call-site input, compare the whole entry.
+    // A write may depend on a different allocation or a module field.
+    late final covered = currentInput ??
+        (before.allocationIdentities(const []).every((key) => mapObject(key) == key) &&
+            (before == this || !before.copy().join(copy(resetWrites: true))));
     _Slot preserve(_Slot next, _Slot? previous, bool written) {
       if (written || previous == null) return next;
       return _Slot._(
@@ -735,7 +958,7 @@ final class FlowState {
     for (final global in {
       for (final change in after._globals.differences(before._globals))
         change.key,
-      ...?after._writes[_globalWrites]?.keys.cast<GlobalVariable>(),
+      ...?after._writes[_globalWrites]?.keys.whereType<GlobalVariable>(),
     }) {
       result._setGlobal(
         global,
@@ -777,7 +1000,10 @@ final class FlowState {
           preserve(slot.map(mapValue), current.slots[key], written),
         );
       }
-      current = current!.withFlags(summary: next.summary && !prior.summary);
+      current = current!.withFlags(
+        summary: next.summary && !prior.summary,
+        sawRelease: next.sawRelease,
+      );
       if (after._written(identity, _captureWrites)) {
         current = _ObjectState._(
           current.slots,
@@ -786,6 +1012,7 @@ final class FlowState {
               : List.unmodifiable(next.captures!.map(mapValue)),
           current.summary,
           current.memory,
+          current.sawRelease,
         );
       }
       if (after._written(identity, _objectMemoryWrites)) {
@@ -804,21 +1031,62 @@ final class FlowState {
         mapValue(after._externalAliases),
       );
     }
+    // Several callee allocations may reach one bounded caller summary.
+    // Combine all of their updates before replacing the caller's region.
+    final absentInputs = <FlowObject>{};
+    final regionExits = <FlowObject, _ObjectState>{};
     for (final identity in {
       for (final change in after._regions.differences(before._regions))
         change.key,
       for (final key in after._writes.keys.whereType<FlowObject>())
         if (after._written(key, _regionWrites)) key,
     }) {
-      if (after._regions[identity] case final region?) {
-        if (before._regions[identity] == null ||
-            after._written(identity, _regionWrites)) {
-          result._regions = result._regions.withEntry(
-            mapObject(identity),
-            region.map(mapValue),
-          );
+      final region = after._regions[identity];
+      if (region == null) continue;
+      final atEntry = before._regions[identity];
+      if (atEntry != null && !after._written(identity, _regionWrites)) continue;
+      final dest = mapObject(identity);
+      var atExit = region.map(mapValue);
+      final occupied = result._regions[dest];
+      // This summary may include inputs supplied by a different caller.
+      // A write to its old mapping cannot affect a fresh allocation in this
+      // caller merely because both map to the same bounded result identity.
+      if (atEntry != null &&
+          occupied == null &&
+          identity.site is DirectCall &&
+          !_externalMemory.containsKey((identity.site as DirectCall).target) &&
+          !after._written(identity, _mappedRegions)) {
+        absentInputs.add(identity);
+        continue;
+      }
+      if (atEntry != null && occupied != null) {
+        atExit = atExit.withMapping(_commonMapping(atExit.mapping, occupied.mapping));
+      }
+      // A caller may have changed since this exit was computed. Keep later
+      // contents, releases and additional occupants through summary replay.
+      if (result._regions[dest] case final previous?) {
+        final entry = atEntry?.map(mapValue);
+        if (entry == null || previous.summary) {
+          atExit = previous.join(atExit).withFlags(summary: entry == null);
+        } else if (previous != entry || !covered) {
+          final extent = after._writes[identity]?[_regionWrites];
+          if (extent == null || previous.sawRelease || entry.sawRelease ||
+              atExit.summary || atExit.sawRelease || previous.memory == null ||
+              entry.memory == null || atExit.memory == null) {
+            atExit = previous.join(atExit);
+          } else {
+            atExit = atExit.withMemory(previous.memory!.applyWrites(
+              entry.memory!, atExit.memory!, extent, currentInput: covered));
+          }
         }
       }
+      if (regionExits[dest] case final previous?) {
+        atExit = previous.join(atExit).withFlags(summary: true);
+      }
+      regionExits[dest] = atExit;
+    }
+    for (final entry in regionExits.entries) {
+      result._regions = result._regions.withEntry(entry.key, entry.value);
     }
     for (final change in after._addresses.differences(before._addresses)) {
       if (change.after case final address?) {
@@ -834,21 +1102,90 @@ final class FlowState {
       }
     }
     for (final owner in after._writes.entries) {
+      if (absentInputs.contains(owner.key)) continue;
       final mapped = owner.key is FlowObject
           ? mapObject(owner.key as FlowObject)
           : owner.key;
-      for (final key in owner.value.keys) {
+      for (final write in owner.value.entries) {
         result._recordWrite(
           mapped == _globalWrites ? null : mapped as FlowObject,
-          key,
+          write.key, write.value,
         );
       }
+    }
+    final retired = after._written(null, _retiredRangeEffect);
+    final unproven = after._written(null, _unprovenRangeEffect);
+    if (retired || unproven || after._written(null, _historicalWriteEffect)) {
+      Set<FlowObject>? omitted;
+      Set<GlobalVariable>? omittedGlobals;
+      if (covered) {
+        final represented = <FlowObject>{}, partial = <FlowObject>{};
+        for (final key in before._regions.keys) {
+          final owner = mapObject(key);
+          if (!represented.add(owner) || after._regions[key] == null) {
+            partial.add(owner);
+          }
+        }
+        for (final entry in before._objects.entries) {
+          final owner = mapObject(entry.key);
+          final caller = _objects[owner];
+          if (!represented.add(owner) ||
+              caller != null &&
+                  (!_coversRawStorage(entry.value, caller) ||
+                      !_coversRawStorage(after._objects[entry.key], caller))) {
+            partial.add(owner);
+          }
+        }
+        omitted = {
+          ...partial,
+          ..._regions.keys.where((key) => !represented.contains(key)),
+          ..._objects.keys.where((key) => !represented.contains(key)),
+        };
+        omittedGlobals = {
+          if (unproven || result._moduleReplacement != null)
+            for (final global in _declaredGlobals)
+              if (!after._written(null, global)) global,
+        };
+      }
+      if (omitted == null || omitted.isNotEmpty || omittedGlobals!.isNotEmpty) {
+        // A later mapping or an owner omitted by projection can occupy the
+        // released bytes. A stale inner replay cannot recover its bounds.
+        result._invalidateRaw(
+          release: retired,
+          original: covered && !unproven,
+          written: mapValue(after.escapedValues).references,
+          omitted: omitted,
+          omittedGlobals: omittedGlobals,
+        );
+      }
+    }
+    // Partial inputs can omit declarations still present in this caller.
+    final exitModule = after._moduleReplacement;
+    final callerModule = result._moduleReplacement;
+    final mappedModule = exitModule == null ? null : mapValue(exitModule);
+    final module = mappedModule == null
+        ? callerModule
+        : callerModule?.join(mappedModule) ?? mappedModule;
+    if (module != null &&
+        (after._written(null, _moduleStorageEffect) || module != callerModule ||
+          callerModule != null && mappedModule == null && !covered ||
+          regionExits.entries.any(
+          (entry) => entry.key.site is NativeDataAddress &&
+              entry.value.memory?.length != null,
+        ))) {
+      result._retireModuleMappings(module);
     }
     return result;
   }
 
+  static bool _coversRawStorage(_ObjectState? projected, _ObjectState caller) =>
+      projected != null &&
+      (caller.memory == null || projected.memory != null) &&
+      (caller.captures == null || projected.captures != null) &&
+      caller.slots.keys.every((key) => projected.slots[key] != null);
+
   bool _written(FlowObject? object, Object key) =>
-      _writes[object ?? _globalWrites]?[key] == true;
+      _writes[object ?? _globalWrites]?[key] != null;
 
   /// Whether this exit preserves every concrete location used by a source read.
   /// This tests semantic writes, including writes whose abstract value is equal.
@@ -868,15 +1205,12 @@ final class FlowState {
         receiver.objects.every((object) => !_written(object, key));
   }
 
-  void _recordWrite(FlowObject? object, Object key) {
+  void _recordWrite(FlowObject? object, Object key,
+      [FlowWrites extent = const FlowWrites.all()]) {
     final owner = object ?? _globalWrites;
-    _writes = _writes.withEntry(
-      owner,
-      (_writes[owner] ?? const StateMap<Object, bool>.empty()).withEntry(
-        key,
-        true,
-      ),
-    );
+    final previous = _writes[owner] ?? const StateMap<Object, FlowWrites>.empty();
+    _writes = _writes.withEntry(owner,
+        previous.withEntry(key, previous[key]?.join(extent) ?? extent));
   }
 
   void _setGlobal(GlobalVariable global, _Slot slot) {
@@ -884,6 +1218,12 @@ final class FlowState {
         ? _globals.withoutKey(global)
         : _globals.withEntry(global, slot);
   }
+
+  /// Whether a native mapping may have been released on the path to this exit.
+  /// An unknown extent alone does not imply a release. Other allocations have
+  /// no native mapping status.
+  bool? regionSawRelease(FlowObject allocation) =>
+      _regions[allocation]?.sawRelease;
 
   /// Whether this state contains storage for the analysis allocation.
   bool containsObject(FlowObject object) =>
@@ -895,6 +1235,7 @@ final class FlowState {
       [
         ...roots,
         ...allocations,
+        ?_moduleReplacement,
         _nativeContext,
         _escaped,
         _externalAliases,
@@ -911,8 +1252,32 @@ final class FlowState {
     };
   }
 
+  /// Whether this state holds a single allocation for the supplied identity.
+  bool hasSingletonAllocation(Object identity) => switch (identity) {
+    FlowObject() => _objects[identity]?.summary == false,
+    FlowRegion(:final allocation) => _regions[allocation]?.summary == false,
+    _ => false,
+  };
+
   /// Allocation identities whose state can be changed by an invocation.
   Iterable<FlowObject> get objects => _objects.keys;
+
+  /// Whether the projected state retains dynamically allocated managed objects.
+  bool get hasManagedAllocations =>
+      _objects.keys.any((object) => object.site is! ModuleObjectReference);
+
+  /// A dynamic allocation-site name can denote several simultaneous addresses.
+  /// Fixed module declarations keep their numerical address throughout loading.
+  bool hasSingleAddressBase(FlowAddress address) {
+    if (address.retainedBase) return false;
+    return switch (address.base) {
+      FlowRegion(:final allocation) => allocation.site is NativeDataAddress ||
+          _regions[allocation]?.summary == false,
+      final FlowObject object => object.site is ModuleObjectReference ||
+          _objects[object]?.summary == false,
+      _ => true,
+    };
+  }
 
   /// Storage held by an incoming caller, including native mappings.
   Iterable<FlowValue> get allocations => [
@@ -928,25 +1293,52 @@ final class FlowState {
     required bool repeated,
   }) {
     final next = copy();
-    final size = byteLength.integers?.constant;
-    final storage = _ObjectState(
-      {},
-      memory: FlowMemory(0, size != null && size > 0 ? size : null),
-      summary: repeated,
-    );
-    final previous = next._regions[region];
-    next._recordWrite(region, _regionWrites);
-    next._regions = next._regions.withEntry(
+    final size = byteLength.integers;
+    next._recordWrite(region, _mappedRegions);
+    next._allocateRegion(
       region,
-      previous == null
-          ? storage
-          : previous.join(storage).withFlags(summary: true),
+      size == null || size.lower <= 0
+          ? FlowMemory(0, null)
+          : FlowMemory(0, size.lower, maximumLength: size.upper),
+      repeated,
+      freshMapping: true,
     );
     return _normal(
       FlowValue.address(FlowAddress(FlowRegion(region), 0))
           .join(FlowValue.constant(const Constant.integer(0))),
       next,
     );
+  }
+
+  void _allocateRegion(
+    FlowObject region,
+    FlowMemory bytes,
+    bool repeated, {
+    bool freshMapping = false,
+  }) {
+    final length = bytes.length;
+    final storage = _ObjectState(
+      {},
+      memory: bytes,
+      summary: repeated,
+      mapping: freshMapping ? length : null,
+    );
+    final previous = _regions[region];
+    _recordWrite(region, _regionWrites);
+    _regions = _regions.withEntry(
+      region,
+      previous == null
+          ? storage
+          : previous.join(storage).withFlags(summary: true),
+    );
+  }
+
+  /// A fresh, non-repeated mapping does not exist on the zero-return path.
+  /// Earlier mappings at a reused site still belong to the incoming state.
+  void discardFailedMapping(FlowObject region) {
+    if (_regions[region]?.summary != false) return;
+    _regions = _regions.withoutKey(region);
+    _writes = _writes.withoutKey(region);
   }
 
   /// Captures of this allocation, preserving shared cell identities.
@@ -1011,20 +1403,38 @@ final class FlowState {
 
   /// Records capabilities crossing a boundary, including values already read there.
   FlowValue escape(Iterable<FlowValue> roots) {
+    recordEscape(roots);
+    return escapedValues;
+  }
+
+  /// Updates escaped storage without walking private captures for a GC result.
+  void recordEscape(Iterable<FlowValue> roots) {
     for (final root in roots) {
-      _escaped = _escaped.join(root);
+      _escaped = _escaped.join(resolveValue(root).externalBits);
     }
     // Outside code may retain a field value even after its owner overwrites it.
-    _escaped = _escaped.join(exposedValues);
-    return escapedValues;
+    if (!identical(_escaped, const FlowValue.bottom())) {
+      _escaped = _escaped.join(exposedValues);
+    }
   }
 
   /// Forgets values an external operation can write through the given roots.
   ///
   /// The caller supplies previously escaped roots and program-wide access
   /// explicitly. [globals] includes globals after lowering to module storage.
-  void invalidate(Iterable<FlowValue> roots, {bool globals = false}) {
+  /// A native borrow may grant access to more storage than can be transferred
+  /// to a managed slot through [writtenValues] or to bytes via [writtenReferences].
+  void invalidate(
+    Iterable<FlowValue> roots, {
+    bool globals = false,
+    FlowValue? writtenValues,
+    FlowValue writtenReferences = const .bottom(),
+  }) {
     final reachable = exposedFrom([...roots, if (globals) programValues]);
+    final available = writtenValues ?? reachable;
+    final replacements = <ValueType, FlowValue>{};
+    FlowValue replacement(ValueType type) =>
+        replacements.putIfAbsent(type, () => available.externalValue(type));
     // A program slot may itself hold a raw capability. It has the same write
     // authority as that capability supplied directly as an argument.
     final raw = reachableValues([reachable.references]);
@@ -1035,7 +1445,10 @@ final class FlowState {
     }
     for (final object in reachable.objects) {
       final state = _objects[object];
-      if (state == null) continue;
+      if (state == null ||
+          object.callableStorage != null && !raw.objects.contains(object)) {
+        continue;
+      }
       var next = state;
       for (final entry in state.slots.entries) {
         final key = entry.key;
@@ -1046,15 +1459,18 @@ final class FlowState {
             ? key.isFinal
             : (object.type as CellType).isFinal;
         final readonly = isFinal && !raw.objects.contains(object);
-        if (entry.value.permitsWrite(readonly)) {
-          _recordWrite(object, key);
-        }
+        if (!entry.value.permitsWrite(readonly)) continue;
+        _recordWrite(object, key);
         next = next.withSlot(
           key,
-          entry.value.invalidate(type, isFinal: readonly),
+          entry.value.invalidate(replacement(type), isFinal: readonly),
         );
       }
-      next = next.withMemory(state.memory?.invalidate());
+      next = next.withMemory(
+        state.memory?.invalidate().retainReferences(writtenReferences),
+      ).withFlags(
+        sawRelease: object.site is ModuleObjectReference && raw.objects.contains(object),
+      );
       if (state.memory != null) _recordWrite(object, _objectMemoryWrites);
       _objects = _objects.withEntry(object, next);
     }
@@ -1065,7 +1481,9 @@ final class FlowState {
           _recordWrite(allocation, _regionWrites);
           _regions = _regions.withEntry(
             allocation,
-            region.withMemory(region.memory!.invalidate()),
+            region.withMemory(
+              region.memory!.invalidate().retainReferences(writtenReferences),
+            ).withFlags(sawRelease: allocation.site is NativeDataAddress),
           );
         }
       }
@@ -1073,10 +1491,11 @@ final class FlowState {
     if (globals) {
       for (final global in _declaredGlobals) {
         final slot = _globals[global] ?? _initial(global);
-        if (slot.permitsWrite(global.isFinal)) _recordWrite(null, global);
+        if (!slot.permitsWrite(global.isFinal)) continue;
+        _recordWrite(null, global);
         _setGlobal(
           global,
-          slot.invalidate(global.type, isFinal: global.isFinal),
+          slot.invalidate(replacement(global.type), isFinal: global.isFinal),
         );
       }
     }
@@ -1085,12 +1504,22 @@ final class FlowState {
   /// Installs zeroed field and inline storage after the managed allocator returned.
   void acceptManagedAllocation(FlowObject object, FlowValue bytes, {required bool repeated}) {
     final fixed = memoryLayout?.objectLayout(object.storageType!).size;
-    final size = bytes.integers?.constant;
-    final extent = fixed != null && size != null && size >= 0 &&
-            size <= 0x7fffffffffffffff - fixed ? fixed + size : fixed;
-    _allocate(object, _ObjectState(_initialFields(object.storageType!),
-        summary: repeated, memory: FlowMemory(0, extent ?? ObjectHeader.fieldsOffset)
-            .forget(0, ObjectHeader.fieldsOffset)));
+    _allocate(object, _ObjectState(
+      _initialFields(object.storageType!),
+      summary: repeated,
+      memory: _payloadMemory(fixed, bytes).forget(0, ObjectHeader.fieldsOffset),
+    ));
+  }
+
+  FlowMemory _payloadMemory(int? fixed, FlowValue bytes, {int start = 0}) {
+    final range = bytes.integers;
+    if (fixed != null && range != null && range.lower >= 0 &&
+        range.upper <= FlowIntegerRange.maximum - fixed) {
+      return FlowMemory(start, fixed - start + range.lower,
+          maximumLength: fixed - start + range.upper);
+    }
+    return FlowMemory(start, (fixed ?? ObjectHeader.fieldsOffset) - start,
+        maximumLength: FlowIntegerRange.maximum - start);
   }
 
   /// Allocates one source instance and runs its generative initializer.
@@ -1269,22 +1698,14 @@ final class FlowState {
         }
         if (fresh) {
           final object = allocate(operation);
-          final size = operands.last.integers?.constant;
           final fixed = memoryLayout?.objectLayout(object.storageType!).size;
-          final extent = fixed == null
-              ? ObjectHeader.fieldsOffset
-              : size != null && size >= 0 && size <= 0x7fffffffffffffff - fixed
-              ? fixed + size
-              : fixed;
           next._allocate(
             object,
             _ObjectState(
               _initialFields(object.storageType!),
               summary: repeated,
-              memory: FlowMemory(
-                0,
-                extent,
-              ).forget(0, ObjectHeader.fieldsOffset),
+              memory: _payloadMemory(fixed, operands.last)
+                  .forget(0, ObjectHeader.fieldsOffset),
             ),
           );
           value = value.join(FlowValue.object(object));
@@ -1329,12 +1750,8 @@ final class FlowState {
               summary: repeated,
               memory: fixedSize == null
                   ? null
-                  : FlowMemory(
-                      ObjectHeader.fieldsOffset,
-                      valid
-                          ? fixedSize - ObjectHeader.fieldsOffset + length
-                          : null,
-                    ),
+                  : _payloadMemory(fixedSize, operands.single,
+                      start: ObjectHeader.fieldsOffset),
             ),
           );
         return FlowResult(
@@ -1388,14 +1805,61 @@ final class FlowState {
         if (operands.any((v) => v.isBottom)) return _unreachable;
         final range = _nativeWriteRange(operation, operands);
         final layout = memoryLayout?.nativeLayout;
+        final stored = operands.last.nativeScalar;
         final next = _writeNative(
           range.address,
           range.size,
-          operands.last,
+          stored,
           (memory, offset) =>
-              memory.write(offset, nativeType, operands.last, layout!),
+              memory.write(offset, nativeType, stored, layout!),
+          zeroBytes: nativeType is NativeScalarType &&
+              nativeType.integerLayout != null &&
+              switch (stored.constant) {
+                ScalarConstant(value: final int value) => value == 0,
+                _ => false,
+              },
+          withinPayload: _withinPayload(operation, range.address, range.size),
         );
         return _withEffects(_normal(_null, next), const {Effect.writesStorage});
+      case NativeView(type: ClassType(nativeType: final nativeType?)):
+        final view = allocate(operation);
+        final next = copy();
+        final source = operation.address == null ? null : operands.first;
+        late final FlowValue backing;
+        if (source != null && !operation.copy) {
+          backing = source;
+        } else {
+          final size = memoryLayout?.nativeLayout.of(nativeType).size;
+          var bytes = FlowMemory(0, size);
+          if (source != null) {
+            final contents = reachableValues([source]);
+            bytes = size == null
+                ? bytes.invalidate().retainReferences(contents)
+                : _copyBytes(bytes, 0, size, source, contents);
+          }
+          final region = FlowObject(
+            view.site,
+            view.activation,
+            type: ValueType.integer,
+          );
+          next._allocateRegion(region, bytes, repeated);
+          backing = FlowValue.address(FlowAddress(FlowRegion(region), 0));
+        }
+        // The source wrapper has distinct Dart identity. Copies own their
+        // backing; only a borrowed view retains the supplied lifetime owner.
+        next.retain(view, [
+          backing,
+          if (source != null && !operation.copy) operands.last,
+        ], repeated: repeated);
+        return _withEffects(
+          _normal(FlowValue.object(view), next),
+          operation.effects,
+        );
+      case NativeAddress():
+        return _withEffects(
+          _normal(nativeViewAddress(operands.single), copy()),
+          operation.effects,
+        );
       case CopyNative():
         if (operands.any((v) => v.isBottom)) return _unreachable;
         final range = _nativeWriteRange(operation, operands);
@@ -1403,30 +1867,13 @@ final class FlowState {
         if (size == 0) return _normal(_null, copy());
         final source = operands.last;
         final sourceReferences = reachableValues([source]);
-        final next = _writeNative(range.address, size, sourceReferences, (
-          memory,
-          offset,
-        ) {
-          FlowMemory? result;
-          for (final address in source.addresses) {
-            final from = _memoryOf(address.base);
-            var copied = from != null && address.offset != null
-                ? memory.copyFrom(offset, from, address.offset!, size!)
-                : memory.forget(offset, size!, retained: sourceReferences);
-            if (from != null &&
-                address.offsets != null &&
-                !from.hasCompleteRead(address.offsets!, size)) {
-              copied = copied.retainReferences(sourceReferences);
-            }
-            result = result == null ? copied : result.join(copied);
-          }
-          if (result == null ||
-              source.unknownTypes.isNotEmpty ||
-              source.constants.isNotEmpty) {
-            result = memory.forget(offset, size!, retained: sourceReferences);
-          }
-          return result;
-        });
+        final next = _writeNative(
+          range.address,
+          size,
+          sourceReferences,
+          (memory, offset) =>
+              _copyBytes(memory, offset, size!, source, sourceReferences),
+        );
         return _withEffects(_normal(_null, next), const {
           Effect.readsStorage,
           Effect.writesStorage,
@@ -1770,21 +2217,121 @@ final class FlowState {
 
   /// References held anywhere in the addressed storage, excluding its owner.
   /// Unknown backing storage can contain any reference.
-  FlowValue nativeReferences(FlowValue address) {
+  FlowValue nativeReferences(FlowValue address, {NativeTypeRef? storage}) {
     address = resolveValue(address);
     final unknown = FlowValue.unknown(.object.nullable);
-    var value =
+    final unresolved =
         address.addresses.isEmpty ||
-            address.objects.isNotEmpty ||
-            address.constants.isNotEmpty ||
-            address.unknownTypes.isNotEmpty
-        ? unknown
-        : const FlowValue.bottom();
+        address.objects.isNotEmpty ||
+        address.constants.isNotEmpty ||
+        address.unknownTypes.isNotEmpty;
+    var value = unresolved ? unknown : const FlowValue.bottom();
+    // Integer operations can lose a precise base and retain its capabilities.
+    // The copied bytes can still contain pointers into known native regions.
+    if (unresolved && !address.references.isBottom) {
+      value = value.withReferences([
+        exposedFrom([address.references]),
+      ]);
+    }
+    final size = storage == null
+        ? null
+        : memoryLayout?.nativeLayout.of(storage).size;
     for (final pointer in address.addresses) {
-      value = value.join(_memoryOf(pointer.base)?.references ?? unknown);
+      final memory = _memoryOf(pointer.base);
+      final offsets = pointer.offsets;
+      value = value.join(
+        memory == null
+            ? unknown
+            : offsets == null || size == null
+            ? memory.references
+            : memory.referencesIn(offsets, size),
+      );
     }
     return value;
   }
+
+  /// Capabilities transported by the ABI and any storage read for a byte copy.
+  /// Scalars transport their bits; compound values transport the contents of
+  /// their source range independently of the caller's storage lifetime.
+  ({FlowValue capability, FlowValue? copiedFrom}) nativeArgument(
+    FlowValue value,
+    NativeTypeRef type, {
+    required bool raw,
+  }) {
+    value = value.externalBits;
+    final address = type is NativeCompoundType
+        ? (raw ? value : nativeViewAddress(value))
+        : null;
+    final capability = address == null
+        ? FlowValue.joined([
+            value.references,
+            for (final pointer in value.addresses)
+              if (!pointer.retainedBase) FlowValue.address(pointer),
+          ])
+        : nativeReferences(address, storage: type);
+    return (capability: capability.withReferences([capability]), copiedFrom: address);
+  }
+
+  /// Reads a view's backing independently of its identity and lifetime owner.
+  FlowValue nativeViewAddress(FlowValue view) {
+    var address = const FlowValue.bottom();
+    var unresolved = view.unknownTypes.isNotEmpty || view.constants.isNotEmpty;
+    for (final object in view.objects) {
+      final backing = object.site is NativeView
+          ? capturesOf(object)?.first
+          : null;
+      if (backing == null) {
+        unresolved = true;
+      } else {
+        address = address.join(backing);
+      }
+    }
+    return unresolved || address.isBottom
+        ? address.join(
+            FlowValue.unknown(.integer).withReferences([
+              exposedFrom([view]),
+            ]),
+          )
+        : address;
+  }
+
+  FlowMemory _copyBytes(
+    FlowMemory memory,
+    int offset,
+    int size,
+    FlowValue source,
+    FlowValue sourceReferences,
+  ) {
+    FlowMemory? result;
+    for (final address in source.addresses) {
+      final from = _memoryOf(address.base);
+      var copied = from != null && address.offset != null
+          ? memory.copyFrom(offset, from, address.offset!, size)
+          : memory.forget(offset, size, retained: sourceReferences);
+      if (from != null &&
+          address.offsets != null &&
+          !from.hasCompleteRead(address.offsets!, size)) {
+        copied = copied.retainReferences(sourceReferences);
+      }
+      result = result == null ? copied : result.join(copied);
+    }
+    if (result == null ||
+        source.unknownTypes.isNotEmpty ||
+        source.constants.isNotEmpty) {
+      return memory.forget(offset, size, retained: sourceReferences);
+    }
+    return result;
+  }
+
+  /// A byte inside a live native mapping cannot have the null address.
+  bool isMappedAddress(FlowValue value) =>
+      value.managedBackings.isEmpty &&
+      !value.hasUnknownBacking &&
+      value.addresses.every((address) =>
+          address.base is FlowRegion &&
+          address.type == ValueType.integer &&
+          !address.retainedBase) &&
+      _containsNative(value, 1);
 
   bool _containsNative(FlowValue address, int? size) =>
       size != null &&
@@ -1831,7 +2378,49 @@ final class FlowState {
       operands.map(resolveValue).toList(),
     );
     return operation is CopyNative && range.size == 0 ||
-        _boundedMutableNative(range.address, range.size);
+        _boundedMutableNative(range.address, range.size) ||
+        _withinPayload(operation, range.address, range.size);
+  }
+
+  // A store at bytes + displacement can be inside its own allocation even
+  // when the largest possible offset exceeds the smallest possible extent.
+  // Independent byte counts with identical ranges do not establish this fact.
+  bool _withinPayload(Instruction operation, FlowValue address, int? width) {
+    if (operation is! StoreObjectData || width == null ||
+        address.addresses.length != 1 || address.unknownTypes.isNotEmpty) {
+      return false;
+    }
+    final owner = operation.object;
+    final bytes = switch (owner) {
+      NewPayload(:final bytes) => bytes,
+      AllocatedObject(:final payloadBytes) => payloadBytes,
+      ManagedStorageAllocation(:final inputs) => inputs.last,
+      _ => null,
+    };
+    if (bytes == null) return false;
+    final pointer = address.addresses.single;
+    final object = pointer.base;
+    if (object is! FlowObject || !identical(object.site, owner) ||
+        _objects[object]?.memory?.length == null) {
+      return false;
+    }
+    final fixed = memoryLayout?.objectLayout(object.storageType!).size;
+    final offsets = pointer.offsets;
+    if (fixed == null || offsets == null || offsets.lower < fixed ||
+        offsets.upper > FlowIntegerRange.maximum - width) {
+      return false;
+    }
+    final offset = operation.byteOffset;
+    final displacement = identical(offset, bytes) ? 0 : switch (offset) {
+      IntBinary(operator: .add, :final left, right: ScalarConstant(value: final int n))
+          when identical(left, bytes) => n,
+      IntBinary(operator: .add, left: ScalarConstant(value: final int n), :final right)
+          when identical(right, bytes) => n,
+      IntBinary(operator: .subtract, :final left, right: ScalarConstant(value: final int n))
+          when identical(left, bytes) && n != FlowIntegerRange.minimum => -n,
+      _ => null,
+    };
+    return displacement != null && displacement <= fixed - width;
   }
 
   /// Proves a native leaf's complete written interval from its actual arguments.
@@ -1865,20 +2454,26 @@ final class FlowState {
     FlowValue address,
     FlowValue length, {
     bool release = false,
+    FlowValue writtenReferences = const .bottom(),
   }) {
     final count = length.integers;
     if (count?.constant == 0) return copy();
     final size = count != null && count.lower >= 0 ? count.upper : null;
-    return _writeNative(
-      resolveValue(address),
-      size,
-      const .bottom(),
-      (memory, offset) => release
-          ? FlowMemory(memory.start, null)
-          // WrittenMemory bounds possible writes; it does not promise that
-          // every byte in the interval is overwritten, even for an exact size.
-          : memory.join(memory.forget(offset, size!)),
-    );
+    return _writeNative(resolveValue(address), size, writtenReferences, (
+      memory,
+      offset,
+    ) {
+      if (release) {
+        return offset == memory.start && count!.lower >= memory.maximumLength!
+            ? FlowMemory(memory.start, null)
+            : memory.invalidate(release: true);
+      }
+      // The footprint bounds possible writes without promising that the
+      // external function replaces every byte, even for an exact size.
+      return memory.join(
+        memory.forget(offset, size!, retained: writtenReferences),
+      );
+    }, release: release);
   }
 
   FlowState _writeNative(
@@ -1887,20 +2482,36 @@ final class FlowState {
     FlowValue stored,
     FlowMemory Function(FlowMemory, int) write, {
     int? writeWidth,
+    bool withinPayload = false,
+    bool release = false,
+    bool zeroBytes = false,
   }) {
     if (address.addresses.any((pointer) => pointer.base is FlowMetadata)) {
       throw StateError('Cannot write immutable module metadata.');
     }
     final next = copy();
     next._recordRawSlotWrites(address, writeWidth ?? size);
-    if (!_containsNative(address, size) ||
+    if (!withinPayload && !_containsNative(address, size) ||
         address.addresses.any(
           (pointer) =>
               pointer.base is! FlowObject && pointer.base is! FlowRegion,
         )) {
-      // An unbounded offset can reach other allocations, not just its base.
-      next._invalidateRaw();
-      next.escape([stored]);
+      // An unchecked range can reach another mapping. Even when its original
+      // placement survives, the old address may now refer to a new occupant.
+      final original = _withinOriginalMapping(address, size);
+      if (original) {
+        next._recordWrite(
+          null,
+          release ? _retiredRangeEffect : _historicalWriteEffect,
+        );
+      }
+      next._invalidateRaw(
+        release: release,
+        original: original,
+        written: original ? stored.references : const .bottom(),
+        zeroBytes: zeroBytes,
+      );
+      next.recordEscape([stored]);
       return next;
     }
     final strong = address.addresses.length == 1;
@@ -1916,15 +2527,22 @@ final class FlowState {
       }
       final state = (native ? _regions : _objects)[object]!;
       final offsets = pointer.offsets!;
-      final memory = offsets.constant != null
-          ? write(state.memory!, offsets.constant!)
-          : state.memory!.join(
-              state.memory!.forget(
-                offsets.lower,
-                offsets.upper - offsets.lower + size!,
-                retained: stored,
-              ),
-            );
+      final original = state.memory!;
+      final memory = withinPayload && !original.containsRange(offsets, size!)
+          ? original.join(original.forget(
+              offsets.lower,
+              offsets.upper - offsets.lower + size,
+              retained: stored.references,
+              extentProven: true,
+            ))
+          : release || offsets.constant != null
+          ? write(original, offsets.lower)
+          : original.join(original.forget(
+              offsets.lower,
+              offsets.upper - offsets.lower + size!,
+              retained: stored,
+              keepKnownZeroes: zeroBytes,
+            ));
       var updated = (native ? next._regions : next._objects)[object]!
           .withMemory(
             strong && !state.summary
@@ -1933,8 +2551,13 @@ final class FlowState {
                       .join(memory),
           );
       if (native) {
-        next._recordWrite(object, _regionWrites);
-        next._regions = next._regions.withEntry(object, updated);
+        next._recordWrite(object, _regionWrites, release
+            ? const FlowWrites.all()
+            : FlowWrites.bytes(offsets.lower, offsets.upper + (writeWidth ?? size!)));
+        next._regions = next._regions.withEntry(
+          object,
+          updated.withFlags(sawRelease: release),
+        );
         continue;
       }
       next._recordWrite(object, _objectMemoryWrites);
@@ -1955,9 +2578,12 @@ final class FlowState {
           }
         }
       }
-      next._objects = next._objects.withEntry(object, updated);
+      next._objects = next._objects.withEntry(
+        object,
+        updated.withFlags(sawRelease: release && object.site is ModuleObjectReference),
+      );
     }
-    next.escape(const []);
+    next.recordEscape(const []);
     return next;
   }
 
@@ -2004,30 +2630,84 @@ final class FlowState {
   bool hasIntactSlot(FlowObject object, InstanceField field) =>
       _objects[object]?.slots[field]?.rawOverwrite == false;
 
-  void _invalidateRaw() {
-    for (final region in _regions.keys) {
-      _recordWrite(region, _regionWrites);
+  bool _withinOriginalMapping(FlowValue address, int? width) {
+    if (width == null || width <= 0 || address.addresses.isEmpty ||
+        address.objects.isNotEmpty || address.unknownTypes.isNotEmpty ||
+        address.constants.isNotEmpty) {
+      return false;
     }
-    _regions = _regions.mapValues(
-      (_, region) => region.withMemory(region.memory!.invalidate()),
-    );
-    for (final global in _declaredGlobals) {
-      _recordWrite(null, global);
-      _setGlobal(
-        global,
-        (_globals[global] ?? _initial(global)).invalidate(
-          global.type,
-          isFinal: false,
-        ),
-      );
+    return address.addresses.every((pointer) {
+      final base = pointer.base;
+      final offsets = pointer.offsets;
+      final extent = base is FlowRegion ? _regions[base.allocation]?.mapping : null;
+      return extent != null && !pointer.retainedBase && offsets != null &&
+          offsets.lower >= 0 && offsets.upper <= extent - width;
+    });
+  }
+
+  void _invalidateRaw({
+    bool release = false,
+    bool original = false,
+    FlowValue written = const .bottom(),
+    bool zeroBytes = false,
+    Set<FlowObject>? omitted,
+    Set<GlobalVariable>? omittedGlobals,
+  }) {
+    if (!original) _recordWrite(null, _unprovenRangeEffect);
+    if (release) _recordWrite(null, _retiredRangeEffect);
+    if (release && !original && _hasModuleStorage) {
+      _moduleReplacement = _moduleReplacement?.join(written) ?? written;
+    }
+    final fixedModule = original && _moduleReplacement == null;
+    _regions = _regions.mapValues((object, region) {
+      if (omitted != null && !omitted.contains(object)) return region;
+      // A fresh mapping could not overlap a module block which has continuously
+      // occupied its address. Other storage can be a replacement for its bytes.
+      if (fixedModule && object.site is NativeDataAddress &&
+          !region.sawRelease && region.memory?.length != null) {
+        return region;
+      }
+      _recordWrite(object, _regionWrites);
+      final memory = region.memory!.invalidate(release: release);
+      return region.withMemory(memory.retainReferences(written))
+          .withFlags(sawRelease: release);
+    });
+    if (!fixedModule) {
+      for (final global in omittedGlobals ?? _declaredGlobals) {
+        _recordWrite(null, global);
+        _setGlobal(
+          global,
+          (_globals[global] ?? _initial(global)).invalidate(
+            FlowValue.unknown(global.type),
+            isFinal: false,
+          ),
+        );
+      }
     }
     _objects = _objects.mapValues((object, state) {
+      if (omitted != null && !omitted.contains(object)) return state;
+      if (fixedModule && object.site is ModuleObjectReference && !state.sawRelease) {
+        return state;
+      }
       for (final key in state.slots.keys) {
         _recordWrite(object, key);
       }
       if (state.memory != null) _recordWrite(object, _objectMemoryWrites);
       if (state.captures != null) _recordWrite(object, _captureWrites);
       final slots = state.slots.mapValues((key, slot) {
+        // Every byte of a bound null reference is already zero. The slot's
+        // write effect was recorded above, including for a stale caller.
+        if (zeroBytes &&
+            !release &&
+            object.site is ModuleObjectReference &&
+            key is InstanceField &&
+            !key.isLate &&
+            !slot.unbound &&
+            slot.value.constant?.type == ValueType.nullType &&
+            slot.value.managedBackings.isEmpty &&
+            !slot.value.hasUnknownBacking) {
+          return slot;
+        }
         final type = key is InstanceField
             ? key.typeFor(object.storageType!)
             : (object.type as CellType).content;
@@ -2051,7 +2731,8 @@ final class FlowState {
             )
             .toList(growable: false),
         state.summary,
-        state.memory?.invalidate(),
+        state.memory?.invalidate().retainReferences(written),
+        state.sawRelease,
       );
     });
   }
@@ -2285,7 +2966,7 @@ final class FlowState {
       next._set((object, field), weak ? old.join(copied!) : copied!);
       next._forgetFieldBytes(object);
     }
-    if (unknown.unknownTypes.isNotEmpty) next.escape([copied!.value]);
+    if (unknown.unknownTypes.isNotEmpty) next.recordEscape([copied!.value]);
     return _withEffects(_normal(_null, next), const {
       Effect.readsStorage, Effect.writesStorage,
     });
@@ -2324,7 +3005,7 @@ final class FlowState {
     if (unknown.unknownTypes.isNotEmpty) {
       // Capture the receiver's aliases before exposing the stored value.
       final aliases = _unknownAliases(unknown);
-      final next = copy()..escape([value]);
+      final next = copy()..recordEscape([value]);
       for (final object in next._objects.keys) {
         final state = next._objects[object]!;
         if (!aliases.contains(object)) {
@@ -2604,6 +3285,39 @@ final class FlowState {
         'A stored read requires its operands and SSA source.',
       );
     }
+    if (read case LoadNative(nativeType: final NativeTypeRef storage)) {
+      final address = operands.single;
+      final pointer = address.addresses.singleOrNull;
+      if (address.constants.isEmpty &&
+          address.unknownTypes.isEmpty &&
+          address.objects.isEmpty &&
+          !address.hasUnknownBacking &&
+          address.managedBackings.isEmpty &&
+          pointer != null &&
+          !pointer.retainedBase &&
+          pointer.offset != null &&
+          pointer.base is FlowRegion) {
+        final allocation = (pointer.base as FlowRegion).allocation;
+        final prior = _regions[allocation];
+        if (prior != null &&
+            !prior.summary &&
+            prior.memory != null &&
+            memoryLayout != null &&
+            storage
+                    .resolveAbi(memoryLayout!.nativeLayout.target.abi)
+                    .integerLayout
+                    ?.bytes ==
+                8) {
+          _regions = _regions.withEntry(
+            allocation,
+            prior.withMemory(
+              prior.memory!.rememberWord(pointer.offset!, source),
+            ),
+          );
+        }
+      }
+      return;
+    }
     if (read case LoadGlobal(:final global)) {
       _requireGlobal(global);
       final slot = _globals[global] ?? _initial(global);
@@ -2659,30 +3373,35 @@ final class FlowState {
   FlowValue exposedFrom(Iterable<FlowValue> roots) =>
       _reachable(roots, expose: true);
 
-  Set<FlowObject> _externalAliasObjects() => _reachable(
-    [
-      _externalAliases,
-      _escaped,
-      for (final object in _moduleObjects.values)
-        if (_objects[object] != null) FlowValue.object(object),
-      for (final slot in _globals.values) ...[slot.value, slot.initializer],
-      for (final binding in [..._externalMemory.values, ..._nativeData.values])
-        if (_regions[binding.allocation] != null)
-          FlowValue.address(FlowAddress(FlowRegion(binding.allocation), 0)),
-    ],
-    expose: true,
-    expandExternal: false,
-  ).objects;
+  Set<FlowObject> _externalAliasObjects() => {
+    for (final value in _reachableInputs(
+      [
+        _externalAliases,
+        _escaped,
+        for (final object in _moduleObjects.values)
+          if (_objects[object] != null) FlowValue.object(object),
+        for (final slot in _globals.values) ...[slot.value, slot.initializer],
+        for (final binding in [..._externalMemory.values, ..._nativeData.values])
+          if (_regions[binding.allocation] != null)
+            FlowValue.address(FlowAddress(FlowRegion(binding.allocation), 0)),
+      ],
+      expose: true,
+      expandExternal: false,
+      constants: false,
+    ))
+      ...value.objects,
+  };
 
   Set<FlowObject> _unknownAliases(
     FlowValue value, {
     bool memory = false,
     bool includeRegions = false,
+    Set<FlowObject> Function()? externalFrontier,
   }) {
     if (value.unknownTypes.isEmpty) return const {};
     final external = value.externalUnknownTypes.isEmpty
         ? const <FlowObject>{}
-        : _externalAliasObjects();
+        : (externalFrontier ?? _externalAliasObjects)();
     return {
       for (final object in [
         ..._objects.keys,
@@ -2703,7 +3422,23 @@ final class FlowState {
     required bool expose,
     FlowStorageAccess? access,
     bool constants = true,
+    Set<FlowObject> Function()? externalFrontier,
+  }) => FlowValue.joined(_reachableInputs(
+    roots,
+    expose: expose,
+    access: access,
+    constants: constants,
+    externalFrontier: externalFrontier,
+  ));
+
+
+  List<FlowValue> _reachableInputs(
+    Iterable<FlowValue> roots, {
+    required bool expose,
+    FlowStorageAccess? access,
+    bool constants = true,
     bool expandExternal = true,
+    Set<FlowObject> Function()? externalFrontier,
   }) {
     final values = <FlowValue>[];
     final pending = [for (final value in roots) (value, !expose)];
@@ -2721,11 +3456,12 @@ final class FlowState {
     // across states, escaped-object sets or changes in the program graph.
     late final families = _aliasFamilies(_objects.keys);
     final externalVisits = <bool>{};
-    late final externalObjects = _externalAliasObjects();
+    late final externalObjects = (externalFrontier ?? _externalAliasObjects)();
     while (pending.isNotEmpty) {
       final (input, raw) = pending.removeLast();
       if (!(raw ? rawValues : directValues).add(input)) continue;
-      final value = resolveValue(input);
+      final resolved = resolveValue(input);
+      final value = expose ? resolved.externalBits : resolved;
       values.add(value);
       if (!value.references.isBottom) pending.add((value.references, true));
       // A physical scalar carrier is retained by GC and summaries. Passing the
@@ -2791,6 +3527,9 @@ final class FlowState {
       }
       for (final object in value.objects) {
         if (!objects.add((object, raw))) continue;
+        // Ordinary Dart invocation grants the callable's behavior. Its physical
+        // entry table and captures are readable through a raw address or GC walk.
+        if (expose && !raw && object.callableStorage != null) continue;
         final state = _objects[object];
         if (state == null) continue;
         if (state.memory case final memory?
@@ -2826,7 +3565,7 @@ final class FlowState {
         ]);
       }
     }
-    return FlowValue.joined(values);
+    return values;
   }
 }
 
@@ -2873,6 +3612,11 @@ final _cell = Object();
 final _globalWrites = Object();
 final _objectMemoryWrites = Object();
 final _regionWrites = Object();
+final _mappedRegions = Object();
+final _retiredRangeEffect = Object();
+final _historicalWriteEffect = Object();
+final _unprovenRangeEffect = Object();
+final _moduleStorageEffect = Object();
 final _captureWrites = Object();
 final _null = FlowValue.constant(const Constant.nullValue());
 final _typeError = FlowValue.unknown(ValueType.typeError);
@@ -2967,13 +3711,16 @@ final class _Slot {
   _Slot withRawOverwrite() =>
       rawOverwrite ? this : _Slot._(value, unbound, initializer, true);
 
-  _Slot invalidate(ValueType type, {required bool isFinal}) =>
+  _Slot invalidate(FlowValue written, {required bool isFinal}) =>
       permitsWrite(isFinal)
-      ? _Slot._(value.join(.unknown(type)), unbound, initializer, rawOverwrite)
+      ? _Slot._(value.join(written), unbound, initializer, rawOverwrite)
       : this;
 
+  _Slot withExternalBytes(FlowValue written, {required bool mayUnbind}) =>
+      _Slot._(value.join(written), unbound || mayUnbind, initializer, true);
+
   _Slot invalidateRaw(ValueType type, {required bool isLate}) =>
-      isLate ? join(_Slot.unknown(type)) : invalidate(type, isFinal: false);
+      isLate ? join(_Slot.unknown(type)) : invalidate(FlowValue.unknown(type), isFinal: false);
 
   @override
   bool operator ==(Object other) =>
@@ -2986,35 +3733,63 @@ final class _Slot {
   int get hashCode => Object.hash(value, unbound, initializer, rawOverwrite);
 }
 
+int? _commonMapping(int? a, int? b) =>
+    a == null || b == null ? null : a < b ? a : b;
+
 final class _ObjectState {
   final StateMap<Object, _Slot> slots;
   final List<FlowValue>? captures;
   final bool summary;
+  final bool sawRelease;
+  // Original placement never authorizes a load, a strong store, or a liveness test.
+  final int? mapping;
   final FlowMemory? memory;
 
   new(
     Map<Object, _Slot> slots, {
     List<FlowValue>? captures,
     this.summary = false,
+    this.mapping,
     this.memory,
-  }) : slots = StateMap.fromEntries(slots.entries),
+  }) : sawRelease = false,
+       slots = StateMap.fromEntries(slots.entries),
        captures = captures == null ? null : List.unmodifiable(captures);
 
-  new _(this.slots, this.captures, this.summary, this.memory);
+  new _(
+    this.slots,
+    this.captures,
+    this.summary,
+    this.memory, [
+    this.sawRelease = false,
+    this.mapping,
+  ]);
+
+  _ObjectState withMapping(int? value) => mapping == value
+      ? this
+      : _ObjectState._(slots, captures, summary, memory, sawRelease, value);
 
   _ObjectState withSlot(Object key, _Slot value) {
     final next = slots.withEntry(key, value);
     return identical(next, slots)
         ? this
-        : _ObjectState._(next, captures, summary, memory);
+        : _ObjectState._(next, captures, summary, memory, sawRelease, mapping);
   }
 
-  _ObjectState withFlags({bool summary = false}) => !summary || this.summary
+  _ObjectState withFlags({bool summary = false, bool sawRelease = false}) =>
+      (this.summary || !summary) && (this.sawRelease || !sawRelease)
       ? this
-      : _ObjectState._(slots, captures, true, memory);
+      : _ObjectState._(
+          slots,
+          captures,
+          this.summary || summary,
+          memory,
+          this.sawRelease || sawRelease,
+          mapping,
+        );
 
-  _ObjectState withMemory(FlowMemory? value) =>
-      value == memory ? this : _ObjectState._(slots, captures, summary, value);
+  _ObjectState withMemory(FlowMemory? value) => value == memory
+      ? this
+      : _ObjectState._(slots, captures, summary, value, sawRelease, mapping);
 
   _ObjectState map(FlowValue Function(FlowValue) transform) {
     final mappedSlots = slots.mapValues((_, value) => value.map(transform));
@@ -3026,7 +3801,14 @@ final class _ObjectState {
             identical(mappedSlots, slots) &&
             _sameCaptures(mappedCaptures, captures)
         ? this
-        : _ObjectState._(mappedSlots, mappedCaptures, summary, mappedMemory);
+        : _ObjectState._(
+            mappedSlots,
+            mappedCaptures,
+            summary,
+            mappedMemory,
+            sawRelease,
+            mapping,
+          );
   }
 
   @override
@@ -3035,6 +3817,8 @@ final class _ObjectState {
       other is _ObjectState &&
           slots == other.slots &&
           summary == other.summary &&
+          sawRelease == other.sawRelease &&
+          mapping == other.mapping &&
           memory == other.memory &&
           _sameCaptures(captures, other.captures);
 
@@ -3044,10 +3828,16 @@ final class _ObjectState {
     captures != null,
     Object.hashAll(captures ?? const <FlowValue>[]),
     summary,
+    sawRelease,
+    mapping,
     memory,
   );
 
-  _ObjectState join(_ObjectState incoming, {bool widen = false}) {
+  _ObjectState join(
+    _ObjectState incoming, {
+    bool widen = false,
+    NativeWordProofs? nativeWords,
+  }) {
     if (identical(this, incoming)) return this;
     final joinedSlots = slots.merge(
       incoming.slots,
@@ -3061,11 +3851,18 @@ final class _ObjectState {
         ? incoming.memory?.invalidate()
         : incoming.memory == null
         ? memory!.invalidate()
-        : memory!.join(incoming.memory!, widen: widen);
+        : memory!.join(
+            incoming.memory!,
+            widen: widen,
+            nativeWords: nativeWords,
+          );
+    final joinedMapping = _commonMapping(mapping, incoming.mapping);
     var changed =
+        joinedMapping != mapping ||
         joinedMemory != memory ||
         !identical(joinedSlots, slots) ||
-        incoming.summary && !summary;
+        incoming.summary && !summary ||
+        incoming.sawRelease && !sawRelease;
     var joinedCaptures = captures;
     if (incoming.captures case final other?) {
       if (captures == null) {
@@ -3092,6 +3889,8 @@ final class _ObjectState {
             joinedCaptures,
             summary || incoming.summary,
             joinedMemory,
+            sawRelease || incoming.sawRelease,
+            joinedMapping,
           )
         : this;
   }

@@ -14,6 +14,13 @@ final class StackFrames(final int context) {
   int get description =>
       Pointer<Int64>.fromAddress(_record + StackMapRecord.description).value;
 
+  int get _table =>
+      Pointer<Int64>.fromAddress(context + RuntimeContext.maps).value;
+
+  /// Only the module's own proven context-free table can skip continuation reads.
+  bool mayHaveContexts(int contextFreeTable) =>
+      contextFreeTable == 0 || _table != contextFreeTable;
+
   /// The managed continuation saved in this frame, if any.
   Object? get continuation {
     final offset = Pointer<Int64>.fromAddress(_record + StackMapRecord.context)
@@ -76,8 +83,7 @@ final class StackFrames(final int context) {
   }
 
   int _find(int pc) {
-    final table = Pointer<Int64>.fromAddress(context + RuntimeContext.maps)
-        .value;
+    final table = _table;
     var low = 0,
         high = Pointer<Int64>.fromAddress(table + StackMapTable.count).value;
     while (low < high) {

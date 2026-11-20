@@ -46,6 +46,10 @@ abstract final class Memory() {
   @Primitive(.writeReference)
   external static void writeReference(Object object, int offset, Object? value);
 
+  /// This module's linked table if no return PC saves a continuation, else zero.
+  @Primitive(.contextFreeStackMap)
+  external static int contextFreeStackMap();
+
   /// The active Dart execution context, preserved across native reentry.
   @Primitive(.context)
   external static int context();

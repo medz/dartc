@@ -11,13 +11,34 @@ final class StackTraceLowering(final FunctionTarget capture)
   ProgramPassKind get kind => .lowering;
 
   @override
-  IrProgram run(ProgramFlowFacts facts) {
-    facts.checkProgram(facts.program);
-    return lower(facts.program);
+  ProgramTransform bind() {
+    final recipes = <IrOrigin, ProgramRealization>{};
+    return ProgramTransform((facts) {
+      facts.checkProgram(facts.program);
+      final definitions = facts.definitions;
+      return _lower(facts.program, (function, operation) {
+        if (!definitions.contains(function.target) || !facts.reachesOperation(operation)) return false;
+        final source = function.originOf(operation).source;
+        recipes.putIfAbsent(source, () => ProgramRealization(
+          (StackTraceLowering, source),
+          (canonical) => _lower(canonical, (owner, site) =>
+              owner.originOf(site).source == source),
+        ));
+        return true;
+      });
+    }, realizations: () => recipes.values, requiresRetainedUse: true);
   }
 
+  @override
+  IrProgram run(ProgramFlowFacts facts) => bind()(facts);
+
   /// Expands snapshots without optimizing the caller's supplied IR.
-  IrProgram lower(IrProgram program) {
+  IrProgram lower(IrProgram program) => _lower(program, (_, _) => true);
+
+  IrProgram _lower(
+    IrProgram program,
+    bool Function(IrFunction, CaptureStackTrace) selected,
+  ) {
     final declaration = program.implementationOf(capture);
     if (declaration is! IrFunction ||
         capture.signature != FunctionType(.stackTrace, [.integer, .integer])) {
@@ -32,7 +53,7 @@ final class StackTraceLowering(final FunctionTarget capture)
             ...block.instructions,
             if (block.end case Invoke(:final operation)) operation,
           ])
-            if (operation is CaptureStackTrace)
+            if (operation is CaptureStackTrace && selected(function, operation))
               operation: DirectCall(capture, [
                 FrameValue(.callerStackPointer),
                 FrameValue(.returnAddress),

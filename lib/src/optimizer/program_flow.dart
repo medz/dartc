@@ -1,5 +1,7 @@
 import 'package:dartc/ir.dart';
+import 'package:dartc/interop.dart';
 
+import '../ir/type.dart' show isDartType;
 import 'flow_state.dart';
 import 'flow_memory.dart';
 import 'flow_value.dart';
@@ -23,9 +25,17 @@ final class ProgramFlow(
   Iterable<FunctionTarget> openEntries = const [],
   Iterable<FunctionTarget> escapingReturns = const [],
 
+  /// An open host entry whose exit ends the module lifetime. Its body receives
+  /// the shared state and can call back into live code during shutdown.
+  final FunctionTarget? terminalEntry,
+
   /// Raw ABI entries used only when their declared callback addresses escape.
   Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
   final FlowMemoryLayout? memoryLayout,
+
+  /// The runtime's actual stack-context interface used by frame selection.
+  /// Without its module-owned lifecycle, a valid inherited frame is unknown.
+  final ClassType? stackContext,
 
   /// Ordinary target body reporting a retained allocation's failure.
   final FunctionTarget? allocationFailure,
@@ -51,27 +61,49 @@ final class ProgramFlow(
   final _escapingReturns = <FunctionTarget>{};
   final _escapedCalls = <Object, _Activation>{};
   final _roots = <FunctionTarget, _Activation>{};
+  final _resumedEntries = <FunctionTarget, _Activation>{};
   final _calls = <_Activation>{};
   final _inputs = <_ContextKey, Set<_Activation>>{};
   final _inputIdentities = <(FunctionTarget, int), _InputIdentity>{};
   final _ancestry = _CallAncestry();
   final _callSites = <(_Activation, Instruction, FunctionTarget), _CallSite>{};
   final _pending = <_Activation>{};
+  bool _lostCaller = false;
+  final _stackContextReaders = <_Activation>{};
+  late final _nativeStackEntries = <FunctionTarget>{
+    if (program.nativeBoundaries case final bindings?
+        when bindings.context?.contextOwner != null) ...{
+      for (final export in bindings.exports.values) export.entry,
+      ...bindings.processes.values,
+      ?bindings.cleanup,
+    },
+  };
+  bool _stackContextsPossible = false;
+
+  void _allowStackContexts() {
+    if (_stackContextsPossible) return;
+    _stackContextsPossible = true;
+    _pending.addAll(_stackContextReaders);
+    _stackContextReaders.clear();
+  }
   final _owners = <Object, FunctionTarget>{};
   final _cyclic = <FunctionTarget, Set<Block>>{};
   final _loops = <FunctionTarget, LoopRanges>{};
+  final _nullGuards = <FunctionTarget, Map<Block, Map<Value, bool>>>{};
   final _liveness = <FunctionTarget, ValueLiveness>{};
   final _storageAccess = <FunctionTarget, FlowStorageAccess?>{};
   final _allocating = <FunctionTarget, bool>{};
   final _accessPlans = <FunctionTarget, _AccessPlan>{};
   final _receiverBounds = <ValueType, List<ClassType>>{};
   final _definitions = <FunctionTarget>{};
-  FlowState? _externalState;
+  final _externalStates = <bool, FlowState>{};
   final _escapingActivations = <_Activation>{};
+  final _externalReaders = <_Activation>{};
   final _nativeActivations = <_Activation>{};
   final _nativeLookups = <_Activation>{};
   final _constructedReturns = <_Activation, FlowValue>{};
   ProgramFlowFacts? _facts;
+  final _exceptionSources = Expando<Map<Object, FlowState>>();
 
   this {
     _externalMemory = {
@@ -162,6 +194,7 @@ final class ProgramFlow(
         changed = true;
       }
     }
+    final previousOpenCount = _openEntries.length;
     for (final source in openEntries) {
       final target = source.implementation;
       if (program.implementationOf(target) == null || target.kind == .closure) {
@@ -174,6 +207,9 @@ final class ProgramFlow(
         ), open: true);
         changed = true;
       }
+    }
+    if (_openEntries.length != previousOpenCount) {
+      _pending.addAll(_externalReaders);
     }
     for (final source in [..._openEntries, ...escapingReturns]) {
       final target = source.implementation;
@@ -189,10 +225,16 @@ final class ProgramFlow(
     }
     if (!changed) return false;
     _facts = null;
+    var untilTrace = 0;
     while (_pending.isNotEmpty) {
       final activation = _pending.first;
       _pending.remove(activation);
       _evaluate(activation);
+      if (_lostCaller && (--untilTrace <= 0 || _pending.isEmpty)) {
+        _releaseDisconnected();
+        _lostCaller = false;
+        untilTrace = _pending.length;
+      }
     }
     for (final activation in _activeContexts) {
       for (final entry in activation.storageViews.entries) {
@@ -209,6 +251,7 @@ final class ProgramFlow(
 
   Iterable<_Activation> get _activeContexts sync* {
     yield* _roots.values;
+    yield* _resumedEntries.values;
     yield* _calls;
     yield* _escapedCalls.values;
   }
@@ -282,28 +325,44 @@ final class ProgramFlow(
 
   void _enterRoot(FlowEntry entry, {required bool open}) {
     if (entry.arguments.any((value) => value.isBottom)) return;
+    if (stackContext != null && !_nativeStackEntries.contains(entry.target)) {
+      _allowStackContexts();
+    }
     final activation = _roots.putIfAbsent(
       entry.target,
       () => _Activation(program.implementationOf(entry.target)!),
     );
-    activation.repeated |= open;
+    if (open && !activation.repeated) {
+      activation.repeated = true;
+      activation.inputRevision++;
+      _pending.add(activation);
+    }
     activation.mergeEnvironment(const {});
-    _supply(
-      activation,
-      entry.arguments.map((value) => value.asExternal()).toList(),
-      open
-          ? (_externalState ??= FlowState(
-              program,
-              memoryLayout: memoryLayout,
-              externalMemory: _externalMemory,
-            ))
-          : FlowState(
-              program,
-              memoryLayout: memoryLayout,
-              externalMemory: _externalMemory,
-            ),
-    );
+    final arguments = entry.arguments.map((value) => value.asExternal()).toList();
+    _supply(activation, arguments, FlowState(
+      program,
+      memoryLayout: memoryLayout,
+      externalMemory: _externalMemory,
+    ));
+    if (open) {
+      for (final entryState in _externalStates.entries) {
+        _supply(entryState.key ? _resumedEntry(entry.target) : activation,
+            arguments, entryState.value);
+      }
+    }
   }
+
+  _Activation _resumedEntry(FunctionTarget target) =>
+      _resumedEntries.putIfAbsent(target, () {
+        final entry = _Activation(_roots[target]!.body);
+        entry.repeated = true;
+        entry.mergeEnvironment(const {});
+        return entry;
+      });
+
+  bool _isRoot(_Activation activation, FunctionTarget target) =>
+      identical(_roots[target], activation) ||
+      identical(_resumedEntries[target], activation);
 
   bool _supply(
     _Activation activation,
@@ -337,6 +396,7 @@ final class ProgramFlow(
           activation.input!.join(input, widen: activation.recursive) || changed;
     }
     if (changed) {
+      activation.inputRevision++;
       activation._incomingIdentities = null;
       _pending.add(activation);
     }
@@ -354,7 +414,36 @@ final class ProgramFlow(
     bool checkAllArguments = false,
     // Helper invocations need not return the enclosing operation's value.
     FlowSource? resultSource,
+    List<(FlowValue, FlowState)>? normalReturns,
+    Object? exceptionalSource,
   }) {
+    final alternatives = _exceptionSources[input];
+    if (exceptionalSource == null && alternatives != null && alternatives.isNotEmpty &&
+        operation is DirectCall && program.implementationOf(source.implementation) is IrFunction) {
+      var joined = _unreachable;
+      final normal = <Object, FlowState>{};
+      for (final arm in alternatives.entries) {
+        final returns = normalReturns == null ? null : <(FlowValue, FlowState)>[];
+        final invoked = _invoke(caller, block, operation, source, arguments, arm.value,
+            environment: environment, checkAllArguments: checkAllArguments,
+            resultSource: resultSource, exceptionalSource: arm.key, normalReturns: returns);
+        joined = _joinResult(joined, invoked);
+        if (invoked.normal case final state?) {
+          normal[arm.key] = state;
+          if (normalReturns != null) {
+            if (returns!.isEmpty) {
+              normalReturns.add((invoked.value, state));
+            } else {
+              normalReturns.addAll(returns);
+            }
+          }
+        }
+      }
+      if (joined.normal case final state? when normal.isNotEmpty) {
+        _exceptionSources[state] = normal;
+      }
+      return joined;
+    }
     if (arguments.any((value) => value.isBottom)) return _unreachable;
     final target = source.implementation;
     if (operation case FunctionCall(target: final bound?)
@@ -459,13 +548,24 @@ final class ProgramFlow(
       callee = path.last;
     } else {
       final aliasKey = aliases.fold<Object?>(null, (key, pair) => (key, pair));
+      // A forwarded argument can keep an otherwise unused object in the
+      // projection. Split only bodies with a possible heap storage access.
+      final mayAccessHeap = access == null ||
+          access.memory ||
+          access.rawWrites ||
+          access.fields.isNotEmpty ||
+          access.cells;
       final local = _ContextKey(
         target,
         const [],
         environment,
-        site,
+        (site, mayAccessHeap && projected.hasManagedAllocations),
         repeated,
-        aliasKey,
+        caller.iterationContext == null
+            ? exceptionalSource == null
+                  ? aliasKey
+                  : (exceptionalSource, aliasKey)
+            : (caller.iterationContext, exceptionalSource, aliasKey),
       );
       final invocation = site.contexts.putIfAbsent(
         local,
@@ -481,6 +581,14 @@ final class ProgramFlow(
       plain = prepared.arguments;
       suppliedState = prepared.state;
       final previous = invocation.activation;
+      final owns =
+          previous != null &&
+          previous.callSites.length == 1 &&
+          !site.recursive &&
+          !site.contexts.values.any(
+            (other) =>
+                other != invocation && identical(previous, other.activation),
+          );
       if (prepared.reset) {
         site.joined.remove(local);
         callee = _Activation(body);
@@ -496,23 +604,17 @@ final class ProgramFlow(
           repeated,
           aliasKey,
         );
-        if ((access == null || access.writes || previous?.recursive == true) &&
-            previous != null &&
+        if (previous != null && previous.recursive &&
             previous.inputKey != precise) {
-          // Effectful calls keep allocation identities as their inputs grow.
-          // Recursive summaries are deliberately unindexed: retain their joined
-          // call-site identity instead of repeatedly starting another SCC.
+          // A recursive summary is unindexed. Keep its joined call-site identity
+          // instead of repeatedly starting another strongly connected component.
           site.joined.add(local);
-          callee = previous.callSites.length == 1
-              ? previous
-              : _Activation(body);
+          callee = owns ? previous : _Activation(body);
           callee.shareInput = false;
         } else {
           callee =
               _inputs[precise]?.firstOrNull ??
-              (previous != null && previous.callSites.length == 1
-                  ? previous
-                  : _Activation(body));
+              (owns ? previous : _Activation(body));
         }
       }
       _calls.add(callee);
@@ -529,13 +631,17 @@ final class ProgramFlow(
       }
     }
     if (repeated && !callee.repeated) {
+      callee.inputRevision++;
       callee.repeated = true;
       _pending.add(callee);
     }
     if (path.isNotEmpty) {
       site.recursive = true;
       for (final cycle in path) {
-        cycle.recursive = true;
+        if (!cycle.recursive) {
+          cycle.inputRevision++;
+          cycle.recursive = true;
+        }
         _indexInput(cycle);
         if (!cycle.repeated) {
           cycle.repeated = true;
@@ -553,7 +659,10 @@ final class ProgramFlow(
       }
     }
     final environmentChanged = callee.mergeEnvironment(environment);
-    if (environmentChanged) _pending.add(callee);
+    if (environmentChanged) {
+      callee.inputRevision++;
+      _pending.add(callee);
+    }
     caller.calls.putIfAbsent(operation, () => {}).add(callee);
     callee.readers.add(caller);
     callee.callSites.add(site);
@@ -577,7 +686,24 @@ final class ProgramFlow(
       _indexInput(callee);
     }
 
-    FlowObject mapObject(FlowObject object) {
+    // Returned native allocations and their aliases receive the same name for
+    // each observed lifetime. Keep one unoccupied name distinct from the
+    // summary of subsequent allocations while that name remains reachable.
+    final regionNames = <(FlowObject, bool), FlowObject>{};
+    final reservedRegions = <FlowObject, FlowObject>{};
+    if (normalReturns != null && callee.hasMultipleReturns &&
+        !callee.hasCurrentExits) {
+      callee.normalReturns ??= {};
+    }
+    if (!callee.hasCurrentExits) {
+      // The argument type check precedes the call and can throw even while
+      // the body is waiting to be evaluated for its new input.
+      return failedCheck
+          ? FlowResult(exceptional: input.copy(), exception: _typeError)
+          : _unreachable;
+    }
+
+    FlowObject mapObject(FlowObject object, FlowState? exit) {
       if (object.site is NativeDataAddress ||
           object.site is ModuleObjectReference ||
           site.recursive) {
@@ -588,8 +714,9 @@ final class ProgramFlow(
           callee.incomingIdentities.contains(object)) {
         return object;
       }
-      final mapped = site.allocations.putIfAbsent(
-        _allocationKey(object),
+      final allocationKey = _allocationKey(object);
+      FlowObject name(Object key) => site.allocations.putIfAbsent(
+        key,
         () => FlowObject(
           object.site,
           _AllocationContext(object, site),
@@ -599,6 +726,20 @@ final class ProgramFlow(
           storageView: object.storageView,
         ),
       );
+      final released = exit?.regionSawRelease(object);
+      final mapped = released == null
+          ? name(allocationKey)
+          : regionNames.putIfAbsent((object, released), () {
+              final initial = name((allocationKey, released, false));
+              final reserved = reservedRegions[initial];
+              if (!input.containsObject(initial) &&
+                  (reserved == null || reserved == object)) {
+                reservedRegions[initial] = object;
+                return initial;
+              }
+              // Occupied names are weakly updated by FlowState.applySummary.
+              return name((allocationKey, released, true));
+            });
       (mapped.activation as _AllocationContext).origins.add(object);
       return mapped;
     }
@@ -633,7 +774,11 @@ final class ProgramFlow(
                       .boundValueOf(
                         read,
                         operands
-                            .map((value) => value.mapObjects(mapObject))
+                            .map(
+                              (value) => value.mapObjects(
+                                (object) => mapObject(object, exit),
+                              ),
+                            )
                             .toList(),
                       )
                       ?.sources ??
@@ -646,7 +791,9 @@ final class ProgramFlow(
         );
         if (index >= 0) sources.addAll(arguments[index].sources);
       }
-      return value.mapObjects(mapObject).withSources(sources);
+      return value
+          .mapObjects((object) => mapObject(object, exit))
+          .withSources(sources);
     }
 
     FlowState? apply(_StateSummary? summary, {bool normal = false}) =>
@@ -654,20 +801,50 @@ final class ProgramFlow(
         ? null
         : input.applySummary(
             summary.entry,
-            summary.exit.project([
+            summary.project([
               ...supplied,
               ...suppliedState.allocations,
               callee.returned,
               callee.exception,
+              if (!normal) callee.stackTrace,
             ]),
-            mapObject: mapObject,
+            mapObject: (object) => mapObject(object, summary.exit),
             mapValue: (value) =>
                 mapValue(value, normal: normal, exit: summary.exit),
+            currentInput: true,
           );
+    if (normalReturns != null && callee.hasMultipleReturns) {
+      // If this activation already published a joined exit without tracking its
+      // individual returns, continue using the complete summary at this site.
+      if (callee.normalSummary == null) callee.normalReturns ??= {};
+      if (callee.normalReturns case final exits?) {
+        for (final returned in exits.values) {
+          normalReturns.add((
+            mapValue(returned.value, exit: returned.state.exit),
+            apply(returned.state, normal: true)!,
+          ));
+        }
+      }
+    }
+    final thrownState = apply(callee.exceptionalSummary);
+    final sourceExits = callee.exceptionSources;
+    if (thrownState != null && sourceExits != null) {
+      _exceptionSources[thrownState] = {
+        for (final pair in sourceExits.entries) pair.key: apply(pair.value)!,
+      };
+    }
     final invoked = FlowResult(
       value: mapValue(callee.returned, exit: callee.normal),
       normal: apply(callee.normalSummary, normal: true),
-      exceptional: apply(callee.exceptionalSummary),
+      normalRanges: callee.normalParameterRanges.isEmpty
+          ? const {}
+          : {
+              for (final entry in callee.normalParameterRanges.entries)
+                for (final source in arguments[entry.key].sources)
+                  if (identical(source.activation, caller))
+                    source.value: entry.value,
+            },
+      exceptional: thrownState,
       allocationFailureOnly: !callee.hasSemanticFailure,
       exception: mapValue(callee.exception, exit: callee.exceptional),
       stackTrace: mapValue(callee.stackTrace, exit: callee.exceptional),
@@ -678,6 +855,45 @@ final class ProgramFlow(
             FlowResult(exceptional: input.copy(), exception: _typeError),
           )
         : invoked;
+  }
+
+  FlowState? _joinState(FlowState? a, FlowState? b) {
+    if (a != null && b != null) return a.copy()..join(b);
+    final incoming = a ?? b;
+    if (incoming == null) return null;
+    final result = incoming.copy();
+    // A call accumulator starts with an unreachable outcome. Its only
+    // executable predecessor retains the same partition of exceptional exits.
+    if (_exceptionSources[incoming] case final alternatives?) {
+      _exceptionSources[result] = {
+        for (final entry in alternatives.entries) entry.key: entry.value.copy(),
+      };
+    }
+    return result;
+  }
+
+  FlowResult _joinResult(FlowResult left, FlowResult right) {
+    return FlowResult(
+      value: left.value.join(right.value),
+      normal: _joinState(left.normal, right.normal),
+      normalRanges: left.normal == null
+          ? right.normalRanges
+          : right.normal == null
+          ? left.normalRanges
+          : left.normalRanges.isEmpty || right.normalRanges.isEmpty
+          ? const {}
+          : {
+              for (final entry in left.normalRanges.entries)
+                if (right.normalRanges[entry.key] case final other?)
+                  entry.key: entry.value.join(other),
+            },
+      exceptional: _joinState(left.exceptional, right.exceptional),
+      allocationFailureOnly:
+          !left.hasSemanticFailure && !right.hasSemanticFailure,
+      exception: left.exception.join(right.exception),
+      stackTrace: left.stackTrace.join(right.stackTrace),
+      effects: {...left.effects, ...right.effects},
+    );
   }
 
   List<_Activation> _recursivePath(
@@ -767,32 +983,70 @@ final class ProgramFlow(
     final pending = [activation];
     while (pending.isNotEmpty) {
       final old = pending.removeLast();
-      if (old.readers.isNotEmpty ||
-          _roots.containsValue(old) ||
-          _escapedCalls.containsValue(old) ||
-          !_calls.remove(old)) {
+      if (!_calls.contains(old) ||
+          _isRoot(old, old.body.target) ||
+          _escapedCalls.containsValue(old)) {
         continue;
       }
-      _pending.remove(old);
-      if (old.inputKey case final key?) {
-        final bucket = _inputs[key]!;
-        bucket.remove(old);
-        if (bucket.isEmpty) _inputs.remove(key);
-        old.inputKey = null;
+      if (old.readers.isNotEmpty) {
+        _lostCaller = true;
+      } else {
+        _retire(old, pending);
       }
-      for (final entry in old.calls.entries) {
-        for (final target
-            in entry.value.map((call) => call.body.target).toSet()) {
-          final site = _callSites.remove((old, entry.key, target));
-          if (site == null) continue;
-          for (final called in {
-            for (final input in site.contexts.values) ?input.activation,
-          }) {
-            called.callSites.remove(site);
-            called.readers.remove(old);
-            pending.add(called);
-          }
+    }
+  }
+
+  // A cycle can retain its readers after the last invocation from a root was
+  // redirected. Trace only between evaluations, after call sites are rebound.
+  void _releaseDisconnected() {
+    final reachable = {
+      ..._roots.values,
+      ..._resumedEntries.values,
+      ..._escapedCalls.values,
+    };
+    final frontier = reachable.toList();
+    for (var i = 0; i < frontier.length; i++) {
+      for (final calls in frontier[i].calls.values) {
+        for (final callee in calls) {
+          if (reachable.add(callee)) frontier.add(callee);
         }
+      }
+    }
+    for (final old in _calls.where((a) => !reachable.contains(a)).toList()) {
+      _retire(old);
+    }
+  }
+
+  void _retire(_Activation old, [List<_Activation>? children]) {
+    // Published allocations still own their creator's capture, type argument,
+    // and bound method facts through their original allocation identity.
+    _calls.remove(old);
+    _pending.remove(old);
+    _externalReaders.remove(old);
+    _stackContextReaders.remove(old);
+    if (old.inputKey case final key?) {
+      final bucket = _inputs[key]!;
+      bucket.remove(old);
+      if (bucket.isEmpty) _inputs.remove(key);
+      old.inputKey = null;
+    }
+    // Native reentry also installs summary readers on callable roots.
+    for (final root in [
+      ..._escapingActivations,
+      ..._roots.values,
+      ..._resumedEntries.values,
+    ]) {
+      root.readers.remove(old);
+    }
+    for (final entry in old.calls.entries) {
+      for (final called in entry.value) {
+        final site = _callSites[(old, entry.key, called.body.target)];
+        called.callSites.remove(site);
+        called.readers.remove(old);
+        children?.add(called);
+      }
+      for (final called in entry.value) {
+        _callSites.remove((old, entry.key, called.body.target));
       }
     }
   }
@@ -985,7 +1239,7 @@ final class ProgramFlow(
                           operands.any(
                             (operand) => operand.addresses.isNotEmpty,
                           )
-                      ? _addressArithmetic(value, operands)
+                      ? _addressArithmetic(value, operands, proofState)
                       : _integerOperation(value, operands)?.value;
                 case ReadNativeContext() ||
                     NativeDataAddress() ||
@@ -1154,7 +1408,7 @@ final class ProgramFlow(
             return false;
           }
           addCall(entry, read == null ? null : [
-            _receiverValue(receiver, type),
+            receiver.receiverFor(type),
             ...positional,
             for (final name in binding.names) named[name]!,
             ...executionTypes,
@@ -1168,7 +1422,7 @@ final class ProgramFlow(
           read == null
               ? null
               : [
-                  _receiverValue(receiver, type),
+                  receiver.receiverFor(type),
                   ...target.signature.bind<FlowValue>(
                     positional,
                     named,
@@ -1196,6 +1450,13 @@ final class ProgramFlow(
       // rather than suppressing a call based on its earlier solved effects.
       if (read != null && _fold(operation, inputs, program) != null) continue;
       switch (operation) {
+        case NativeCall(:final isLeaf) || RawNativeCall(:final isLeaf):
+          if (!isLeaf) return (access: null, calls: calls, allocates: true);
+          // Native code can read or write arguments and previously exposed
+          // storage. A compound output additionally writes its ABI destination.
+          memory = writes = exposed = true;
+          rawWrites |=
+              operation is RawNativeCall && operation.resultStorage != null;
         case ReadNativeContext():
           context = memory = true;
         case BindNativeContext():
@@ -1310,6 +1571,7 @@ final class ProgramFlow(
         case WriteCell():
           cells = writes = true;
         case LoadNative() ||
+            NativeAddress() ||
             LoadObjectData() ||
             LoadObjectReference() ||
             StringLength() ||
@@ -1360,6 +1622,9 @@ final class ProgramFlow(
     if (activation.input == null) return;
     _definitions.add(body.target);
     if (body is! IrFunction) return;
+    if (stackContext != null && body.target.retainsStackContext(stackContext)) {
+      _allowStackContexts();
+    }
     if (body.bodyKind != .synchronous) {
       throw StateError(
         'Normalize suspension before program flow: '
@@ -1368,8 +1633,12 @@ final class ProgramFlow(
     }
     // Recursive supply may grow activation.input while this body is evaluated.
     // Each published exit remains paired with the entry actually analyzed.
+    activation.beginEvaluation();
     final entryState = activation.input!.copy();
-    // Local snapshots belong to this evaluation; only call summaries propagate.
+    // A changed callee input can select a different summary and allocation
+    // identity. Rebuild local SSA values with their point states so a previous
+    // return cannot be consumed with this evaluation's capture storage.
+    activation.values.clear();
     activation.before.clear();
     activation.after.clear();
     activation.thrown.clear();
@@ -1377,26 +1646,77 @@ final class ProgramFlow(
     activation.environmentReads.clear();
     activation.storageViews.clear();
     final escapes =
+        !_endsModule(activation) &&
         !_nativeLookups.contains(activation) &&
         (_escapingActivations.contains(activation) ||
             (_escapingReturns.contains(body.target) &&
-                identical(_roots[body.target], activation)));
+                _isRoot(activation, body.target)));
     bool availableAt(FlowSource source, Block block) =>
         !identical(source.activation, activation) ||
         !block.parameters.contains(source.value) &&
             activation.dominance.atEntry(source.value, block);
-    final incoming = <Block, FlowState>{
-      body.entry: entryState.copy()
+    final entryKey = (body.entry, 0);
+    final incoming = <(Block, int), FlowState>{
+      entryKey: entryState.copy()
         ..retainSources((source) => availableAt(source, body.entry)),
     };
-    final incomingRanges = <Block, Map<Value, FlowIntegerRange>>{
-      body.entry: {},
+    final incomingRanges = <(Block, int), Map<Value, FlowIntegerRange>>{
+      entryKey: {},
     };
-    final pending = <Block>{body.entry};
-    final readers = <Value, Set<Block>>{};
+    final nullGuards = _nullGuards.putIfAbsent(
+      body.target, () => _nullGuardsAtEntry(body),
+    );
+    final pending = <(Block, int)>{entryKey};
+    final readers = <Value, Set<(Block, int)>>{};
+    final boundAt = <(Block, int), Map<Value, FlowValue>>{};
+    final owner = <Block, Block>{};
+    final loopEntries = <Block, Map<Jump, FlowState>>{};
+    // These identities are local to one evaluation of this body. A loop that
+    // can create allocations or invoke Dart retains its bounded call contexts.
+    final localTraversals = <Block>{};
+    final localBindings = <Block, Map<Object, int>>{};
+    bool staysLocal(Instruction operation) {
+      if (operation case DirectCall(:final target)) {
+        final implementation = program.implementationOf(target);
+        if (implementation is! IrExternal ||
+            implementation.capturesArguments ||
+            target.returnType != ValueType.voidType ||
+            !(implementation.memory is ReleasedMemory ||
+                implementation.memory is WrittenMemory)) {
+          return false;
+        }
+        return !implementation.effects.contains(Effect.allocates) &&
+            !implementation.effects.contains(Effect.callsUserCode);
+      }
+      return operation is! AllocatedObject &&
+          operation is! NativeLocalStorage &&
+          !operation.effects.contains(Effect.allocates) &&
+          !operation.effects.contains(Effect.callsUserCode);
+    }
+
+    var key = entryKey;
+    var local = <Value, FlowValue>{};
     final loops = _loops.putIfAbsent(body.target, () => LoopRanges(body));
     final loopProofs = <LoopRange, LoopRangeProof>{};
-    final evaluated = <Value>{};
+    // A backedge that exits at a pure guard cannot supply memory to the
+    // continuing arm. Keep both outcomes when the incoming value is open.
+    final guardedEntries = <(Block, int), Map<bool, FlowState>>{};
+    final nullTests = <Block, TypeTest>{};
+    for (final loop in loops.loops) {
+      final header = loop.header;
+      if (header.end case Branch(condition: final TypeTest test)
+          when header.instructions.length == 1 &&
+              identical(header.instructions.single, test) &&
+              test.testedType == ValueType.nullType &&
+              header.parameters.contains(test.operand)) {
+        nullTests[header] = test;
+      }
+    }
+    // A caller may be evaluated again with a different set of available exits.
+    // Its published facts cover all evaluations, but its current storage only
+    // accompanies SSA values supplied on edges reached in this evaluation.
+    final values = <Value, ({FlowValue current, FlowValue earlier})>{};
+    late final liveness = _valueLiveness(body);
     FlowIntegerRange? loopRange(Value value, Block block) {
       FlowIntegerRange? result;
       for (final proof in loopProofs.values) {
@@ -1410,13 +1730,17 @@ final class ProgramFlow(
 
     void proveLoop(LoopRange loop) {
       final proof = loop.prove(
-        (value) => value is Constant
-            ? FlowValue.constant(value).integers
-            : evaluated.contains(value) &&
-                (activation.values[value]?.managedBackings.isEmpty ?? false) &&
-                !(activation.values[value]?.hasUnknownBacking ?? false)
-            ? activation.values[value]?.integers
-            : null,
+        (value) {
+          final fact = value is Constant
+              ? FlowValue.constant(value)
+              : values[value]?.current;
+          if (fact == null ||
+              fact.managedBackings.isNotEmpty ||
+              fact.hasUnknownBacking) {
+            return null;
+          }
+          return fact.integers;
+        },
         (operation) {
           final calls = activation.calls[operation];
           final effects = {
@@ -1441,16 +1765,37 @@ final class ProgramFlow(
     late Map<Value, FlowIntegerRange> ranges;
     late FlowState point;
     bool mergeValue(Value value, FlowValue incoming, {bool widen = false}) {
-      evaluated.add(value);
-      if (!activation.mergeValue(
-        value,
+      final previous = values[value];
+      final current = previous?.current ?? const FlowValue.bottom();
+      // The first two concrete values on a loop edge establish its stride
+      // and bounded interval. A later expansion widens the established range.
+      final initialPair =
+          widen &&
+          value is BlockParameter &&
+          current.managedBackings.isEmpty &&
+          !current.hasUnknownBacking &&
+          incoming.managedBackings.isEmpty &&
+          !incoming.hasUnknownBacking &&
+          current.integers?.constant != null &&
+          incoming.integers?.constant != null;
+      var joined = current.join(
         incoming,
-        widen: widen,
-        bound: incoming.managedBackings.isEmpty && !incoming.hasUnknownBacking
-            ? loopRange(value, loops.owners[value] ?? body.entry) : null,
-      )) {
-        return false;
+        widen: activation.recursive || widen && !initialPair,
+      );
+      if (joined.managedBackings.isEmpty && !joined.hasUnknownBacking) {
+        final bound = loopRange(value, loops.owners[value] ?? body.entry);
+        if (bound != null) joined = joined.restrictIntegers(bound);
       }
+      if (joined == current) return false;
+      final earlier =
+          previous?.earlier ??
+          activation.values[value] ??
+          const FlowValue.bottom();
+      values[value] = (current: joined, earlier: earlier);
+      activation.values[value] = earlier.join(
+        joined,
+        widen: activation.recursive,
+      );
       pending.addAll(readers[value] ?? const []);
       return true;
     }
@@ -1463,14 +1808,20 @@ final class ProgramFlow(
     }
     var summaryChanged = false;
 
-    FlowValue constrained(FlowValue value) {
-      if (value.managedBackings.isNotEmpty || value.hasUnknownBacking) return value;
+    FlowValue constrained(
+      FlowValue value,
+      Map<Value, FlowIntegerRange> bounds,
+      Block block,
+    ) {
+      if (value.managedBackings.isNotEmpty || value.hasUnknownBacking) {
+        return value;
+      }
       for (final source in value.sources) {
         if (!identical(source.activation, activation)) continue;
-        if (ranges[source.value] case final range?) {
+        if (bounds[source.value] case final range?) {
           value = value.restrictIntegers(range);
         }
-        if (loopRange(source.value, readingBlock) case final range?) {
+        if (loopRange(source.value, block) case final range?) {
           value = value.restrictIntegers(range);
         }
       }
@@ -1494,12 +1845,19 @@ final class ProgramFlow(
         case UnwindValue() || CallFrameValue():
           return FlowValue.unknown(value.type);
         default:
-          (readers[value] ??= {}).add(readingBlock);
-          final known = constrained(
+          (readers[value] ??= {}).add(key);
+          var known = constrained(
             point.resolveValue(
-              activation.values[value] ?? const FlowValue.bottom(),
+              local[value] ??
+                  values[value]?.current ??
+                  const FlowValue.bottom(),
             ),
+            ranges,
+            readingBlock,
           );
+          if (nullGuards[readingBlock]?[value] case final isNull?) {
+            known = known.check(isNull ? .nullType : .object).value;
+          }
           if (known.managedBackings.isNotEmpty || known.hasUnknownBacking) {
             // A carrier can be changed through an actual raw capability. Whole
             // SSA replacement facts must cover every observed payload, while
@@ -1518,19 +1876,189 @@ final class ProgramFlow(
       }
     }
 
+    final parameterGuards = <Block, ({int parameter, int? constant})>{};
+    for (final loop in loops.loops) {
+      final header = loop.header;
+      if (loops.loops.any(
+        (other) =>
+            !identical(other, loop) && other.blocks.any(loop.blocks.contains),
+      )) {
+        continue;
+      }
+      if (nullTests[header] case final test?) {
+        parameterGuards[header] = (
+          parameter: header.parameters.indexOf(test.operand as BlockParameter),
+          constant: null,
+        );
+      } else if (loops.entryComparisons[header] case final comparison?
+          when comparison.constant is ScalarConstant &&
+              (comparison.constant as ScalarConstant).value == 0 &&
+              comparison.input.type == ValueType.integer) {
+        parameterGuards[header] = (
+          parameter: header.parameters.indexOf(comparison.input),
+          constant: 0,
+        );
+      } else {
+        continue;
+      }
+      if (loop.blocks.every(
+        (block) =>
+            block.instructions.every(staysLocal) &&
+            (block.end is! Invoke ||
+                staysLocal((block.end as Invoke).operation)),
+      )) {
+        localTraversals.add(header);
+      }
+      for (final block in loop.blocks) {
+        owner[block] = header;
+      }
+    }
+
     void edge(
       Jump jump,
       FlowState state, {
       FlowValue? exception,
       FlowValue? stackTrace,
       Map<Value, FlowIntegerRange>? refinements,
+      (Instruction, FlowValue)? returned,
+      int? selected,
+      FlowValue? binding,
     }) {
+      point = state;
+      final target = jump.target;
+      final header = owner[target];
+      final guard = parameterGuards[target];
+      if (selected == null && identical(target, header) && guard != null) {
+        if ((localTraversals.contains(header) || guard.constant == null) &&
+            owner[key.$1] != header) {
+          (loopEntries[target] ??= {})[jump] = state.copy();
+        }
+        final argument = jump.arguments[guard.parameter];
+        if (argument is! UnwindValue) {
+          final value = returned?.$1 == argument
+              ? returned!.$2.withSource(argument, activation)
+              : read(argument);
+          final objects =
+              guard.constant == null &&
+              value.objects.isNotEmpty &&
+              value.addresses.isEmpty;
+          final addresses =
+              guard.constant == 0 &&
+              value.objects.isEmpty &&
+              value.addresses.isNotEmpty &&
+              value.addresses.every(
+                (address) =>
+                    address.base is FlowRegion &&
+                    address.type == ValueType.integer &&
+                    address.offset == 0 &&
+                    !address.retainedBase,
+              );
+          if ((objects || addresses) &&
+              value.unknownTypes.isEmpty &&
+              value.managedBackings.isEmpty &&
+              !value.hasUnknownBacking &&
+              value.rawBackingTypes.isEmpty &&
+              value.constants.every(
+                (c) => c is ScalarConstant && c.value == guard.constant,
+              )) {
+            // Leaf traversals can distinguish the finite nodes present on entry
+            // without giving their callers or callees new invocation identities.
+            final localOnly = localTraversals.contains(target);
+            final names = (localOnly ? localBindings : activation.loopBindings)
+                .putIfAbsent(target, () => {});
+            void forward(FlowValue alternative, int slot) {
+              edge(
+                jump,
+                state,
+                exception: exception,
+                stackTrace: stackTrace,
+                refinements: refinements,
+                returned: returned,
+                selected: slot,
+                binding: alternative.withSources(value.sources).withReferences([
+                  value.references,
+                ]),
+              );
+            }
+
+            for (final (identity, alternative) in [
+              for (final object in value.objects)
+                (object as Object, FlowValue.object(object)),
+              for (final address in value.addresses)
+                (address.base, FlowValue.address(address)),
+            ]) {
+              final int slot;
+              final node =
+                  !localOnly &&
+                      identity is FlowObject &&
+                      loopEntries[target]?.values.any(
+                            (entry) => entry.containsObject(identity),
+                          ) ==
+                          true
+                  ? _managedNodeOrigin(identity)
+                  : null;
+              if (node != null) {
+                // The original two fallback lanes use 1 and 2. Source labels
+                // are tuples of instructions in this fixed graph and stay
+                // stable across recursive evaluation and native re-entry.
+                final origins = activation.loopOrigins.putIfAbsent(
+                  target,
+                  () => {},
+                );
+                slot = origins.putIfAbsent(node, () => origins.length + 3);
+              } else if (localOnly) {
+                final existing =
+                    loopEntries[target]?.values.any(
+                      (entry) => entry.hasSingletonAllocation(identity),
+                    ) ??
+                    false;
+                slot = existing
+                    ? names.putIfAbsent(identity, () => names.length + 1)
+                    : 0;
+              } else {
+                slot =
+                    names[identity] ??
+                    (names.length < 2 ? names[identity] = names.length + 1 : 0);
+              }
+              forward(alternative, slot);
+            }
+            for (final constant in value.constants) {
+              forward(FlowValue.constant(constant), 0);
+            }
+            return;
+          }
+        }
+      }
+      final lane =
+          selected ??
+          (header != null && header == owner[key.$1] && target != header
+              ? key.$2
+              : 0);
+      final targetKey = (target, lane);
+      final live = liveness.liveIn[target]!;
+      final bindings = <Value, FlowValue>{
+        for (final entry in local.entries)
+          if (live.contains(entry.key) &&
+              !target.parameters.contains(entry.key) &&
+              activation.dominance.atEntry(entry.key, target))
+            entry.key: entry.value,
+      };
       // Re-entry can change a nested loop's starting values and invariant bound.
       loopProofs.removeWhere(
         (loop, _) => loop.header == jump.target && !loop.backs.contains(jump),
       );
-      point = state;
       final nextRanges = {...ranges, ...?refinements};
+      for (final proof in loopProofs.values) {
+        if (proof.exitBound case final bound?
+            when identical(bound.edge, jump)) {
+          final earlier = nextRanges[bound.counter];
+          final range = earlier == null
+              ? bound.range
+              : earlier.intersect(bound.range);
+          if (range == null) return;
+          nextRanges[bound.counter] = range;
+        }
+      }
       for (final entry
           in refinements?.entries ??
               const <MapEntry<Value, FlowIntegerRange>>[]) {
@@ -1560,24 +2088,72 @@ final class ProgramFlow(
       // Stored aliases refer to the previous binding when a loop re-enters.
       final nextState = state.copy()
         ..retainSources((source) => availableAt(source, jump.target));
-      var changed = false;
-      for (final (index, parameter) in jump.target.parameters.indexed) {
-        var value = switch (jump.arguments[index]) {
-          UnwindValue.exception => exception ?? FlowValue.unknown(.object),
-          UnwindValue.stackTrace =>
-            stackTrace ?? FlowValue.unknown(.stackTrace),
-          final argument => read(argument),
+      if (_exceptionSources[state] case final alternatives?) {
+        _exceptionSources[nextState] = {
+          for (final entry in alternatives.entries)
+            entry.key: (entry.value.copy()..retainSources((source) => availableAt(source, jump.target))),
         };
+      }
+      var changed = false;
+      final comparison = loops.entryComparisons[jump.target];
+      final nullTest = nullTests[jump.target];
+      bool? comparisonResult;
+      for (final (index, parameter) in jump.target.parameters.indexed) {
+        var value = binding != null && guard?.parameter == index
+            ? binding
+            : switch (jump.arguments[index]) {
+                UnwindValue.exception =>
+                  exception ?? FlowValue.unknown(.object),
+                UnwindValue.stackTrace =>
+                  stackTrace ?? FlowValue.unknown(.stackTrace),
+                final argument when returned?.$1 == argument =>
+                  returned!.$2.withSource(argument, activation),
+                final argument => read(argument),
+              };
         if (nextRanges[jump.arguments[index]] case final range?) {
           value = value.restrictIntegers(range);
         }
         value = value.withSources(
           value.sources.where((source) => availableAt(source, jump.target)),
         );
+        nextState.bindAddress(FlowSource(parameter, activation), value);
+        if (live.contains(parameter)) {
+          bindings[parameter] = value.withSource(parameter, activation);
+        }
         nextRanges.remove(parameter);
         if (value.integers case final range?
-            when range != FlowIntegerRange.full) {
+            when range != FlowIntegerRange.full &&
+                value.managedBackings.isEmpty &&
+                !value.hasUnknownBacking) {
           nextRanges[parameter] = range;
+        }
+        if (nullTest != null &&
+            identical(nullTest.operand, parameter) &&
+            value.managedBackings.isEmpty &&
+            !value.hasUnknownBacking) {
+          final checked = value.check(ValueType.nullType, runtimeTypes: true);
+          if (!checked.mayFail) {
+            comparisonResult = !nullTest.negated;
+          } else if (checked.value.isBottom) {
+            comparisonResult = nullTest.negated;
+          }
+        }
+        if (comparison != null &&
+            comparison.input == parameter &&
+            value.managedBackings.isEmpty &&
+            !value.hasUnknownBacking) {
+          final constant = FlowValue.constant(comparison.constant);
+          final inputs = comparison.operation.left == parameter
+              ? [value, constant]
+              : [constant, value];
+          if (_fold(comparison.operation, inputs, program, state: nextState)
+              case ScalarConstant(value: final bool result)) {
+            comparisonResult = result;
+          } else if (comparison.constant case ScalarConstant(value: final int n)
+              when parameter.type == ValueType.integer &&
+                  value.integers?.contains(n) == false) {
+            comparisonResult = comparison.operation.negated;
+          }
         }
         changed =
             mergeValue(
@@ -1587,49 +2163,185 @@ final class ProgramFlow(
             ) ||
             changed;
       }
+      for (final entry in refinements?.entries ?? const <MapEntry<Value, FlowIntegerRange>>[]) {
+        if (entry.value.constant != 0) continue;
+        final original = read(entry.key);
+        if (original.addresses.length != 1 || original.unknownTypes.isNotEmpty ||
+            original.objects.isNotEmpty || original.constants.any((c) => c is! ScalarConstant || c.value != 0)) continue;
+        final address = original.addresses.single;
+        if (address case FlowAddress(base: FlowRegion(:final allocation), offset: 0, retainedBase: false)) {
+          if (!identical(allocation.activation, activation) || allocation.site is! DirectCall) continue;
+          final call = allocation.site as DirectCall;
+          if (program.implementationOf(call.target) case IrExternal(memory: ZeroedMemory())) {
+            if (identical(entry.key, call) || original.sources.contains(FlowSource(call, activation))) {
+              nextState.discardFailedMapping(allocation);
+            }
+          }
+        }
+      }
       nextState.refineIntegers({
         for (final entry in nextRanges.entries)
           FlowSource(entry.key, activation): entry.value,
       });
-      if (incomingRanges[jump.target] case final previous?) {
-        for (final value in previous.keys.toList()) {
-          final next = nextRanges[value];
-          if (next == null) {
-            previous.remove(value);
-            changed = true;
+      // Forward the value on this edge, including a successful address check.
+      // A later merge may no longer retain the same storage-side equality.
+      bindings.updateAll((definition, value) {
+        final valid = value.withSources(
+          value.sources.where(
+            (source) =>
+                identical(source.value, definition) ||
+                availableAt(source, target),
+          ),
+        );
+        return constrained(nextState.resolveValue(valid), nextRanges, target);
+      });
+      if (comparison != null || nullTest != null) {
+        final outcomes = guardedEntries.putIfAbsent(targetKey, () => {});
+        for (final outcome in [true, false]) {
+          if (comparisonResult != null && comparisonResult != outcome) continue;
+          if (outcomes[outcome] case final previous?) {
+            changed = previous.join(nextState, widen: widen) || changed;
           } else {
-            final joined = previous[value]!.join(next, widen: widen);
-            changed |= joined != previous[value];
-            previous[value] = joined;
+            outcomes[outcome] = nextState.copy();
+            changed = true;
           }
         }
+      }
+      if (incomingRanges[targetKey] case final previous?) {
+        changed = _joinRanges(previous, nextRanges, widen: widen) || changed;
       } else {
-        incomingRanges[jump.target] = nextRanges;
+        incomingRanges[targetKey] = nextRanges;
         changed = true;
       }
-      if (incoming[jump.target] case final previous?) {
+      if (incoming[targetKey] case final previous?) {
+        final before = _exceptionSources[previous];
+        final additional = _exceptionSources[nextState];
+        if (before != null) {
+          if (additional == null || additional.keys.any((key) => !before.containsKey(key))) {
+            _exceptionSources[previous] = null;
+            changed = true;
+          } else {
+            for (final entry in additional.entries) {
+              changed = before[entry.key]!.join(entry.value, widen: widen) || changed;
+            }
+          }
+        }
         changed = previous.join(nextState, widen: widen) || changed;
       } else {
-        incoming[jump.target] = nextState;
+        incoming[targetKey] = nextState;
         changed = true;
       }
-      if (changed) pending.add(jump.target);
+      final prior = boundAt[targetKey];
+      if (prior == null) {
+        boundAt[targetKey] = bindings;
+        changed = true;
+      } else {
+        for (final value in prior.keys.toList()) {
+          final newer = bindings[value];
+          if (newer == null) {
+            prior.remove(value);
+            changed = true;
+            continue;
+          }
+          final joined = prior[value]!.join(newer, widen: widen);
+          if (joined != prior[value]) {
+            prior[value] = joined;
+            changed = true;
+          }
+        }
+      }
+      if (changed) pending.add(targetKey);
     }
 
     void exceptional(
+      Object source,
       FlowState state,
       FlowValue exception,
       FlowValue stackTrace, {
       bool allocationFailureOnly = false,
     }) {
-      state = state.copy(nativeContext: entryState.nativeContext);
+      final alternatives = _exceptionSources[state];
+      FlowState unwind(FlowState input) {
+        final exit = input.copy(nativeContext: entryState.nativeContext);
+        if (escapes && !_nativeActivations.contains(activation)) {
+          exit.recordEscape([exception, stackTrace]);
+        }
+        return exit.returningMappings(entryState, [exception, stackTrace]);
+      }
+
+      state = unwind(state);
       if (!allocationFailureOnly && !activation.hasSemanticFailure) {
         activation.hasSemanticFailure = true;
         summaryChanged = true;
       }
       if (escapes && !_nativeActivations.contains(activation)) {
-        state.escape([exception, stackTrace]);
         _admitEscaped(state);
+      }
+      final previous = activation.exceptionalSummary;
+      var lanes = activation.exceptionSources;
+      if (lanes == null && (alternatives != null ||
+          previous != null && previous.exit.losesNativeExtent(state))) {
+        lanes = activation.exceptionSources = {};
+        if (previous != null) {
+          final covered =
+              alternatives != null &&
+              alternatives.values.any((alternative) {
+                return !unwind(alternative).join(previous.exit);
+              });
+          if (!covered) {
+            lanes[activation.firstExceptionSite!] = _StateSummary(previous.entry, previous.exit);
+          }
+        }
+        summaryChanged = true;
+      }
+      if (lanes != null) {
+        final incoming = alternatives ?? {source: state};
+        for (final pair in incoming.entries) {
+          final snapshot = alternatives == null
+              ? pair.value
+              : unwind(pair.value);
+          // A throw site can execute both before and after a mapping is
+          // retired. Reuse compatible summaries across sites and keep at most
+          // two distinct exit names per original source across repeated calls.
+          final key = pair.key;
+          final preferred = lanes[key];
+          final compatible = lanes.values.where(
+            (lane) => !lane.exit.losesNativeExtent(snapshot),
+          );
+          final exact =
+              preferred != null && !preferred.exit.losesNativeExtent(snapshot);
+          if (!exact &&
+              compatible.any(
+                (lane) =>
+                    !lane.entry.copy().join(entryState) &&
+                    !lane.exit.copy().join(snapshot),
+              )) {
+            continue;
+          }
+          final shared = exact ? preferred : compatible.firstOrNull;
+          final other = switch (key) {
+            (_LifetimeExit.alternate, final Object original) => original,
+            _ => (_LifetimeExit.alternate, key),
+          };
+          final destination = preferred == null ? key : other;
+          final summary = shared ?? lanes[destination];
+          if (summary == null) {
+            lanes[destination] = _StateSummary(
+              entryState,
+              snapshot,
+            );
+            summaryChanged = true;
+          } else {
+            summaryChanged |= summary.join(
+              entryState,
+              snapshot,
+              widen: activation.recursive,
+            );
+          }
+        }
+      } else {
+        final first = activation.firstExceptionSite;
+        activation.firstExceptionSite = first == null || first == source ? source : activation;
       }
       final joinedException = activation.exception.join(exception);
       final joinedTrace = activation.stackTrace.join(stackTrace);
@@ -1653,15 +2365,45 @@ final class ProgramFlow(
     }
 
     while (pending.isNotEmpty) {
-      final block = pending.first;
-      pending.remove(block);
+      key = pending.first;
+      pending.remove(key);
+      final block = key.$1;
+      activation.iterationContext =
+          key.$2 == 0 || localTraversals.contains(owner[key.$1])
+          ? null
+          : (owner[block]!, key.$2);
+      local = {...?boundAt[key]};
       readingBlock = block;
-      ranges = {...incomingRanges[block]!};
+      ranges = {...incomingRanges[key]!};
       activation.blocks.add(block);
-      FlowState? state = incoming[block]!.copy();
+      final current = incoming[key]!;
+      FlowState? state = current.copy();
+      if (_exceptionSources[current] case final alternatives?) {
+        _exceptionSources[state] = alternatives;
+      }
+      List<(FlowValue, FlowState)>? normalReturns;
+      void normalEdge(Jump jump, FlowState merged, {Map<Value, FlowIntegerRange>? refinements}) {
+        if (normalReturns case final exits? when exits.isNotEmpty) {
+          final call = block.end is Invoke
+              ? (block.end as Invoke).operation
+              : block.instructions.last;
+          for (final (value, exit) in exits) {
+            edge(jump, exit, returned: (call, value), refinements: refinements);
+          }
+        } else {
+          edge(jump, merged, refinements: refinements);
+        }
+      }
       FlowResult evaluate(Instruction operation) {
+        normalReturns = loops.guardedCalls.contains(operation) ? [] : null;
         point = state!;
-        activation.before[operation] = state.copy();
+        final priorEffects = activation.operationEffects[operation];
+        final priorView = activation.storageViews[operation];
+        final priorEnv = activation.environmentReads[operation];
+        final combine = owner.containsKey(block);
+        activation.before[operation] = combine
+            ? (_joinState(activation.before[operation], state)!)
+            : state.copy();
         if (body.typeBindings.isNotEmpty) {
           body.typeInputsOf(operation).forEach(read);
         }
@@ -1672,6 +2414,7 @@ final class ProgramFlow(
           operation.inputs.map(read).toList(),
           state,
           read,
+          normalReturns,
         );
         if (activation.operationEffects[operation]?.contains(
               Effect.allocates,
@@ -1712,7 +2455,7 @@ final class ProgramFlow(
           // Caller bounds also constrain unresolved receiver type arguments.
           bounded = bounded.check(type).value;
         }
-        bounded = constrained(bounded);
+        bounded = constrained(bounded, ranges, readingBlock);
         if ((program.executionShapes ?? ExecutionShapes.defaults)
                 .shapeOf(body, operation).isReference &&
             ExecutionShapes.forType(type).isScalar &&
@@ -1720,9 +2463,11 @@ final class ProgramFlow(
           bounded = bounded.withManagedBackings(const [], unknown: true);
         }
         if (bounded != result.value) {
+          normalReturns = null;
           result = FlowResult(
             value: bounded,
             normal: bounded.isBottom ? null : result.normal,
+            normalRanges: result.normalRanges,
             exceptional: result.exceptional,
             allocationFailureOnly: result.allocationFailureOnly,
             exception: result.exception,
@@ -1730,7 +2475,18 @@ final class ProgramFlow(
             effects: result.effects,
           );
         }
-        mergeValue(operation, result.value.withSource(operation, activation));
+        local[operation] = result.value.withSource(operation, activation);
+        if (combine) {
+          if (priorEffects != null) {
+            activation.operationEffects[operation] = {
+              ...priorEffects,
+              ...?activation.operationEffects[operation],
+            };
+          }
+          if (priorView == false) activation.storageViews[operation] = false;
+          if (priorEnv == false) activation.environmentReads[operation] = false;
+        }
+        mergeValue(operation, local[operation]!);
         ranges.remove(operation);
         if (result.value.integers case final range?
             when range != FlowIntegerRange.full &&
@@ -1739,7 +2495,9 @@ final class ProgramFlow(
           ranges[operation] = range;
         }
         if (result.normal != null) {
-          activation.after[operation] = result.normal!.copy();
+          activation.after[operation] = combine
+              ? _joinState(activation.after[operation], result.normal)!
+              : result.normal!.copy();
         }
         if (result.hasSemanticFailure) {
           activation.semanticFailures.add(operation);
@@ -1752,7 +2510,9 @@ final class ProgramFlow(
               (activation.traces[operation] ?? const FlowValue.bottom()).join(
                 result.stackTrace,
               );
-          activation.thrown[operation] = result.exceptional!.copy();
+          activation.thrown[operation] = combine
+              ? _joinState(activation.thrown[operation], result.exceptional)!
+              : result.exceptional!.copy();
         }
         final exits =
             activation.exits[operation] ?? (normal: false, exceptional: false);
@@ -1767,6 +2527,7 @@ final class ProgramFlow(
         final result = evaluate(operation);
         if (result.exceptional case final thrown?) {
           exceptional(
+            operation,
             thrown,
             result.exception,
             result.stackTrace,
@@ -1775,6 +2536,13 @@ final class ProgramFlow(
         }
         state = result.normal;
         if (state == null) break;
+        if (result.normalRanges.isNotEmpty) {
+          ranges.addAll(result.normalRanges);
+          state.refineIntegers({
+            for (final entry in result.normalRanges.entries)
+              FlowSource(entry.key, activation): entry.value,
+          });
+        }
       }
       if (state == null) continue;
       point = state;
@@ -1783,8 +2551,27 @@ final class ProgramFlow(
           final returned = value == null ? _null : read(value);
           state = state.copy(nativeContext: entryState.nativeContext);
           if (escapes) {
-            state.escape([returned, ?_constructedReturns[activation]]);
+            state.recordEscape([returned, ?_constructedReturns[activation]]);
             _admitEscaped(state);
+          }
+          state = state.returningMappings(entryState, [
+            returned,
+            ?_constructedReturns[activation],
+          ]);
+          if (activation.normalReturns case final exits?) {
+            final summary = exits[block];
+            if (summary == null) {
+              exits[block] = _NormalReturn(
+                returned,
+                _StateSummary(entryState, state),
+              );
+              summaryChanged = true;
+            } else {
+              final joined = summary.value.join(returned, widen: activation.recursive);
+              summaryChanged |= joined != summary.value;
+              summary.value = joined;
+              summaryChanged = summary.state.join(entryState, state, widen: activation.recursive) || summaryChanged;
+            }
           }
           final joined = activation.returned.join(
             returned,
@@ -1792,20 +2579,36 @@ final class ProgramFlow(
           );
           summaryChanged |= joined != activation.returned;
           activation.returned = joined;
+          final parameterRanges = <int, FlowIntegerRange>{
+            for (final (i, parameter) in body.entry.parameters.indexed)
+              if (ranges[parameter] case final range?
+                  when range != FlowIntegerRange.full &&
+                      activation.arguments[i].managedBackings.isEmpty &&
+                      !activation.arguments[i].hasUnknownBacking)
+                i: range,
+          };
           if (activation.normalSummary == null) {
+            activation.normalParameterRanges.addAll(parameterRanges);
             activation.normalSummary = _StateSummary(entryState, state);
             summaryChanged = true;
           } else {
             summaryChanged =
+                _joinRanges(
+                  activation.normalParameterRanges,
+                  parameterRanges,
+                  widen: activation.recursive,
+                ) ||
+                summaryChanged;
+            summaryChanged =
                 activation.normalSummary!.join(
                   entryState,
                   state,
-                  widen: activation.recursive,
+                      widen: activation.recursive,
                 ) ||
                 summaryChanged;
           }
         case final Jump jump:
-          edge(jump, state);
+          normalEdge(jump, state);
         case Branch(:final condition, :final ifTrue, :final ifFalse):
           for (final loop in loops.loops) {
             if (loop.blocks.contains(block) && loop.guards(block)) {
@@ -1814,29 +2617,59 @@ final class ProgramFlow(
           }
           final value = read(condition);
           if (value.isBottom) break;
-          if (value.constant case ScalarConstant(value: final bool known)) {
-            edge(known ? ifTrue : ifFalse, state);
-          } else {
-            final yes = _integerRefinements(condition, true, read);
-            final no = _integerRefinements(condition, false, read);
-            FlowState branch(bool outcome) {
-              if (condition is! TypeTest) return state!;
-              return state!.copy()..refineType(
-                read(condition.operand).sources,
-                condition.testedType.substituteForFlow(
-                  activation.executionEnvironment,
-                ),
-                negated: outcome == condition.negated,
-              );
+          final outcomes = guardedEntries[key];
+          final known = switch (value.constant) {
+            ScalarConstant(value: final bool result) => result,
+            _ => null,
+          };
+          void take(bool outcome, Jump jump) {
+            if (known != null && outcome != known) return;
+            final selected = outcomes == null ? state : outcomes[outcome];
+            if (selected == null) return;
+            point = state!;
+            var predicate = condition;
+            if (known == null && condition is BlockParameter &&
+                block != body.entry &&
+                block.instructions.isEmpty &&
+                value.managedBackings.isEmpty &&
+                !value.hasUnknownBacking) {
+              final index = block.parameters.indexOf(condition);
+              if (loops.incoming[block] case [(final producer, final jump)]
+                  when index >= 0 && identical(producer.end, jump)) {
+                // Only the comparison just executed on this edge can constrain
+                // its operands here. A saved boolean may refer to an earlier turn.
+                final comparison = jump.arguments[index];
+                if (comparison is IntBinary &&
+                    identical(producer.instructions.lastOrNull, comparison) &&
+                    comparison.inputs.map(read).every(
+                      (operand) =>
+                          operand.managedBackings.isEmpty &&
+                          !operand.hasUnknownBacking,
+                    )) {
+                  predicate = comparison;
+                }
+              }
             }
-
-            if (yes != null) edge(ifTrue, branch(true), refinements: yes);
-            if (no != null) edge(ifFalse, branch(false), refinements: no);
+            final refinements = _integerRefinements(predicate, outcome, read);
+            if (refinements == null && known == null) return;
+            final branch = condition is TypeTest
+                ? (selected.copy()..refineType(
+                    read(condition.operand).sources,
+                    condition.testedType.substituteForFlow(
+                      activation.executionEnvironment,
+                    ),
+                    negated: outcome == condition.negated,
+                  ))
+                : selected;
+            edge(jump, branch, refinements: refinements);
           }
+
+          take(true, ifTrue);
+          take(false, ifFalse);
         case Invoke(:final operation, :final onReturn, :final onThrow):
           final result = evaluate(operation);
           if (onReturn != null && result.normal != null) {
-            edge(onReturn, result.normal!);
+            normalEdge(onReturn, result.normal!, refinements: result.normalRanges);
           }
           if (result.exceptional case final thrown?) {
             edge(
@@ -1852,13 +2685,14 @@ final class ProgramFlow(
               ? FlowValue.unknown(.stackTrace)
               : read(stackTrace);
           if (onThrow == null) {
-            exceptional(state, value, trace);
+            exceptional(block.end, state, value, trace);
           } else {
             edge(onThrow, state, exception: value, stackTrace: trace);
           }
         case ExhaustivenessFailure(:final onThrow):
           if (onThrow == null) {
             exceptional(
+              block.end,
               state,
               FlowValue.unknown(.object),
               FlowValue.unknown(.stackTrace),
@@ -1900,6 +2734,53 @@ final class ProgramFlow(
     if (summaryChanged) _pending.addAll(activation.readers);
   }
 
+  // Identify an existing managed allocation by its creation site, its
+  // outermost call site and the invocation that requested managed storage.
+  // This groups equal origins even when the actual allocations are distinct.
+  // No activation, runtime value or unbounded call string forms a label.
+  (Instruction, Instruction?, Instruction?)? _managedNodeOrigin(
+    FlowObject object,
+  ) {
+    if (!_owners.containsKey(object.site) ||
+        object.variant != null ||
+        object.type is FunctionType) {
+      return null;
+    }
+    final seen = <Instruction>{};
+    Instruction? published, allocation;
+    var current = object;
+    while (current.activation is _AllocationContext) {
+      final context = current.activation as _AllocationContext;
+      final call = context.site.operation;
+      if (!_owners.containsKey(call) || !seen.add(call)) return null;
+      published ??= call;
+      if (call is ManagedStorageAllocation || call is Construct) {
+        allocation = call;
+      }
+      current = context.original;
+    }
+    return current.activation is _Activation
+        ? (object.site, published, allocation)
+        : null;
+  }
+
+  ValueLiveness _valueLiveness(IrFunction body) =>
+      _liveness.putIfAbsent(body.target, () {
+        return ValueLiveness.source(
+          body,
+          calls: {
+            for (final block in body.blocks)
+              for (final instruction in [
+                ...block.instructions,
+                if (block.end case Invoke(:final operation)) operation,
+              ])
+                if (instruction is AllocatedObject ||
+                    instruction.effects.contains(Effect.allocates))
+                  instruction,
+          },
+        );
+      });
+
   // Pruning dead allocation instances is needed at a repeated allocation, not
   // at every syntactic call. A selected call target uses the fixed graph's
   // transitive allocation proof; incomplete or unknown calls remain conservative.
@@ -1915,18 +2796,7 @@ final class ProgramFlow(
         _owners[operation] != activation.body.target) {
       return state;
     }
-    final liveness = _liveness.putIfAbsent(activation.body.target, () {
-      final body = activation.body as IrFunction;
-      return ValueLiveness.source(body, calls: {
-        for (final block in body.blocks)
-          for (final instruction in [
-            ...block.instructions,
-            if (block.end case Invoke(:final operation)) operation,
-          ])
-            if (instruction is AllocatedObject ||
-                instruction.effects.contains(Effect.allocates)) instruction,
-      });
-    });
+    final liveness = _valueLiveness(activation.body as IrFunction);
     FlowValue retained(Value value) {
       if (read != null) return read(value);
       if (value is Constant) return FlowValue.constant(value);
@@ -1956,8 +2826,25 @@ final class ProgramFlow(
     List<FlowValue> inputs,
     FlowState state,
     FlowValue Function(Value) read,
+    List<(FlowValue, FlowState)>? normalReturns,
   ) {
     if (inputs.any((value) => value.isBottom)) return _unreachable;
+    FlowValue? originalOperand(FlowSource source, Value operand) {
+      if (operand is Constant) return FlowValue.constant(operand);
+      final creator = source.activation as _Activation;
+      if (!identical(creator, activation)) return creator.values[operand];
+      // A forwarded conversion may come from an earlier loop iteration. Only
+      // undo a conversion directly executed in this block with the same input.
+      if (!identical(operation.inputs.single, source.value) ||
+          !block.instructions.contains(source.value)) {
+        return null;
+      }
+      final value = read(operand);
+      return value.managedBackings.isEmpty && !value.hasUnknownBacking
+          ? value
+          : null;
+    }
+
     if (operation.requiredStorageView case final template?) {
       final expected = template.mapTypes(
         (type) => type.substituteForFlow(activation.executionEnvironment),
@@ -1984,13 +2871,14 @@ final class ProgramFlow(
     final resultType = operation.type.substituteForFlow(
       activation.executionEnvironment,
     );
-    final folded = _fold(operation, inputs, program);
+    final folded = _fold(operation, inputs, program, state: state);
     if (folded != null) {
       activation.operationEffects[operation] = const {};
-      return FlowResult(
-        value: FlowValue.constant(folded),
-        normal: state.copy(),
-      );
+      final normal = state.copy();
+      if (_exceptionSources[state] case final alternatives?) {
+        _exceptionSources[normal] = alternatives;
+      }
+      return FlowResult(value: FlowValue.constant(folded), normal: normal);
     }
     if (!_deferredAllocationProjection(operation) &&
         (operation is AllocatedObject ||
@@ -2062,11 +2950,16 @@ final class ProgramFlow(
           value: FlowValue.address(FlowAddress(target, 0)),
           normal: state.copy(),
         );
-      case StackMapAddress():
-        return FlowResult(
-          value: FlowValue.address(FlowAddress(FlowMetadata.stackMaps, 0)),
-          normal: state.copy(),
-        );
+      case StackMapAddress(:final contextFreeOnly):
+        var table = FlowValue.address(FlowAddress(FlowMetadata.stackMaps, 0));
+        if (contextFreeOnly) {
+          if (stackContext == null || _stackContextsPossible) {
+            table = table.join(FlowValue.constant(const Constant.integer(0)));
+          } else {
+            _stackContextReaders.add(activation);
+          }
+        }
+        return FlowResult(value: table, normal: state.copy());
       case MakeInvocation():
         throw StateError('Normalize Invocation before program flow.');
       case InitializeObject(:final initializer):
@@ -2096,20 +2989,17 @@ final class ProgramFlow(
             resultSource: FlowSource(operation, activation),
           );
         }
-        final actual = inputs.first.constant;
+        final actual = _descriptorType(inputs.first.constant, memoryLayout);
         final raw = <TypeParameterType, ValueType>{};
         for (final (index, key) in environment.keys.indexed) {
-          if (inputs[index + 1].constant case TypeConstant(
-            :final representedType,
-          )) {
-            raw[key] = representedType;
+          if (_descriptorType(inputs[index + 1].constant, memoryLayout)
+              case final type?) {
+            raw[key] = type;
           }
         }
-        final proven =
-            actual is TypeConstant && raw.length == environment.length;
+        final proven = actual != null && raw.length == environment.length;
         final succeeds =
-            !proven ||
-            parameter.bound.substitute(raw).accepts(actual.representedType);
+            !proven || parameter.bound.substitute(raw).accepts(actual);
         activation.operationEffects[operation] = {
           if (!proven || !succeeds) Effect.mayThrow,
         };
@@ -2171,6 +3061,7 @@ final class ProgramFlow(
           state,
           environment: environment,
           resultSource: FlowSource(operation, activation),
+          normalReturns: normalReturns,
         );
       case FunctionCall(:final function, :final positional, :final named):
         activation.operationEffects[operation] = const {};
@@ -2320,6 +3211,44 @@ final class ProgramFlow(
           value: FlowValue.address(FlowAddress(target, 0)),
           normal: state.copy(),
         );
+      case NativeCall(:final signature, :final arguments) ||
+          RawNativeCall(:final signature, :final arguments):
+        final borrowed = operation is NativeCall
+            ? operation.borrowedOwners.keys
+            : (operation as RawNativeCall).borrowedArguments;
+        final resultStorage = operation is RawNativeCall
+            ? operation.resultStorage
+            : null;
+        final accessible = <FlowValue>[], retained = <FlowValue>[];
+        for (final (index, operand) in arguments.indexed) {
+          final value = read(operand);
+          final argument = state.nativeArgument(
+            value, signature.parameters[index], raw: operation is RawNativeCall,
+          );
+          accessible.add(argument.capability);
+          retained.add(
+            borrowed.contains(index) ? state.nativeReferences(value) : argument.capability,
+          );
+        }
+        activation.operationEffects[operation] = operation.effects;
+        activation.externalCalls.add(operation);
+        return _external(
+          activation,
+          block,
+          operation,
+          [if (resultStorage != null) read(resultStorage), ...accessible],
+          state,
+          resultType,
+          memory: resultStorage == null
+              ? const .arbitrary()
+              : NativeResultMemory(
+                  signature.result as NativeCompoundType,
+                  const .arbitrary(),
+                ),
+          retainedArguments: retained,
+          nativeCallee: inputs.first.references,
+          returned: resultType == .voidType ? _null : null,
+        );
       case ReferenceAddress():
         activation.operationEffects[operation] = const {Effect.readsStorage};
         return FlowResult(
@@ -2349,10 +3278,9 @@ final class ProgramFlow(
           for (final source in input.sources) {
             if (source.value case PointerFromAddress(:final address)
                 when source.activation is _Activation) {
-              final creator = source.activation as _Activation;
-              value = address is Constant
-                  ? FlowValue.constant(address)
-                  : creator.values[address] ?? value;
+              final original = originalOperand(source, address);
+              if (original == null) continue;
+              value = original;
               break;
             }
           }
@@ -2429,10 +3357,12 @@ final class ProgramFlow(
         var value = const FlowValue.bottom();
         for (final address in input.addresses) {
           value = value.join(
-            address.offset == 0
+            address.offset == 0 &&
+                    (address.base is FlowObject || address.base is Constant)
                 ? address.reference.check(resultType).value
-                : FlowValue.unknown(resultType)
-                      .withReferences([address.reference]),
+                : address.base is FlowRegion && !address.retainedBase
+                ? FlowValue.unknown(resultType, at: address)
+                : FlowValue.unknown(resultType).withReferences([address.reference]),
           );
         }
         for (final constant in input.constants) {
@@ -2450,11 +3380,9 @@ final class ProgramFlow(
         for (final source in input.sources) {
           if (source.value case ReferenceAddress(:final object)
               when source.activation is _Activation) {
-            final creator = source.activation as _Activation;
-            value = object is Constant
-                ? FlowValue.constant(object)
-                : creator.values[object] ?? value;
-            value = value.check(resultType).value;
+            final original = originalOperand(source, object);
+            if (original == null) continue;
+            value = original.check(resultType).value;
             break;
           }
         }
@@ -2468,7 +3396,7 @@ final class ProgramFlow(
           when inputs.any((input) => input.addresses.isNotEmpty):
         activation.operationEffects[operation] = const {};
         return FlowResult(
-          value: _addressArithmetic(operation, inputs),
+          value: _addressArithmetic(operation, inputs, state),
           normal: state.copy(),
         );
       case ObjectRuntimeType(direct: true):
@@ -2716,7 +3644,7 @@ final class ProgramFlow(
               when bindings.containsKey(method)) {
             final implementation = bindings[method]!;
             result = _joinResult(result, _invoke(activation, block, operation,
-                implementation, [_receiverValue(receiver, type)], state,
+                implementation, [receiver.receiverFor(type)], state,
                 resultSource: resultSource));
             continue;
           }
@@ -2754,7 +3682,7 @@ final class ProgramFlow(
               block,
               operation,
               helper,
-              [_receiverValue(receiver, type), ...positional, ...named.values],
+              [receiver.receiverFor(type), ...positional, ...named.values],
               state,
               environment: _environment(
                 helper,
@@ -2821,7 +3749,7 @@ final class ProgramFlow(
         final entry = binding?.entries[target];
         if (entry != null) {
           result = _joinResult(result, _invoke(activation, block, operation,
-            entry, [_receiverValue(receiver, type), ...positional,
+            entry, [receiver.receiverFor(type), ...positional,
               for (final name in binding!.names) named[name]!, ...executionTypes],
             state, resultSource: resultSource));
           continue;
@@ -2857,7 +3785,7 @@ final class ProgramFlow(
         block,
         operation,
         target,
-        [_receiverValue(receiver, type), ...arguments],
+        [receiver.receiverFor(type), ...arguments],
         state,
         environment: _environment(target, type, appliedTypes, activation),
         checkAllArguments: checkAllArguments,
@@ -2927,7 +3855,7 @@ final class ProgramFlow(
           throw StateError('A method producer requires its actual ordinary body.');
         }
         return _invoke(activation, block, site, entry, [
-          _receiverValue(receiver, receiverType),
+          receiver.receiverFor(receiverType),
           ...executionTypes,
         ], state, resultSource: FlowSource(site, activation));
       }
@@ -2952,7 +3880,7 @@ final class ProgramFlow(
     final object = FlowObject(site, activation, type: actual, variant: target);
     final next = state.copy()
       ..retain(object, [
-        _receiverValue(receiver, receiverType),
+        receiver.receiverFor(receiverType),
       ], repeated: false);
     activation.boundMethods.putIfAbsent(object, () => {}).add(target);
     activation.operationEffects[site] = {
@@ -2986,7 +3914,7 @@ final class ProgramFlow(
         operation,
         failure,
         [
-          _receiverValue(receiver, receiverType),
+          receiver.receiverFor(receiverType),
           ...positional,
           ...named.values,
         ],
@@ -3122,6 +4050,12 @@ final class ProgramFlow(
     List<FlowValue>? descriptorArguments,
   }) {
     FlowResult result = _unreachable;
+    // Only unresolved alternatives at this invocation cross the external
+    // boundary. A known sibling can carry private storage of its own.
+    final unresolved = <FlowValue>[
+      for (final bound in function.unknownTypes)
+        FlowValue.unknown(bound, external: function.externalUnknownTypes.contains(bound)),
+    ];
     final appliedArguments = [
       for (final type
           in typeArguments ??
@@ -3217,7 +4151,7 @@ final class ProgramFlow(
       final signature = constant.type as FunctionType;
       if (descriptorArguments != null &&
           descriptorArguments.length != signature.typeParameters.length) {
-        activation.unknownCalls.add(site);
+        unresolved.add(FlowValue.constant(constant));
         continue;
       }
       if (!accepts(FlowValue.constant(constant), signature)) continue;
@@ -3320,7 +4254,10 @@ final class ProgramFlow(
     for (final object in function.objects) {
       if (object.site is InstantiateFunction || object.site is InstantiateFunctionFrom) {
         final origin = state.capturesOf(object);
-        if (origin == null) { activation.unknownCalls.add(site); continue; }
+        if (origin == null) {
+          unresolved.add(FlowValue.object(object));
+          continue;
+        }
         result = _joinResult(result, _call(activation, block, site, origin.single,
             positional, named, state,
             typeArguments: _creator(object).instantiations[_original(object)]!,
@@ -3347,7 +4284,7 @@ final class ProgramFlow(
         final origin = state.storedFieldOf(object, storage.origin!);
         final arguments = _storedArguments(object, state);
         if (origin == null || arguments == null) {
-          activation.unknownCalls.add(site);
+          unresolved.add(FlowValue.object(object));
           continue;
         }
         result = _joinResult(result, _call(activation, block, site, origin,
@@ -3366,7 +4303,7 @@ final class ProgramFlow(
       final signature = object.callableStorage?.signature ?? object.type as FunctionType;
       if (descriptorArguments != null &&
           descriptorArguments.length != signature.typeParameters.length) {
-        activation.unknownCalls.add(site);
+        unresolved.add(FlowValue.object(object));
         continue;
       }
       if (!accepts(FlowValue.object(object), signature)) continue;
@@ -3391,7 +4328,7 @@ final class ProgramFlow(
       }
       final captures = state.capturesOf(object);
       if (captures == null) {
-        activation.unknownCalls.add(site);
+        unresolved.add(FlowValue.object(object));
         continue;
       }
       switch (object.site) {
@@ -3400,7 +4337,7 @@ final class ProgramFlow(
           final target = storage.source;
           if (target == null) throw StateError('Unresolved callable wrapper.');
           if (!_provesStoredCallable(object, state, target)) {
-            activation.unknownCalls.add(site);
+            unresolved.add(FlowValue.object(object));
             continue;
           }
           if (entryFor(target, FlowValue.object(object)) case final invoked?) {
@@ -3488,11 +4425,10 @@ final class ProgramFlow(
             );
           }
         default:
-          activation.unknownCalls.add(site);
+          unresolved.add(FlowValue.object(object));
       }
     }
-    if (function.unknownTypes.isNotEmpty ||
-        activation.unknownCalls.contains(site)) {
+    if (unresolved.isNotEmpty) {
       if (site case FunctionCall(target: final bound?)) {
         throw StateError(
           'Unresolved function value for proven target ${bound.name}.',
@@ -3505,7 +4441,11 @@ final class ProgramFlow(
           activation,
           block,
           site,
-          [function, ...positional, ...named.values],
+          [
+            FlowValue.joined(unresolved).withReferences([function.references]),
+            ...positional,
+            ...named.values,
+          ],
           state,
           site.type.substituteForFlow(activation.executionEnvironment),
           accessesProgramState: true,
@@ -3525,6 +4465,8 @@ final class ProgramFlow(
     Set<Effect>? effects,
     ExternalMemory memory = const .arbitrary(),
     bool capturesArguments = true,
+    Iterable<FlowValue>? retainedArguments,
+    FlowValue? nativeCallee,
     // An unknown Dart invocation can name module storage without receiving it
     // as an argument. Explicit external leaves keep their own memory contract.
     bool accessesProgramState = false,
@@ -3539,32 +4481,48 @@ final class ProgramFlow(
     }
     activation.externalEffects.putIfAbsent(operation, () => {}).addAll(effects);
     var next = state.copy();
+    ({FlowValue storage, FlowValue bytes})? output;
     if (memory case NativeResultMemory(:final type, :final arguments)) {
       final bytes = memoryLayout?.nativeLayout.of(type).size;
-      next = next.overwriteNative(
-        inputs.first,
-        bytes == null
+      output = (
+        storage: inputs.first,
+        bytes: bytes == null
             ? FlowValue.unknown(.integer)
             : FlowValue.constant(Constant.integer(bytes)),
       );
-      // The native implementation receives only its source arguments. In
-      // particular a copied-out result does not retain its local destination.
+      // Only source arguments are passed to the host. The ABI adapter writes
+      // its local destination when the host returns, after any native reentry.
       inputs = inputs.sublist(1);
       memory = arguments;
     }
     if (capturesArguments || accessesProgramState) {
-      next.escape([
-        if (capturesArguments) ...inputs,
+      next.recordEscape([
+        if (capturesArguments) ...retainedArguments ?? inputs,
         if (accessesProgramState) next.programValues,
       ]);
     }
+    // A noncapturing call can still return or copy an argument during the call.
+    FlowValue availableValues(FlowValue exposed) => capturesArguments
+        ? exposed
+        : next.exposedFrom([...retainedArguments ?? inputs, exposed]);
+
+    void invalidateAccessibleStorage() {
+      final exposed = next.exposedValues;
+      final available = availableValues(exposed);
+      next.invalidate(
+        [...inputs, exposed],
+        globals: accessesProgramState,
+        writtenValues: available,
+        writtenReferences: retainedArguments == null
+            ? available.references
+            : FlowValue.joined([...retainedArguments, exposed.references]),
+      );
+    }
+
     if (effects.contains(Effect.writesStorage)) {
       switch (memory) {
         case ArbitraryMemory():
-          next.invalidate([
-            ...inputs,
-            next.exposedValues,
-          ], globals: accessesProgramState);
+          invalidateAccessibleStorage();
         case WrittenMemory(:final addressParameter, :final lengthParameter) ||
             ReleasedMemory(:final addressParameter, :final lengthParameter):
           next = next.overwriteNative(
@@ -3577,42 +4535,91 @@ final class ProgramFlow(
       }
     }
     if (effects.contains(Effect.callsUserCode)) {
-      // Re-entry follows values that crossed this boundary or declared exports.
-      _admitEscaped(next, arguments: inputs);
-      for (final callback in {
-        ..._escapingActivations,
-        for (final target in _openEntries) _roots[target]!,
-      }) {
+      // A later open entry or newly escaped callable can re-enter this call.
+      _externalReaders.add(activation);
+      _admitEscaped(
+        next,
+        arguments: nativeCallee == null ? inputs : [...inputs, nativeCallee],
+      );
+      // A host can invoke eligible entries any number of times in any order.
+      // Every entry in a round sees the same input. An available exit only
+      // needs merging once while this activation is being evaluated.
+      final canReenter = _escapingActivations.isNotEmpty || _openEntries.isNotEmpty;
+      final merged = <_Activation>{};
+      var changed = canReenter;
+      void reenter(_Activation callback, List<FlowValue> args, FlowState input) {
         _ancestry.link(activation.body.target, callback.body.target);
         callback.readers.add(activation);
-        _supply(callback, callback.arguments, next.project(callback.arguments));
-        if (callback.normal != null) {
-          next.join(callback.normal!.project(const []));
-        }
-        if (callback.exceptional != null) {
-          next.join(callback.exceptional!.project(const []));
+        _supply(callback, args, input);
+        if (_endsModule(callback) || !merged.add(callback)) return;
+        for (final exit in [callback.normal, callback.exceptional]) {
+          if (exit != null) {
+            changed = next.join(exit.project(const [])) || changed;
+          }
         }
       }
+
+      while (changed) {
+        changed = false;
+        // The host may write capabilities obtained from an earlier callback
+        // before invoking the next one, including newly returned raw storage.
+        if (effects.contains(Effect.writesStorage) &&
+            memory is ArbitraryMemory) {
+          invalidateAccessibleStorage();
+        }
+        final current = next.copy();
+        for (final callback in _escapingActivations) {
+          reenter(callback, callback.arguments, current.project(callback.arguments));
+        }
+        for (final target in _openEntries) {
+          final entry = _roots[target]!;
+          final input = current.project(entry.arguments);
+          reenter(input.hasManagedAllocations ? _resumedEntry(target) : entry,
+              entry.arguments, input);
+        }
+      }
+    }
+    if (output != null) {
+      next = next.overwriteNative(
+        output.storage,
+        output.bytes,
+        writtenReferences: FlowValue.joined([
+          ...retainedArguments ?? inputs.map((value) => value.references),
+          next.exposedValues.references,
+        ]),
+      );
     }
     final mapping = switch (memory) {
       ZeroedMemory(:final lengthParameter) => next.allocateMemory(
         FlowObject(operation, activation, type: resultType),
         inputs[lengthParameter],
         repeated:
-            activation.repeated || _loopBlocks(activation.body).contains(block),
+            activation.recursive ||
+            _loopBlocks(activation.body).contains(block),
       ),
       _ => null,
     };
+    late final available = availableValues(next.exposedValues);
     return FlowResult(
       value:
           returned ??
           mapping?.value ??
           (resultType == .never
               ? const FlowValue.bottom()
-              : FlowValue.unknown(resultType)
-                    .join(next.exposedValues.check(resultType).value)
-                    .withSources(const [])
-                    .withReferences(inputs.map((value) => value.references))),
+              : available.externalValue(resultType)
+                    .withReferences([
+                      ...retainedArguments ??
+                          inputs.map((value) => value.externalBits.references),
+                      // The host may return a native capability retained by
+                      // an earlier call, even when this call has no arguments.
+                      if (retainedArguments != null) available.references,
+                    ])),
+      exception: effects.contains(Effect.mayThrow)
+          ? available.externalValue(.object)
+          : null,
+      stackTrace: effects.contains(Effect.mayThrow)
+          ? available.externalValue(.stackTrace)
+          : null,
       normal: resultType == .never ? null : mapping?.normal ?? next,
       exceptional:
           effects.contains(Effect.mayThrow) ||
@@ -3902,18 +4909,23 @@ final class ProgramFlow(
       ) ??
       FlowValue.unknown(field.type);
 
+  bool _endsModule(_Activation activation) =>
+      terminalEntry != null && _isRoot(activation, terminalEntry!);
+
   void _publishExternal(FlowState state) {
-    final exposed = state.project(const []);
-    final changed = _externalState == null
-        ? true
-        : _externalState!.join(exposed, widen: true);
-    _externalState ??= exposed;
-    if (!changed) return;
+    final exposed = state.project(const [])..publishMappingCapabilities();
+    final heap = exposed.hasManagedAllocations;
+    final previous = _externalStates[heap];
+    if (previous != null && !previous.join(exposed, widen: true)) return;
+    final shared = _externalStates.putIfAbsent(heap, () => exposed);
     for (final callback in {
       ..._escapingActivations,
-      for (final target in _openEntries) _roots[target]!,
+      for (final target in _openEntries) heap ? _resumedEntry(target) : _roots[target]!,
     }) {
-      _supply(callback, callback.arguments, _externalState!);
+      final arguments = identical(_resumedEntries[callback.body.target], callback)
+          ? _roots[callback.body.target]!.arguments
+          : callback.arguments;
+      _supply(callback, arguments, shared);
     }
   }
 
@@ -3938,7 +4950,12 @@ final class ProgramFlow(
     FlowState state, {
     Iterable<FlowValue> arguments = const [],
   }) {
+    final previousCount = _escapingActivations.length;
     final reachable = state.exposedFrom([state.exposedValues, ...arguments]);
+    final callbackInputs = <ValueType, FlowValue>{};
+    FlowValue supplied(ValueType type) =>
+        callbackInputs.putIfAbsent(type, () => reachable.externalValue(type));
+
     _Activation? prepare(
       Object key,
       FunctionTarget target,
@@ -3946,13 +4963,17 @@ final class ProgramFlow(
     ) {
       final body = program.implementationOf(target);
       if (body is! IrFunction) return null;
+      if (stackContext != null) _allowStackContexts();
       final activation = _escapedCalls.putIfAbsent(
         key,
         () => _Activation(body),
       );
       activation.repeated = true;
       _escapingActivations.add(activation);
-      if (activation.mergeEnvironment(environment)) _pending.add(activation);
+      if (activation.mergeEnvironment(environment)) {
+        activation.inputRevision++;
+        _pending.add(activation);
+      }
       return activation;
     }
 
@@ -3984,10 +5005,10 @@ final class ProgramFlow(
       ) => callback == null
           ? [
               for (final type in target.signature.parameters)
-                FlowValue.unknown(type.substituteForFlow(environment)),
+                supplied(type.substituteForFlow(environment)),
             ]
           : target.signature.bind<FlowValue>(
-              callback.dartSignature.parameters.map(FlowValue.unknown).toList(),
+              callback.dartSignature.parameters.map(supplied).toList(),
               const {},
               (index) => FlowValue.constant(
                 program.implementationOf(target)!.defaults[index]!,
@@ -4001,7 +5022,7 @@ final class ProgramFlow(
             admit(
               definition,
               entry,
-              entry.parameterTypes.map(FlowValue.unknown).toList(),
+              entry.parameterTypes.map(supplied).toList(),
               native: true,
             );
             continue;
@@ -4012,7 +5033,7 @@ final class ProgramFlow(
             final target = definition.function;
             final args = target.signature.bind<FlowValue>(
               definition.dartSignature.parameters
-                  .map(FlowValue.unknown)
+                  .map(supplied)
                   .toList(),
               const {},
               (index) => FlowValue.constant(
@@ -4029,7 +5050,7 @@ final class ProgramFlow(
             if (lookup == null) continue;
             _nativeLookups.add(lookup);
             _supply(lookup, [
-              FlowValue.unknown(.integer),
+              supplied(.integer),
             ], state.project(const []));
             if (lookup.normal case final normal?) {
               state.join(normal.project([lookup.returned]));
@@ -4183,7 +5204,7 @@ final class ProgramFlow(
                 (identity ?? object, target, type),
                 target,
                 [
-                  _receiverValue(captures.single, type),
+                  captures.single.receiverFor(type),
                   ...parameters(target, environment),
                 ],
                 environment: environment,
@@ -4196,35 +5217,29 @@ final class ProgramFlow(
     }
 
     visit(reachable);
-  }
-
-  FlowValue _receiverValue(FlowValue value, ClassType type) {
-    if (type != ValueType.nullClass) return value.check(type).value;
-    return FlowValue.constant(const Constant.nullValue())
-        .withSources(value.sources);
+    if (_escapingActivations.length != previousCount) {
+      _pending.addAll(_externalReaders);
+    }
   }
 
   Iterable<ClassType> _receiverTypes(FlowValue value) sync* {
     final seen = <ClassType>{};
-    for (final type in [
-      ...value.constants.map((constant) => constant.provenValueType),
-      ...value.objects.map((object) => object.type),
-      ...value.addresses.map((address) => address.type),
-    ]) {
-      final nominal = type == .nullType
-          ? ValueType.nullClass
-          : type is FunctionType
-          ? ValueType.function
-          : type;
-      if (nominal is ClassType && seen.add(nominal)) yield nominal;
+    for (final type in value.knownReceiverTypes) {
+      if (seen.add(type)) yield type;
     }
     for (final bound in value.unknownTypes) {
-      if (bound.mayBeNull && seen.add(ValueType.nullClass)) {
+      bool allowed(ClassType type) =>
+          value.unknownReceiverClasses?.contains(type.declaration) ?? true;
+      if (bound.mayBeNull &&
+          allowed(ValueType.nullClass) &&
+          seen.add(ValueType.nullClass)) {
         yield ValueType.nullClass;
       }
       if (bound.nonNullable is FunctionType ||
           bound.nonNullable == ValueType.function) {
-        if (seen.add(ValueType.function)) yield ValueType.function;
+        if (allowed(ValueType.function) && seen.add(ValueType.function)) {
+          yield ValueType.function;
+        }
         continue;
       }
       const primitiveTypes = <ClassType>[
@@ -4245,7 +5260,7 @@ final class ProgramFlow(
                 declaration.type,
         ],
       )) {
-        if (seen.add(type)) yield type;
+        if (allowed(type) && seen.add(type)) yield type;
       }
     }
   }
@@ -4282,6 +5297,30 @@ final class ProgramFlowFacts._(final ProgramFlow _flow)
     return Set.unmodifiable(_flow._roots.keys);
   }
 
+  /// Checks the frame producer bound against the backend's actual stack table.
+  void checkStackMapContexts(ClassType? context, {required bool hasContexts}) {
+    _check();
+    if (_flow.stackContext == null) return;
+    if (_flow.stackContext != context) {
+      throw ArgumentError('Stack context binding differs from the solved graph.');
+    }
+    if (hasContexts && !_flow._stackContextsPossible) {
+      throw StateError('Emitted stack context has no solved frame producer.');
+    }
+  }
+
+  /// Whether this solve used the absence of physical context-slot producers.
+  bool get usedEmptyStackMaps {
+    _check();
+    return _flow._stackContextReaders.isNotEmpty && !_flow._stackContextsPossible;
+  }
+
+  /// A selected frame or inherited activation may provide a physical slot.
+  bool get mayHaveStackContexts {
+    _check();
+    return _flow._stackContextsPossible;
+  }
+
   /// Bodies whose exceptional completion can reach a caller outside this graph.
   Set<FunctionTarget> get escapingThrows {
     _check();
@@ -4305,6 +5344,7 @@ final class ProgramFlowFacts._(final ProgramFlow _flow)
     if (!_flow._definitions.contains(target)) return false;
     return [
       ?_flow._roots[target],
+      ?_flow._resumedEntries[target],
       for (final activation in _flow._escapingActivations)
         if (activation.body.target == target &&
             !_flow._nativeLookups.contains(activation))
@@ -5144,17 +6184,99 @@ Set<Object>? _callableOrigins(FlowValue value) {
   return origins.isEmpty ? null : origins;
 }
 
+final class _NormalReturn(var FlowValue value, final _StateSummary state);
+
+enum _LifetimeExit { alternate }
+
 final class _StateSummary(FlowState before, FlowState after) {
   final FlowState entry = before.copy();
   final FlowState exit = after.copy();
+  ({List<FlowValue> roots, FlowState? state})? _projection;
+
+  // Each return or throw summary owns its exit. Rebinding a caller still
+  // applies the projected storage to that caller's current input.
+  FlowState project(List<FlowValue> roots) {
+    final saved = _projection;
+    final repeated = saved != null && _sameValues(saved.roots, roots);
+    if (repeated && saved.state != null) return saved.state!;
+    final projected = exit.project(roots);
+    _projection = (roots: roots, state: repeated ? projected : null);
+    return projected;
+  }
+
 
   bool join(FlowState before, FlowState after, {required bool widen}) {
     final changed = entry.join(before, widen: widen);
-    return exit.join(after, widen: widen) || changed;
+    final exitChanged = exit.join(after, widen: widen);
+    if (exitChanged) _projection = null;
+    return exitChanged || changed;
   }
 }
 
+/// Null comparisons test identity, including for classes overriding equality.
+/// A block retains only guards shared by every structural predecessor. Rebinding
+/// a loop parameter or instruction drops the previous iteration's guard.
+Map<Block, Map<Value, bool>> _nullGuardsAtEntry(IrFunction body) {
+  final guards = <Block, (Value, bool)>{};
+  for (final block in body.blocks) {
+    if (block.end case Branch(:final condition, :final ifTrue, :final ifFalse)
+        when !identical(ifTrue, ifFalse)) {
+      final comparison = switch (condition) {
+        Equals(:final left, :final right, :final negated) => (left, right, negated),
+        Identical(:final left, :final right) => (left, right, false),
+        _ => null,
+      };
+      if (comparison case (final left, final right, final negated)) {
+        if (left.type == .nullType) guards[block] = (right, !negated);
+        if (right.type == .nullType) guards[block] = (left, !negated);
+      }
+    }
+  }
+  if (guards.isEmpty) return const {};
+  final owners = <Value, Block>{
+    for (final block in body.blocks)
+      for (final value in [
+        ...block.parameters, ...block.instructions,
+        if (block.end case Invoke(:final operation)) operation,
+      ]) value: block,
+  };
+  final incoming = <Block, Map<Value, bool>>{body.entry: {}};
+  final pending = <Block>{body.entry};
+  while (pending.isNotEmpty) {
+    final block = pending.first;
+    pending.remove(block);
+    for (final edge in block.successors) {
+      final next = {...incoming[block]!};
+      if (guards[block] case (final value, final trueIsNull)) {
+        next[value] = identical(edge, (block.end as Branch).ifTrue) == trueIsNull;
+      }
+      final target = edge.target;
+      final forwarded = <Value, bool>{
+        for (final (i, arg) in edge.arguments.indexed)
+          if (next[arg] case final isNull?) target.parameters[i]: isNull,
+      };
+      next.removeWhere((value, _) => identical(owners[value], target));
+      next.addAll(forwarded);
+      if (incoming[target] case final previous?) {
+        final size = previous.length;
+        previous.removeWhere((value, isNull) => next[value] != isNull);
+        if (previous.length != size) pending.add(target);
+      } else {
+        incoming[target] = next;
+        pending.add(target);
+      }
+    }
+  }
+  return incoming..removeWhere((_, guards) => guards.isEmpty);
+}
+
 final class _Activation(final IrCallable body) {
+  // A stored exit can precede a change to this call's state or arguments.
+  int inputRevision = 0;
+  final loopBindings = <Block, Map<Object, int>>{};
+  final loopOrigins =
+      <Block, Map<(Instruction, Instruction?, Instruction?), int>>{};
+  (Block, int)? iterationContext;
   _ContextKey? inputKey;
   // Caller-owned identities are stable across applications of this input
   // version. _supply invalidates the closure whenever arguments or state grow.
@@ -5206,18 +6328,25 @@ final class _Activation(final IrCallable body) {
     return {
       ...environment,
       for (final binding in function.typeBindings)
-        binding.parameter: switch (binding.value is Constant
-            ? binding.value
-            : values[binding.value]?.constant) {
-          TypeConstant(:final representedType) => representedType,
-          _ => binding.parameter,
-        },
+        binding.parameter: _descriptorType(
+              binding.value is Constant
+                  ? binding.value as Constant
+                  : values[binding.value]?.constant,
+              input?.memoryLayout,
+            ) ??
+            binding.parameter,
     };
   }
 
   FlowState? input;
+  late final hasMultipleReturns = body is IrFunction &&
+      (body as IrFunction).blocks.where((block) => block.end is Return).take(2).length == 2;
+  Map<Block, _NormalReturn>? normalReturns;
+  final normalParameterRanges = <int, FlowIntegerRange>{};
   _StateSummary? normalSummary;
   _StateSummary? exceptionalSummary;
+  Object? firstExceptionSite;
+  Map<Object, _StateSummary>? exceptionSources;
   FlowState? get normal => normalSummary?.exit;
   FlowState? get exceptional => exceptionalSummary?.exit;
   FlowValue returned = const FlowValue.bottom();
@@ -5228,18 +6357,24 @@ final class _Activation(final IrCallable body) {
   bool repeated = false;
   bool recursive = false;
 
-  bool mergeValue(
-    Value value,
-    FlowValue incoming, {
-    bool widen = false,
-    FlowIntegerRange? bound,
-  }) {
-    final previous = values[value] ?? const FlowValue.bottom();
-    var joined = previous.join(incoming, widen: widen || recursive);
-    if (bound != null) joined = joined.restrictIntegers(bound);
-    if (joined == previous) return false;
-    values[value] = joined;
-    return true;
+  int _exitRevision = -1;
+  bool get hasCurrentExits => _exitRevision == inputRevision;
+
+  // A larger input can change which calls return or throw. Keep the published
+  // SSA facts, but solve every exit and its payload against the new entry.
+  void beginEvaluation() {
+    if (hasCurrentExits) return;
+    _exitRevision = inputRevision;
+    normalSummary = null;
+    exceptionalSummary = null;
+    firstExceptionSite = null;
+    exceptionSources = null;
+    normalParameterRanges.clear();
+    normalReturns?.clear();
+    returned = const FlowValue.bottom();
+    exception = const FlowValue.bottom();
+    stackTrace = const FlowValue.bottom();
+    hasSemanticFailure = false;
   }
 
   bool mergeEnvironment(Map<TypeParameterType, ValueType> incoming) {
@@ -5280,23 +6415,37 @@ const FlowResult _unreachable = FlowResult(
   normal: null,
   exceptional: null,
 );
+// Closed projection results can be immutable physical metadata constants.
+ValueType? _descriptorType(Constant? value, FlowMemoryLayout? layout) =>
+    switch (value) {
+      TypeConstant(:final representedType) => representedType,
+      ObjectConstant() when value.type == TypeMetadata.type && layout is FlowTypeLayout =>
+        (layout as FlowTypeLayout).canonicalTypeConstant(value)?.representedType,
+      _ => null,
+    };
+
 final _null = FlowValue.constant(const Constant.nullValue());
 final _typeError = FlowValue.unknown(ValueType.typeError);
 
-FlowState? _joinState(FlowState? a, FlowState? b) =>
-    a == null ? b?.copy() : (a.copy()..join(b ?? a));
-
-FlowResult _joinResult(FlowResult left, FlowResult right) {
-  return FlowResult(
-    value: left.value.join(right.value),
-    normal: _joinState(left.normal, right.normal),
-    exceptional: _joinState(left.exceptional, right.exceptional),
-    allocationFailureOnly:
-        !left.hasSemanticFailure && !right.hasSemanticFailure,
-    exception: left.exception.join(right.exception),
-    stackTrace: left.stackTrace.join(right.stackTrace),
-    effects: {...left.effects, ...right.effects},
-  );
+// Missing entries denote an unrestricted value on the incoming path.
+bool _joinRanges<K>(
+  Map<K, FlowIntegerRange> known,
+  Map<K, FlowIntegerRange> incoming, {
+  bool widen = false,
+}) {
+  var changed = false;
+  for (final key in known.keys.toList()) {
+    final range = incoming[key];
+    if (range == null) {
+      known.remove(key);
+      changed = true;
+    } else {
+      final joined = known[key]!.join(range, widen: widen);
+      changed |= joined != known[key];
+      known[key] = joined;
+    }
+  }
+  return changed;
 }
 
 FlowStorageAccess _emptyStorageAccess() => (
@@ -5328,13 +6477,21 @@ FlowValue _runtimeTypeValue(FlowValue input, FlowState state) {
         : FlowValue.unknown(TypeMetadata.type);
   }
 
-  FlowValue scalar(ValueType type) =>
-      type == ValueType.integer ||
-          type == ValueType.floating ||
-          type == ValueType.boolean ||
-          type == ValueType.nullType
-      ? known(type)
-      : FlowValue.unknown(TypeMetadata.type);
+  FlowValue scalar(ValueType type) {
+    final base = type.nullableBase ?? type;
+    final FlowValue actual;
+    if (base == ValueType.number) {
+      actual = known(ValueType.integer).join(known(ValueType.floating));
+    } else if (base == ValueType.integer ||
+        base == ValueType.floating ||
+        base == ValueType.boolean ||
+        base == ValueType.nullType) {
+      actual = known(base);
+    } else {
+      return FlowValue.unknown(TypeMetadata.type);
+    }
+    return type == base ? actual : actual.join(known(ValueType.nullType));
+  }
 
   return FlowValue.joined([
     for (final constant in input.constants) known(constant.runtimeValueType),
@@ -5380,6 +6537,15 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
   bool outcome,
   FlowValue Function(Value) read,
 ) {
+  // A saved predicate describes the payloads at the comparison. A raw alias
+  // can change a scalar carrier before the branch consumes that predicate.
+  FlowValue? stable(Value operand) {
+    final value = read(operand);
+    return value.managedBackings.isEmpty && !value.hasUnknownBacking
+        ? value
+        : null;
+  }
+
   final (Value, Value, bool)? relation = switch (condition) {
     IntBinary(operator: .lessThan, :final left, :final right) =>
       outcome ? (left, right, true) : (right, left, false),
@@ -5393,7 +6559,8 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
   };
   if (relation != null) {
     final (leftValue, rightValue, strict) = relation;
-    final left = read(leftValue).integers, right = read(rightValue).integers;
+    final left = stable(leftValue)?.integers,
+        right = stable(rightValue)?.integers;
     if (left == null || right == null) return {};
     if (strict &&
         (right.upper == FlowIntegerRange.minimum ||
@@ -5411,11 +6578,21 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
     );
     return a == null || b == null ? null : {leftValue: a, rightValue: b};
   }
-  if (condition case Equals(:final left, :final right, :final negated)) {
-    for (final (value, constant) in [(left, right), (right, left)]) {
-      if (read(constant).constant case ScalarConstant(value: 0)
-          when read(value).addresses.isNotEmpty &&
-              read(value).types.every((type) => type == ValueType.integer)) {
+  if (condition case Equals(
+    mayCallUserCode: false,
+    :final left,
+    :final right,
+    :final negated,
+  )) {
+    final lhs = stable(left), rhs = stable(right);
+    if (lhs == null || rhs == null) return {};
+    for (final (value, actual, constant) in [
+      (left, lhs, rhs),
+      (right, rhs, lhs),
+    ]) {
+      if (constant.constant case ScalarConstant(value: 0)
+          when actual.addresses.isNotEmpty &&
+              actual.types.every((type) => type == ValueType.integer)) {
         return {
           value: outcome != negated
               ? FlowIntegerRange(0, 0)
@@ -5427,7 +6604,7 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
         };
       }
     }
-    final a = read(left).integers, b = read(right).integers;
+    final a = lhs.integers, b = rhs.integers;
     if (a == null || b == null) return {};
     if (outcome != negated) {
       final common = a.intersect(b);
@@ -5440,6 +6617,9 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
     ]) {
       if (excluded == null || !range.contains(excluded)) continue;
       if (range.constant == excluded) return null;
+      if (excluded == 0 && value is IntBinary && value.operator == .bitAnd) {
+        if (!_refineSetBit(value, read, result)) return null;
+      }
       if (range.lower == excluded) {
         result[value] = FlowIntegerRange(excluded + 1, range.upper);
       } else if (range.upper == excluded) {
@@ -5457,6 +6637,45 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
     return result;
   }
   return {};
+}
+
+// On the nonzero edge of mask & (1 << count), only set bits can be selected.
+// A masked count restricts the original index when it already fits that mask.
+bool _refineSetBit(
+  IntBinary test,
+  FlowValue Function(Value) read,
+  Map<Value, FlowIntegerRange> result,
+) {
+  for (final (bits, shifted) in [(test.left, test.right), (test.right, test.left)]) {
+    if (shifted is! IntBinary || shifted.operator != .shiftLeft) continue;
+    final mask = read(bits), one = read(shifted.left), count = read(shifted.right);
+    if ([mask, one, count, read(shifted), read(test)].any(
+      (v) => v.managedBackings.isNotEmpty || v.hasUnknownBacking,
+    )) continue;
+    final pattern = mask.integers?.constant, range = count.integers;
+    if (one.integers?.constant != 1 || pattern == null || range == null) continue;
+    FlowIntegerRange? positions;
+    for (var pos = 0; pos < 64; pos++) {
+      if ((pattern & (1 << pos)) == 0 || !range.contains(pos)) continue;
+      final single = FlowIntegerRange(pos, pos);
+      positions = positions == null ? single : positions.join(single);
+    }
+    if (positions == null) return false;
+    result[shifted.right] = positions;
+    if (shifted.right case IntBinary(operator: .bitAnd, :final left, :final right)) {
+      for (final (index, maskCount) in [(left, right), (right, left)]) {
+        if (maskCount is! ScalarConstant || maskCount.value != 63) continue;
+        final original = read(index), indexRange = original.integers;
+        if (original.managedBackings.isNotEmpty || original.hasUnknownBacking ||
+            indexRange == null || indexRange.lower < 0 || indexRange.upper >= 64) continue;
+        final narrowed = indexRange.intersect(positions);
+        if (narrowed == null) return false;
+        result[index] = narrowed;
+      }
+    }
+    break;
+  }
+  return true;
 }
 
 ({FlowValue value, bool mayThrow})? _integerOperation(
@@ -5621,6 +6840,9 @@ Map<Value, FlowIntegerRange>? _integerRefinements(
 }
 
 FlowValue _referenceAddress(FlowValue input) {
+  if (input.recoveredAddress case final address?) {
+    return address.withReferences([input.references]);
+  }
   final carrier = input.carrierReferences;
   var value = const FlowValue.bottom();
   for (final constant in carrier.constants) {
@@ -5639,7 +6861,7 @@ FlowValue _referenceAddress(FlowValue input) {
   return value;
 }
 
-FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
+FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs, FlowState state) {
   final left = inputs[0], right = inputs[1];
   final subtract = operation.operator == .subtract;
   var result = const FlowValue.bottom();
@@ -5662,11 +6884,15 @@ FlowValue _addressArithmetic(IntBinary operation, List<FlowValue> inputs) {
 
   if (scalar(right)) shifted(left, right, negative: subtract);
   if (!subtract && scalar(left)) shifted(right, left, negative: false);
+  if (subtract && identical(operation.left, operation.right)) {
+    return FlowValue.constant(const Constant.integer(0));
+  }
   if (subtract && left.addresses.isNotEmpty && right.addresses.isNotEmpty) {
     for (final a in left.addresses) {
       for (final b in right.addresses) {
         result = result.join(
-          a.identity == b.identity && a.offsets != null && b.offsets != null
+          a.identity == b.identity && a.offsets != null && b.offsets != null &&
+                  !b.retainedBase && state.hasSingleAddressBase(a)
               ? FlowValue.integerRange(
                   _shiftOffsets(a.offsets, b.offsets, subtract: true)!,
                 )
@@ -5706,8 +6932,9 @@ FlowIntegerRange? _shiftOffsets(
 Constant? _fold(
   Instruction operation,
   List<FlowValue> inputs,
-  IrProgram program,
-) {
+  IrProgram program, {
+  FlowState? state,
+}) {
   // Dart's null equality never dispatches a user operator. A non-null bound
   // therefore decides this branch even when the other identity is unknown.
   if (operation is Equals || operation is Identical) {
@@ -5750,6 +6977,24 @@ Constant? _fold(
       (inputs.first, inputs.last),
       (inputs.last, inputs.first),
     ]) {
+      // The canonical object has an exact class. A value whose alternatives
+      // all exclude that class cannot denote the same instance.
+      if (constant.constant case final ObjectConstant canonical
+          when allocated.objects.isEmpty && allocated.addresses.isEmpty &&
+              allocated.constants.every(
+                (value) => value is ObjectConstant || value is ScalarConstant,
+              )) {
+        final runtimeClass = canonical.type.reify() as ClassType;
+        final hasConstant = allocated.constants.any(
+          (value) => value.structuralKey == canonical.structuralKey,
+        );
+        final hasBound = allocated.unknownTypes.any(
+          (bound) => !isDartType(bound) ||
+              bound.freeTypeParameters.isNotEmpty ||
+              bound.runtimeValueBound.mayHaveInstance(runtimeClass),
+        );
+        if (!hasConstant && !hasBound) return const Constant.boolean(false);
+      }
       if (constant.constant is ObjectConstant &&
           allocated.objects.isNotEmpty &&
           allocated.constants.isEmpty &&
@@ -5760,7 +7005,24 @@ Constant? _fold(
       }
     }
   }
+  if (state != null && operation is Equals && !operation.mayCallUserCode) {
+    for (final (value, other) in [
+      (inputs.first, inputs.last),
+      (inputs.last, inputs.first),
+    ]) {
+      if (other.constant case ScalarConstant(type: final type, value: 0)
+          when type == ValueType.integer && state.isMappedAddress(value)) {
+        return Constant.boolean(operation.negated);
+      }
+    }
+  }
   if (operation case Equals(:final negated)) {
+    if (inputs.any((value) => value.constant?.structuralKey == const Constant.integer(0).structuralKey) &&
+        inputs.any((value) => value.objects.isEmpty && value.constants.isEmpty &&
+            value.unknownTypes.isEmpty && value.addresses.singleOrNull ==
+                FlowAddress(FlowMetadata.stackMaps, 0))) {
+      return Constant.boolean(negated);
+    }
     if (inputs.every(
       (value) =>
           value.constants.isEmpty &&
@@ -5770,7 +7032,14 @@ Constant? _fold(
     )) {
       final left = inputs.first.addresses.single,
           right = inputs.last.addresses.single;
-      if (left.identity == right.identity &&
+      if (!operation.mayCallUserCode &&
+          identical(operation.left, operation.right)) {
+        return Constant.boolean(!negated);
+      }
+      if (!operation.mayCallUserCode &&
+          left.identity == right.identity &&
+          !right.retainedBase &&
+          state?.hasSingleAddressBase(left) == true &&
           left.offset != null &&
           right.offset != null) {
         return Constant.boolean((left.offset == right.offset) != negated);

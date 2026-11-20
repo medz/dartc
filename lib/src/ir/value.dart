@@ -718,13 +718,15 @@ sealed class Instruction(super.type) extends Value {
         arguments,
         resultStorage: resultStorage,
         isLeaf: call.isLeaf,
+        borrowedArguments: call.borrowedArguments,
       );
     }
 
     return switch (this) {
       CaptureStackTrace() => CaptureStackTrace(),
       FrameValue(:final kind) => FrameValue(kind),
-      StackMapAddress() => StackMapAddress(),
+      StackMapAddress(:final contextFreeOnly) =>
+        StackMapAddress(contextFreeOnly: contextFreeOnly),
       ModuleRootsAddress() => ModuleRootsAddress(),
       ReadNativeContext() => ReadNativeContext(),
       BindNativeContext(:final address) => BindNativeContext(map(address)),
@@ -1188,6 +1190,13 @@ sealed class Instruction(super.type) extends Value {
   /// the operation itself; temporary boxes and GC safepoints depend on the backend.
   Set<Effect> get effects => switch (this) {
     NativeCallbackAddress() => const {.readsStorage, .writesStorage},
+    NativeCall(isLeaf: true) || RawNativeCall(isLeaf: true) => const {
+      .readsStorage,
+      .writesStorage,
+      .allocates,
+      .mayThrow,
+      .keepsAlive,
+    },
     KeepAlive() => const {.keepsAlive},
     ObjectHashCode(direct: true) => const {.readsStorage},
     ObjectRuntimeType(direct: true) => const {.readsStorage},
@@ -1287,6 +1296,7 @@ sealed class Instruction(super.type) extends Value {
         when type != .integer =>
       const {.mayThrow},
     TypeTest(testedType: != ValueType.nullType) => _allocate,
+    NativeView(copy: true) => const {.readsStorage, .allocates},
     ReifyType() ||
     PointerFromAddress() ||
     PointerOffset() ||
@@ -1388,11 +1398,14 @@ final class BindNativeContext(final Value address) extends Instruction {
   Iterable<Value> get inputs => [address];
 }
 
-/// The stable, nonzero address of this module's immutable stack-map table.
+/// This module's linked, immutable stack-map table address.
 ///
 /// The table describes the emitted call PCs and roots. Its bytes are assigned
 /// after machine locations are known, including a valid empty table.
-final class StackMapAddress() extends Instruction {
+final class StackMapAddress({
+  /// Return zero if any emitted return PC saves a continuation.
+  final bool contextFreeOnly = false,
+}) extends Instruction {
   this : super(.integer);
 
   @override
@@ -3360,8 +3373,12 @@ final class RawNativeCall(
   Iterable<Value> arguments, {
   final Value? resultStorage,
   final bool isLeaf = false,
+  Iterable<int> borrowedArguments = const [],
 }) extends Instruction {
   final List<Value> arguments = .unmodifiable(arguments);
+
+  /// Pointer arguments whose address is usable only during this leaf call.
+  final Set<int> borrowedArguments = .unmodifiable(borrowedArguments);
 
   this
     : super(
@@ -3380,6 +3397,14 @@ final class RawNativeCall(
       signature.parameters.map(FfiTypes.rawValueType).toList(),
       this.arguments,
     );
+    for (final index in this.borrowedArguments) {
+      if (!isLeaf ||
+          index < 0 ||
+          index >= signature.parameters.length ||
+          signature.parameters[index] is! NativePointerType) {
+        throw ArgumentError('Only leaf pointer arguments may be borrowed.');
+      }
+    }
   }
 
   @override

@@ -75,6 +75,25 @@ void main() {
     );
   }
 
+  test('a mixed Error receiver records its trace on the actual object', () {
+    final target = program.functions
+        .singleWhere((body) => body.target.name == 'mixedErrorTrace')
+        .target;
+    final facts = ProgramFlow(program, [
+      (target: target, arguments: [FlowValue.unknown(.boolean)]),
+    ], allocationFailure: heapRuntime.allocationFailure).facts;
+    final record =
+        program.implementationOf(heapRuntime.recordError) as IrFunction;
+    final call = record.entry.instructions.whereType<InstanceCall>().single;
+    expect(facts.targetsOf(call).map((target) => target.owner).toSet(), {
+      ValueType.error,
+      ValueType.object,
+    });
+    expect(facts.effectsOf(call), isNot(contains(Effect.allocates)));
+    expect(source.mixedErrorTrace(false), 1);
+    expect(source.mixedErrorTrace(true), 2);
+  });
+
   for (final type in [ValueType.error, ValueType.object]) {
     test('a caught ${type.dartName} preserves the first Error trace', () {
       final target = FunctionTarget(_uri, 'ignore', .integer, [type]);

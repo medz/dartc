@@ -48,3 +48,18 @@ int caughtFinally(int value) {
     return observed + error.value;
   }
 }
+
+int mixedErrorTrace(bool useOrdinary) {
+  final error = useOrdinary ? Error() : const OutOfMemoryError();
+  try {
+    Error.throwWithStackTrace(error, StackTrace.empty);
+  } on OutOfMemoryError catch (e, s) {
+    return identical(e, const OutOfMemoryError()) &&
+            identical(s, StackTrace.empty) &&
+            e.stackTrace == null
+        ? 1
+        : -1;
+  } on Error catch (e, s) {
+    return identical(e, error) && identical(e.stackTrace, s) ? 2 : -2;
+  }
+}

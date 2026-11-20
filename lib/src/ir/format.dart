@@ -88,6 +88,7 @@ void writeFunction(
   String operation(Instruction op) => switch (op) {
     CaptureStackTrace() => 'captureStackTrace',
     FrameValue(:final kind) => 'frame.${kind.name}',
+    StackMapAddress(contextFreeOnly: true) => 'contextFreeStackMapAddress',
     StackMapAddress() => 'stackMapAddress',
     ModuleRootsAddress() => 'moduleRootsAddress',
     ReadNativeContext() => 'readNativeContext',

@@ -28,13 +28,15 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     Iterable<FlowEntry> entries, {
     Iterable<FunctionTarget> openEntries = const [],
     Iterable<FunctionTarget> escapingReturns = const [],
+    FunctionTarget? terminalEntry,
     Map<NativeCallbackTarget, FunctionTarget> nativeEntries = const {},
     FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
     FunctionTarget? allocationFailure,
     FunctionTarget? managedAllocator,
+    ClassType? stackContext,
     Map<FunctionTarget, List<int?>> initialMemory = const {},
   }) {
-    var initial = [
+    final initial = [
       for (final entry in entries)
         (
           target: entry.target,
@@ -50,17 +52,64 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       for (final entry in initialMemory.entries)
         entry.key: List<int?>.unmodifiable(entry.value),
     });
-    ProgramFlowFacts analyze(IrProgram input) => ProgramFlow(
-      input,
+    ProgramFlowFacts execute(ClassType? context) => _run(
+      program,
       initial,
-      openEntries: open,
-      escapingReturns: escaping,
-      nativeEntries: callbacks,
-      memoryLayout: memoryLayoutFor?.call(input),
-      allocationFailure: allocationFailure,
-      managedAllocator: managedAllocator,
-      initialMemory: memory,
-    ).facts;
+      open,
+      escaping,
+      terminalEntry,
+      callbacks,
+      memory,
+      memoryLayoutFor,
+      allocationFailure,
+      managedAllocator,
+      context,
+    );
+    try {
+      return execute(stackContext);
+    } on _StackContextsDiscovered {
+      // A previous rewrite may have folded a header read. A new frame producer
+      // must see the original caller and both of its original edges.
+      return execute(null);
+    }
+  }
+
+  ProgramFlowFacts _run(
+    IrProgram program,
+    List<FlowEntry> entries,
+    Set<FunctionTarget> open,
+    Set<FunctionTarget> escaping,
+    FunctionTarget? terminalEntry,
+    Map<NativeCallbackTarget, FunctionTarget> callbacks,
+    Map<FunctionTarget, List<int?>> memory,
+    FlowMemoryLayout Function(IrProgram)? memoryLayoutFor,
+    FunctionTarget? allocationFailure,
+    FunctionTarget? managedAllocator,
+    ClassType? stackContext,
+  ) {
+    var initial = List.of(entries);
+    var usedEmptyStackMaps = false;
+    ProgramFlowFacts analyze(IrProgram input) {
+      final facts = ProgramFlow(
+        input,
+        initial,
+        openEntries: open,
+        escapingReturns: escaping,
+        terminalEntry: terminalEntry,
+        nativeEntries: callbacks,
+        memoryLayout: memoryLayoutFor?.call(input),
+        allocationFailure: allocationFailure,
+        managedAllocator: managedAllocator,
+        initialMemory: memory,
+        stackContext: stackContext,
+      ).facts;
+      if (usedEmptyStackMaps && facts.mayHaveStackContexts) {
+        throw const _StackContextsDiscovered();
+      }
+      usedEmptyStackMaps |= facts.usedEmptyStackMaps;
+      return facts;
+    }
+
     final stages = [
       for (final pass in passes) (kind: pass.kind, run: pass.bind()),
     ];
@@ -76,17 +125,27 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
       return added;
     }
 
+    final sourceStages = stages.where((stage) => stage.kind != .lowering).toList();
+    final loweringStages = stages.where((stage) => stage.kind == .lowering).toList();
     IrProgram normalize(IrProgram input) {
-      bool changed;
-      do {
-        changed = false;
-        for (final stage in stages) {
-          final next = stage.run.normalize(input);
-          changed |= !identical(next, input);
-          input = next;
+      while (true) {
+        // Materializing captures can hide lexical calls and prevent SSA promotion.
+        // Exhaust source-level normalization before choosing physical storage.
+        bool changed;
+        do {
+          changed = false;
+          for (final stage in sourceStages) {
+            final next = stage.run.normalize(input);
+            changed |= !identical(next, input);
+            input = next;
+          }
+        } while (changed);
+        final source = input;
+        for (final stage in loweringStages) {
+          input = stage.run.normalize(input);
         }
-      } while (changed);
-      return input;
+        if (identical(input, source)) return input;
+      }
     }
 
     var facts = analyze(normalize(program));
@@ -169,7 +228,7 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
         }
 
         for (final stage in stages) {
-          if (stage.kind != .lowering) continue;
+          if (stage.kind != .lowering || stage.run.requiresRetainedUse) continue;
           if (!stage.run.isReplayable) {
             flush();
             lowered |= apply(stage.run);
@@ -242,3 +301,5 @@ final class ProgramOptimizer(Iterable<ProgramPass> passes) {
     }
   }
 }
+
+final class const _StackContextsDiscovered();

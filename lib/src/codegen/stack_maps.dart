@@ -10,6 +10,9 @@ final class StackMaps() {
   final _entries = <(int, StackRoots, int?, int?)>[];
   final _addresses = <int, List<(int, FixupEncoding)>>{};
 
+  /// Whether at least one actual return PC has a traced continuation slot.
+  bool get hasContexts => _entries.any((entry) => entry.$4 != null);
+
   /// Adds roots and the optional immutable source-frame metadata symbol.
   void add(
     int returnAddress,

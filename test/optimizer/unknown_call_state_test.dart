@@ -14,6 +14,237 @@ import '../support/ir_interpreter.dart';
 final _uri = Uri.parse('memory:unknown-call-state');
 
 void main() {
+  for (final emptyGlobal in [false, true]) {
+    test(
+      'an external callee cannot publish a private callable alternative (empty global=$emptyGlobal)',
+      () {
+        final signature = FunctionType(.voidType, [.integer]);
+        final root = FunctionTarget(_uri, 'select', .integer, [
+          .boolean,
+          signature,
+        ]);
+        final cell = CellType(.integer);
+        final write = FunctionTarget(
+          _uri,
+          'write',
+          .voidType,
+          [.integer],
+          kind: .closure,
+          enclosing: root,
+          sourceOffset: 1,
+          captures: [cell],
+        );
+        final body = Block(write.parameterTypes);
+        body.emit(WriteCell(body.parameters[1], body.parameters[2]));
+        body.finish(const Return());
+        final entry = Block(root.parameterTypes);
+        final storage = entry.emit(NewCell(cell, const Constant.integer(42)));
+        final local = entry.emit(MakeClosure(write, [storage]));
+        final invoke = Block([signature]);
+        entry.finish(
+          Branch(
+            entry.parameters.first,
+            Jump(invoke, [local]),
+            Jump(invoke, [entry.parameters[1]]),
+          ),
+        );
+        final call = invoke.emit(
+          FunctionCall(invoke.parameters.single, [const Constant.integer(42)]),
+        );
+        invoke.finish(Return(invoke.emit(ReadCell(storage))));
+        final program = IrProgram(
+          [],
+          [
+            IrFunction(root, [entry, invoke]),
+            IrFunction(write, [body]),
+          ],
+          globals: [
+            if (emptyGlobal) GlobalVariable(_uri, 'empty', signature.nullable),
+          ],
+        );
+        final facts = ProgramFlow(program, [
+          (
+            target: root,
+            arguments: [
+              FlowValue.unknown(.boolean),
+              FlowValue.unknown(signature, external: true),
+            ],
+          ),
+        ]).facts;
+        expect(facts.hasUnknownCall(call), isTrue);
+        expect(facts.targetsOf(call), contains(write));
+        expect(facts.activationsOf(write), hasLength(1));
+        expect(
+          facts.returnedBy(root).constant?.structuralKey,
+          const Constant.integer(42).structuralKey,
+        );
+      },
+    );
+  }
+
+  for (final lowered in [false, true]) {
+    for (final raw in [false, true]) {
+      for (final route in ['private', 'argument', 'retained']) {
+        test('outside writes and returns an available value '
+            '(lowered=$lowered, raw=$raw, route=$route)', () {
+          final item = ClassType(_uri, 'Item');
+          final valueType = (raw ? ValueType.integer : item).nullable;
+          final signature = FunctionType(valueType, [valueType]);
+          final root = FunctionTarget(_uri, 'root', valueType, [signature]);
+          final saved = GlobalVariable(_uri, 'saved', valueType);
+          final stash = FunctionTarget(_uri, 'stash', .voidType, [valueType]);
+          final entry = Block(root.parameterTypes);
+          final offered = entry.emit(
+            NewPayload(item, const Constant.integer(8)),
+          );
+          entry.emit(NewPayload(item, const Constant.integer(8)));
+          final ability = raw ? entry.emit(ReferenceAddress(offered)) : offered;
+          if (route == 'retained') entry.emit(DirectCall(stash, [ability]));
+          entry.emit(
+            FunctionCall(entry.parameters.single, [
+              route == 'argument' ? ability : const Constant.nullValue(),
+            ]),
+          );
+          entry.finish(Return(entry.emit(LoadGlobal(saved))));
+          final source = IrProgram(
+            [IrClass(item, [])],
+            [
+              IrFunction(root, [entry]),
+            ],
+            globals: [saved],
+            externals: [IrExternal(stash, effects: const {})],
+          );
+          final program = lowered
+              ? GlobalLowering().lower(
+                  source,
+                  source.functions.map((f) => f.target),
+                )
+              : source;
+          final facts = ProgramFlow(program, [
+            (
+              target: root,
+              arguments: [FlowValue.unknown(signature, external: true)],
+            ),
+          ]).facts;
+          final instructions = (program.implementationOf(root) as IrFunction)
+              .blocks
+              .expand((b) => b.instructions);
+          final bodies = instructions
+              .whereType<NewPayload>()
+              .map((i) => facts.valueOf(i).objects.single)
+              .toList();
+          final call = instructions.whereType<FunctionCall>().single;
+          for (final value in [facts.valueOf(call), facts.returnedBy(root)]) {
+            if (!raw) expect(value.externalUnknownTypes, contains(valueType));
+            final possible = raw
+                ? {
+                    ...value.references.objects,
+                    ...value.addresses.map((a) => a.base),
+                  }
+                : value.objects;
+            expect(possible.contains(bodies.first), route != 'private');
+            expect(possible, isNot(contains(bodies.last)));
+          }
+        });
+      }
+    }
+  }
+
+  for (final offer in [false, true]) {
+    test(
+      'reentry can supply a published local as its argument (offer=$offer)',
+      () {
+        final targetType = FunctionType(.voidType, [.integer]);
+        final observer = FunctionTarget(_uri, 'observe', .voidType, [
+          targetType,
+        ]);
+        final observerBody = Block(observer.parameterTypes);
+        final invoke = observerBody.emit(
+          FunctionCall(observerBody.parameters.single, [
+            const Constant.integer(71),
+          ]),
+        );
+        observerBody.finish(const Return());
+        final root = FunctionTarget(_uri, 'root', .integer, []);
+        final cellType = CellType(.integer);
+        final writer = FunctionTarget(
+          _uri,
+          'write',
+          .voidType,
+          [.integer],
+          kind: .closure,
+          enclosing: root,
+          sourceOffset: 1,
+          captures: [cellType],
+        );
+        final writerBody = Block(writer.parameterTypes);
+        writerBody.emit(
+          WriteCell(writerBody.parameters[1], writerBody.parameters[2]),
+        );
+        writerBody.finish(const Return());
+        final host = FunctionTarget(_uri, 'host', .voidType, [
+          observer.signature,
+          targetType.nullable,
+        ]);
+        final entry = Block();
+        final cell = entry.emit(NewCell(cellType, const Constant.integer(42)));
+        final local = entry.emit(MakeClosure(writer, [cell]));
+        entry.emit(
+          DirectCall(host, [
+            FunctionConstant(observer),
+            offer ? local : const Constant.nullValue(),
+          ]),
+        );
+        entry.finish(Return(entry.emit(ReadCell(cell))));
+        final facts = ProgramFlow(
+          IrProgram(
+            [],
+            [
+              IrFunction(root, [entry]),
+              IrFunction(observer, [observerBody]),
+              IrFunction(writer, [writerBody]),
+            ],
+            externals: [IrExternal(host)],
+          ),
+          [(target: root, arguments: [])],
+        ).facts;
+        expect(facts.definitions, contains(observer));
+        expect(facts.targetsOf(invoke).contains(writer), offer);
+        expect(facts.returnedBy(root).integers?.contains(71), offer);
+      },
+    );
+  }
+
+  test('a noncapturing external can return the private object it receives', () {
+    final type = ClassType(_uri, 'Returned');
+    final root = FunctionTarget(_uri, 'root', type, []);
+    final outside = FunctionTarget(_uri, 'pass', type, [type]);
+    final block = Block();
+    final offered = block.emit(NewPayload(type, const Constant.integer(8)));
+    final private = block.emit(NewPayload(type, const Constant.integer(8)));
+    final result = block.emit(DirectCall(outside, [offered]));
+    block.finish(Return(result));
+    final facts = ProgramFlow(
+      IrProgram(
+        [IrClass(type, [])],
+        [
+          IrFunction(root, [block]),
+        ],
+        externals: [
+          IrExternal(outside, effects: const {}, capturesArguments: false),
+        ],
+      ),
+      [(target: root, arguments: [])],
+    ).facts;
+    final returned = facts.returnedBy(root);
+    expect(returned.externalUnknownTypes, contains(type));
+    expect(returned.objects, contains(facts.valueOf(offered).objects.single));
+    expect(
+      returned.objects,
+      isNot(contains(facts.valueOf(private).objects.single)),
+    );
+  });
+
   for (final lowered in [false, true]) {
     for (final throwing in [false, true]) {
       for (final unknown in [false, true]) {
