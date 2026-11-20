@@ -14,6 +14,32 @@ final _i64 = NativeScalarType(Int64);
 final _layout = _Layout();
 
 void main() {
+  test('both refreshed exits carry the native word cleared by the callee', () {
+    final data = NativeData(List.filled(8, 0), alignment: 8);
+    final reset = FunctionTarget(_uri, 'maybeThrow', .voidType, [.boolean]);
+    final clear = Block(reset.parameterTypes);
+    final normal = Block()..finish(const Return());
+    final fail = Block()..finish(Throw(const Constant.string('thrown')));
+    clear.emit(StoreNative(clear.emit(NativeDataAddress(data)), _i64, const Constant.integer(0)));
+    clear.finish(Branch(clear.parameters.single, Jump(fail), Jump(normal)));
+    final entry = FunctionTarget(_uri, 'entry', .integer, [.integer, .boolean]);
+    final root = Block(entry.parameterTypes), returned = Block(), caught = Block();
+    final address = root.emit(NativeDataAddress(data));
+    root.emit(StoreNative(address, _i64, root.parameters.first));
+    root.finish(Invoke(DirectCall(reset, [root.parameters.last]), onReturn: Jump(returned), onThrow: Jump(caught)));
+    for (final (block, code) in [(returned, 11), (caught, 22)]) {
+      final loaded = block.emit(LoadNative(address, _i64));
+      block.finish(Return(block.emit(IntBinary(.add, loaded, Constant.integer(code)))));
+    }
+    final graph = IrProgram([], [IrFunction(entry, [root, returned, caught]), IrFunction(reset, [clear, fail, normal])]);
+    FlowEntry input(int value, bool raises) => (target: entry, arguments: [FlowValue.constant(Constant.integer(value)), FlowValue.constant(Constant.boolean(raises))]);
+    final flow = ProgramFlow(graph, [input(17, false)], memoryLayout: _layout);
+    expect(flow.facts.returnedBy(entry).integers?.constant, 11);
+    flow.extend(entries: [input(91, true)]);
+    final result = flow.facts.returnedBy(entry).integers;
+    expect([result?.lower, result?.upper], [11, 22]);
+  });
+
   test('clearing a native word still applies when the caller input grows', () {
     final data = NativeData(List.filled(8, 0), alignment: 8);
     final reset = FunctionTarget(_uri, 'reset', .voidType, []);
