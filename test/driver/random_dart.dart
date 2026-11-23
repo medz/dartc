@@ -13,7 +13,8 @@ enum Kind(final String name) {
   /// A number of either kind, a number or null, and anything.
   number('num'),
   maybe('int?'),
-  any('Object?');
+  any('Object?'),
+  function('int Function(int)');
 
   /// The kinds that the official runtime can print.
   static const List<Kind> plain = [integer, float, boolean];
@@ -33,7 +34,10 @@ final class RandomDart(int seed) {
   final _scopes = <List<(String, Kind)>>[];
   final _loops = <String?>[];
   final _methods = <_Method>[];
-  late Kind _result;
+  Kind _result = .integer;
+
+  /// Whether this is the body of a closure, which calls nothing.
+  bool _isLeaf = false;
   int _tries = 0;
 
   /// Whether to throw here, which is rarely done where nothing catches it.
@@ -52,6 +56,9 @@ final class RandomDart(int seed) {
 
   String generate(int count) {
     _scopes.add([]);
+    for (var i = 0; i < 3; i++) {
+      _line('int leaf$i(int p) => p * ${i + 2} ^ $i;');
+    }
     _globals();
     _classes();
     _methodLimit = _methods.length;
@@ -59,6 +66,40 @@ final class RandomDart(int seed) {
       _function('f$i');
     }
     return _lines.join('\n');
+  }
+
+  /// A closure that uses the variables around it.
+  String _closure() {
+    final result = _result, tries = _tries;
+    final loops = List.of(_loops), lines = List.of(_lines);
+    final depth = _depth;
+    _loops.clear();
+    _lines.clear();
+    _result = .integer;
+    _tries = 0;
+    _depth = 0;
+    _isLeaf = true;
+    final name = 'q${_names++}';
+    _scopes.add([(name, .integer)]);
+    // Statements need a variable of every kind.
+    if (_chance(2) &&
+        Kind.values.every((kind) => _assignable(kind).isNotEmpty)) {
+      _statements(1 + _random.nextInt(2), 0);
+    }
+    _line('return ${_expression(.integer, 2)};');
+    final body = _lines.join(' ');
+    _scopes.removeLast();
+    _isLeaf = false;
+    _result = result;
+    _tries = tries;
+    _depth = depth;
+    _loops
+      ..clear()
+      ..addAll(loops);
+    _lines
+      ..clear()
+      ..addAll(lines);
+    return '(int $name) { $body }';
   }
 
   static const _fields = [
@@ -103,6 +144,7 @@ final class RandomDart(int seed) {
       _line('set o0(C0? value) { }');
       _line('const K(this.i0, this.d0, this.b0, [this.k]) : n0 = d0, a0 = k;');
       _line('C0 operator +(C0 other) => b0 ? other : this;');
+      _line('int leaf(int at) => i0 * at;');
       _line('int operator [](int at) => i0 - at;');
       _line('void operator []=(int at, int value) {}');
       for (final (i, method) in _methods.indexed) {
@@ -147,6 +189,7 @@ final class RandomDart(int seed) {
           ': n0 = i0, a0 = d0;',
         );
         _line('C0 operator +(C0 other) => b0 ? this : other;');
+        _line('int leaf(int at) => i0 ^ at;');
         _line('int operator [](int at) => i0 + at;');
         _line('void operator []=(int at, int value) => i0 = at ^ value;');
       } else {
@@ -182,6 +225,9 @@ final class RandomDart(int seed) {
         }
         if (_chance(4)) {
           _line('@override int get n0 => i0;');
+        }
+        if (_chance(4)) {
+          _line('@override int leaf(int at) => super.leaf(at) - 1;');
         }
       }
       for (final (i, method) in _methods.indexed) {
@@ -294,6 +340,7 @@ final class RandomDart(int seed) {
   String _constant(Kind kind) => switch (kind) {
     .object => 'const ${_constantObject()}',
     .any => _constant(_any(Kind.values.take(5).toList())),
+    .function => 'leaf${_random.nextInt(3)}',
     _ => _literal(kind),
   };
 
@@ -307,6 +354,7 @@ final class RandomDart(int seed) {
     .object => _chance(3) ? _constant(kind) : _creation(_literal),
     .boolean => '${_random.nextBool()}',
     .number => _literal(_any([.integer, .float])),
+    .function => _isLeaf || _chance(3) ? _constant(kind) : _closure(),
     .maybe => _chance(3) ? '(null as int?)' : _literal(.integer),
     .any =>
       _chance(6)

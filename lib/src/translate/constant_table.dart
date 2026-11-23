@@ -22,6 +22,7 @@ final class ConstantTable(
   final Declarations _declarations,
   final ClassTable _classes,
   final LibraryElement _core,
+  final HirConstObject? Function(ExecutableElement element) _functionObject,
 
   /// Tells that there are objects of a class.
   final void Function(ClassElement class_) _instantiate,
@@ -35,7 +36,10 @@ final class ConstantTable(
       .integer => object?.toIntValue(),
       .float => object?.toDoubleValue(),
       .boolean => object?.toBoolValue(),
-      .reference => object == null ? null : _number(object) ?? _object(object),
+      .reference =>
+        object == null
+            ? null
+            : _number(object) ?? _function(object) ?? _object(object),
       null => null,
     };
     if (value != null) return Constant(value);
@@ -62,6 +66,11 @@ final class ConstantTable(
       found.enclosingElement!,
       'a default of type ${found.type}',
     );
+  }
+
+  HirConstObject? _function(DartObject object) {
+    final element = object.toFunctionValue();
+    return element == null ? null : _functionObject(element);
   }
 
   HirConstObject? _number(DartObject object) {
@@ -125,7 +134,7 @@ final class ConstantTable(
 
   /// Tells different values of one type apart.
   String _key(Object? value) => switch (value) {
-    HirConstObject() => '${_numbers[value]}',
+    HirConstObject() => '${_numbers[value] ??= _numbers.length}',
     double() => '${(ByteData(8)..setFloat64(0, value)).getInt64(0)}',
     _ => '$value',
   };

@@ -58,7 +58,12 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
 
   /// The failure to translate the declaration of [element].
   CompileFailure unsupported(Element element, String what) {
-    final (unit, node) = _nodes[element]!;
+    // What is inside of functions has no place of its own here.
+    Element? found = element;
+    while (!_nodes.containsKey(found)) {
+      found = found!.enclosingElement;
+    }
+    final (unit, node) = _nodes[found]!;
     final offset = switch (node) {
       FunctionDeclaration(:final name) ||
       MethodDeclaration(:final name) ||

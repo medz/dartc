@@ -347,10 +347,6 @@ int get get => x;''',
       '2:15: $what assignment to prefixed identifier.',
     );
     reports(
-      'int f() => 1;\nvoid main() { f; }',
-      '2:15: $what simple identifier.',
-    );
-    reports(
       'class A { final String s; const A(this.s); }\nvoid main() { const A("a"); }',
       '1:24: $what a field of type String.',
     );

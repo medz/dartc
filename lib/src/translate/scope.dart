@@ -4,7 +4,10 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
+import 'builder.dart';
 import 'builtin_error.dart';
+import 'captures.dart';
+import 'closure.dart';
 
 /// Reports that something is not supported yet.
 typedef Reject = Never Function(String what);
@@ -39,6 +42,39 @@ abstract interface class ProgramScope() {
 
   /// What gives the value that [parameter] has where a call leaves it out.
   HirInstruction defaultOf(FormalParameterElement parameter);
+
+  /// Which variables the closures in [declaration] use.
+  Captures capturesOf(AstNode declaration);
+
+  /// The class of the cells that closures share variables of [type] through.
+  HirClass cellClass(HirType type);
+
+  void addClosure(Closure closure);
+
+  /// The selector of calls of functions that are values.
+  HirSelector callSelector(int positional, List<String> named);
+
+  /// Whether objects are functions of [type], or functions at all.
+  HirTypeTest functionTest(FunctionType? type);
+
+  /// The object that [element] is, if the program declares it.
+  HirConstObject? functionObject(ExecutableElement element);
+
+  /// How to get the method [element] of objects of [receiver].
+  HirSelector tearOffSelector(ExecutableElement element, ClassElement receiver);
+
+  /// Gives the method [element] of [receiver] itself.
+  HirValue tearOff(
+    FunctionBuilder builder,
+    ExecutableElement element,
+    HirValue receiver,
+  );
+
+  /// Translates [body] as that of the function of [builder], later.
+  void translateBody(FunctionBuilder builder, FunctionBody body);
+
+  /// Has [work] done later.
+  void schedule(void Function() work);
 
   /// The class of the objects holding values of [type].
   HirClass boxClass(HirType type);

@@ -9,7 +9,11 @@ HirType? valueType(DartType type) {
     if (type.isDartCoreDouble) return .float;
     if (type.isDartCoreBool) return .boolean;
   }
-  return isTop(type) || type.isDartCoreNull || classOf(type) != null
+  return isTop(type) ||
+          type is FunctionType && type.typeParameters.isEmpty ||
+          type.isDartCoreNull ||
+          type is NeverType && !isNever(type) ||
+          classOf(type) != null
       ? .reference
       : null;
 }
@@ -48,7 +52,13 @@ ClassElement? classOf(DartType? type) {
 bool _isKnown(ClassElement class_) =>
     class_.library.isDartCore &&
     (class_.isDartCoreObject ||
-        const {'num', 'int', 'double', 'bool'}.contains(class_.name) ||
+        const {
+          'num',
+          'int',
+          'double',
+          'bool',
+          'Function',
+        }.contains(class_.name) ||
         class_.name == 'StackTrace' ||
         _isFailure(class_) ||
         class_.allSupertypes.any((type) => _isFailure(type.element)));
@@ -57,8 +67,36 @@ bool _isFailure(InterfaceElement class_) =>
     class_.library.isDartCore &&
     (class_.name == 'Error' || class_.name == 'Exception');
 
+/// [type] as the official runtime calls it.
+String describeType(DartType type) {
+  if (type is! FunctionType) return type.getDisplayString();
+  String list(Iterable<FormalParameterElement> parameters) =>
+      parameters.map((p) => describeType(p.type)).join(', ');
+  final all = type.formalParameters;
+  final optional = all.where((p) => p.isOptionalPositional);
+  final named = all
+      .where((p) => p.isNamed)
+      .map(
+        (p) =>
+            '${p.isRequiredNamed ? 'required ' : ''}'
+            '${describeType(p.type)} ${p.name}',
+      );
+  final parameters = [
+    if (all.any((p) => p.isRequiredPositional))
+      list(all.where((p) => p.isRequiredPositional)),
+    if (optional.isNotEmpty) '[${list(optional)}]',
+    if (named.isNotEmpty) '{${named.join(', ')}}',
+  ];
+  final text = '(${parameters.join(', ')}) => ${describeType(type.returnType)}';
+  return type.nullabilitySuffix == .question ? '($text)?' : text;
+}
+
 /// Whether a function returning [type] gives its caller nothing to use.
-bool hasNoResult(DartType type) => type is VoidType || type is NeverType;
+bool hasNoResult(DartType type) => type is VoidType || isNever(type);
+
+/// Whether expressions of [type] never give a value.
+bool isNever(DartType? type) =>
+    type is NeverType && type.nullabilitySuffix == .none;
 
 /// Whether objects of [sub] are objects of [superclass] too.
 bool isSubclass(ClassElement sub, ClassElement superclass) =>

@@ -4,6 +4,7 @@ import 'package:dartc/hir.dart';
 
 import 'builtin_error.dart';
 import 'classes.dart';
+import 'closure.dart';
 import 'constant.dart';
 import 'error_table.dart';
 import 'members.dart';
@@ -32,8 +33,13 @@ final class ReportBuilder(
   Map<HirTypeTest, Set<HirClass>> get tests => _tests;
 
   /// A function reporting objects of any of [classes] that can be thrown.
-  HirFunction build(Iterable<ClassElement> classes) {
-    if (_errors.castTexts.isNotEmpty) describe = _makeDescribe(classes);
+  HirFunction build(
+    Iterable<ClassElement> classes,
+    Iterable<Closure> closures,
+  ) {
+    if (_errors.castTexts.isNotEmpty) {
+      describe = _makeDescribe(classes, closures);
+    }
     var block = HirBlock([.reference]);
     final exception = block.parameters.single;
     _blocks.add(block);
@@ -136,7 +142,10 @@ final class ReportBuilder(
   }
 
   /// Makes a function that writes the name of the class of an object.
-  HirFunction _makeDescribe(Iterable<ClassElement> classes) {
+  HirFunction _makeDescribe(
+    Iterable<ClassElement> classes,
+    Iterable<Closure> closures,
+  ) {
     var block = HirBlock([.reference]);
     final object = block.parameters.single;
     final start = _blocks.length;
@@ -149,6 +158,13 @@ final class ReportBuilder(
       final test = _exactly(class_);
       final (yes, no) = _branch(block, block.add(HirIsInstance(test, object)));
       _end(yes, class_.displayName);
+      block = no;
+    }
+    for (final Closure(:class_, :type) in closures) {
+      final test = HirTypeTest(class_.name);
+      _tests[test] = {class_};
+      final (yes, no) = _branch(block, block.add(HirIsInstance(test, object)));
+      _end(yes, describeType(type));
       block = no;
     }
     block.end(HirUnreachable());

@@ -1,12 +1,16 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
 import 'builtin_error.dart';
+import 'captures.dart';
 import 'classes.dart';
+import 'closure.dart';
+import 'closure_table.dart';
 import 'constant_table.dart';
 import 'constructor.dart';
 import 'dispatch.dart';
@@ -45,8 +49,10 @@ final class ProgramTranslator(
     _declarations,
     _classes,
     _core,
+    functionObject,
     _dispatch.instantiate,
   );
+  late final _closures = ClosureTable(this, _unit, _creatorOf);
   late final _errors = ErrorTable(_classes, _core, _dispatch.instantiate);
   late final _globals = GlobalTable(
     this,
@@ -56,6 +62,12 @@ final class ProgramTranslator(
   );
   final _functions = <ExecutableElement, HirFunction>{};
   final _pending = <void Function()>[];
+  final _captures = <AstNode, Captures>{};
+  final _cells = <HirType, HirClass>{};
+
+  /// The functions of closures.
+  final _bodies = <HirFunction>[];
+  final _creators = <ConstructorElement, HirFunction>{};
   final _thrown = <ClassElement>{};
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _writeNumber;
 
@@ -78,7 +90,11 @@ final class ProgramTranslator(
         _pending.removeLast()();
       }
       _addRuntime();
-    } while (_dispatch.update() || _pending.isNotEmpty);
+    } while (_dispatch.update() || _closures.update() || _pending.isNotEmpty);
+    final dispatch = {
+      ..._dispatch.result(_classes.classOf, _closures),
+      ..._closures.dispatch,
+    };
     final report = ReportBuilder(
       _declarations,
       _classes,
@@ -86,14 +102,25 @@ final class ProgramTranslator(
       _thrown,
       _writeNumber,
     );
-    final uncaught = _canThrow ? report.build(_dispatch.classes) : null;
+    final uncaught = _canThrow
+        ? report.build(_dispatch.classes, _closures.closures)
+        : null;
     return HirModule(
       main,
       [..._allFunctions, ?uncaught, ?report.describe],
-      classes: _dispatch.classes.map(_classes.classOf),
-      dispatch: _dispatch.result(_classes.classOf),
+      classes: [
+        ..._dispatch.classes.map(_classes.classOf),
+        for (final closure in _closures.closures) closure.class_,
+        ..._cells.values,
+      ],
+      dispatch: dispatch,
       globals: _globals.globals,
-      tests: {..._errors.results(_dispatch.classes), ...report.tests},
+      tests: {
+        ..._errors.results(_dispatch.classes),
+        ..._closures.tests,
+        ..._closures.exact,
+        ...report.tests,
+      },
       allocate: _allocate,
       raise: _raise,
       stackOverflow: _stackOverflow,
@@ -106,6 +133,9 @@ final class ProgramTranslator(
     ..._functions.values,
     ..._globals.getters,
     ..._dispatch.made,
+    ..._closures.made,
+    ..._bodies,
+    ..._creators.values,
     ..._errors.functions,
   ];
 
@@ -151,6 +181,88 @@ final class ProgramTranslator(
     final thrower = _errors.throwerOf(error);
     if (!error.isExhaustion) _addAllocation();
     return thrower;
+  }
+
+  @override
+  Captures capturesOf(AstNode declaration) =>
+      _captures[declaration] ??= Captures.of(declaration);
+
+  @override
+  HirClass cellClass(HirType type) {
+    _addAllocation();
+    return _cells[type] ??= HirClass('cell of ${type.dartName}', null, [
+      HirField('value', type),
+    ]);
+  }
+
+  @override
+  void addClosure(Closure closure) {
+    _bodies.add(closure.target());
+    _closures.add(closure);
+    _addAllocation();
+  }
+
+  @override
+  HirSelector callSelector(int positional, List<String> named) =>
+      _closures.selectorOf(positional, named);
+
+  @override
+  HirTypeTest functionTest(FunctionType? type) =>
+      type == null ? _closures.anyFunction : _closures.testOf(type);
+
+  @override
+  HirConstObject? functionObject(ExecutableElement element) {
+    final owner = element is ConstructorElement
+        ? element.enclosingElement
+        : element;
+    return _declarations[owner] == null ? null : _closures.static(element);
+  }
+
+  @override
+  HirSelector tearOffSelector(
+    ExecutableElement element,
+    ClassElement receiver,
+  ) => _dispatch.tearOffSelector(element, receiver);
+
+  @override
+  HirValue tearOff(
+    FunctionBuilder builder,
+    ExecutableElement element,
+    HirValue receiver,
+  ) {
+    _addAllocation();
+    return _closures.tearOff(builder, element, receiver);
+  }
+
+  @override
+  void translateBody(FunctionBuilder builder, FunctionBody body) {
+    StatementTranslator(this, builder).body(body);
+    builder.finish();
+  }
+
+  @override
+  void schedule(void Function() work) => _pending.add(work);
+
+  /// A function that creates an object and initializes it.
+  HirFunction _creatorOf(ConstructorElement element) {
+    if (element.isFactory) return factoryOf(element);
+    return _creators[element] ??= () {
+      final initializer = initializerOf(element);
+      final function = HirFunction(
+        'create ${initializer.name}',
+        initializer.parameters.skip(1),
+        .reference,
+      );
+      final builder = FunctionBuilder(_unit, function, const []);
+      final object = builder.create(
+        createdClass(element.enclosingElement as ClassElement),
+      );
+      builder
+        ..call(HirCall(initializer, [object, ...builder.inputs]))
+        ..end(HirReturn(object))
+        ..finish();
+      return function;
+    }();
   }
 
   @override
@@ -283,6 +395,8 @@ final class ProgramTranslator(
       element.formalParameters,
       receiverClass: hasReceiver(element) ? owner as ClassElement : null,
       returnType: element.returnType,
+      captures: capturesOf(declarationOf(node)),
+      cellClass: cellClass,
     );
     final statements = StatementTranslator(this, builder);
     if (isInitializerElement(element)) {

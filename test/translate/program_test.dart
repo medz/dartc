@@ -435,10 +435,6 @@ b0():
       'void main() { switch (1) { a: case 1: continue a; } }',
       '2:28: $what a labeled case.',
     );
-    reports(
-      'void main() { void f() {} }',
-      '2:15: $what function declaration statement.',
-    );
     reports('void main() { "a"; }', '2:15: $what simple string literal.');
     reports('void main() { 1.abs(); }', '2:15: $what calling abs of the SDK.');
     reports(

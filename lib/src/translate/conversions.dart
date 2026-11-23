@@ -67,14 +67,24 @@ final class Conversions(
           : constant(false);
     }
     if (type.isDartCoreNull) return isNull(value);
-    final class_ = classOf(type);
-    if (class_ == null) return null;
-    if (type.isDartCoreObject) return _not(isNull(value));
+    final HirTypeTest test;
+    if (type is FunctionType) {
+      test = _scope.functionTest(type);
+    } else if (type.isDartCoreFunction) {
+      test = _scope.functionTest(null);
+    } else {
+      final class_ = classOf(type);
+      if (class_ == null) return null;
+      if (type.isDartCoreObject && type.nullabilitySuffix == .none) {
+        return _not(isNull(value));
+      }
+      test = _scope.testOf(class_);
+    }
     return _builder.choose(
       isNull(value),
       .boolean,
       () => constant(type.nullabilitySuffix == .question),
-      () => _builder.add(HirIsInstance(_scope.testOf(class_), value)),
+      () => _builder.add(HirIsInstance(test, value)),
     );
   }
 
@@ -97,7 +107,7 @@ final class Conversions(
     final fits = isInstance(value, to);
     if (fits == null) return null;
     final number = _scope.castNumber(
-      "' is not a subtype of type '${to.getDisplayString()}'$ending",
+      "' is not a subtype of type '${describeType(to)}'$ending",
     );
     _builder.unless(fits, () {
       final object = coerce(value, .reference);

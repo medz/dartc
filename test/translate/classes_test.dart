@@ -396,14 +396,6 @@ A make() => A();''',
       '1:7: $what primary constructors.',
     );
     reports(
-      'class A { void f() {} }\nvoid main() { A().f; }',
-      '2:15: $what method tear-offs.',
-    );
-    reports(
-      'class A { void f() {} void g() { f; } }\nvoid main() { A().g(); }',
-      '1:34: $what method tear-offs.',
-    );
-    reports(
       'class A { A? n; A get m => this; }\nvoid f(A? a) { a?.n?.n; a?.m.m; }\nvoid main() { f(null); }',
       '2:25: $what null-aware chains.',
     );
@@ -452,10 +444,6 @@ A make() => A();''',
       '3:6: $what a parameter of type M.',
     );
     reports(
-      'class A { void call() {} }\nvoid main() { A()(); }',
-      '2:15: $what function expression invocation.',
-    );
-    reports(
       'class A { int f() => 1; }\nvoid main() { A().f().toString(); }',
       '2:15: $what calling toString of the SDK.',
     );
@@ -466,10 +454,6 @@ A make() => A();''',
     reports(
       'enum E { a }\nvoid main() { E.a; }',
       '2:15: $what a constant of type E.',
-    );
-    reports(
-      'class A { void f() { void g() {} } }\nvoid main() { A().f(); }',
-      '1:22: $what function declaration statement.',
     );
     reports(
       'void main() { Object(); }',

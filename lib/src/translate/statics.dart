@@ -29,6 +29,12 @@ final class StaticTranslator(
           ));
       return _builder.add(constant);
     }
+    if (element is ExecutableElement &&
+        (element is TopLevelFunctionElement || element is MethodElement) &&
+        element.typeParameters.isEmpty) {
+      final object = _scope.functionObject(element) ?? _unsupported(node);
+      return _builder.add(HirStatic(object));
+    }
     if (element is! GetterElement || isInstanceMember(element)) {
       _unsupported(node);
     }

@@ -68,6 +68,8 @@ final class StatementTranslator(
         _goTo(_breaks[target] ?? _unsupported(node, 'this break'));
       case ContinueStatement(:final target):
         _goTo(_continues[target] ?? _unsupported(node, 'this continue'));
+      case FunctionDeclarationStatement(:final functionDeclaration):
+        expressions.closures.declare(functionDeclaration);
       case TryStatement():
         _tries.translate(node);
       case ReturnStatement(:final expression):
@@ -192,6 +194,12 @@ final class StatementTranslator(
       _builder
         ..jump(update)
         ..enter(update);
+      // Every round has its own variables.
+      if (parts case ForPartsWithDeclarations(:final variables)) {
+        for (final variable in variables.variables) {
+          _builder.renew(variable.declaredFragment!.element);
+        }
+      }
       parts.updaters.forEach(expressions.effect);
       _builder.jump(head);
     });

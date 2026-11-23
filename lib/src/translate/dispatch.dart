@@ -5,6 +5,7 @@ import 'package:dartc/world.dart';
 
 import 'builder.dart';
 import 'classes.dart';
+import 'closure_table.dart';
 import 'conversions.dart';
 import 'members.dart';
 import 'scope.dart';
@@ -23,6 +24,7 @@ final class DispatchBuilder(
   final Declarations _declarations,
   final SourceUnit _unit,
 ) {
+  final _tearOffs = <HirSelector>{};
   final _world = World<ClassElement, HirSelector>(isSubclass);
   final _selectors = <String, HirSelector>{};
   final _shapes = <HirSelector, _Shape>{};
@@ -76,6 +78,25 @@ final class DispatchBuilder(
     return selector;
   }
 
+  /// How to get the method [member] of objects of [receiver].
+  HirSelector tearOffSelector(ExecutableElement member, ClassElement receiver) {
+    final owner = member.isPrivate ? member.library.uri : '';
+    final key = 'tear-off|${member.lookupName}|$owner';
+    final selector = _selectors.putIfAbsent(key, () {
+      final made = HirSelector(
+        'tear-off ${member.displayName}',
+        const [],
+        .reference,
+      );
+      _shapes[made] = (member: member, positional: 0, named: const []);
+      _entries[made] = {};
+      _tearOffs.add(made);
+      return made;
+    });
+    _world.call(selector, receiver);
+    return selector;
+  }
+
   HirType? _result(ExecutableElement member, Reject reject) {
     if (hasNoResult(member.returnType)) return null;
     return valueType(member.returnType) ??
@@ -109,11 +130,14 @@ final class DispatchBuilder(
 
   Map<HirSelector, Map<HirClass, HirFunction>> result(
     HirClass Function(ClassElement element) classOf,
+    ClosureTable closures,
   ) => {
     for (final MapEntry(key: selector, value: entries) in _entries.entries)
       selector: {
         for (final MapEntry(:key, :value) in entries.entries)
           classOf(key): value,
+        if (selector.name == '==')
+          ...closures.equalities(selector, _objectEquals),
       },
   };
 
@@ -122,6 +146,11 @@ final class DispatchBuilder(
     final found =
         implementationIn(class_, shape.member) ??
         (throw _declarations.unsupported(class_, 'noSuchMethod'));
+    if (_tearOffs.contains(selector)) {
+      return _make(selector.name, selector, (builder, _) {
+        return _scope.tearOff(builder, found, builder.inputs.first);
+      });
+    }
     if (found.library.isInSdk) {
       return _numberEquals(class_, selector) ?? _objectEquals;
     }

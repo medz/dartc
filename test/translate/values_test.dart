@@ -188,6 +188,13 @@ void main() {
         num n = 3; if (n is double) { print('no'); } else { n as int; number(n << 1); }
       }
     ''');
+    shows('narrow variables to null', '''
+      void main() {
+        int? n = yes() ? null : 5;
+        if (n is! num) { truth(n == null); truth(A(1) != n); show(n); final m = n; show(m); }
+        Object? o = n; while (o is! Object) { truth(o == n); o = 3; } show(o);
+      }
+    ''');
     shows('cast, or throw', '''
       void t(int n) {
         final o = pick(n);
@@ -350,7 +357,7 @@ void main() {
     );
     reports(
       'void main() { dynamic d = 1; d(); }',
-      '1:30: $what function expression invocation.',
+      '1:30: $what using a dynamic value.',
     );
     reports(
       'void main() { Object o = "a"; }',

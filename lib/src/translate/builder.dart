@@ -6,6 +6,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'assigned.dart';
+import 'captures.dart';
 
 extension Unsupported on SourceUnit {
   /// The failure to translate [node].
@@ -19,7 +20,7 @@ extension Unsupported on SourceUnit {
 final class Join._(
   final HirBlock _block,
   final int _resultCount,
-  final List<VariableElement> _variables,
+  final List<Element> _variables,
 );
 
 /// Builds the blocks of one function and tracks its variables' values.
@@ -31,16 +32,36 @@ final class FunctionBuilder(
   /// The class of the object that the function's first parameter is.
   final ClassElement? receiverClass,
 
+  /// Where the function's object, a closure, keeps the object that `this` is.
+  final HirField? receiverField,
+
+  /// Whether the function first takes its own closure.
+  final bool isClosure = false,
+
   /// The type of what the function returns.
   final DartType? returnType,
+
+  /// Which variables closures share.
+  final Captures? captures,
+
+  /// The class of the cells for values of a type.
+  final HirClass Function(HirType type)? cellClass,
 }) {
   final _entry = HirBlock(function.parameters);
   late HirBlock _block = _entry;
-  final _types = <VariableElement, HirType>{};
-  final _values = <VariableElement, HirValue>{};
+  final _types = <Element, HirType>{};
+
+  /// The values of variables, or the cells holding them.
+  final _values = <Element, HirValue>{};
 
   this {
-    final given = _entry.parameters.skip(receiverClass == null ? 0 : 1);
+    if (receiverField case final field?) {
+      _receiver = add(HirLoad(field, _entry.parameters.first));
+    } else if (!isClosure && receiverClass != null) {
+      _receiver = _entry.parameters.first;
+    }
+    final hasObject = isClosure || receiverClass != null;
+    final given = _entry.parameters.skip(hasObject ? 1 : 0);
     // Functions made without source have no names for what they are given.
     for (final (i, parameter) in parameters.indexed) {
       final value = given.elementAt(i);
@@ -49,6 +70,8 @@ final class FunctionBuilder(
     }
   }
 
+  HirClass cells(HirType type) => cellClass!(type);
+
   /// The library of the source translated.
   LibraryElement get library => unit.ast.declaredFragment!.element;
 
@@ -56,8 +79,8 @@ final class FunctionBuilder(
   List<HirValue> get inputs => _entry.parameters;
 
   /// The object that `this` is, where there is one.
-  HirValue? get receiver =>
-      receiverClass == null ? null : _entry.parameters.first;
+  HirValue? get receiver => _receiver;
+  HirValue? _receiver;
 
   /// Gives [function] the blocks that can run.
   void finish() {
@@ -162,23 +185,59 @@ final class FunctionBuilder(
   }
 
   /// Declares [variable], not yet assigned.
-  void declare(VariableElement variable, HirType type) =>
-      _types[variable] = type;
+  void declare(Element variable, HirType type) {
+    _types[variable] = type;
+    _values.remove(variable);
+    if (_isCell(variable)) _values[variable] = create(cells(type));
+  }
 
-  HirType? typeOf(VariableElement variable) => _types[variable];
+  /// Declares [variable], of which [value] is the value or the cell.
+  void bind(Element variable, HirValue value, HirType type) {
+    _types[variable] = type;
+    _values[variable] = value;
+  }
+
+  bool _isCell(Element variable) => captures?.isCell(variable) ?? false;
+
+  HirType? typeOf(Element variable) => _types[variable];
+
+  /// The type of the value of [variable] or of the cell holding it.
+  HirType? rawTypeOf(Element variable) =>
+      _isCell(variable) ? .reference : _types[variable];
+
+  /// The value of [variable] or the cell holding it.
+  HirValue raw(Element variable) =>
+      _values[variable] ?? placeholder(_types[variable]!);
+
+  /// Gives [variable] a cell of its own, with the same value.
+  void renew(Element variable) {
+    if (!_isCell(variable)) return;
+    final value = read(variable);
+    _values[variable] = create(cells(_types[variable]!));
+    assign(variable, value);
+  }
 
   /// The current value of [variable].
   ///
   /// An unassigned one can only be read by code that cannot run, or passed to
   /// a join after which it is assigned again before it is read.
-  HirValue read(VariableElement variable) =>
-      _values[variable] ?? placeholder(_types[variable]!);
+  HirValue read(Element variable) {
+    final value = raw(variable);
+    return _isCell(variable)
+        ? add(HirLoad(cells(_types[variable]!).fields.single, value))
+        : value;
+  }
 
-  void assign(VariableElement variable, HirValue value) {
+  void assign(Element variable, HirValue value) {
     if (value.type != _types[variable]) {
       throw StateError('Assigned ${value.type} to ${variable.name}.');
     }
-    _values[variable] = value;
+    if (_isCell(variable)) {
+      final field = cells(_types[variable]!).fields.single;
+      add(HirStore(field, raw(variable), value));
+    } else {
+      _values[variable] = value;
+    }
   }
 
   /// A block whose predecessors may have run different parts of [construct].
@@ -196,13 +255,13 @@ final class FunctionBuilder(
     ];
     final block = HirBlock([
       ...results,
-      for (final variable in variables) _types[variable]!,
+      for (final variable in variables) rawTypeOf(variable)!,
     ]);
     return Join._(block, results.length, variables);
   }
 
   HirEdge _edge(Join join, [List<HirValue> results = const []]) =>
-      HirEdge(join._block, [...results, ...join._variables.map(read)]);
+      HirEdge(join._block, [...results, ...join._variables.map(raw)]);
 
   void jump(Join join, [HirValue? result]) => jumpWith(join, [?result]);
 

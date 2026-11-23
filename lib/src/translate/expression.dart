@@ -6,6 +6,7 @@ import 'package:dartc/hir.dart';
 import 'builder.dart';
 import 'calls.dart';
 import 'checks.dart';
+import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'describe.dart';
@@ -21,7 +22,19 @@ final class ExpressionTranslator(
   final ProgramScope _scope,
   final FunctionBuilder _builder,
 ) implements Evaluator {
-  late final calls = CallTranslator(_scope, _builder, this);
+  late final CallTranslator calls = CallTranslator(
+    _scope,
+    _builder,
+    this,
+    closures,
+  );
+  late final ClosureTranslator closures = ClosureTranslator(
+    _scope,
+    _builder,
+    this,
+    (node, receiver, class_, element, list) =>
+        calls.method(node, receiver, class_, element, list),
+  );
   late final _operators = OperatorTranslator(_scope, _builder, calls);
   late final _statics = StaticTranslator(_scope, _builder);
   late final _conversions = Conversions(_scope, _builder);
@@ -42,6 +55,8 @@ final class ExpressionTranslator(
     switch (inner) {
       case MethodInvocation():
         calls.invocation(inner, isUsed: false);
+      case FunctionExpressionInvocation():
+        closures.invocation(inner);
       case ConditionalExpression(:final DartType staticType)
           when hasNoResult(staticType):
         final exit = _builder.join(inner);
@@ -85,7 +100,7 @@ final class ExpressionTranslator(
   HirValue value(Expression node, {HirType placeholder = .integer}) {
     final result = _value(node, placeholder);
     final type = node.staticType;
-    if (type == null || type is NeverType) return result;
+    if (type == null || isNever(type)) return result;
     final representation = valueType(type);
     return representation == null
         ? result
@@ -94,12 +109,14 @@ final class ExpressionTranslator(
 
   HirValue _value(Expression node, HirType placeholder) {
     final inner = node.unParenthesized, type = inner.staticType;
-    if (type is NeverType) {
+    if (isNever(type)) {
       switch (inner) {
         case MethodInvocation():
           calls.invocation(inner, isUsed: false);
         case ThrowExpression(:final expression):
           _throw(expression);
+        case FunctionExpressionInvocation():
+          closures.invocation(inner);
         case RethrowExpression():
           final (exception, trace) = _builder.caught.last;
           _builder.raise(exception, trace);
@@ -127,6 +144,18 @@ final class ExpressionTranslator(
           when realTarget.staticType is DynamicType:
         _unsupported(realTarget, usingDynamic);
       case PrefixedIdentifier(
+            prefix: Expression(staticType: FunctionType()) &&
+                final Expression function,
+            identifier: SimpleIdentifier(name: 'call'),
+          ) ||
+          PropertyAccess(
+            target: Expression(staticType: FunctionType()) &&
+                final Expression function,
+            propertyName: SimpleIdentifier(name: 'call'),
+            isNullAware: false,
+          ):
+        return value(function);
+      case PrefixedIdentifier(
         :final prefix,
         identifier: SimpleIdentifier(:final element),
       ):
@@ -151,6 +180,24 @@ final class ExpressionTranslator(
         return _conditional(inner);
       case AssignmentExpression():
         return _assignment(inner);
+      case FunctionExpression():
+        return closures.create(inner);
+      case FunctionExpressionInvocation():
+        return closures.invocation(inner) ??
+            _unsupported(inner, 'using a value of type $type');
+      case ConstructorReference(:final constructorName):
+        return _constructor(inner, constructorName);
+      case ImplicitCallReference(:final expression, :final element):
+        final class_ = classOf(expression.staticType);
+        if (class_ == null || element == null) {
+          _unsupported(inner, describe(inner));
+        }
+        return calls.tearOff(
+          inner,
+          valueAs(expression, .reference),
+          class_,
+          element,
+        );
       case IsExpression():
         return _isExpression(inner);
       case AsExpression():
@@ -184,6 +231,15 @@ final class ExpressionTranslator(
     return CheckedOperations(_scope, _builder).notNull(value(operand));
   }
 
+  HirValue _constructor(Expression node, ConstructorName name) {
+    final element = name.element;
+    final object = element == null ? null : _scope.functionObject(element);
+    if (object == null || classOf(element!.returnType) == null) {
+      _unsupported(node, describe(node));
+    }
+    return _builder.add(HirStatic(object));
+  }
+
   HirValue _isExpression(IsExpression node) {
     final type = node.type.type!;
     final result =
@@ -214,9 +270,9 @@ final class ExpressionTranslator(
       );
 
   HirValue _identifier(Expression node, Element? element) {
-    if (element is VariableElement &&
+    if (element != null &&
         _builder.typeOf(element) != null &&
-        !element.isConst) {
+        !(element is VariableElement && element.isConst)) {
       return _builder.read(element);
     }
     return isInstanceMember(element)

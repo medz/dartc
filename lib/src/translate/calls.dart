@@ -5,6 +5,7 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'checks.dart';
+import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'describe.dart';
@@ -17,6 +18,7 @@ final class CallTranslator(
   final ProgramScope _scope,
   final FunctionBuilder _builder,
   final Evaluator _evaluator,
+  final ClosureTranslator _closures,
 ) {
   late final _conversions = Conversions(_scope, _builder);
 
@@ -27,7 +29,13 @@ final class CallTranslator(
   HirValue? invocation(MethodInvocation node, {required bool isUsed}) {
     final element = node.methodName.element, target = node.realTarget;
     if (target?.staticType is DynamicType) _unsupported(target!, usingDynamic);
+    if (target?.staticType is FunctionType) {
+      return _callFunction(node, target!, isUsed: isUsed);
+    }
     if (element is! ExecutableElement) _unsupported(node, describe(node));
+    if (_builder.typeOf(element) != null) {
+      return _closures.call(node, _builder.read(element), node.argumentList);
+    }
     if (!isInstanceMember(element)) return _static(node, element);
     if (element is! MethodElement) _unsupported(node, describe(node));
     if (target != null && isNumber(target.staticType)) {
@@ -41,7 +49,7 @@ final class CallTranslator(
         ordered(element, supplied(node.argumentList)),
       );
     }
-    HirValue? call(HirValue receiver) => _invoke(
+    HirValue? call(HirValue receiver) => method(
       node,
       receiver,
       _receiverClass(node, target),
@@ -53,6 +61,22 @@ final class CallTranslator(
     return node.isNullAware
         ? _unlessNull(node, receiver, () => call(receiver), isUsed: isUsed)
         : call(receiver);
+  }
+
+  HirValue? _callFunction(
+    MethodInvocation node,
+    Expression target, {
+    required bool isUsed,
+  }) {
+    if (node.methodName.name != 'call') {
+      final name = node.methodName.name;
+      _unsupported(node, 'calling $name of the SDK');
+    }
+    final function = _evaluator.value(target);
+    HirValue? call() => _closures.call(node, function, node.argumentList);
+    return node.isNullAware
+        ? _unlessNull(node, function, call, isUsed: isUsed)
+        : call();
   }
 
   /// The result of a conversion of the number [target], if it is one.
@@ -205,7 +229,7 @@ final class CallTranslator(
     List<HirValue> arguments,
   ) {
     final result = _builder.call(HirCall(function, arguments));
-    if (element.returnType is NeverType) _builder.end(HirUnreachable());
+    if (isNever(element.returnType)) _builder.end(HirUnreachable());
     return result;
   }
 
@@ -269,7 +293,8 @@ final class CallTranslator(
       supplied[parameter] ?? _builder.add(_scope.defaultOf(parameter)),
   ];
 
-  HirValue? _invoke(
+  /// Calls the method [element] on [receiver].
+  HirValue? method(
     AstNode node,
     HirValue receiver,
     ClassElement class_,
@@ -312,7 +337,7 @@ final class CallTranslator(
         for (final name in names) named[name]!,
       ]),
     );
-    if (element.returnType is NeverType) _builder.end(HirUnreachable());
+    if (isNever(element.returnType)) _builder.end(HirUnreachable());
     return result;
   }
 
@@ -354,9 +379,49 @@ final class CallTranslator(
     return _direct(_scope.memberOf(element), element, [receiver, ...values]);
   }
 
+  /// Gives the method [element] of [receiver].
+  HirValue tearOff(
+    AstNode node,
+    HirValue receiver,
+    ClassElement class_,
+    MethodElement element,
+  ) {
+    _checkMember(node, element);
+    return _builder.call(
+      HirVirtualCall(
+        _scope.tearOffSelector(element, class_),
+        receiver,
+        const [],
+      ),
+    )!;
+  }
+
+  HirValue _methodOf(
+    Expression node,
+    Expression? target,
+    MethodElement method,
+  ) {
+    if (target is SuperExpression) {
+      _checkMember(node, method);
+      final parent = _builder.receiverClass!.supertype!.element as ClassElement;
+      if (implementationIn(parent, method) != method) {
+        _unsupported(node, 'this use of super');
+      }
+      return _scope.tearOff(_builder, method, _this(node));
+    }
+    final class_ = _receiverClass(node, target);
+    if (target == null) return tearOff(node, _this(node), class_, method);
+    final isNullAware = node is PropertyAccess && node.isNullAware;
+    final receiver = object(target, isNullAware: isNullAware);
+    HirValue read() => tearOff(node, receiver, class_, method);
+    return isNullAware
+        ? _unlessNull(node, receiver, read, isUsed: true)!
+        : read();
+  }
+
   /// Reads the property [element] of [target], or of `this` if that is null.
   HirValue property(Expression node, Expression? target, Element element) {
-    if (element is MethodElement) _unsupported(node, 'method tear-offs');
+    if (element is MethodElement) return _methodOf(node, target, element);
     if (element is! GetterElement) _unsupported(node, describe(node));
     HirValue? result;
     if (target is SuperExpression) {

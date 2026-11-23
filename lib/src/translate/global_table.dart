@@ -5,6 +5,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
+import 'captures.dart';
 import 'classes.dart';
 import 'constant.dart';
 import 'constant_table.dart';
@@ -111,7 +112,14 @@ final class GlobalTable(
   ) {
     final type = element.type, isFinal = element.isFinal;
     final GlobalVariable(:global, :isSet!, :getter!) = variable;
-    final builder = FunctionBuilder(unit, getter, const []);
+    final builder = FunctionBuilder(
+      unit,
+      getter,
+      const [],
+      returnType: element.type,
+      captures: _scope.capturesOf(declarationOf(initializer)),
+      cellClass: _scope.cellClass,
+    );
     final exit = builder.join(initializer);
     builder.branch(
       builder.add(HirLoadGlobal(isSet)),

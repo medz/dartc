@@ -30,6 +30,7 @@ extension on RandomDart {
       ),
       .maybe => ('??', _expression(.maybe, depth)),
       .any => ('??', _expression(.any, depth)),
+      .function => ('', _expression(.function, depth)),
     };
     return '$variable $operator= $right';
   }
@@ -45,7 +46,8 @@ extension on RandomDart {
     switch (_random.nextInt(11)) {
       // Methods call less, or the work would grow with every level.
       case 9 || 10
-          when _loops.isEmpty &&
+          when !_isLeaf &&
+              _loops.isEmpty &&
               _variables(.object).isNotEmpty &&
               (_methodLimit == _methods.length || _chance(5)):
         final callable = [
@@ -67,7 +69,7 @@ extension on RandomDart {
       case 2:
         final matching = _functions.where((f) => f.result == kind).toList();
         // Calls are kept outside loops, so programs stay small.
-        if (matching.isNotEmpty && _loops.isEmpty) {
+        if (!_isLeaf && matching.isNotEmpty && _loops.isEmpty) {
           return _callOf(_any(matching), (kind) => _expression(kind, 1));
         }
     }
@@ -79,7 +81,17 @@ extension on RandomDart {
       .number => _number(inner),
       .maybe => _maybe(inner),
       .any => _anything(inner),
+      .function => _functionValue(inner),
     };
+  }
+
+  String _functionValue(String Function(Kind) inner) {
+    final objects = _variables(.object);
+    if (objects.isNotEmpty && !_isLeaf && _chance(3)) {
+      // A method that calls nothing.
+      return _any(objects.map((name) => '$name.leaf').toList());
+    }
+    return '(${_literal(.function)})';
   }
 
   String _number(String Function(Kind) inner) {
@@ -132,7 +144,9 @@ extension on RandomDart {
   }
 
   String _integer(String Function(Kind) inner) {
-    switch (_random.nextInt(11)) {
+    switch (_random.nextInt(13)) {
+      case 11 || 12 when !_isLeaf && _loops.isEmpty:
+        return '${inner(.function)}(${inner(.integer)})';
       case 10:
         return '(${inner(.maybe)} ?? ${inner(.integer)})';
       case 9 when _mayThrow:
@@ -206,6 +220,8 @@ extension on RandomDart {
           'Object',
           'int?',
           'C3?',
+          'Function',
+          'int Function(int)',
         ]);
         return '(${inner(.any)} ${_any(['is', 'is!'])} $type)';
       case 10:
