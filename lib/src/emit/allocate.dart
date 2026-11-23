@@ -5,15 +5,25 @@ import 'liveness.dart';
 /// Where a value lives.
 sealed class const Location();
 
+/// The separate sets of registers for words and for doubles.
+enum RegisterBank() {
+  word,
+  float;
+
+  /// The registers holding values of [type].
+  factory of(LirType type) => type == .f64 ? float : word;
+}
+
 /// A machine register, numbered as the target encodes it.
-final class const InRegister(final int number) extends Location {
+final class const InRegister(final RegisterBank bank, final int number)
+    extends Location {
   @override
   bool operator ==(Object other) =>
-      other is InRegister && other.number == number;
+      other is InRegister && other.bank == bank && other.number == number;
   @override
-  int get hashCode => number;
+  int get hashCode => Object.hash(bank, number);
   @override
-  String toString() => 'r$number';
+  String toString() => '${bank.name}$number';
 }
 
 /// The words of a stack frame.
@@ -40,7 +50,7 @@ final class const OnStack(final StackArea area, final int index)
   String toString() => '${area.name}$index';
 }
 
-/// The registers a target offers to values.
+/// The registers of one bank a target offers to values.
 final class const RegisterSet({
   /// Destroyed by every call.
   required final List<int> volatile,
@@ -50,7 +60,10 @@ final class const RegisterSet({
 });
 
 /// One location for each value's whole life.
-final class Allocation(final Liveness liveness, final RegisterSet registers) {
+final class Allocation(
+  final Liveness liveness,
+  final Map<RegisterBank, RegisterSet> registers,
+) {
   final locations = <LirValue, Location>{};
   int spillCount = 0;
 
@@ -62,17 +75,21 @@ final class Allocation(final Liveness liveness, final RegisterSet registers) {
   void _scan() {
     final intervals = liveness.intervals.values.toList()
       ..sort((a, b) => a.start.compareTo(b.start));
-    final active = <int, Interval>{};
+    final inUse = {
+      for (final bank in RegisterBank.values) bank: <int, Interval>{},
+    };
     for (final current in intervals) {
+      final bank = RegisterBank.of(current.value.type!);
+      final active = inUse[bank]!, set = registers[bank]!;
       active.removeWhere((_, interval) => interval.end < current.start);
       final usable = [
-        if (!current.crossesCall) ...registers.volatile,
-        ...registers.preserved,
+        if (!current.crossesCall) ...set.volatile,
+        ...set.preserved,
       ];
       final free = usable.where((r) => !active.containsKey(r)).firstOrNull;
       if (free != null) {
         active[free] = current;
-        locations[current.value] = InRegister(free);
+        locations[current.value] = InRegister(bank, free);
         continue;
       }
       final victim = usable.reduce(
@@ -85,7 +102,7 @@ final class Allocation(final Liveness liveness, final RegisterSet registers) {
       }
       _spill(evicted);
       active[victim] = current;
-      locations[current.value] = InRegister(victim);
+      locations[current.value] = InRegister(bank, victim);
     }
   }
 

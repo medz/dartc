@@ -4,7 +4,6 @@
 library;
 
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:dartc/driver.dart';
@@ -13,8 +12,9 @@ import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
 import '../image/support.dart' show skipExecution;
-import '../lower/lower_test.dart' show runLowered;
+import '../lower/support.dart';
 import '../support/new_compiler.dart';
+import 'random_dart.dart';
 
 /// Exit codes of the official runtime and of the compiled program.
 Future<(int, int)> _both(String source) async {
@@ -28,36 +28,59 @@ Future<(int, int)> _both(String source) async {
   return (official.exitCode, compiled.exitCode);
 }
 
-/// A random expression over the supported operators.
-String _expression(Random random, int depth) {
-  const literals = [
-    '0',
-    '1',
-    '2',
-    '255',
-    '1_000_003',
-    '0xffffffffffffffff',
-    '0x8000000000000000',
-    '9223372036854775807',
-    '-9223372036854775808',
-    '0x123456789abcdef',
+/// A check that [found] is [printed], as the official runtime printed it.
+String _same(String found, Kind kind, String printed) {
+  if (kind != .float) return '$found == $printed';
+  return switch (printed) {
+    'NaN' => '$found != $found',
+    'Infinity' => '$found == double.infinity',
+    '-Infinity' => '$found == -double.infinity',
+    '0.0' => '$found == 0 && 1 / $found > 0',
+    '-0.0' => '$found == 0 && 1 / $found < 0',
+    _ => '$found == $printed',
+  };
+}
+
+/// Runs random functions everywhere and compares every bit of their results.
+Future<void> _compareRandom(int seed) async {
+  final generator = RandomDart(seed);
+  final functions = generator.generate(25);
+  final calls = generator.calls;
+  final directory = writeSources({
+    'print.dart':
+        '$functions\nvoid main() {\n'
+        '${calls.map((call) => '  print(${call.$1});\n').join()}}',
+  });
+  final official = await Process.run('$hostSdk/bin/dart', [
+    'run',
+    '${directory.path}/print.dart',
+  ]);
+  expect(official.exitCode, 0, reason: 'seed $seed: ${official.stderr}');
+  final printed = '${official.stdout}'.trim().split('\n');
+  expect(printed, hasLength(calls.length));
+  // Exits with the number of the first result that differs.
+  final checks = [
+    for (final (i, (call, kind)) in calls.indexed)
+      '  final ${kind.name} r$i = $call;\n'
+          '  if (!(${_same('r$i', kind, printed[i])})) exit(${i + 1});\n',
   ];
-  if (depth == 0 || random.nextInt(8) == 0) {
-    return random.nextBool()
-        ? literals[random.nextInt(literals.length)]
-        : '${random.nextInt(1 << 32)}';
-  }
-  if (random.nextInt(5) == 0) {
-    final operator = random.nextBool() ? '-' : '~';
-    return '$operator(${_expression(random, depth - 1)})';
-  }
-  final operator = const ['+', '-', '*', '&', '|', '^'][random.nextInt(6)];
-  final left = _expression(random, depth - 1);
-  final right = _expression(random, depth - 1);
-  // Often without parentheses, so precedence decides the grouping.
-  return random.nextBool()
-      ? '$left $operator $right'
-      : '($left) $operator ($right)';
+  final source =
+      "import 'dart:io';\n$functions\n"
+      'void main() {\n${checks.join()}  exit(100);\n}';
+  String reason(int? code) => code != null && code > 0 && code <= calls.length
+      ? 'seed $seed: ${calls[code - 1].$1} is not ${printed[code - 1]}'
+      : 'seed $seed: ended with $code';
+  final module = await translate(source);
+  final dartLevel = HirInterpreter(module).run();
+  expect(dartLevel, 100, reason: reason(dartLevel));
+  final machineLevel = runLowered(module);
+  expect(machineLevel, 100, reason: reason(machineLevel));
+  final path = '${directory.path}/main.dart';
+  File(path).writeAsStringSync(source);
+  final program = '${directory.path}/program';
+  writeProgram(await compileProgram(path, sdk: hostSdk), program);
+  final native = (await Process.run(program, const [])).exitCode;
+  expect(native, 100, reason: reason(native));
 }
 
 void main() {
@@ -75,6 +98,8 @@ void main() {
       'exit(7); exit(8);',
       'return; exit(8);',
       '1 + 2; { exit(~(5 - 9)); }',
+      'var n = 0; for (var i = 0; i < 9; i++) { n += i * i; } exit(n);',
+      'exit(5.5 % -2 == 1.5 && -7 % 3 == 2 ? 11 : 12);',
     ]) {
       final (official, compiled) = await _both(
         "import 'dart:io';\nvoid main() { $body }",
@@ -83,32 +108,33 @@ void main() {
     }
   }, skip: skipExecution);
 
-  test('random expressions agree with the official runtime', () async {
-    final random = Random(20261123);
-    final expressions = [for (var i = 0; i < 40; i++) _expression(random, 6)];
-    final directory = writeSources({
-      'print.dart':
-          'void main() {\n${expressions.map((e) => 'print($e);\n').join()}}',
-    });
-    final official = await Process.run('$hostSdk/bin/dart', [
-      'run',
-      '${directory.path}/print.dart',
-    ]);
-    expect(official.exitCode, 0, reason: '${official.stderr}');
-    final values = '${official.stdout}'.trim().split('\n').map(int.parse);
-    expect(values, hasLength(expressions.length));
-    for (final (i, value) in values.indexed) {
-      final source =
-          "import 'dart:io';\nvoid main() { exit(${expressions[i]}); }";
-      final module = await translate(source);
-      expect(HirInterpreter(module).run(), value, reason: expressions[i]);
-      expect(runLowered(module), value, reason: expressions[i]);
-      if (i % 8 != 0) continue;
-      final (code, compiled) = await _both(source);
-      expect(compiled, code, reason: expressions[i]);
-      expect(compiled, value & 0xff, reason: expressions[i]);
+  test('a wrong result would be noticed', () async {
+    // Each kind of check must fail for a value that differs slightly.
+    for (final (found, kind, printed) in [
+      ('1', Kind.integer, '2'),
+      ('true', Kind.boolean, 'false'),
+      ('0.1', Kind.float, '0.10000000000000002'),
+      ('0.0', Kind.float, '-0.0'),
+      ('-0.0', Kind.float, '0.0'),
+      ('1.0', Kind.float, 'NaN'),
+      ('double.nan', Kind.float, '1.0'),
+      ('1e308', Kind.float, 'Infinity'),
+      ('double.infinity', Kind.float, '-Infinity'),
+    ]) {
+      final module = await translate(
+        "import 'dart:io';\nvoid main() { final ${kind.name} r = $found; "
+        'if (!(${_same('r', kind, printed)})) exit(1); exit(100); }',
+      );
+      expect(HirInterpreter(module).run(), 1, reason: '$found, $printed');
+      expect(runLowered(module), 1, reason: '$found, $printed');
     }
-  }, skip: skipExecution);
+  });
+
+  for (var seed = 0; seed < 12; seed++) {
+    test('random functions, seed $seed', () async {
+      await _compareRandom(seed);
+    }, skip: skipExecution);
+  }
 
   test('the same source gives the same bytes', () async {
     final directory = writeSources({

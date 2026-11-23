@@ -7,7 +7,7 @@ void checkSupported(LirModule module) {
   for (final external in module.externals) {
     final LirSignature(:parameters, :result) = external.signature;
     for (final type in [...parameters, ?result]) {
-      if (type == .f64 || type == .ref) {
+      if (type == .ref) {
         throw EmitUnsupported(external.name, '$type');
       }
     }
@@ -19,7 +19,7 @@ void checkSupported(LirModule module) {
     Never reject(Object what) => throw EmitUnsupported(function.name, '$what');
     for (final block in function.blocks) {
       for (final value in [...block.parameters, ...block.instructions]) {
-        if (value.type == .f64 || value.type == .ref) reject(value.type!);
+        if (value.type == .ref) reject(value.type!);
       }
       for (final instruction in block.instructions) {
         switch (instruction) {

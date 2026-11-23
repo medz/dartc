@@ -6,29 +6,29 @@ import 'package:test/test.dart';
 import '../support/new_compiler.dart';
 
 void main() {
-  Future<SourceLibrary> loadFiles(Map<String, String> files) {
+  Future<SourceProgram> loadFiles(Map<String, String> files) {
     final directory = writeSources(files);
-    return loadLibrary('${directory.path}/main.dart', sdk: hostSdk);
+    return loadProgram('${directory.path}/main.dart', sdk: hostSdk);
   }
 
   test('loads a library with its parts', () async {
-    final library = await loadFiles({
+    final program = await loadFiles({
       'main.dart': "part 'part.dart';\nvoid main() {}",
       'part.dart': "part of 'main.dart';\nvoid f() {}",
     });
-    expect(library.units.map((unit) => unit.path.split('/').last), [
+    expect(program.main.units.map((unit) => unit.path.split('/').last), [
       'main.dart',
       'part.dart',
     ]);
-    expect(library.element.entryPoint, isNotNull);
+    expect(program.main.element.entryPoint, isNotNull);
   });
 
   test('follows a symbolic link', () async {
     final directory = writeSources({'real/main.dart': 'void main() {}'});
     final link = Link('${directory.path}/main.dart')
       ..createSync('${directory.path}/real/main.dart');
-    final library = await loadLibrary(link.path, sdk: hostSdk);
-    expect(library.units.single.path, endsWith('/real/main.dart'));
+    final program = await loadProgram(link.path, sdk: hostSdk);
+    expect(program.main.units.single.path, endsWith('/real/main.dart'));
   });
 
   test('positions count from one', () async {
@@ -101,10 +101,10 @@ void main() {
     const text =
         '// ignore: unused_local_variable\n'
         'void main() { var s = "// ignore: x"; } /* ignore */ // é ignore';
-    final library = await load(text);
-    final changed = library.units.single.ast.toSource();
+    final program = await load(text);
+    final changed = program.main.units.single.ast.toSource();
     expect(changed, contains('"// ignore: x"'));
-    expect(library.units.single.ast.end, text.length);
+    expect(program.main.units.single.ast.end, text.length);
   });
 
   test('warnings do not stop compilation', () async {
@@ -144,16 +144,18 @@ void main() {
     );
   });
 
-  test('libraries importing each other are checked once', () async {
-    await loadFiles({
+  test('libraries importing each other appear once', () async {
+    final program = await loadFiles({
       'main.dart': "import 'a.dart';\nvoid main() => a();",
       'a.dart': "import 'main.dart';\nvoid a() => main();",
     });
+    expect(program.libraries, hasLength(2));
+    expect(program.main.units.single.path, endsWith('/main.dart'));
   });
 
   test('missing files are reported', () async {
     await expectLater(
-      loadLibrary('/no/such/main.dart', sdk: hostSdk),
+      loadProgram('/no/such/main.dart', sdk: hostSdk),
       failsWith(['main.dart:1:1: File not found.']),
     );
     await expectLater(

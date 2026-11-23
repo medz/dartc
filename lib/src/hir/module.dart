@@ -1,28 +1,31 @@
-import 'instruction.dart';
+import 'block.dart';
+import 'value.dart';
 
-/// A straight run of instructions.
-final class HirBlock() {
-  final List<HirInstruction> instructions = [];
-  HirTerminator? terminator;
+/// A function, which may be called before its body is known.
+final class HirFunction(
+  @override final String name,
+  Iterable<HirType> parameters, [
+  @override final HirType? result,
+]) extends HirCallable {
+  @override
+  final List<HirType> parameters = .unmodifiable(parameters);
+  List<HirBlock>? _blocks;
 
-  /// Appends [instruction] and returns it.
-  T add<T extends HirInstruction>(T instruction) {
-    if (terminator != null) throw StateError('The block has already ended.');
-    instructions.add(instruction);
-    return instruction;
-  }
+  /// The body, whose first block is its entry.
+  List<HirBlock> get blocks =>
+      _blocks ?? (throw StateError('$name has no body.'));
+  HirBlock get entry => blocks.first;
 
-  /// Finishes this block.
-  void end(HirTerminator terminator) {
-    if (this.terminator != null) {
-      throw StateError('The block has already ended.');
-    }
-    this.terminator = terminator;
+  /// Supplies the body, once.
+  void define(Iterable<HirBlock> blocks) {
+    if (_blocks != null) throw StateError('$name already has a body.');
+    _blocks = .unmodifiable(blocks);
   }
 }
 
-/// A function body without parameters or a result.
-final class HirFunction(final String name, final HirBlock body);
-
-/// A whole program, started by [main].
-final class HirModule(final HirFunction main);
+/// A whole program, started by [main], which takes no arguments.
+///
+/// [functions] includes [main] and everything it can call.
+final class HirModule(final HirFunction main, Iterable<HirFunction> functions) {
+  final List<HirFunction> functions = .unmodifiable(functions);
+}

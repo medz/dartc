@@ -10,6 +10,7 @@ enum Condition(final int code) {
   lo(3),
   hi(8),
   ls(9),
+  mi(4),
   ge(10),
   lt(11),
   gt(12),
@@ -107,6 +108,24 @@ final class Arm64Assembler() {
   void msub(int d, int n, int m, int a) =>
       _three(0x9b008000 | a << 10, d, n, m);
 
+  // Doubles, with registers of the other bank.
+  void fadd(int d, int n, int m) => _three(0x1e602800, d, n, m);
+  void fsub(int d, int n, int m) => _three(0x1e603800, d, n, m);
+  void fmul(int d, int n, int m) => _three(0x1e600800, d, n, m);
+  void fdiv(int d, int n, int m) => _three(0x1e601800, d, n, m);
+  void fneg(int d, int n) => _three(0x1e614000, d, n, 0);
+  void fsqrt(int d, int n) => _three(0x1e61c000, d, n, 0);
+  void fmov(int d, int n) => _three(0x1e604000, d, n, 0);
+  void fcmp(int n, int m) => _three(0x1e602000, 0, n, m);
+
+  /// Converts the signed word in [n] to a double, and back toward zero.
+  void intToFloat(int d, int n) => _three(0x9e620000, d, n, 0);
+  void floatToInt(int d, int n) => _three(0x9e780000, d, n, 0);
+
+  /// Copies bits between the banks.
+  void bitsToFloat(int d, int n) => _three(0x9e670000, d, n, 0);
+  void floatToBits(int d, int n) => _three(0x9e660000, d, n, 0);
+
   void cmp(int n, int m) => _three(0xeb000000, zero, n, m);
 
   /// d = 1 if [condition] holds, else 0.
@@ -129,14 +148,19 @@ final class Arm64Assembler() {
     return _field(offset ~/ 8, 12, 'word offset');
   }
 
-  void load(int t, int n, int offset) =>
-      _emit(0xf9400000 | _scaled(offset) << 10 | n << 5 | t);
-  void store(int t, int n, int offset) =>
-      _emit(0xf9000000 | _scaled(offset) << 10 | n << 5 | t);
+  /// [float] selects a register of the double bank for [t].
+  void load(int t, int n, int offset, {bool float = false}) => _emit(
+    (float ? 0xfd400000 : 0xf9400000) | _scaled(offset) << 10 | n << 5 | t,
+  );
+  void store(int t, int n, int offset, {bool float = false}) => _emit(
+    (float ? 0xfd000000 : 0xf9000000) | _scaled(offset) << 10 | n << 5 | t,
+  );
 
   /// Addressing by base [n], possibly the stack pointer, plus register [m].
-  void loadIndexed(int t, int n, int m) => _three(0xf8606800, t, n, m);
-  void storeIndexed(int t, int n, int m) => _three(0xf8206800, t, n, m);
+  void loadIndexed(int t, int n, int m, {bool float = false}) =>
+      _three(float ? 0xfc606800 : 0xf8606800, t, n, m);
+  void storeIndexed(int t, int n, int m, {bool float = false}) =>
+      _three(float ? 0xfc206800 : 0xf8206800, t, n, m);
 
   void pushFrame() => _emit(0xa9bf7bfd);
   void popFrame() => _emit(0xa8c17bfd);

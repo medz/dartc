@@ -12,8 +12,8 @@ import 'package:dartc/translate.dart';
 /// [sdk] is the Dart SDK whose libraries the program uses. Throws
 /// [CompileFailure] if the program has an error or is not supported yet.
 Future<Uint8List> compileProgram(String path, {required String sdk}) async {
-  final library = await loadLibrary(path, sdk: sdk);
-  final code = emitArm64(lowerProgram(translateProgram(library)));
+  final source = await loadProgram(path, sdk: sdk);
+  final code = emitArm64(lowerProgram(translateProgram(source)));
   final name = Uri.file(path).pathSegments.last;
   return linkMacho(code, entry: entrySymbol, identifier: name);
 }

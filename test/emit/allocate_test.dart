@@ -1,6 +1,6 @@
 import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/allocate.dart';
-import 'package:dartc/src/emit/arm64/function.dart';
+import 'package:dartc/src/emit/arm64/convention.dart';
 import 'package:dartc/src/emit/liveness.dart';
 import 'package:dartc/src/emit/moves.dart';
 import 'package:test/test.dart';
@@ -112,14 +112,65 @@ void main() {
   });
 
   test('scratch, system and frame registers hold no values', () {
-    final values = [...arm64Registers.volatile, ...arm64Registers.preserved];
-    expect(values.toSet(), hasLength(values.length));
-    final reserved = [...arm64Scratch, 18, 29, 30, 31];
-    expect(reserved.toSet(), hasLength(reserved.length));
-    expect(values.toSet().intersection(reserved.toSet()), isEmpty);
-    // The calling convention fixes which registers survive calls.
-    expect(arm64Registers.volatile, everyElement(lessThan(18)));
-    expect(arm64Registers.preserved, everyElement(inInclusiveRange(19, 28)));
+    void check(RegisterBank bank, List<int> reserved, List<int> preserved) {
+      final set = arm64Registers[bank]!;
+      final values = [...set.volatile, ...set.preserved, ...reserved];
+      // Every register has exactly one role.
+      expect(values.toSet(), hasLength(values.length));
+      expect(values.toSet(), {for (var i = 0; i < 32; i++) i});
+      // The calling convention fixes which registers survive calls.
+      expect(set.preserved, preserved);
+    }
+
+    check(
+      .word,
+      [calleeScratch, leftScratch, rightScratch, farScratch, 18, 29, 30, 31],
+      [for (var i = 19; i <= 28; i++) i],
+    );
+    check(
+      .float,
+      [leftFloatScratch, rightFloatScratch],
+      [for (var i = 8; i <= 15; i++) i],
+    );
+  });
+
+  test('doubles and words do not compete for registers', () {
+    final made = function('f', [.i64, .f64], .f64, (block, p) {
+      final words = [for (var i = 0; i < 23; i++) block.add(ConstInt(i))];
+      final floats = [
+        for (var i = 0; i < 28; i++) block.add(ConstFloat(1.0 * i)),
+      ];
+      LirValue word = p[0], float = p[1];
+      for (final value in words) {
+        word = block.add(IntBinary(.add, word, value));
+      }
+      for (final value in floats) {
+        float = block.add(FloatBinary(.add, float, value));
+      }
+      return block.add(
+        FloatBinary(.add, float, block.add(Convert(.intToFloat, word))),
+      );
+    });
+    final allocation = Allocation(Liveness(made), arm64Registers);
+    expect(allocation.spillCount, 0);
+    for (final MapEntry(key: value, value: place)
+        in allocation.locations.entries) {
+      expect((place as InRegister).bank, RegisterBank.of(value.type!));
+    }
+  });
+
+  test('arguments follow the calling convention', () {
+    final signature = LirSignature([
+      for (var i = 0; i < 10; i++) ...[LirType.f64, i == 3 ? .ptr : .i64],
+    ]);
+    final places = argumentLocations(signature, .incoming);
+    for (var i = 0; i < 8; i++) {
+      expect(places[2 * i], InRegister(.float, i));
+      expect(places[2 * i + 1], InRegister(.word, i));
+    }
+    expect(places.skip(16), [
+      for (var i = 0; i < 4; i++) OnStack(.incoming, i),
+    ]);
   });
 
   test('values alive together never share a location', () {
@@ -134,10 +185,9 @@ void main() {
           final place = allocation.locations[a.value]!;
           if (a.crossesCall) {
             crossings++;
-            expect(
-              arm64Registers.volatile.map(InRegister.new),
-              isNot(contains(place)),
-            );
+            if (place case InRegister(:final bank, :final number)) {
+              expect(arm64Registers[bank]!.preserved, contains(number));
+            }
           }
           for (final b in intervals.skip(i + 1)) {
             if (a.start > b.end || b.start > a.end) continue;
@@ -151,10 +201,14 @@ void main() {
   });
 
   group('parallel moves', () {
-    const temporary = InRegister(99);
+    const temporary = InRegister(.word, 99);
+    const temporaries = {
+      RegisterBank.word: temporary,
+      RegisterBank.float: InRegister(.float, 99),
+    };
     List<Location> places(int count) => [
       for (var i = 0; i < count; i++)
-        i.isEven ? InRegister(i) : OnStack(.spill, i),
+        i.isEven ? InRegister(.word, i) : OnStack(.spill, i),
     ];
 
     void check(List<int> sources) {
@@ -162,10 +216,10 @@ void main() {
       final all = places(6);
       final moves = [
         for (final (i, source) in sources.indexed)
-          (source: all[source], destination: all[i]),
+          (source: all[source], destination: all[i], bank: RegisterBank.word),
       ];
       final content = <Location, int>{for (final (i, p) in all.indexed) p: i};
-      for (final move in sequentialize(moves, temporary)) {
+      for (final move in sequentialize(moves, temporaries)) {
         content[move.destination] = content[move.source]!;
       }
       for (final (i, place) in all.indexed) {
@@ -188,11 +242,35 @@ void main() {
 
     test('two separate cycles', () => check([1, 0, 3, 2, 5, 4]));
 
+    test('each bank breaks its own cycles', () {
+      Location place(RegisterBank bank, int i) => InRegister(bank, i);
+      final moves = [
+        for (final bank in RegisterBank.values)
+          for (var i = 0; i < 3; i++)
+            (
+              source: place(bank, (i + 1) % 3),
+              destination: place(bank, i),
+              bank: bank,
+            ),
+      ];
+      final content = {for (final move in moves) move.source: move.source};
+      for (final move in sequentialize(moves, temporaries)) {
+        for (final side in [move.source, move.destination]) {
+          expect((side as InRegister).bank, move.bank);
+        }
+        content[move.destination] = content[move.source]!;
+      }
+      for (final move in moves) {
+        expect(content[move.destination], move.source);
+      }
+    });
+
     test('moves in place disappear', () {
+      final place = OnStack(.spill, 0);
       expect(
         sequentialize([
-          (source: temporary, destination: temporary),
-        ], const InRegister(1)),
+          (source: place, destination: place, bank: .float),
+        ], temporaries),
         isEmpty,
       );
     });

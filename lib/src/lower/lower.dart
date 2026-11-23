@@ -1,66 +1,41 @@
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'function.dart';
+import 'system.dart';
+
 /// The function that starts the program and returns its exit code.
 const entrySymbol = '.start';
-
-final _exit = LirSignature([.i64]);
 
 /// Lowers a program to a closed machine-level module.
 LirModule lowerProgram(HirModule module) {
   verifyHir(module);
-  final main = _FunctionLowering().lower(module.main);
-  final start = LirBlock()..add(Call(main.name, main.signature, const []));
+  // Numbers keep functions apart, and apart from system functions.
+  final symbols = <HirCallable, String>{
+    for (final (i, function) in module.functions.indexed)
+      function: 'dart.$i.${function.name}',
+  };
+  final start = LirBlock()
+    ..add(Call(symbols[module.main]!, signatureOf(module.main), const []));
   start.end(Return(start.add(ConstInt(0))));
+  final functions = [
+    for (final function in module.functions)
+      FunctionLowering(function, symbols).lower(),
+    LirFunction(entrySymbol, LirSignature([], .i64), [start]),
+  ];
+  final called = {
+    for (final function in functions)
+      for (final block in function.blocks)
+        for (final call in block.instructions.whereType<Call>()) call.symbol,
+  };
   return LirModule(
-    functions: [
-      main,
-      LirFunction(entrySymbol, LirSignature([], .i64), [start]),
+    functions: functions,
+    externals: [
+      for (final external in [
+        LirExternal('exit', exitSignature),
+        LirExternal('fmod', fmodSignature),
+      ])
+        if (called.contains(external.name)) external,
     ],
-    externals: [LirExternal('exit', _exit)],
   );
-}
-
-final class _FunctionLowering() {
-  final _values = <HirInstruction, LirValue>{};
-  final _block = LirBlock();
-
-  LirFunction lower(HirFunction function) {
-    for (final instruction in function.body.instructions) {
-      _values[instruction] = _block.add(_instruction(instruction));
-    }
-    switch (function.body.terminator!) {
-      case HirReturn():
-        _block.end(Return());
-      case HirExit(:final code):
-        _block
-          ..add(Call('exit', _exit, [_values[code]!]))
-          ..end(Unreachable());
-    }
-    // A prefix keeps Dart names apart from system functions.
-    return LirFunction('dart.${function.name}', LirSignature([]), [_block]);
-  }
-
-  LirInstruction _instruction(HirInstruction instruction) {
-    switch (instruction) {
-      case HirInt(:final value):
-        return ConstInt(value);
-      case HirIntBinary(:final operator, :final left, :final right):
-        final IntOp op = switch (operator) {
-          .add => .add,
-          .subtract => .sub,
-          .multiply => .mul,
-          .and => .and,
-          .or => .or,
-          .xor => .xor,
-        };
-        return IntBinary(op, _values[left]!, _values[right]!);
-      case HirIntUnary(:final operator, :final operand):
-        final value = _values[operand]!;
-        return switch (operator) {
-          .negate => IntBinary(.sub, _block.add(ConstInt(0)), value),
-          .complement => IntBinary(.xor, value, _block.add(ConstInt(-1))),
-        };
-    }
-  }
 }

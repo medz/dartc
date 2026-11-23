@@ -7,12 +7,13 @@ import 'package:test/test.dart';
 void main() {
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
-      'lir': {},
-      'hir': {},
+      'graph': {},
+      'lir': {'graph'},
+      'hir': {'graph'},
       'source': {},
-      'translate': {'source', 'hir'},
-      'lower': {'hir', 'lir'},
-      'emit': {'lir'},
+      'translate': {'source', 'hir', 'graph'},
+      'lower': {'hir', 'lir', 'graph'},
+      'emit': {'lir', 'graph'},
       'image': {'emit'},
       'driver': {'source', 'translate', 'lower', 'emit', 'image'},
       'ir': {'interop'},

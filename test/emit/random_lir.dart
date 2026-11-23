@@ -11,7 +11,9 @@ final class RandomLir(final int seed, {String prefix = ''}) {
   final Random _random = Random(seed);
   final _done = <LirFunction>[];
   final _pool = <LirValue>[];
+  final _floats = <LirValue>[];
   late LirBlock _block;
+  late LirType _result;
   late List<LirBlock> _blocks;
 
   static const _interesting = [
@@ -34,6 +36,27 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     _ => _random.nextInt(1 << 32) << 32 | _random.nextInt(1 << 32),
   };
 
+  /// A double that is often an edge case.
+  double float() => switch (_random.nextInt(3)) {
+    0 => const [
+      0.0,
+      -0.0,
+      1.0,
+      -1.5,
+      1e308,
+      5e-324,
+      double.infinity,
+      double.negativeInfinity,
+      double.nan,
+      9007199254740993.0,
+    ][_random.nextInt(10)],
+    1 => _random.nextInt(200) / 8 - 12,
+    _ => _random.nextDouble() * 1e10 - 5e9,
+  };
+
+  /// An argument of [type].
+  Object argument(LirType type) => type == .f64 ? float() : integer();
+
   List<LirFunction> functions() {
     for (var i = 0; i < 5; i++) {
       _done.add(_function('$_prefix$i'));
@@ -41,31 +64,53 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     return _done;
   }
 
+  LirType _type() => _random.nextInt(3) == 0 ? .f64 : .i64;
+
   LirFunction _function(String name) {
-    final arity = _random.nextInt(13);
-    final signature = LirSignature(List.filled(arity, .i64), .i64);
+    final arity = _random.nextInt(21);
+    final signature = LirSignature([
+      for (var i = 0; i < arity; i++) _type(),
+    ], _random.nextInt(4) == 0 ? .f64 : .i64);
+    _result = signature.result!;
     _block = LirBlock(signature.parameters);
     _blocks = [_block];
-    _pool
-      ..clear()
-      ..addAll(_block.parameters);
-    _pool.add(_block.add(ConstInt(integer())));
+    _pool.clear();
+    _floats.clear();
+    _block.parameters.forEach(_keep);
+    _keep(_block.add(ConstInt(integer())));
+    _keep(_block.add(ConstFloat(float())));
     _statements(8 + _random.nextInt(30), 2);
     // Reading every remaining value at the end keeps them all alive.
     var result = _pool.first;
-    for (final value in _pool.skip(1)) {
+    for (final value in [..._pool.skip(1), ..._floats.map(_bits)]) {
       final op = const <IntOp>[.add, .xor, .sub][_random.nextInt(3)];
       result = _block.add(IntBinary(op, result, value));
     }
-    _block.end(Return(result));
+    _block.end(Return(_convertTo(signature.result!, result)));
     return LirFunction(name, signature, _blocks);
   }
+
+  void _keep(LirValue value) =>
+      (value.type == .f64 ? _floats : _pool).add(value);
+
+  /// The bits of a double, or 0 for NaN, whose bits are not specified.
+  LirValue _bits(LirValue value) {
+    final bits = _block.add(Convert(.floatBitsToInt, value));
+    final known = _block.add(Compare(.eq, value, value));
+    return _block.add(IntBinary(.mul, bits, known));
+  }
+
+  LirValue _convertTo(LirType type, LirValue value) =>
+      type == .f64 ? _block.add(Convert(.intToFloat, value)) : value;
+
+  LirValue _pickOf(LirType type) =>
+      type == .f64 ? _floats[_random.nextInt(_floats.length)] : _pick();
 
   LirValue _pick() => _pool[_random.nextInt(_pool.length)];
 
   void _statements(int count, int depth) {
     for (var i = 0; i < count; i++) {
-      switch (_random.nextInt(depth > 0 ? 16 : 13)) {
+      switch (_random.nextInt(depth > 0 ? 20 : 17)) {
         case 0:
           _pool.add(_block.add(ConstInt(integer())));
         case 1:
@@ -75,11 +120,13 @@ final class RandomLir(final int seed, {String prefix = ''}) {
           _address();
         case 3 || 4 when _done.isNotEmpty && depth == 2:
           _call();
-        case 13:
+        case 13 || 14 || 15 || 16:
+          _floatOperation();
+        case 17:
           _diamond(depth - 1);
-        case 14:
+        case 18:
           _loop(depth - 1);
-        case 15:
+        case 19:
           _exit();
         default:
           _arithmetic();
@@ -98,6 +145,35 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     _pool.add(_block.add(IntBinary(op, _pick(), right)));
   }
 
+  void _floatOperation() {
+    LirValue pick() => _pickOf(.f64);
+    switch (_random.nextInt(8)) {
+      case 0:
+        _keep(_block.add(ConstFloat(float())));
+      case 1:
+        _keep(_block.add(Convert(.intToFloat, _pick())));
+      case 2:
+        final relation = Relation.values[_random.nextInt(6)];
+        _keep(_block.add(Compare(relation, pick(), pick())));
+      case 3:
+        final op = FloatUnaryOp.values[_random.nextInt(2)];
+        _keep(_block.add(FloatUnary(op, pick())));
+      case 4:
+        _keep(_bits(pick()));
+      case 5:
+        // Small enough to convert back.
+        final mask = _block.add(ConstInt(0xfffffff));
+        final small = _block.add(IntBinary(.and, _pick(), mask));
+        final whole = _block.add(Convert(.intToFloat, small));
+        final eighth = _block.add(ConstFloat(-0.125));
+        final scaled = _block.add(FloatBinary(.mul, whole, eighth));
+        _keep(_block.add(Convert(.floatToInt, scaled)));
+      default:
+        final op = FloatOp.values[_random.nextInt(4)];
+        _keep(_block.add(FloatBinary(op, pick(), pick())));
+    }
+  }
+
   /// Address arithmetic that ends as an ordinary integer.
   void _address() {
     final base = _block.add(Convert(.intToPtr, _pick()));
@@ -108,7 +184,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
 
   void _call() {
     final target = _done[_random.nextInt(_done.length)];
-    final arguments = [for (final _ in target.signature.parameters) _pick()];
+    final arguments = target.signature.parameters.map(_pickOf).toList();
     final call = _random.nextBool()
         ? Call(target.name, target.signature, arguments)
         : CallIndirect(
@@ -118,7 +194,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
           );
     _block.add(call);
     // Sometimes the result is never used.
-    if (_random.nextInt(4) > 0) _pool.add(call);
+    if (_random.nextInt(4) > 0) _keep(call);
   }
 
   LirBlock _open(List<LirType> parameters) {
@@ -127,72 +203,86 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     return block;
   }
 
+  List<LirValue> _pickAll(List<LirType> types) => types.map(_pickOf).toList();
+
+  /// Restores the values available before a nested region.
+  void _restore(List<LirValue> words, List<LirValue> floats) {
+    _pool
+      ..clear()
+      ..addAll(words);
+    _floats
+      ..clear()
+      ..addAll(floats);
+  }
+
   /// Two sides computing different values for a shared continuation.
   void _diamond(int depth) {
-    final width = 1 + _random.nextInt(4);
+    final types = [for (var i = _random.nextInt(4); i >= 0; i--) _type()];
     final left = LirBlock(), right = LirBlock();
     _block.end(Branch(_pick(), LirEdge(left), LirEdge(right)));
-    final outer = List.of(_pool);
+    final words = List.of(_pool), floats = List.of(_floats);
     final ends = <LirBlock>[], results = <List<LirValue>>[];
     for (final side in [left, right]) {
       _blocks.add(side);
       _block = side;
       _statements(1 + _random.nextInt(6), depth);
       ends.add(_block);
-      results.add([for (var i = 0; i < width; i++) _pick()]);
-      _pool
-        ..clear()
-        ..addAll(outer);
+      results.add(_pickAll(types));
+      _restore(words, floats);
     }
-    final join = _open(List.filled(width, .i64));
+    final join = _open(types);
     for (final (i, end) in ends.indexed) {
       end.end(Jump(LirEdge(join, results[i])));
     }
     _block = join;
-    _pool.addAll(join.parameters);
+    join.parameters.forEach(_keep);
   }
 
   /// A counted loop whose back edge permutes its carried values.
   void _loop(int depth) {
-    final width = 1 + _random.nextInt(5);
+    final types = [for (var i = _random.nextInt(5); i >= 0; i--) _type()];
     final start = _block.add(ConstInt(_random.nextInt(4)));
-    final initial = [for (var i = 0; i < width; i++) _pick()];
-    final head = _open(List.filled(width + 1, .i64));
-    _block.end(Jump(LirEdge(head, [start, ...initial])));
+    final head = _open([.i64, ...types]);
+    _block.end(Jump(LirEdge(head, [start, ..._pickAll(types)])));
     final body = LirBlock(), exit = LirBlock();
     final [counter, ...carried] = head.parameters;
     head.end(Branch(counter, LirEdge(body), LirEdge(exit)));
-    _pool.addAll(carried);
-    final outer = List.of(_pool);
+    carried.forEach(_keep);
+    final words = List.of(_pool), floats = List.of(_floats);
     _blocks.add(body);
     _block = body;
     _statements(1 + _random.nextInt(6), depth);
     final one = _block.add(ConstInt(1));
     final next = _block.add(IntBinary(.sub, counter, one));
-    final rotated = [...carried.skip(1), _pick()]..shuffle(_random);
+    final rotated = [
+      for (final type in types)
+        if (carried.where((value) => value.type == type).toList()
+            case final same when _random.nextBool())
+          same[_random.nextInt(same.length)]
+        else
+          _pickOf(type),
+    ];
     _block.end(Jump(LirEdge(head, [next, ...rotated])));
-    _pool
-      ..clear()
-      ..addAll(outer);
+    _restore(words, floats);
     _blocks.add(exit);
     _block = exit;
   }
 
   /// An early return, with both edges of its branch carrying arguments.
   void _exit() {
-    final leave = LirBlock([.i64]), stay = LirBlock([.i64, .i64]);
+    final leave = LirBlock([_result]), stay = LirBlock([.i64, .f64]);
     final zero = _block.add(ConstInt(0x55));
     final rare = _block.add(Compare(.eq, _pick(), zero));
     _block.end(
       Branch(
         rare,
-        LirEdge(leave, [_pick()]),
-        LirEdge(stay, [_pick(), _pick()]),
+        LirEdge(leave, [_pickOf(_result)]),
+        LirEdge(stay, [_pick(), _pickOf(.f64)]),
       ),
     );
     leave.end(Return(leave.parameters.single));
     _blocks.addAll([leave, stay]);
     _block = stay;
-    _pool.addAll(stay.parameters);
+    stay.parameters.forEach(_keep);
   }
 }

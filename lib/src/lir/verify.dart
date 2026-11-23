@@ -1,3 +1,5 @@
+import 'package:dartc/graph.dart';
+
 import 'block.dart';
 import 'instruction.dart';
 import 'module.dart';
@@ -31,17 +33,19 @@ final class _FunctionVerifier(
 ) {
   final _blockOf = <LirValue, LirBlock>{};
   final _positionOf = <LirValue, int>{};
-  final _predecessors = <LirBlock, List<LirBlock>>{};
-  final _order = <LirBlock>[];
-  final _dominator = <LirBlock, LirBlock>{};
+  late final _dominators = Dominators(
+    function.entry,
+    (block) => block.terminator!.edges.map((edge) => edge.target),
+  );
 
   Never _fail(String message) => throw LirError('${function.name}: $message');
 
   void run() {
     _checkShape();
     _define();
-    _orderBlocks();
-    _findDominators();
+    if (_dominators.order.length != function.blocks.length) {
+      _fail('unreachable block');
+    }
     for (final block in function.blocks) {
       for (final (i, instruction) in block.instructions.indexed) {
         _checkUses(instruction.inputs, block, i);
@@ -66,7 +70,6 @@ final class _FunctionVerifier(
       for (final edge in end.edges) {
         if (!owned.contains(edge.target)) _fail('edge leaves the function');
         if (edge.target == function.entry) _fail('edge enters the entry block');
-        (_predecessors[edge.target] ??= []).add(block);
       }
       if (end is Invoke && identical(end.onReturn, end.onThrow)) {
         _fail('invoke shares one edge for both outcomes');
@@ -99,68 +102,13 @@ final class _FunctionVerifier(
     }
   }
 
-  /// Reverse postorder, computed without recursion.
-  void _orderBlocks() {
-    final visited = {function.entry};
-    final stack = [(function.entry, 0)];
-    while (stack.isNotEmpty) {
-      final (block, next) = stack.removeLast();
-      final edges = block.terminator!.edges;
-      if (next == edges.length) {
-        _order.add(block);
-        continue;
-      }
-      stack.add((block, next + 1));
-      if (visited.add(edges[next].target)) stack.add((edges[next].target, 0));
-    }
-    if (visited.length != function.blocks.length) _fail('unreachable block');
-    _order.setAll(0, _order.reversed.toList());
-  }
-
-  void _findDominators() {
-    final rank = {for (final (i, block) in _order.indexed) block: i};
-    _dominator[function.entry] = function.entry;
-    LirBlock meet(LirBlock a, LirBlock b) {
-      while (a != b) {
-        if (rank[a]! > rank[b]!) {
-          a = _dominator[a]!;
-        } else {
-          b = _dominator[b]!;
-        }
-      }
-      return a;
-    }
-
-    bool changed;
-    do {
-      changed = false;
-      for (final block in _order.skip(1)) {
-        final known = _predecessors[block]!.where(_dominator.containsKey);
-        final found = known.reduce(meet);
-        if (_dominator[block] != found) {
-          _dominator[block] = found;
-          changed = true;
-        }
-      }
-    } while (changed);
-  }
-
-  bool _dominates(LirBlock above, LirBlock below) {
-    var block = below;
-    while (block != above) {
-      if (block == function.entry) return false;
-      block = _dominator[block]!;
-    }
-    return true;
-  }
-
   void _checkUses(Iterable<LirValue> uses, LirBlock block, int position) {
     for (final value in uses) {
       final owner = _blockOf[value] ?? _fail('use of an undefined value');
       if (value.type == null) _fail('use of an instruction without a result');
       if (owner == block
           ? _positionOf[value]! >= position
-          : !_dominates(owner, block)) {
+          : !_dominators.dominates(owner, block)) {
         _fail('a definition does not dominate its use');
       }
     }

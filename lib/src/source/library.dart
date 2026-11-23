@@ -30,7 +30,7 @@ final class SourceUnit(
       problemAt(node.offset, message);
 }
 
-/// The program's first library, free of static errors.
+/// One resolved library.
 final class SourceLibrary(
   final LibraryElement element,
   Iterable<SourceUnit> units,
@@ -38,11 +38,20 @@ final class SourceLibrary(
   final List<SourceUnit> units = .unmodifiable(units);
 }
 
-/// Resolves the library at [path] against the Dart SDK at [sdk].
+/// A program free of static errors.
+///
+/// [libraries] starts with the one holding `main` and includes every library
+/// reached outside the SDK.
+final class SourceProgram(Iterable<SourceLibrary> libraries) {
+  final List<SourceLibrary> libraries = .unmodifiable(libraries);
+  SourceLibrary get main => libraries.first;
+}
+
+/// Resolves the program at [path] against the Dart SDK at [sdk].
 ///
 /// Throws [CompileFailure] if it, or any library it reaches outside the SDK,
 /// has a static error.
-Future<SourceLibrary> loadLibrary(String path, {required String sdk}) async {
+Future<SourceProgram> loadProgram(String path, {required String sdk}) async {
   final file = File(path);
   if (!file.existsSync()) {
     throw CompileFailure([SourceProblem(path, 1, 1, 'File not found.')]);
@@ -62,8 +71,10 @@ Future<SourceLibrary> loadLibrary(String path, {required String sdk}) async {
             _unit(unit).problemAt(diagnostic.offset, diagnostic.message),
   ];
   if (problems.isNotEmpty) throw CompileFailure(problems);
-  final first = libraries.first;
-  return SourceLibrary(first.element, first.units.map(_unit));
+  return SourceProgram([
+    for (final library in libraries)
+      SourceLibrary(library.element, library.units.map(_unit)),
+  ]);
 }
 
 SourceUnit _unit(ResolvedUnitResult result) =>

@@ -1,3 +1,4 @@
+import 'package:dartc/graph.dart';
 import 'package:dartc/lir.dart';
 
 /// The closed range of positions where a value needs a location.
@@ -17,7 +18,10 @@ final class Interval(final LirValue value, final int start) {
 /// 2n + 1, so a result may reuse the location of an operand that dies there.
 /// Block parameters are written at their block's first position.
 final class Liveness(final LirFunction function) {
-  final List<LirBlock> order = _reversePostorder(function.entry);
+  final List<LirBlock> order = reversePostorder(
+    function.entry,
+    (block) => block.terminator!.edges.map((edge) => edge.target),
+  );
   final intervals = <LirValue, Interval>{};
   final _liveIn = <LirBlock, Set<LirValue>>{};
   final _calls = <int>[];
@@ -30,22 +34,6 @@ final class Liveness(final LirFunction function) {
         (call) => interval.start <= call && interval.end > call,
       );
     }
-  }
-
-  static List<LirBlock> _reversePostorder(LirBlock entry) {
-    final order = <LirBlock>[], visited = {entry};
-    final stack = [(entry, 0)];
-    while (stack.isNotEmpty) {
-      final (block, next) = stack.removeLast();
-      final edges = block.terminator!.edges;
-      if (next == edges.length) {
-        order.add(block);
-        continue;
-      }
-      stack.add((block, next + 1));
-      if (visited.add(edges[next].target)) stack.add((edges[next].target, 0));
-    }
-    return order.reversed.toList();
   }
 
   static List<LirValue> _endUses(LirBlock block) => [

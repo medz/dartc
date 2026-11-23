@@ -57,11 +57,31 @@ void main() {
     _encodes(0x9ac32841, (a) => a.asr(1, 2, 3));
   });
 
+  test('floating point', () {
+    _encodes(0x1e632841, (a) => a.fadd(1, 2, 3));
+    _encodes(0x1e633841, (a) => a.fsub(1, 2, 3));
+    _encodes(0x1e630841, (a) => a.fmul(1, 2, 3));
+    _encodes(0x1e631841, (a) => a.fdiv(1, 2, 3));
+    _encodes(0x1e614041, (a) => a.fneg(1, 2));
+    _encodes(0x1e61c041, (a) => a.fsqrt(1, 2));
+    _encodes(0x1e604366, (a) => a.fmov(6, 27));
+    _encodes(0x1e6a2120, (a) => a.fcmp(9, 10));
+    _encodes(0x9e620041, (a) => a.intToFloat(1, 2));
+    _encodes(0x9e780041, (a) => a.floatToInt(1, 2));
+    _encodes(0x9e670041, (a) => a.bitsToFloat(1, 2));
+    _encodes(0x9e660041, (a) => a.floatToBits(1, 2));
+    _encodes(0xfd7fffe7, (a) => a.load(7, 31, 32760, float: true));
+    _encodes(0xfd000ba7, (a) => a.store(7, 29, 16, float: true));
+    _encodes(0xfc716be7, (a) => a.loadIndexed(7, 31, 17, float: true));
+    _encodes(0xfc316ba7, (a) => a.storeIndexed(7, 29, 17, float: true));
+  });
+
   test('comparisons', () {
     _encodes(0xeb0a013f, (a) => a.cmp(9, 10));
     const words = {
       Condition.eq: 0x9a9f17eb,
       Condition.ne: 0x9a9f07eb,
+      Condition.mi: 0x9a9f57eb,
       Condition.lt: 0x9a9fa7eb,
       Condition.le: 0x9a9fc7eb,
       Condition.gt: 0x9a9fd7eb,

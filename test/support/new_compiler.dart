@@ -24,9 +24,9 @@ Directory writeSources(Map<String, String> files) {
   return directory;
 }
 
-Future<SourceLibrary> load(String source) {
+Future<SourceProgram> load(String source) {
   final directory = writeSources({'main.dart': source});
-  return loadLibrary('${directory.path}/main.dart', sdk: hostSdk);
+  return loadProgram('${directory.path}/main.dart', sdk: hostSdk);
 }
 
 Future<HirModule> translate(String source) async =>

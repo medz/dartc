@@ -9,7 +9,7 @@ import '../emit/random_lir.dart';
 import '../lir/support.dart';
 import 'support.dart';
 
-typedef _Case = ({String function, List<int> arguments});
+typedef _Case = ({String function, List<Object> arguments});
 
 const _min = -0x8000000000000000, _max = 0x7fffffffffffffff;
 const _limit = 250;
@@ -27,7 +27,10 @@ LirModule _program(
   for (final (i, (:function, :arguments)) in cases.indexed) {
     final call = block.add(
       Call(function, signatures[function]!, [
-        for (final value in arguments) block.add(ConstInt(value)),
+        for (final value in arguments)
+          value is double
+              ? block.add(ConstFloat(value))
+              : block.add(ConstInt(value as int)),
       ]),
     );
     final same = block.add(
@@ -129,6 +132,148 @@ void main() {
       cases.add((function: 'address', arguments: [a, 0]));
     }
     await _agree(functions, cases);
+  }, skip: skipExecution);
+
+  test('every floating-point operation', () async {
+    const values = [
+      0.0,
+      -0.0,
+      1.0,
+      -2.5,
+      0.1,
+      1e308,
+      5e-324,
+      9007199254740993.0,
+      double.infinity,
+      double.negativeInfinity,
+      double.nan,
+    ];
+    final functions = <LirFunction>[], cases = <_Case>[];
+    // Results are compared by their bits, except that all NaNs are equal.
+    LirValue bits(LirBlock block, LirValue value) {
+      final word = block.add(Convert(.floatBitsToInt, value));
+      final known = block.add(Compare(.eq, value, value));
+      return block.add(IntBinary(.mul, word, known));
+    }
+
+    void pair(
+      String name,
+      LirValue Function(LirBlock b, LirValue x, LirValue y) build,
+    ) {
+      functions.add(
+        function(name, [.f64, .f64], .i64, (b, p) => build(b, p[0], p[1])),
+      );
+      for (final x in values) {
+        for (final y in values) {
+          cases.add((function: name, arguments: [x, y]));
+        }
+      }
+    }
+
+    for (final op in FloatOp.values) {
+      pair('op.${op.name}', (block, x, y) {
+        return bits(block, block.add(FloatBinary(op, x, y)));
+      });
+    }
+    for (final op in FloatUnaryOp.values) {
+      pair('op.${op.name}', (block, x, _) {
+        return bits(block, block.add(FloatUnary(op, x)));
+      });
+    }
+    for (final relation in Relation.values.where((r) => !r.isUnsigned)) {
+      pair('is.${relation.name}', (block, x, y) {
+        return block.add(Compare(relation, x, y));
+      });
+    }
+    functions.add(
+      function('from', [.i64], .i64, (block, p) {
+        return bits(block, block.add(Convert(.intToFloat, p[0])));
+      }),
+    );
+    functions.add(
+      function('raw', [.i64], .i64, (block, p) {
+        final value = block.add(Convert(.intBitsToFloat, p[0]));
+        return block.add(Convert(.floatBitsToInt, value));
+      }),
+    );
+    functions.add(
+      function('to', [.f64], .i64, (block, p) {
+        return block.add(Convert(.floatToInt, p[0]));
+      }),
+    );
+    for (final value in [0, 1, -1, _max, _min, 9007199254740993]) {
+      cases.add((function: 'from', arguments: [value]));
+      cases.add((function: 'raw', arguments: [value]));
+    }
+    for (final value in [0.0, -0.9, 1.9, -2.5, 1e18, -9223372036854775808.0]) {
+      cases.add((function: 'to', arguments: [value]));
+    }
+    await _agree(functions, cases);
+  }, skip: skipExecution);
+
+  test('floating-point arguments and results of every kind', () async {
+    // Both banks overflow to the stack, interleaved.
+    final types = [
+      for (var i = 0; i < 24; i++) i.isEven ? LirType.i64 : LirType.f64,
+    ];
+    final mixed = function('mixed', types, .f64, (block, p) {
+      LirValue sum = block.add(ConstFloat(0));
+      for (final (i, value) in p.indexed) {
+        final term = value.type == .i64
+            ? block.add(Convert(.intToFloat, value))
+            : value;
+        final weight = block.add(ConstFloat(i + 0.5));
+        sum = block.add(FloatBinary(.mul, sum, block.add(ConstFloat(1.25))));
+        sum = block.add(
+          FloatBinary(.add, sum, block.add(FloatBinary(.mul, term, weight))),
+        );
+      }
+      return sum;
+    });
+    final forward = function('forward', types, .i64, (block, p) {
+      final words = p.where((v) => v.type == .i64).toList().reversed.toList();
+      final floats = p.where((v) => v.type == .f64).toList().reversed.toList();
+      final result = block.add(
+        Call('mixed', mixed.signature, [
+          for (var i = 0; i < 12; i++) ...[words[i], floats[i]],
+        ]),
+      );
+      // The arguments must survive the call.
+      LirValue sum = result;
+      for (final value in floats) {
+        sum = block.add(FloatBinary(.add, sum, value));
+      }
+      LirValue bits = block.add(Convert(.floatBitsToInt, sum));
+      for (final value in words) {
+        bits = block.add(IntBinary(.xor, bits, value));
+      }
+      return bits;
+    });
+    await _agree(
+      [mixed, forward],
+      [
+        (
+          function: 'forward',
+          arguments: [for (var i = 0; i < 24; i++) i.isEven ? i * 7 : i / 3],
+        ),
+      ],
+    );
+  }, skip: skipExecution);
+
+  test('system functions taking doubles', () async {
+    final pow = LirSignature([.f64, .f64], .f64);
+    final block = LirBlock();
+    final result = block.add(
+      Call('pow', pow, [block.add(ConstFloat(1.5)), block.add(ConstFloat(8))]),
+    );
+    block.end(Return(block.add(Convert(.floatToInt, result))));
+    final module = LirModule(
+      functions: [
+        LirFunction('main', LirSignature([], .i64), [block]),
+      ],
+      externals: [LirExternal('pow', pow)],
+    );
+    expect(await execute(module), 25);
   }, skip: skipExecution);
 
   test('every constant shape', () async {
@@ -290,9 +435,10 @@ void main() {
         final random = RandomLir(seed, prefix: 'r');
         for (final made in random.functions()) {
           functions.add(made);
+          if (made.signature.result != .i64) continue;
           for (var i = 0; i < 4; i++) {
             final arguments = [
-              for (final _ in made.signature.parameters) random.integer(),
+              ...made.signature.parameters.map(random.argument),
             ];
             cases.add((function: made.name, arguments: arguments));
           }

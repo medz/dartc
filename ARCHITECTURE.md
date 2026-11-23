@@ -39,7 +39,7 @@
 
 | 阶段 | 为什么会结束 |
 | --- | --- |
-| translate | 每个声明一次 |
+| translate | 每个可达的声明一次 |
 | world | 函数、类、选择子的集合只增不减，上限由源码决定 |
 | lower、emit | 每个函数一次 |
 
@@ -52,13 +52,14 @@
 
 | 领域 | 职责 | 可以依赖 |
 | --- | --- | --- |
-| `lir` | 机器层 IR：数据、验证、打印、解释 | 无 |
-| `hir` | Dart 层 IR：数据、验证、打印、解释 | 无 |
+| `graph` | 控制流图的顺序和支配关系 | 无 |
+| `lir` | 机器层 IR：数据、验证、打印、解释 | `graph` |
+| `hir` | Dart 层 IR：数据、验证、打印、解释 | `graph` |
 | `source` | 调用 analyzer | analyzer |
-| `translate` | AST → HIR | `source` `hir` analyzer |
+| `translate` | AST → HIR，按需翻译可达的声明 | `source` `hir` `graph` analyzer |
 | `world` | 全程序闭包 | `hir` |
-| `lower` | HIR → LIR | `hir` `world` `lir` |
-| `emit` | LIR → 机器码 | `lir` |
+| `lower` | HIR → LIR | `hir` `world` `lir` `graph` |
+| `emit` | LIR → 机器码 | `lir` `graph` |
 | `image` | 机器码 → 文件 | `emit` |
 | `driver` | 把阶段串起来，CLI 和 API 共用 | 全部 |
 
