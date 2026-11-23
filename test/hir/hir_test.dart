@@ -136,30 +136,6 @@ void main() {
     operation('not: expected bool', (i, _, _) => HirUnary(.not, i));
     operation('==: expected int', (i, d, _) => HirCompare(.equal, i, d));
     operation('bool has no <', (_, _, b) => HirCompare(.less, b, b));
-    for (final (operator, bad) in [
-      (HirIntOperator.divide, 0),
-      (HirIntOperator.modulo, 0),
-      (HirIntOperator.shiftLeft, -1),
-      (HirIntOperator.shiftRight, -1),
-      (HirIntOperator.shiftRightUnsigned, -1),
-    ]) {
-      final message = '${operator.symbol} could throw';
-      rejects(message, () {
-        return body((block) {
-          final left = block.add(HirConst(1)), right = block.add(HirConst(bad));
-          block.add(HirIntBinary(operator, left, right));
-          return HirReturn();
-        });
-      });
-      rejects(message, () {
-        return body((block) {
-          final left = block.add(HirConst(1));
-          final right = block.add(HirUnary(.negateInt, left));
-          block.add(HirIntBinary(operator, left, right));
-          return HirReturn();
-        });
-      }, 'with a variable');
-    }
     rejects('unlisted callee', () {
       return body((block) {
         block.add(HirCall(HirFunction('f', const []), []));

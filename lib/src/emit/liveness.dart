@@ -8,6 +8,9 @@ final class Interval(final LirValue value, final int start) {
   /// Whether the value must survive a call inside its range.
   bool crossesCall = false;
 
+  /// Whether the value is used after a throw is caught.
+  bool crossesThrow = false;
+
   /// Extends the range to [position], which is never before the current end.
   void extend(int position) => end = position;
 }
@@ -36,15 +39,32 @@ final class Liveness(final LirFunction function) {
         (call) => interval.start <= call && interval.end > call,
       );
     }
+    for (final block in order) {
+      if (block.terminator case Invoke(:final onThrow)) {
+        for (final value in [
+          ...onThrow.arguments,
+          ...?_liveIn[onThrow.target],
+        ]) {
+          intervals[value]!.crossesThrow = true;
+        }
+      }
+    }
   }
 
   /// The values that exist before [call] and are used after it.
   Set<LirValue> liveAfter(LirCall call) => _liveAfter[call]!;
 
+  /// What the end of [block] uses, after a call it makes.
   static List<LirValue> _endUses(LirBlock block) => [
     ...block.terminator!.inputs,
     for (final edge in block.terminator!.edges) ...edge.arguments,
   ];
+
+  /// The call that ends [block], if there is one.
+  static LirCall? _endCall(LirBlock block) => switch (block.terminator) {
+    Invoke(:final call) => call,
+    _ => null,
+  };
 
   Set<LirValue> _liveOut(LirBlock block) => {
     for (final edge in block.terminator!.edges) ...?_liveIn[edge.target],
@@ -57,6 +77,7 @@ final class Liveness(final LirFunction function) {
       changed = false;
       for (final block in order.reversed) {
         final live = _liveOut(block)..addAll(_endUses(block));
+        live.addAll([...?_endCall(block)?.inputs]);
         for (final instruction in block.instructions.reversed) {
           live.remove(instruction);
           live.addAll(instruction.inputs);
@@ -74,6 +95,10 @@ final class Liveness(final LirFunction function) {
   void _recordCalls() {
     for (final block in order) {
       final live = _liveOut(block)..addAll(_endUses(block));
+      if (_endCall(block) case final call?) {
+        _liveAfter[call] = Set.of(live);
+        live.addAll(call.inputs);
+      }
       for (final instruction in block.instructions.reversed) {
         live.remove(instruction);
         if (instruction is LirCall) _liveAfter[instruction] = Set.of(live);
@@ -100,6 +125,13 @@ final class Liveness(final LirFunction function) {
         if (instruction.type != null) _include(instruction, position + 1);
       }
       position += 2;
+      if (_endCall(block) case final call?) {
+        for (final input in call.inputs) {
+          _include(input, position);
+        }
+        _calls.add(position);
+        position += 2;
+      }
       for (final value in [..._endUses(block), ..._liveOut(block)]) {
         _include(value, position);
       }

@@ -47,7 +47,7 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
         _assembler.mov(d, Arm64Assembler.frame);
       case ConstNull():
         _assembler.constant(d, 0);
-      case Store() || LirCall():
+      case Store() || LirCall() || Resume():
         throw StateError('Unchecked instruction: $instruction');
     }
   }

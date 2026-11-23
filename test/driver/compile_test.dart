@@ -41,6 +41,18 @@ String _same(String found, Kind kind, String printed) {
   };
 }
 
+/// What is printed for calls that throw, by the classes tested.
+const _thrown = ['!C3', '!C1', '!K', '!C0', '!U', '!E'];
+
+/// Runs [body], telling apart what it throws.
+String _caught(String body, [String Function(String code)? onThrow]) {
+  String done(String code) => onThrow?.call(code) ?? 'print("=$code");';
+  return '  try { $body }\n'
+      '  on C3 { ${done('!C3')} } on C1 { ${done('!C1')} }\n'
+      '  on K { ${done('!K')} } on C0 { ${done('!C0')} }\n'
+      '  on UnsupportedError { ${done('!U')} } on Error { ${done('!E')} }\n';
+}
+
 /// Runs random functions everywhere and compares every bit of their results.
 Future<void> _compareRandom(int seed) async {
   final generator = RandomDart(seed);
@@ -49,7 +61,7 @@ Future<void> _compareRandom(int seed) async {
   final directory = writeSources({
     'print.dart':
         '$functions\nvoid main() {\n'
-        '${calls.map((call) => '  print("=\${${call.$1}}");\n').join()}}',
+        '${calls.map((call) => _caught('print("=\${${call.$1}}");')).join()}}',
   });
   final official = await Process.run('$hostSdk/bin/dart', [
     'run',
@@ -64,8 +76,16 @@ Future<void> _compareRandom(int seed) async {
   // Exits with the number of the first result that differs.
   final checks = [
     for (final (i, (call, kind)) in calls.indexed)
-      '  final ${kind.name} r$i = $call;\n'
-          '  if (!(${_same('r$i', kind, printed[i])})) exit(${i + 1});\n',
+      if (_thrown.contains(printed[i]))
+        _caught('$call; exit(${i + 1});', (code) {
+          return printed[i] == code ? '' : 'exit(${i + 1});';
+        })
+      else
+        _caught(
+          'final ${kind.name} r$i = $call; '
+          'if (!(${_same('r$i', kind, printed[i])})) exit(${i + 1});',
+          (_) => 'exit(${i + 1});',
+        ),
   ];
   final source =
       "import 'dart:io';\n$functions\n"

@@ -13,14 +13,17 @@ const classes = <List<int>>[
 /// The bytes of an object of each class.
 const sizes = [16, 16, 32, 24];
 
+/// Ends a simulated throw.
+final class const Resumed() implements Exception;
+
 /// Memory with a stack, globals and tables, where wrong accesses throw.
 final class SimulatedMachine({
   @override final bool collectsAlways = false,
-  final int available = 1 << 40,
+  var int available = 1 << 40,
 }) implements Machine {
   final _regions = <int, ByteData>{};
   int _next = 0x100000, mapped = 0, mostMapped = 0, collections = 0;
-  late final int _frames, _maps, _classes, _globals;
+  late final int _frames, _maps, _classes, _globals, _handlers;
 
   /// References held by functions that are running, innermost last.
   final List<List<int>> frames = [];
@@ -30,9 +33,13 @@ final class SimulatedMachine({
   static const globalCount = 4;
   static const _code = 0x5000;
 
+  /// What the machine maps for itself.
+  static int get ownBytes => SimulatedMachine().mapped;
+
   this {
     _frames = mapMemory(1 << 16);
     _globals = mapMemory(globalCount * 8);
+    _handlers = mapMemory(4096);
     final words = <int>[];
     for (final offsets in classes) {
       words.addAll([offsets.length, ...offsets]);
@@ -159,6 +166,34 @@ final class SimulatedMachine({
   void store32(int address, int value) {
     final (region, at) = _find(address, 4);
     region.setUint32(at, value, .little);
+  }
+
+  /// What was written to standard error.
+  final List<int> errors = [];
+
+  /// The calls that have handlers, by return address, and where those are.
+  final Map<int, int> targets = {};
+
+  /// Where the last throw continued, with what.
+  ({int frame, int code, Object exception, Object trace})? resumed;
+
+  @override
+  int get handlers {
+    store32(_handlers, targets.length);
+    for (final (i, offset) in (targets.keys.toList()..sort()).indexed) {
+      store32(_handlers + 4 + i * 8, offset);
+      store32(_handlers + 8 + i * 8, targets[offset]!);
+    }
+    return _handlers;
+  }
+
+  @override
+  void writeError(int byte) => errors.add(byte);
+
+  @override
+  Never resume(int frame, int code, Object exception, Object trace) {
+    resumed = (frame: frame, code: code, exception: exception, trace: trace);
+    throw const Resumed();
   }
 
   @override

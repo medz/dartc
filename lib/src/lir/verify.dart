@@ -36,7 +36,7 @@ void verifyModule(LirModule module) {
       }
     });
   }
-  names.addAll(const [textSymbol, stackMapSymbol]);
+  names.addAll(const [textSymbol, stackMapSymbol, handlerSymbol]);
   for (final table in module.tables) {
     for (final function in table.functions) {
       if (module.signatures.containsKey(function)) continue;
@@ -79,6 +79,18 @@ final class _FunctionVerifier(
   }
 
   void _checkShape() {
+    if (function.checksStack) {
+      if (module.signatures[stackOverflowSymbol] != LirSignature([])) {
+        _fail('nothing to call when the stack overflows');
+      }
+      final hasLimit = module.statics.any(
+        (object) =>
+            object.name == stackLimitSymbol &&
+            object.writable &&
+            object.bytes.length >= 8,
+      );
+      if (!hasLimit) _fail('no stack limit to check');
+    }
     if (function.blocks.isEmpty) _fail('no blocks');
     if (function.blocks.toSet().length != function.blocks.length) {
       _fail('a block is listed twice');
@@ -151,6 +163,11 @@ final class _FunctionVerifier(
         if (!symbols.contains(symbol)) _fail('unknown symbol $symbol');
       case StaticObject(:final symbol):
         if (!objects.contains(symbol)) _fail('unknown object $symbol');
+      case Resume(:final frame, :final code, :final exception, :final trace):
+        _expect(frame, .i64, 'frame');
+        _expect(code, .i64, 'code');
+        _expect(exception, .ref, 'exception');
+        _expect(trace, .ref, 'stack trace');
       case IntBinary(:final left, :final right):
         _expect(left, .i64, 'integer operand');
         _expect(right, .i64, 'integer operand');

@@ -15,10 +15,12 @@ EmittedCode emitArm64(LirModule module) {
   checkSupported(module);
   final assembler = Arm64Assembler();
   final functions = <String, int>{textSymbol: 0};
-  final maps = <StackMap>[];
+  final maps = <StackMap>[], targets = <ThrowTarget>[];
   for (final function in module.functions) {
     functions[function.name] = assembler.offset;
-    maps.addAll(Arm64Function(function, assembler).emit());
+    final emitter = Arm64Function(function, assembler)..emit();
+    maps.addAll(emitter.stackMaps);
+    targets.addAll(emitter.throwTargets);
   }
   return EmittedCode(
     assembler.finish(),
@@ -27,7 +29,9 @@ EmittedCode emitArm64(LirModule module) {
     externals: module.externals.map((external) => external.name),
     data: {
       for (final data in module.data) data.name: data.bytes,
-      if (_usesStackMaps(module)) stackMapSymbol: encodeStackMaps(maps),
+      if (_uses(module, stackMapSymbol)) stackMapSymbol: encodeStackMaps(maps),
+      if (_uses(module, handlerSymbol))
+        handlerSymbol: encodeThrowTargets(targets),
     },
     tables: {for (final table in module.tables) table.name: table.functions},
     objects: {
@@ -39,14 +43,15 @@ EmittedCode emitArm64(LirModule module) {
         ),
     },
     stackMaps: maps,
+    throwTargets: targets,
   );
 }
 
-bool _usesStackMaps(LirModule module) => module.functions.any(
+bool _uses(LirModule module, String symbol) => module.functions.any(
   (function) => function.blocks.any(
     (block) => block.instructions.any(
       (instruction) =>
-          instruction is SymbolAddress && instruction.symbol == stackMapSymbol,
+          instruction is SymbolAddress && instruction.symbol == symbol,
     ),
   ),
 );

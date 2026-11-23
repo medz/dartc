@@ -9,6 +9,7 @@ import '../emit/random_lir.dart';
 import '../lir/support.dart';
 import 'agree.dart';
 import 'support.dart';
+import 'unwind.dart';
 
 const _min = -0x8000000000000000, _max = 0x7fffffffffffffff;
 void main() {
@@ -438,21 +439,29 @@ void main() {
       for (var seed = group * 25; seed < (group + 1) * 25; seed++) {
         final random = RandomLir(seed, prefix: 'r');
         for (final made in random.functions()) {
+          final name = 'catching ${made.name}';
           functions.add(made);
           // Cases are given numbers and give integers.
           if (made.signature.result != .i64 ||
               made.signature.parameters.contains(LirType.ref)) {
             continue;
           }
+          functions.add(
+            catching(name, made, (block, p) {
+              final thrown = block.add(Load(.i64, p[0], offset: 8));
+              final trace = block.add(Load(.i64, p[1], offset: 8));
+              return block.add(IntBinary(.sub, thrown, trace));
+            }),
+          );
           for (var i = 0; i < 4; i++) {
             final arguments = [
               ...made.signature.parameters.map(random.argument),
             ];
-            cases.add((function: made.name, arguments: arguments));
+            cases.add((function: name, arguments: arguments));
           }
         }
       }
-      await agree(functions, cases);
+      await agree([throwFunction, ...functions], cases);
     }, skip: skipExecution);
   }
 }

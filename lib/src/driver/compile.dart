@@ -21,21 +21,21 @@ Future<Uint8List> compileProgram(
 }) async {
   final program = translateProgram(
     await loadProgram(path, sdk: sdk),
-    collector: await loadCollector(sdk: sdk),
+    runtime: await loadRuntime(sdk: sdk),
   );
   final code = emitArm64(lowerProgram(program, collectsAlways: collectsAlways));
   final name = Uri.file(path).pathSegments.last;
   return linkMacho(code, entry: entrySymbol, identifier: name);
 }
 
-final _collectors = <String, Future<SourceProgram>>{};
+final _runtimes = <String, Future<SourceProgram>>{};
 
-/// The source of the collector, against the Dart SDK at [sdk].
-Future<SourceProgram> loadCollector({required String sdk}) =>
-    _collectors[sdk] ??= _loadCollector(sdk);
+/// The source of the runtime, against the Dart SDK at [sdk].
+Future<SourceProgram> loadRuntime({required String sdk}) =>
+    _runtimes[sdk] ??= _loadRuntime(sdk);
 
-Future<SourceProgram> _loadCollector(String sdk) async {
-  final package = Uri.parse('package:dartc/src/heap/collector.dart');
+Future<SourceProgram> _loadRuntime(String sdk) async {
+  final package = Uri.parse('package:dartc/heap.dart');
   final file = await Isolate.resolvePackageUri(package);
   if (file == null) throw StateError('$package is missing.');
   return loadProgram(file.toFilePath(), sdk: sdk);

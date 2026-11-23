@@ -61,7 +61,11 @@ final class EmittedCode(
 
   /// What each call keeps alive, sorted by where it returns to.
   Iterable<StackMap> stackMaps = const [],
+
+  /// Where calls that throw continue, sorted by where they return to.
+  Iterable<ThrowTarget> throwTargets = const [],
 }) {
+  final List<ThrowTarget> throwTargets = .unmodifiable(throwTargets);
   final Map<String, EmittedObject> objects = .unmodifiable(objects);
   final List<StackMap> stackMaps = .unmodifiable(stackMaps);
   final Map<String, List<String>> tables = .unmodifiable(tables);

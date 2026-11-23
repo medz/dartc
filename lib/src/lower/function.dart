@@ -37,6 +37,7 @@ final class FunctionLowering(
 ) {
   final _values = <HirValue, LirValue>{};
   final _blocks = <HirBlock, LirBlock>{};
+  final _added = <LirBlock>[];
 
   LirFunction lower() {
     for (final block in function.blocks) {
@@ -59,10 +60,13 @@ final class FunctionLowering(
       }
       lowered.end(_terminator(lowered, block.terminator!));
     }
+    final overflow = layout.module.stackOverflow;
     return LirFunction(
       symbols[function]!,
       signatureOf(function),
-      _blocks.values,
+      [..._blocks.values, ..._added],
+      checksStack:
+          function.checksStack && overflow != null && function != overflow,
     );
   }
 
@@ -78,13 +82,7 @@ final class FunctionLowering(
           _ => ConstInt(value == true ? 1 : 0),
         });
       case HirIntBinary(:final operator, :final left, :final right):
-        final constant = right is HirConst ? right.value as int : null;
-        return operators.integer(
-          operator,
-          _value(left),
-          _value(right),
-          constant,
-        );
+        return operators.integer(operator, _value(left), _value(right));
       case HirFloatBinary(:final operator, :final left, :final right):
         return operators.float(operator, _value(left), _value(right));
       case HirBoolBinary(:final operator, :final left, :final right):
@@ -96,7 +94,11 @@ final class FunctionLowering(
       case HirNull():
         return block.add(ConstNull());
       case HirNew(:final target):
-        return layout.allocate(block, target);
+        return layout.setClass(
+          block,
+          block.add(layout.allocation(block, target)),
+          target,
+        );
       case HirStatic(:final object):
         return block.add(StaticObject(statics.constant(object)));
       case HirLoadGlobal(:final global):
@@ -124,23 +126,56 @@ final class FunctionLowering(
       case HirStore(:final field, :final object, :final value):
         layout.store(block, field, _value(object), _value(value));
         return null;
+      case HirVirtualCall() || HirCall():
+        return block.add(_call(block, instruction as HirCalling));
+      case HirPrint(:final text):
+        output.write(block, standardOutput, '$text\n');
+        return null;
+      case HirWriteError(:final text):
+        output.write(block, standardError, text);
+        return null;
+      case HirIsInstance(:final test, :final object):
+        return layout.isInstance(block, statics.test(test), _value(object));
+    }
+  }
+
+  /// The call that [calling] makes, not yet part of [block].
+  LirCall _call(LirBlock block, HirCalling calling) {
+    switch (calling) {
+      case HirNew(:final target):
+        return layout.allocation(block, target);
       case HirVirtualCall(:final selector, :final receiver, :final arguments):
         final object = _value(receiver);
-        return block.add(
-          CallIndirect(
-            layout.lookUp(block, selector, object),
-            _selectorSignature(selector),
-            [object, ...arguments.map(_value)],
-          ),
+        return CallIndirect(
+          layout.lookUp(block, selector, object),
+          _selectorSignature(selector),
+          [object, ...arguments.map(_value)],
         );
-      case HirPrint(:final text):
-        output.print(block, text);
-        return null;
       case HirCall(:final target, :final arguments):
-        return block.add(
-          Call(symbols[target]!, signatureOf(target), arguments.map(_value)),
+        return Call(
+          symbols[target]!,
+          signatureOf(target),
+          arguments.map(_value),
         );
     }
+  }
+
+  Invoke _invoke(LirBlock block, HirInvoke invoke) {
+    final HirInvoke(:call, :onReturn, :onThrow) = invoke;
+    var normal = _edge(onReturn);
+    if (call is HirNew) {
+      // Objects get their class before they are used.
+      final made = LirBlock([.ref]);
+      _added.add(made);
+      layout.setClass(made, made.parameters.single, call.target);
+      made.end(
+        Jump(
+          LirEdge(normal.target, [made.parameters.single, ...normal.arguments]),
+        ),
+      );
+      normal = LirEdge(made);
+    }
+    return Invoke(_call(block, call), normal, _edge(onThrow));
   }
 
   LirEdge _edge(HirEdge edge) =>
@@ -154,6 +189,10 @@ final class FunctionLowering(
         return Branch(_value(condition), _edge(ifTrue), _edge(ifFalse));
       case HirReturn(:final value):
         return Return(value == null ? null : _value(value));
+      case HirThrow(:final exception, :final trace):
+        return Throw(_value(exception), _value(trace));
+      case final HirInvoke invoke:
+        return _invoke(block, invoke);
       case HirExit(:final code):
         block.add(callSystem('exit', [_value(code)]));
         return Unreachable();

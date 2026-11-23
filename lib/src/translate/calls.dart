@@ -4,6 +4,7 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'checks.dart';
 import 'constant.dart';
 import 'describe.dart';
 import 'members.dart';
@@ -25,6 +26,12 @@ final class CallTranslator(
     if (element is! ExecutableElement) _unsupported(node, describe(node));
     if (!isInstanceMember(element)) return _static(node, element);
     if (element is! MethodElement) _unsupported(node, describe(node));
+    if (target != null && _isToInt(element, target) && !node.isNullAware) {
+      return CheckedOperations(
+        _scope,
+        _builder,
+      ).toInt(_evaluator.value(target));
+    }
     if (target is SuperExpression) {
       return superMember(
         node,
@@ -46,6 +53,14 @@ final class CallTranslator(
         : call(receiver);
   }
 
+  static bool _isToInt(MethodElement element, Expression target) {
+    final type = target.staticType;
+    return element.displayName == 'toInt' &&
+        type != null &&
+        (type.isDartCoreInt || type.isDartCoreDouble) &&
+        type.nullabilitySuffix == .none;
+  }
+
   HirValue _this(AstNode node) =>
       _builder.receiver ?? _unsupported(node, 'this here');
 
@@ -54,7 +69,7 @@ final class CallTranslator(
   /// Where a null-aware target is null, a use that [isNullAware] itself is
   /// skipped anyway; others would have to be skipped with it.
   HirValue object(Expression target, {bool isNullAware = false}) {
-    if (_isNullAware(target) && !isNullAware) {
+    if (hasNullAware(target) && !isNullAware) {
       _unsupported(target.parent!, 'null-aware chains');
     }
     if (classOf(target.staticType) == null) {
@@ -63,7 +78,7 @@ final class CallTranslator(
     return _evaluator.valueAs(target, .reference);
   }
 
-  static bool _isNullAware(Expression target) => switch (target) {
+  static bool hasNullAware(Expression target) => switch (target) {
     MethodInvocation(:final isNullAware) ||
     PropertyAccess(:final isNullAware) ||
     IndexExpression(:final isNullAware) => isNullAware,
@@ -135,11 +150,11 @@ final class CallTranslator(
   HirValue? _machine(HirMachineOp op, List<Argument> arguments) {
     final call = _builder.add(
       HirMachine(op, [
-        for (final argument in arguments)
-          _evaluator.valueAs(argument.argumentExpression, .integer),
+        for (final (i, argument) in arguments.indexed)
+          _evaluator.valueAs(argument.argumentExpression, op.parameters[i]),
       ]),
     );
-    if (op == .trap) _builder.end(HirUnreachable());
+    if (op == .trap || op == .resume) _builder.end(HirUnreachable());
     return call.type == null ? null : call;
   }
 
@@ -161,9 +176,9 @@ final class CallTranslator(
     ExecutableElement element,
     List<HirValue> arguments,
   ) {
-    final call = _builder.add(HirCall(function, arguments));
+    final result = _builder.call(HirCall(function, arguments));
     if (element.returnType is NeverType) _builder.end(HirUnreachable());
-    return call.type == null ? null : call;
+    return result;
   }
 
   /// Creates an object, or calls a factory.
@@ -185,14 +200,14 @@ final class CallTranslator(
     }
     if (element.isFactory) {
       final factory = _scope.factoryOf(element);
-      return _builder.add(
+      return _builder.call(
         HirCall(factory, ordered(element, supplied(node.argumentList))),
-      );
+      )!;
     }
     final created = _scope.createdClass(class_);
     final arguments = ordered(element, supplied(node.argumentList));
-    final object = _builder.add(HirNew(created));
-    _builder.add(
+    final object = _builder.create(created);
+    _builder.call(
       HirCall(_scope.initializerOf(element), [object, ...arguments]),
     );
     return object;
@@ -260,14 +275,14 @@ final class CallTranslator(
       names,
       (what) => _unsupported(node, what),
     );
-    final call = _builder.add(
+    final result = _builder.call(
       HirVirtualCall(selector, receiver, [
         ...positional,
         for (final name in names) named[name]!,
       ]),
     );
     if (element.returnType is NeverType) _builder.end(HirUnreachable());
-    return call.type == null ? null : call;
+    return result;
   }
 
   void _checkMember(AstNode node, ExecutableElement element) {

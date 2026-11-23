@@ -5,18 +5,21 @@ import 'builder.dart';
 import 'describe.dart';
 import 'expression.dart';
 import 'scope.dart';
+import 'try_statement.dart';
 import 'types.dart';
 
 /// Translates the statements of one function.
 final class StatementTranslator(
-  ProgramScope scope,
+  final ProgramScope _scope,
   final FunctionBuilder _builder,
 ) {
-  final expressions = ExpressionTranslator(scope, _builder);
+  final expressions = ExpressionTranslator(_scope, _builder);
+  late final _tries = TryTranslator(_scope, _builder, statement);
 
-  /// Where `break` and `continue` statements go, by the statement they name.
-  final _breaks = <AstNode, Join>{};
-  final _continues = <AstNode, Join>{};
+  /// Where `break` and `continue` statements go, by the statement they name,
+  /// with the number of `finally` blocks around.
+  final _breaks = <AstNode, (Join, int)>{};
+  final _continues = <AstNode, (Join, int)>{};
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -56,17 +59,17 @@ final class StatementTranslator(
         _switch(node);
       case LabeledStatement(statement: final inner):
         final exit = _builder.join(node);
-        _breaks[inner] = exit;
+        _breaks[inner] = (exit, _tries.depth);
         statement(inner);
         _builder
           ..jump(exit)
           ..enter(exit);
       case BreakStatement(:final target):
-        final exit = _breaks[target] ?? _unsupported(node, 'this break');
-        _builder.jump(exit);
+        _goTo(_breaks[target] ?? _unsupported(node, 'this break'));
       case ContinueStatement(:final target):
-        final next = _continues[target] ?? _unsupported(node, 'this continue');
-        _builder.jump(next);
+        _goTo(_continues[target] ?? _unsupported(node, 'this continue'));
+      case TryStatement():
+        _tries.translate(node);
       case ReturnStatement(:final expression):
         _return(expression);
       default:
@@ -74,14 +77,19 @@ final class StatementTranslator(
     }
   }
 
+  void _goTo((Join, int) target) {
+    final (join, depth) = target;
+    _tries.leave(depth, (_) => _builder.jump(join));
+  }
+
   void _return(Expression? expression) {
     final result = _builder.function.result;
     if (result == null) {
       if (expression != null) expressions.effect(expression);
-      _builder.end(HirReturn());
+      _tries.leave(0, (_) => _builder.end(HirReturn()));
     } else {
       final value = expressions.valueAs(expression!, result);
-      _builder.end(HirReturn(value));
+      _tries.leave(0, (kept) => _builder.end(HirReturn(kept)), value);
     }
   }
 
@@ -135,8 +143,8 @@ final class StatementTranslator(
 
   void _while(WhileStatement node) {
     final head = _builder.join(node), exit = _builder.join(node);
-    _breaks[node] = exit;
-    _continues[node] = head;
+    _breaks[node] = (exit, _tries.depth);
+    _continues[node] = (head, _tries.depth);
     _builder
       ..jump(head)
       ..enter(head);
@@ -149,8 +157,8 @@ final class StatementTranslator(
   void _do(DoStatement node) {
     final head = _builder.join(node), exit = _builder.join(node);
     final test = _builder.join(node);
-    _breaks[node] = exit;
-    _continues[node] = test;
+    _breaks[node] = (exit, _tries.depth);
+    _continues[node] = (test, _tries.depth);
     _builder
       ..jump(head)
       ..enter(head);
@@ -172,8 +180,8 @@ final class StatementTranslator(
     }
     final head = _builder.join(node), exit = _builder.join(node);
     final update = _builder.join(node);
-    _breaks[node] = exit;
-    _continues[node] = update;
+    _breaks[node] = (exit, _tries.depth);
+    _continues[node] = (update, _tries.depth);
     _builder
       ..jump(head)
       ..enter(head);
@@ -190,7 +198,7 @@ final class StatementTranslator(
   void _switch(SwitchStatement node) {
     final value = expressions.value(node.expression);
     final exit = _builder.join(node);
-    _breaks[node] = exit;
+    _breaks[node] = (exit, _tries.depth);
     _cases(node.members, 0, value, exit);
     _builder.enter(exit);
   }

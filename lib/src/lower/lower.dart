@@ -5,11 +5,15 @@ import 'dispatch.dart';
 import 'function.dart';
 import 'machine.dart';
 import 'output.dart';
+import 'runtime.dart';
 import 'statics.dart';
 import 'system.dart';
 
 /// The function that starts the program and returns its exit code.
 const entrySymbol = '.start';
+
+/// The exit code of a program that throws what nothing catches.
+const _uncaughtCode = 255;
 
 /// Lowers a program to a closed machine-level module.
 ///
@@ -24,7 +28,11 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
   final output = OutputData();
   final layout = ObjectLayout(module, symbols);
   final statics = StaticData(module, layout);
-  final machine = MachineLowering(statics, collectsAlways: collectsAlways);
+  final machine = MachineLowering(
+    statics,
+    output,
+    collectsAlways: collectsAlways,
+  );
   final bodies = [
     for (final function in module.functions)
       FunctionLowering(
@@ -36,17 +44,12 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
         machine,
       ).lower(),
   ];
-  final start = LirBlock();
-  if (output.isUsed) ignoreBrokenPipes(start);
-  start.add(Call(symbols[module.main]!, signatureOf(module.main), const []));
-  start.end(Return(start.add(ConstInt(0))));
   final functions = [
     ...bodies,
     ...layout.functions,
-    if (module.allocate case final allocate?)
-      _allocateFunction(symbols[allocate]!, signatureOf(allocate)),
+    ...runtimeFunctions(module, symbols),
     if (output.isUsed) writeFunction(),
-    LirFunction(entrySymbol, LirSignature([], .i64), [start]),
+    _startFunction(module, symbols, output),
   ];
   final called = {
     for (final function in functions)
@@ -60,16 +63,47 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
           in systemFunctions.entries)
         if (called.contains(name)) LirExternal(name, signature),
     ],
-    data: [...output.data, if (module.allocate != null) statics.classTable()],
+    data: [
+      ...output.data,
+      ...statics.tables,
+      if (module.allocate != null) statics.classTable(),
+    ],
     tables: layout.tables,
-    statics: statics.objects,
+    statics: [
+      ...statics.objects,
+      if (module.stackOverflow != null) stackLimit(),
+    ],
   );
 }
 
-/// Makes objects of the addresses that function [symbol] gives.
-LirFunction _allocateFunction(String symbol, LirSignature signature) {
-  final block = LirBlock([.i64]);
-  final address = block.add(Call(symbol, signature, block.parameters));
-  block.end(Return(block.add(Convert(.intToRef, address))));
-  return LirFunction('.allocate', LirSignature([.i64], .ref), [block]);
+/// Starts the program and reports what nothing catches.
+LirFunction _startFunction(
+  HirModule module,
+  Map<HirCallable, String> symbols,
+  OutputData output,
+) {
+  final start = LirBlock(), done = LirBlock();
+  final blocks = [start, done];
+  if (output.isUsed) ignoreBrokenPipes(start);
+  if (module.stackOverflow != null) setStackLimit(start);
+  final main = Call(symbols[module.main]!, signatureOf(module.main), const []);
+  if (module.uncaught case final uncaught?) {
+    final failed = LirBlock([.ref, .ref]);
+    start.end(Invoke(main, LirEdge(done), LirEdge(failed)));
+    failed
+      ..add(
+        Call(symbols[uncaught]!, signatureOf(uncaught), [
+          failed.parameters.first,
+        ]),
+      )
+      ..add(callSystem('exit', [failed.add(ConstInt(_uncaughtCode))]))
+      ..end(Unreachable());
+    blocks.add(failed);
+  } else {
+    start
+      ..add(main)
+      ..end(Jump(LirEdge(done)));
+  }
+  done.end(Return(done.add(ConstInt(0))));
+  return LirFunction(entrySymbol, LirSignature([], .i64), blocks);
 }

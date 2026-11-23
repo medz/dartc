@@ -3,14 +3,16 @@ part of 'random_dart.dart';
 /// Expressions of the variables and functions there are.
 extension on RandomDart {
   String _assignment(Kind kind, int depth) {
-    final variable = _any(_variables(kind));
+    final variable = _any(_assignable(kind));
     if (_random.nextBool()) return '$variable = ${_expression(kind, depth)}';
     final (operator, right) = switch (kind) {
       .integer =>
         _chance(3)
             ? (
                 _any(['~/', '%', '<<', '>>', '>>>']),
-                '${1 + _random.nextInt(70)}',
+                _mayThrow && _chance(8)
+                    ? _expression(.integer, 1)
+                    : '${1 + _random.nextInt(70)}',
               )
             : (
                 _any(['+', '-', '*', '&', '|', '^']),
@@ -52,7 +54,9 @@ extension on RandomDart {
         }
       case 0:
         return '(${inner(.boolean)} ? ${inner(kind)} : ${inner(kind)})';
-      case 1 when _variables(kind).isNotEmpty:
+      case 3 when _mayThrow && _chance(8):
+        return '(${inner(.boolean)} ? ${inner(kind)} : throw ${inner(.object)})';
+      case 1 when _assignable(kind).isNotEmpty:
         return '(${_assignment(kind, depth - 1)})';
       case 2:
         final matching = _functions.where((f) => f.result == kind).toList();
@@ -73,7 +77,8 @@ extension on RandomDart {
     final variables = _variables(.object);
     if (variables.isEmpty || _chance(3)) return _creation(inner);
     final variable = _any(variables);
-    return switch (_random.nextInt(4)) {
+    return switch (_random.nextInt(_mayThrow ? 5 : 4)) {
+      4 => '$variable.o0!',
       0 => '(${inner(.object)} + ${inner(.object)})',
       1 => '($variable.o0 ?? ${inner(.object)})',
       2 => '($variable.o0 ??= ${inner(.object)})',
@@ -94,7 +99,9 @@ extension on RandomDart {
         return '(${_any(['-', '~'])}(${inner(.integer)}))';
       case 1:
         final operator = _any(['~/', '%', '<<', '>>', '>>>']);
-        final right = operator == '~/' || operator == '%'
+        final right = _mayThrow && _chance(8)
+            ? inner(.integer)
+            : operator == '~/' || operator == '%'
             ? _any([
                 '1',
                 '2',
@@ -107,8 +114,12 @@ extension on RandomDart {
               ])
             : '${_random.nextInt(70)}';
         return '(${inner(.integer)} $operator $right)';
-      case 2 when _variables(.integer).isNotEmpty:
-        final variable = _any(_variables(.integer));
+      case 3 when _mayThrow && _chance(2):
+        return _chance(2)
+            ? '(${inner(.float)}).toInt()'
+            : '(${inner(.float)} ~/ ${inner(.integer)})';
+      case 2 when _assignable(.integer).isNotEmpty:
+        final variable = _any(_assignable(.integer));
         return '(${_any(['$variable++', '++$variable', '$variable--'])})';
       default:
         final operator = _any(['+', '-', '*', '&', '|', '^']);

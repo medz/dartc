@@ -13,8 +13,11 @@ extension Unsupported on SourceUnit {
 }
 
 /// A block entered from several places, which agree on some variables.
+///
+/// Its parameters are the results that those supply, then the variables.
 final class Join._(
   final HirBlock _block,
+  final int _resultCount,
   final List<VariableElement> _variables,
 );
 
@@ -55,7 +58,55 @@ final class FunctionBuilder(
     );
   }
 
-  T add<T extends HirInstruction>(T instruction) => _block.add(instruction);
+  /// Where throws go, innermost last.
+  final _handlers = <Join>[];
+
+  /// The exceptions and traces of the `catch` clauses around here.
+  final List<(HirValue, HirValue)> caught = [];
+
+  /// Adds an instruction that cannot throw.
+  T add<T extends HirInstruction>(T instruction) {
+    if (instruction is HirCalling) throw StateError('$instruction may throw.');
+    return _block.add(instruction);
+  }
+
+  /// Adds [calling], returning its result, if any.
+  HirValue? call(HirCalling calling) {
+    if (_handlers.isEmpty) {
+      _block.add(calling);
+      return calling.type == null ? null : calling;
+    }
+    final next = HirBlock([?calling.type]);
+    _block.end(HirInvoke(calling, HirEdge(next), _edge(_handlers.last)));
+    _block = next;
+    return next.parameters.firstOrNull;
+  }
+
+  /// Creates an object of [class_].
+  HirValue create(HirClass class_) => call(HirNew(class_))!;
+
+  /// Throws [exception] with [trace].
+  void raise(HirValue exception, HirValue trace) => _handlers.isEmpty
+      ? end(HirThrow(exception, trace))
+      : jumpWith(_handlers.last, [exception, trace]);
+
+  /// Does [body], where throws go to [handler], which receives the exception
+  /// and its trace.
+  void within(Join handler, void Function() body) {
+    _handlers.add(handler);
+    body();
+    _handlers.removeLast();
+  }
+
+  /// Calls [thrower], which throws, if [failed] holds.
+  void throwIf(
+    HirValue failed,
+    HirFunction thrower, [
+    List<HirValue> arguments = const [],
+  ]) => branch(failed, () {
+    call(HirCall(thrower, arguments));
+    end(HirUnreachable());
+  }, () {});
 
   /// A value that is never used, where one is needed.
   HirValue placeholder(HirType type) => add(switch (type) {
@@ -95,30 +146,41 @@ final class FunctionBuilder(
   ///
   /// Every variable declared outside and assigned inside becomes a parameter.
   /// [result] is the type of a value that each predecessor also supplies.
-  Join join(AstNode construct, [HirType? result]) {
+  Join join(AstNode construct, [HirType? result]) =>
+      joinAll(construct, [?result]);
+
+  /// Like [join], with any number of [results].
+  Join joinAll(AstNode construct, List<HirType> results) {
     final variables = [
       for (final variable in assignedIn(construct))
         if (_types.containsKey(variable)) variable,
     ];
     final block = HirBlock([
+      ...results,
       for (final variable in variables) _types[variable]!,
-      ?result,
     ]);
-    return Join._(block, variables);
+    return Join._(block, results.length, variables);
   }
 
-  HirEdge _edge(Join join, [HirValue? result]) =>
-      HirEdge(join._block, [...join._variables.map(read), ?result]);
+  HirEdge _edge(Join join, [List<HirValue> results = const []]) =>
+      HirEdge(join._block, [...results, ...join._variables.map(read)]);
 
-  void jump(Join join, [HirValue? result]) => end(HirJump(_edge(join, result)));
+  void jump(Join join, [HirValue? result]) => jumpWith(join, [?result]);
 
-  /// Continues at [join], returning the value its predecessors supplied.
+  void jumpWith(Join join, List<HirValue> results) =>
+      end(HirJump(_edge(join, results)));
+
+  /// What the predecessors of [join] supply.
+  List<HirValue> resultsOf(Join join) =>
+      join._block.parameters.take(join._resultCount).toList();
+
+  /// Continues at [join], returning the first value its predecessors supply.
   HirValue? enter(Join join) {
     _block = join._block;
     for (final (i, variable) in join._variables.indexed) {
-      _values[variable] = join._block.parameters[i];
+      _values[variable] = join._block.parameters[join._resultCount + i];
     }
-    return join._block.parameters.elementAtOrNull(join._variables.length);
+    return resultsOf(join).firstOrNull;
   }
 
   /// Runs one of two continuations, both starting from the current values.

@@ -4,11 +4,15 @@ import 'block.dart';
 import 'value.dart';
 
 /// A function body; the first block is its entry.
+///
+/// One that [checksStack] calls `.stackOverflow`, which throws, instead of
+/// running where the stack is used up.
 final class LirFunction(
   final String name,
   final LirSignature signature,
-  Iterable<LirBlock> blocks,
-) {
+  Iterable<LirBlock> blocks, {
+  final bool checksStack = false,
+}) {
   final List<LirBlock> blocks = .unmodifiable(blocks);
   LirBlock get entry => blocks.first;
 }
@@ -26,8 +30,17 @@ final class LirData(
 }
 
 /// Symbols that emitted code defines: where it starts, and what is stored
-/// about references on the stack. Only the runtime uses them.
+/// about references on the stack and about edges for throws. Only the runtime
+/// uses them.
 const textSymbol = '.text', stackMapSymbol = '.stackMaps';
+const handlerSymbol = '.handlers';
+
+/// Functions that code calls for allocations, throws and overflows.
+const allocateSymbol = '.allocate', throwSymbol = '.throw';
+const stackOverflowSymbol = '.stackOverflow';
+
+/// A static holding the lowest address that the stack may reach.
+const stackLimitSymbol = '.stackLimit';
 
 /// An object that exists from the start and is never collected.
 ///

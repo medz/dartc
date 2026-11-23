@@ -21,18 +21,22 @@ void agrees(String name, String source) => test(name, () async {
   final directory = writeSources({'main.dart': text});
   final path = '${directory.path}/main.dart';
   final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
-  expect(official.stderr, isEmpty);
-  expect(official.stdout, isNotEmpty);
+  expect(official.stdout, isNotEmpty, reason: '${official.stderr}');
   final module = translateProgram(
     await loadProgram(path, sdk: hostSdk),
-    collector: await loadCollector(sdk: hostSdk),
+    runtime: await loadRuntime(sdk: hostSdk),
   );
   final interpreter = HirInterpreter(module);
   expect(interpreter.run() ?? 0, official.exitCode);
   expect(interpreter.output, official.stdout);
+  // Stack traces, which follow, are not printed.
+  final errors = interpreter.errors, reported = '${official.stderr}';
+  expect(reported, startsWith(errors));
+  expect(reported.substring(errors.length), anyOf('', startsWith('#0 ')));
   final lowered = LoweredRun(module);
   expect(lowered.code ?? 0, official.exitCode);
   expect(lowered.output, official.stdout);
+  expect(lowered.errors, errors);
   if (skipExecution != null) return;
   for (final collectsAlways in [false, true]) {
     final program = '${directory.path}/program-$collectsAlways';
@@ -47,6 +51,7 @@ void agrees(String name, String source) => test(name, () async {
     final reason = 'collecting always: $collectsAlways';
     expect(result.exitCode, official.exitCode, reason: reason);
     expect(result.stdout, official.stdout, reason: reason);
+    expect(result.stderr, errors, reason: reason);
   }
 });
 

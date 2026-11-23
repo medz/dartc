@@ -35,14 +35,13 @@ void verifyHir(HirModule module) {
     }
     _checkConstant(classes, initial);
   }
-  if (module.allocate case final allocate?) {
-    if (!functions.contains(allocate)) throw HirError('allocate is not listed');
-    if (allocate.parameters.length != 1 ||
-        allocate.parameters.single != .integer ||
-        allocate.result != .integer) {
-      throw HirError('allocate has another signature');
+  _checkRuntime(module, functions);
+  module.tests.forEach((test, passing) {
+    for (final class_ in passing) {
+      if (classes.contains(class_)) continue;
+      throw HirError('test ${test.name}: unlisted class ${class_.name}');
     }
-  }
+  });
   module.dispatch.forEach((selector, entries) {
     entries.forEach((class_, function) {
       Never fail(String message) =>
@@ -63,6 +62,29 @@ void verifyHir(HirModule module) {
   for (final function in module.functions) {
     _FunctionVerifier(module, functions, classes, globals, function).run();
   }
+}
+
+void _checkRuntime(HirModule module, Set<HirFunction> functions) {
+  void check(
+    String name,
+    HirFunction? function,
+    List<HirType> parameters, [
+    HirType? result,
+  ]) {
+    if (function == null) return;
+    if (!functions.contains(function)) throw HirError('$name is not listed');
+    if (function.parameters.length != parameters.length ||
+        function.parameters.indexed.any((e) => e.$2 != parameters[e.$1]) ||
+        function.result != result) {
+      throw HirError('$name has another signature');
+    }
+  }
+
+  check('allocate', module.allocate, [.integer], .integer);
+  check('raise', module.raise, [.reference, .reference]);
+  check('stackOverflow', module.stackOverflow, []);
+  check('outOfMemory', module.outOfMemory, []);
+  check('uncaught', module.uncaught, [.reference]);
 }
 
 /// Checks a constant and those it refers to, which form no cycle.
@@ -111,6 +133,11 @@ final class _FunctionVerifier(
         _define(instruction, block, i);
       }
     }
+    for (final block in function.blocks) {
+      if (block.terminator case HirInvoke(:final call)) {
+        if (_blockOf.containsKey(call)) _fail('a value is defined twice');
+      }
+    }
     if (_dominators.order.length != function.blocks.length) {
       _fail('unreachable block');
     }
@@ -139,6 +166,9 @@ final class _FunctionVerifier(
       for (final edge in end.edges) {
         if (!owned.contains(edge.target)) _fail('edge leaves the function');
         if (edge.target == function.entry) _fail('edge enters the entry block');
+      }
+      if (end is HirInvoke && identical(end.onReturn, end.onThrow)) {
+        _fail('invoke shares one edge for both outcomes');
       }
     }
   }
@@ -178,7 +208,7 @@ final class _FunctionVerifier(
 
   void _checkInstruction(HirInstruction instruction) {
     switch (instruction) {
-      case HirConst() || HirNull() || HirPrint():
+      case HirConst() || HirNull() || HirPrint() || HirWriteError():
         break;
       case HirStatic(:final object):
         _checkConstant(classes, object);
@@ -188,7 +218,12 @@ final class _FunctionVerifier(
         _checkGlobal(global);
         _expect(value, global.type, 'global ${global.name}');
       case HirMachine(:final op, :final arguments):
-        _checkTypes(List.filled(op.parameters, .integer), arguments, op.name);
+        _checkTypes(op.parameters, arguments, op.name);
+      case HirIsInstance(:final test, :final object):
+        if (!module.tests.containsKey(test)) {
+          _fail('unlisted test ${test.name}');
+        }
+        _expect(object, .reference, 'is ${test.name}');
       case HirNew(:final target):
         if (!classes.contains(target)) _fail('unlisted class ${target.name}');
       case HirLoad(:final object):
@@ -205,7 +240,6 @@ final class _FunctionVerifier(
       case HirIntBinary(:final operator, :final left, :final right):
         _expect(left, .integer, operator.symbol);
         _expect(right, .integer, operator.symbol);
-        if (!_allows(operator, right)) _fail('${operator.symbol} could throw');
       case HirFloatBinary(:final operator, :final left, :final right):
         _expect(left, .float, operator.symbol);
         _expect(right, .float, operator.symbol);
@@ -232,13 +266,6 @@ final class _FunctionVerifier(
     if (!globals.contains(global)) _fail('unlisted global ${global.name}');
   }
 
-  static bool _allows(HirIntOperator operator, HirValue right) {
-    if (!operator.isDivision && !operator.isShift) return true;
-    if (right is! HirConst) return false;
-    final value = right.value as int;
-    return operator.isDivision ? value != 0 : value >= 0;
-  }
-
   void _checkTerminator(HirBlock block) {
     final end = block.terminator!, position = block.instructions.length;
     _checkUses(end.inputs, block, position);
@@ -251,13 +278,24 @@ final class _FunctionVerifier(
         }
       case HirExit(:final code):
         _expect(code, .integer, 'exit code');
+      case HirThrow(:final exception, :final trace):
+        _expect(exception, .reference, 'exception');
+        _expect(trace, .reference, 'stack trace');
+      case HirInvoke(:final call):
+        _checkInstruction(call);
       case HirJump() || HirUnreachable():
         break;
     }
     for (final edge in end.edges) {
       _checkUses(edge.arguments, block, position);
+      final implicit = end.implicit(edge);
+      final target = [for (final p in edge.target.parameters) p.type];
+      if (target.length < implicit.length ||
+          implicit.indexed.any((e) => target[e.$1] != e.$2)) {
+        _fail('edge target does not accept the call outcome');
+      }
       _checkTypes(
-        [for (final parameter in edge.target.parameters) parameter.type],
+        target.sublist(implicit.length),
         edge.arguments,
         'edge arguments',
       );

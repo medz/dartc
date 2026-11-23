@@ -23,10 +23,6 @@ int _create(int class_) {
   return object;
 }
 
-final _traps = throwsA(
-  isA<StateError>().having((error) => error.message, 'message', 'Trapped.'),
-);
-
 void main() {
   setUp(_start);
 
@@ -50,18 +46,56 @@ void main() {
       }
     });
 
-    test('stops the program without memory', () {
+    test('gives 0 where there is no memory', () {
       _start(available: 1 << 21);
       _machine.frames.add([0]);
-      expect(() {
-        for (var list = 0; ;) {
-          final object = _create(1);
-          _machine.store64(object + 8, list);
-          list = object;
-          _machine.frames.last[0] = list;
+      int fill() {
+        var count = 0;
+        for (var list = 0; ; count++) {
+          final object = allocate(sizes[1]);
+          if (object == 0) return count;
+          _machine
+            ..store32(object, 1)
+            ..store64(object + 8, list);
+          list = _machine.frames.last[0] = object;
         }
-      }, _traps);
-      expect(() => allocate(1 << 22), _traps);
+      }
+
+      final count = fill();
+      expect(count, greaterThan(1 << 16));
+      expect(allocate(16), 0);
+      expect(allocate(1 << 22), 0);
+      // All kept objects are whole.
+      var found = 0;
+      for (
+        var at = _machine.frames.last[0];
+        at != 0;
+        at = _machine.load64(at + 8)
+      ) {
+        found++;
+      }
+      expect(found, count);
+      // What is dropped can be used again, at once.
+      _machine.frames.last[0] = 0;
+      expect(fill(), count);
+    });
+
+    test('gives 0 until there is memory to start with', () {
+      for (final available in [0, 1500, 60000]) {
+        _start(available: SimulatedMachine.ownBytes + available);
+        expect(allocate(16), 0);
+        expect(allocate(16), 0);
+        expect(heap, 0);
+        expect(_machine.mapped, SimulatedMachine.ownBytes);
+      }
+    });
+
+    test('collects before it gives up', () {
+      _start(available: 1 << 20);
+      for (var i = 0; i < 1 << 16; i++) {
+        expect(allocate(64), isNot(0));
+      }
+      expect(_machine.collections, greaterThan(2));
     });
   });
 
@@ -169,6 +203,54 @@ void main() {
         }
       }
     });
+
+    // As above, where a few or many of them do not fit.
+    for (final length in [4200, 12000]) {
+      test('follows $length references without memory to remember them', () {
+        _start();
+        _machine.frames.add([0]);
+        var list = 0;
+        for (var i = 0; i < length; i++) {
+          final object = _create(2);
+          _machine
+            ..store64(object + 24, list)
+            ..frames.last[0] = object;
+          for (final offset in [8, 16]) {
+            // Links to later and to earlier cells.
+            final chain = [for (var j = 0; j < 4; j++) _create(1)];
+            final order = offset == 8 ? chain : chain.reversed.toList();
+            for (var j = 0; j < 3; j++) {
+              _machine.store64(order[j] + 8, order[j + 1]);
+            }
+            _machine.store64(object + offset, order.first);
+          }
+          list = object;
+        }
+        final lost = [_create(1), _create(1)];
+        _machine.store64(lost[0] + 8, lost[1]);
+        _machine.available = _machine.mapped;
+        collect();
+        for (var at = list; at != 0; at = _machine.load64(at + 24)) {
+          expect(_isAllocated(at), isTrue);
+          for (final offset in [8, 16]) {
+            var links = 0;
+            for (
+              var link = _machine.load64(at + offset);
+              link != 0;
+              link = _machine.load64(link + 8)
+            ) {
+              expect(_isAllocated(link), isTrue);
+              links++;
+            }
+            expect(links, 4);
+          }
+        }
+        expect(lost.map(_isAllocated), [false, false]);
+        _machine.frames.last[0] = 0;
+        collect();
+        expect(_isAllocated(list), isFalse);
+      });
+    }
 
     test('keeps cells of every size apart', () {
       for (var bytes = 8; bytes <= 600; bytes += 8) {

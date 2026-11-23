@@ -215,6 +215,7 @@ final class Arm64Assembler() {
   void pushFrame() => _emit(0xa9bf7bfd);
   void popFrame() => _emit(0xa8c17bfd);
   void callRegister(int n) => _emit(0xd63f0000 | n << 5);
+  void jumpRegister(int n) => _emit(0xd61f0000 | n << 5);
   void ret() => _emit(0xd65f03c0);
   void breakpoint() => _emit(0xd4200020);
 

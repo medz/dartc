@@ -30,8 +30,11 @@ final class HirNull() extends HirInstruction {
   List<HirValue> get inputs => const [];
 }
 
+/// An operation that may throw.
+sealed class HirCalling() extends HirInstruction;
+
 /// An object of [target] whose references are null and numbers are unset.
-final class HirNew(final HirClass target) extends HirInstruction {
+final class HirNew(final HirClass target) extends HirCalling {
   @override
   HirType get type => .reference;
   @override
@@ -61,7 +64,7 @@ final class HirStoreGlobal(final HirGlobal global, final HirValue value)
   List<HirValue> get inputs => [value];
 }
 
-/// Performs [op] for the collector.
+/// Performs [op] for the runtime.
 final class HirMachine(final HirMachineOp op, Iterable<HirValue> arguments)
     extends HirInstruction {
   final List<HirValue> arguments = .unmodifiable(arguments);
@@ -97,7 +100,7 @@ final class HirVirtualCall(
   final HirSelector selector,
   final HirValue receiver,
   Iterable<HirValue> arguments,
-) extends HirInstruction {
+) extends HirCalling {
   final List<HirValue> arguments = .unmodifiable(arguments);
   @override
   HirType? get type => selector.result;
@@ -107,8 +110,8 @@ final class HirVirtualCall(
 
 /// The `int` operators.
 ///
-/// Division and remainder need a constant right operand other than 0, and
-/// shifts one that is not negative, so none of them throws.
+/// Division and remainder need a right operand other than 0, and shifts one
+/// that is not negative, so none of them throws.
 enum HirIntOperator(final String symbol) {
   add('+'),
   subtract('-'),
@@ -176,7 +179,7 @@ final class HirBoolBinary(
   List<HirValue> get inputs => [left, right];
 }
 
-/// The operators with one operand, all keeping its type but the last.
+/// The operators with one operand.
 enum HirUnaryOperator(
   final String symbol,
   final HirType operand,
@@ -189,6 +192,9 @@ enum HirUnaryOperator(
 
   /// The nearest `double`.
   intToFloat('double ', .integer, .float),
+
+  /// Truncates a finite `double` to the nearest `int` there is.
+  floatToInt('int ', .float, .integer),
 }
 
 final class HirUnary(final HirUnaryOperator operator, final HirValue operand)
@@ -224,6 +230,23 @@ final class HirCompare(
   List<HirValue> get inputs => [left, right];
 }
 
+/// Whether the class of [object], which is never null, passes [test].
+final class HirIsInstance(final HirTypeTest test, final HirValue object)
+    extends HirInstruction {
+  @override
+  HirType get type => .boolean;
+  @override
+  List<HirValue> get inputs => [object];
+}
+
+/// Writes [text] to standard error.
+final class HirWriteError(final String text) extends HirInstruction {
+  @override
+  HirType? get type => null;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
 /// Writes [text] and a newline to standard output, as `print` does.
 final class HirPrint(final String text) extends HirInstruction {
   @override
@@ -234,7 +257,7 @@ final class HirPrint(final String text) extends HirInstruction {
 
 /// Calls [target] with one argument for each of its parameters.
 final class HirCall(final HirCallable target, Iterable<HirValue> arguments)
-    extends HirInstruction {
+    extends HirCalling {
   final List<HirValue> arguments = .unmodifiable(arguments);
   @override
   HirType? get type => target.result;

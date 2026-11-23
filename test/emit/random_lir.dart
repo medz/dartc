@@ -168,7 +168,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
 
   void _statements(int count, int depth) {
     for (var i = 0; i < count; i++) {
-      switch (_random.nextInt(depth > 0 ? 23 : 20)) {
+      switch (_random.nextInt(depth > 0 ? 25 : 20)) {
         case 0:
           _pool.add(_block.add(ConstInt(integer())));
         case 1:
@@ -188,6 +188,10 @@ final class RandomLir(final int seed, {String prefix = ''}) {
           _loop(depth - 1);
         case 22:
           _exit();
+        case 23:
+          _throw();
+        case 24 when _done.isNotEmpty && depth == 2:
+          _invoke();
         default:
           _arithmetic();
       }
@@ -242,17 +246,21 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     _pool.add(_block.add(Convert(.ptrToInt, moved)));
   }
 
-  void _call() {
+  /// A call of an earlier function, not yet part of a block.
+  LirCall _made() {
     final target = _done[_random.nextInt(_done.length)];
     final arguments = target.signature.parameters.map(_pickOf).toList();
-    final call = _random.nextBool()
+    return _random.nextBool()
         ? Call(target.name, target.signature, arguments)
         : CallIndirect(
             _block.add(SymbolAddress(target.name)),
             target.signature,
             arguments,
           );
-    _block.add(call);
+  }
+
+  void _call() {
+    final call = _block.add(_made());
     // Sometimes the result is never used.
     if (_random.nextInt(4) > 0) _keep(call);
   }
@@ -287,12 +295,37 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     final types = [for (var i = _random.nextInt(4); i >= 0; i--) _type()];
     final left = LirBlock(), right = LirBlock();
     _block.end(Branch(_pick(), LirEdge(left), LirEdge(right)));
+    _join(left, right, types, depth);
+  }
+
+  /// A call with different continuations for its result and for a throw.
+  void _invoke() {
+    final types = [for (var i = _random.nextInt(4); i >= 0; i--) _type()];
+    final given = [for (var i = _random.nextInt(4); i >= 0; i--) _type()];
+    final call = _random.nextInt(8) == 0
+        ? Alloc(_block.add(ConstInt(_objectBytes)))
+        : _made();
+    final normal = LirBlock([?call.type, ...given]);
+    final handler = LirBlock([.ref, .ref, ...types]);
+    _block.end(
+      Invoke(
+        call,
+        LirEdge(normal, _pickAll(given)),
+        LirEdge(handler, _pickAll(types)),
+      ),
+    );
+    _join(normal, handler, types, 1);
+  }
+
+  /// Continues in both [left] and [right], then with values of [types].
+  void _join(LirBlock left, LirBlock right, List<LirType> types, int depth) {
     final words = List.of(_pool), floats = List.of(_floats);
     final objects = List.of(_objects);
     final ends = <LirBlock>[], results = <List<LirValue>>[];
     for (final side in [left, right]) {
       _blocks.add(side);
       _block = side;
+      side.parameters.forEach(_keep);
       _statements(1 + _random.nextInt(6), depth);
       ends.add(_block);
       results.add(_pickAll(types));
@@ -335,6 +368,17 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     _restore(words, floats, objects);
     _blocks.add(exit);
     _block = exit;
+  }
+
+  /// A throw where a number has some value.
+  void _throw() {
+    final thrower = LirBlock(), stay = LirBlock();
+    final mask = _block.add(ConstInt(3));
+    final low = _block.add(IntBinary(.and, _pick(), mask));
+    _block.end(Branch(low, LirEdge(stay), LirEdge(thrower)));
+    thrower.end(Throw(_pickOf(.ref), _pickOf(.ref)));
+    _blocks.addAll([thrower, stay]);
+    _block = stay;
   }
 
   /// An early return, with both edges of its branch carrying arguments.

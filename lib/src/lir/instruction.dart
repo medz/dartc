@@ -54,6 +54,20 @@ final class FrameAddress() extends LirInstruction {
   List<LirValue> get inputs => const [];
 }
 
+/// Continues at [code] in the function whose frame is at [frame], on the edge
+/// for a throw. Nothing after it runs.
+final class Resume(
+  final LirValue frame,
+  final LirValue code,
+  final LirValue exception,
+  final LirValue trace,
+) extends LirInstruction {
+  @override
+  LirType? get type => null;
+  @override
+  List<LirValue> get inputs => [frame, code, exception, trace];
+}
+
 /// Integer arithmetic on 64-bit words; add, sub and mul wrap.
 enum IntOp() {
   add,

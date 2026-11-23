@@ -3,6 +3,8 @@ import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 
+import 'builtin_error.dart';
+
 /// Reports that something is not supported yet.
 typedef Reject = Never Function(String what);
 
@@ -36,6 +38,21 @@ abstract interface class ProgramScope() {
 
   /// What gives the value that [parameter] has where a call leaves it out.
   HirInstruction defaultOf(FormalParameterElement parameter);
+
+  /// A function that throws [error], given its number if it has one.
+  HirFunction throwerOf(BuiltinError error);
+
+  /// The number telling that [BuiltinError.late] is about the variable [name].
+  int lateNumber(String name);
+
+  /// The class of stack traces.
+  HirClass get traceClass;
+
+  /// Tells that objects of [class_] are thrown.
+  void addThrown(ClassElement class_);
+
+  /// Whether objects are of [class_].
+  HirTypeTest testOf(ClassElement class_);
 
   /// An instance member's own body, taking the receiver first.
   HirFunction memberOf(ExecutableElement element);

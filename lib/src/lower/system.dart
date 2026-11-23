@@ -17,6 +17,12 @@ final systemFunctions = {
   /// munmap(address, bytes).
   'munmap': LirSignature([.i64, .i64], .i64),
 
+  'pthread_self': LirSignature([], .i64),
+
+  /// The end of a thread's stack, and its size.
+  'pthread_get_stackaddr_np': LirSignature([.i64], .i64),
+  'pthread_get_stacksize_np': LirSignature([.i64], .i64),
+
   /// signal(number, handler).
   'signal': LirSignature([.i64, .i64], .i64),
 };

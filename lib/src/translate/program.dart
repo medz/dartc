@@ -5,11 +5,14 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
+import 'builtin_error.dart';
 import 'classes.dart';
 import 'constant_table.dart';
 import 'constructor.dart';
 import 'dispatch.dart';
+import 'error_table.dart';
 import 'global_table.dart';
+import 'report.dart';
 import 'scope.dart';
 import 'statement.dart';
 import 'types.dart';
@@ -18,20 +21,20 @@ import 'types.dart';
 ///
 /// Throws [CompileFailure] at the first construct not supported yet.
 ///
-/// A program that creates objects includes [collector], if given.
-HirModule translateProgram(SourceProgram program, {SourceProgram? collector}) =>
-    ProgramTranslator(program, collector).translate();
+/// A program that needs it includes the [runtime], if given.
+HirModule translateProgram(SourceProgram program, {SourceProgram? runtime}) =>
+    ProgramTranslator(program, runtime).translate();
 
 /// Finds the functions a program needs and translates each once.
 ///
 /// Functions, classes and selectors only grow and are bounded by the source.
 final class ProgramTranslator(
   final SourceProgram program,
-  final SourceProgram? collector,
+  final SourceProgram? runtime,
 ) implements ProgramScope {
   late final _declarations = Declarations([
     ...program.libraries,
-    ...?collector?.libraries,
+    ...?runtime?.libraries,
   ]);
   late final _classes = ClassTable(_declarations);
   late final _dispatch = DispatchBuilder(
@@ -45,6 +48,11 @@ final class ProgramTranslator(
     _classes,
     _dispatch.instantiate,
   );
+  late final _errors = ErrorTable(
+    _classes,
+    program.main.element.typeProvider.objectElement.library,
+    _dispatch.instantiate,
+  );
   late final _globals = GlobalTable(
     this,
     _declarations,
@@ -53,7 +61,8 @@ final class ProgramTranslator(
   );
   final _functions = <ExecutableElement, HirFunction>{};
   final _pending = <void Function()>[];
-  HirFunction? _allocate;
+  final _thrown = <ClassElement>{};
+  HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _writeNumber;
 
   HirModule translate() {
     final start = program.main.units.first;
@@ -73,16 +82,89 @@ final class ProgramTranslator(
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
       }
+      _addRuntime();
     } while (_dispatch.update() || _pending.isNotEmpty);
+    final report = ReportBuilder(
+      _declarations,
+      _classes,
+      _errors,
+      _thrown,
+      _writeNumber,
+    );
+    final uncaught = _canThrow ? report.build(_dispatch.classes) : null;
     return HirModule(
       main,
-      [..._functions.values, ..._globals.getters, ..._dispatch.made],
+      [..._allFunctions, ?uncaught],
       classes: _dispatch.classes.map(_classes.classOf),
       dispatch: _dispatch.result(_classes.classOf),
       globals: _globals.globals,
+      tests: {..._errors.results(_dispatch.classes), ...report.tests},
       allocate: _allocate,
+      raise: _raise,
+      stackOverflow: _stackOverflow,
+      outOfMemory: _outOfMemory,
+      uncaught: uncaught,
     );
   }
+
+  Iterable<HirFunction> get _allFunctions => [
+    ..._functions.values,
+    ..._globals.getters,
+    ..._dispatch.made,
+    ..._errors.functions,
+  ];
+
+  /// Whether the program throws, or calls what may use up the stack.
+  bool get _canThrow => _allFunctions.any(
+    (function) => function.blocks.any(
+      (block) =>
+          block.terminator is HirInvoke ||
+          block.terminator is HirThrow ||
+          block.instructions.any((instruction) => instruction is HirCalling),
+    ),
+  );
+
+  /// Adds what the functions found so far need of the runtime.
+  void _addRuntime() {
+    if (!_canThrow) return;
+    _stackOverflow ??= _errors.throwerOf(.stackOverflow);
+    _raise ??= _runtimeFunction('raise');
+    if (_allocate != null) _outOfMemory ??= _errors.throwerOf(.outOfMemory);
+    if (_errors.throwerIfMade(.negativeShift) != null) {
+      _writeNumber ??= _runtimeFunction('writeNumber');
+    }
+  }
+
+  /// The function called [name] in the runtime, if there is one.
+  HirFunction? _runtimeFunction(String name) {
+    for (final library in runtime?.libraries ?? const <SourceLibrary>[]) {
+      final found = library.element.getTopLevelFunction(name);
+      if (found != null) return _declare(found);
+    }
+    return null;
+  }
+
+  bool _isRuntime(LibraryElement library) =>
+      runtime?.libraries.any((own) => own.element == library) ?? false;
+
+  @override
+  HirFunction throwerOf(BuiltinError error) {
+    final thrower = _errors.throwerOf(error);
+    if (!error.isExhaustion) _addAllocation();
+    return thrower;
+  }
+
+  @override
+  int lateNumber(String name) => _errors.lateNumber(name);
+
+  @override
+  HirClass get traceClass => _errors.trace;
+
+  @override
+  void addThrown(ClassElement class_) => _thrown.add(class_);
+
+  @override
+  HirTypeTest testOf(ClassElement class_) => _errors.testOf(class_);
 
   @override
   HirFunction? functionOf(ExecutableElement element) =>
@@ -90,8 +172,8 @@ final class ProgramTranslator(
 
   @override
   HirMachineOp? machineOpOf(ExecutableElement element) {
-    final libraries = collector?.libraries.skip(1) ?? const [];
-    return libraries.any((library) => library.element == element.library)
+    final library = element.library;
+    return _isRuntime(library) && library.uri.path.endsWith('/machine.dart')
         ? HirMachineOp.values.byName(element.displayName)
         : null;
   }
@@ -126,10 +208,11 @@ final class ProgramTranslator(
   HirClass createdClass(ClassElement element) {
     final class_ = _classes.classOf(element);
     _dispatch.instantiate(element);
-    final allocate = collector?.main.element.getTopLevelFunction('allocate');
-    if (allocate != null) _allocate ??= _declare(allocate);
+    _addAllocation();
     return class_;
   }
+
+  void _addAllocation() => _allocate ??= _runtimeFunction('allocate');
 
   @override
   HirField fieldOf(FieldElement element) => _classes.fieldOf(element);
@@ -169,6 +252,7 @@ final class ProgramTranslator(
                       element,
                       'a result of type $result',
                     )),
+          !_isRuntime(element.library),
         );
       });
 

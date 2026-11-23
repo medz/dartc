@@ -14,13 +14,25 @@ HirType? valueType(DartType type) {
 
 /// The class whose objects, or null, are the values of [type].
 ///
-/// Of the SDK's classes only `Object` is supported yet.
+/// Of the SDK's classes only `Object`, errors, exceptions and stack traces are
+/// supported yet.
 ClassElement? classOf(DartType? type) {
   if (type is! InterfaceType || type.typeArguments.isNotEmpty) return null;
   final element = type.element;
   if (element is! ClassElement) return null;
-  return element.library.isInSdk && !element.isDartCoreObject ? null : element;
+  return element.library.isInSdk && !_isKnown(element) ? null : element;
 }
+
+bool _isKnown(ClassElement class_) =>
+    class_.library.isDartCore &&
+    (class_.isDartCoreObject ||
+        class_.name == 'StackTrace' ||
+        _isFailure(class_) ||
+        class_.allSupertypes.any((type) => _isFailure(type.element)));
+
+bool _isFailure(InterfaceElement class_) =>
+    class_.library.isDartCore &&
+    (class_.name == 'Error' || class_.name == 'Exception');
 
 /// Whether a function returning [type] gives its caller nothing to use.
 bool hasNoResult(DartType type) =>

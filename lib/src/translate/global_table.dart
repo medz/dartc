@@ -121,14 +121,13 @@ final class GlobalTable(
         final expressions = ExpressionTranslator(_scope, builder);
         final value = expressions.valueAs(initializer, global.type);
         if (isFinal) {
-          // Evaluating it may have set it already, which is an error.
-          final next = builder.join(initializer);
-          builder.branch(builder.add(HirLoadGlobal(isSet)), () {
-            builder
-              ..add(HirMachine(.trap, const []))
-              ..end(HirUnreachable());
-          }, () => builder.jump(next));
-          builder.enter(next);
+          // Evaluating it may have set it already.
+          final number = _scope.lateNumber(global.name);
+          builder.throwIf(
+            builder.add(HirLoadGlobal(isSet)),
+            _scope.throwerOf(.late),
+            [builder.add(HirConst(number))],
+          );
         }
         builder
           ..add(HirStoreGlobal(global, value))

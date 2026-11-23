@@ -4,13 +4,18 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'calls.dart';
+import 'checks.dart';
+import 'scope.dart';
 import 'types.dart';
 
 /// Translates operators.
 final class OperatorTranslator(
+  final ProgramScope _scope,
   final FunctionBuilder _builder,
   final CallTranslator _calls,
 ) {
+  late final _checked = CheckedOperations(_scope, _builder);
+
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
@@ -153,17 +158,9 @@ final class OperatorTranslator(
     HirValue right,
   ) {
     for (final known in HirIntOperator.values) {
-      if (known.symbol != operator) continue;
-      if (known.isDivision || known.isShift) {
-        final value = right is HirConst ? right.value as int : null;
-        if (value == null) {
-          _unsupported(node, 'operator $operator with a variable right side');
-        }
-        if (known.isDivision ? value == 0 : value < 0) {
-          _unsupported(node, 'operator $operator throwing an exception');
-        }
+      if (known.symbol == operator) {
+        return _checked.integer(known, left, right);
       }
-      return _builder.add(HirIntBinary(known, left, right));
     }
     _unsupported(node, 'operator $operator');
   }
@@ -174,6 +171,9 @@ final class OperatorTranslator(
     HirValue left,
     HirValue right,
   ) {
+    if (operator == '~/') {
+      return _checked.toInt(_builder.add(HirFloatBinary(.divide, left, right)));
+    }
     for (final known in HirFloatOperator.values) {
       if (known.symbol == operator) {
         return _builder.add(HirFloatBinary(known, left, right));

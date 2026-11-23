@@ -15,7 +15,7 @@ final class LoweredRun(
   final int Function(int count)? accept,
   int maxSteps = 10000000,
 }) {
-  final _written = BytesBuilder();
+  final _written = BytesBuilder(), _errors = BytesBuilder();
 
   /// The calls made to the system, in order.
   final List<String> calls = [];
@@ -23,6 +23,8 @@ final class LoweredRun(
   /// The argument of `exit`, or null if the program returned.
   int? code;
   String get output => utf8.decode(_written.toBytes());
+  List<int> get errorBytes => _errors.toBytes();
+  String get errors => utf8.decode(errorBytes);
 
   this {
     int? errorAddress;
@@ -39,6 +41,9 @@ final class LoweredRun(
           calls.add('signal$arguments');
           return 0;
         },
+        'pthread_self': (_, _) => 1,
+        'pthread_get_stackaddr_np': (_, _) => 1 << 40,
+        'pthread_get_stacksize_np': (_, _) => 1 << 23,
         '__error': (memory, _) {
           final at = address(memory);
           memory.store(.i32, at, 0, error);
@@ -52,7 +57,9 @@ final class LoweredRun(
             error = -accepted;
             return -1;
           }
-          _written.add(memory.read(from, min(accepted, count)));
+          (descriptor == 1 ? _written : _errors).add(
+            memory.read(from, min(accepted, count)),
+          );
           return min(accepted, count);
         },
       },

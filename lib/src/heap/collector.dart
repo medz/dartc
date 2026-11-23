@@ -4,6 +4,7 @@
 // live in blocks of equal cells, each size with its own list of free cells;
 // large ones have a block each. This file uses only what the compiler supports.
 import 'machine.dart';
+import 'returns.dart';
 
 /// Where the collector's own state is, or 0 before the first allocation.
 int heap = 0;
@@ -12,9 +13,11 @@ int heap = 0;
 const _flags = 4, _allocated = 1, _marked = 2, _fixed = 4;
 
 // The state: the blocks, the bytes mapped since the last collection and how
-// many start the next, the stack of objects to scan, and lists of free cells.
+// many start the next, the stack of objects to scan, whether any did not fit
+// there, and lists of free cells.
 const _blocks = 0, _grown = 8, _limit = 16;
-const _pending = 24, _pendingBytes = 32, _pendingEnd = 40, _free = 48;
+const _pending = 24, _pendingBytes = 32, _pendingEnd = 40;
+const _missed = 48, _free = 56;
 const _stateBytes = 1024;
 
 // A block: the next one, the size of its cells, and its own size.
@@ -26,16 +29,20 @@ const _nextFree = 8;
 const _smallBlock = 262144, _largestCell = 512, _smallestLimit = 4194304;
 const _firstPendingBytes = 65536, _garbage = 0x5bad5bad5bad5bad;
 
-/// Zeroed memory for an object of [bytes] bytes, marked as in use.
+/// Zeroed memory for an object of [bytes] bytes, marked as in use, or 0.
 int allocate(int bytes) {
-  if (heap == 0) _start();
+  if (heap == 0 && !_start()) return 0;
   final cell = (bytes + 15) & ~15;
   if (collectsAlways() || load64(heap + _grown) >= load64(heap + _limit)) {
     collect();
   }
   var found = _takeFree(cell);
   if (found == 0) {
-    _addBlock(cell);
+    if (!_addBlock(cell)) {
+      collect();
+      // A collection may free cells, or the memory for a block.
+      if (load64(_freeList(cell)) == 0 && !_addBlock(cell)) return 0;
+    }
     found = _takeFree(cell);
   }
   _fill(found, cell, 0);
@@ -43,17 +50,20 @@ int allocate(int bytes) {
   return found;
 }
 
-void _start() {
-  heap = _map(_stateBytes);
+/// Creates the state, if there is memory for it.
+bool _start() {
+  final state = mapMemory(_stateBytes);
+  if (state == 0) return false;
+  final pending = mapMemory(_firstPendingBytes);
+  if (pending == 0) {
+    unmapMemory(state, _stateBytes);
+    return false;
+  }
+  heap = state;
   store64(heap + _limit, _smallestLimit);
-  store64(heap + _pending, _map(_firstPendingBytes));
+  store64(heap + _pending, pending);
   store64(heap + _pendingBytes, _firstPendingBytes);
-}
-
-int _map(int bytes) {
-  final address = mapMemory(bytes);
-  if (address == 0) trap();
-  return address;
+  return true;
 }
 
 void _fill(int address, int bytes, int value) {
@@ -80,10 +90,12 @@ void _giveFree(int cell, int address) {
   store64(list, address);
 }
 
-void _addBlock(int cell) {
+/// Maps more cells of a size, if there is memory for them.
+bool _addBlock(int cell) {
   final isLarge = cell > _largestCell;
   final bytes = isLarge ? cell + _firstCell : _smallBlock;
-  final block = _map(bytes);
+  final block = mapMemory(bytes);
+  if (block == 0) return false;
   store64(block + _next, load64(heap + _blocks));
   store64(block + _cellBytes, cell);
   store64(block + _blockBytes, bytes);
@@ -92,6 +104,7 @@ void _addBlock(int cell) {
   for (var at = block + _firstCell; at + cell <= block + bytes; at += cell) {
     _giveFree(cell, at);
   }
+  return true;
 }
 
 /// Frees every object that the program cannot reach.
@@ -103,6 +116,10 @@ void collect() {
     _mark(load64(roots + i * 8));
   }
   _scan();
+  while (load64(heap + _missed) != 0) {
+    store64(heap + _missed, 0);
+    _scanMarked();
+  }
   final kept = _sweep();
   store64(heap + _grown, 0);
   store64(heap + _limit, kept > _smallestLimit ? kept : _smallestLimit);
@@ -112,8 +129,11 @@ void collect() {
 void _markStack() {
   var frame = frameAddress();
   while (true) {
-    final record = _findRecord(load64(frame + 8) - codeStart());
-    if (record == 0) return;
+    final table = stackMaps();
+    final at = findReturn(table, load64(frame + 8) - codeStart());
+    // Outside the program, nothing holds objects.
+    if (at == 0) return;
+    final record = table + at;
     // The record tells about the caller, whose frame is stored first.
     frame = load64(frame);
     final count = load32(record);
@@ -123,23 +143,6 @@ void _markStack() {
   }
 }
 
-/// The record of the call returning to [offset], or 0 outside the program.
-int _findRecord(int offset) {
-  final table = stackMaps();
-  var low = 0, high = load32(table);
-  while (low < high) {
-    final middle = (low + high) >> 1, entry = table + 4 + middle * 8;
-    final found = load32(entry);
-    if (found == offset) return table + load32(entry + 4);
-    if (found < offset) {
-      low = middle + 1;
-    } else {
-      high = middle;
-    }
-  }
-  return 0;
-}
-
 /// Marks [object], if it is one, to be scanned.
 void _mark(int object) {
   if (object == 0) return;
@@ -147,34 +150,59 @@ void _mark(int object) {
   if (flags & (_marked | _fixed) != 0) return;
   store32(object + _flags, flags | _marked);
   final end = load64(heap + _pendingEnd);
-  if (end == load64(heap + _pendingBytes)) _growPending();
+  if (end == load64(heap + _pendingBytes) && !_growPending()) {
+    // Scanning what is marked again finds it.
+    store64(heap + _missed, 1);
+    return;
+  }
   store64(load64(heap + _pending) + end, object);
   store64(heap + _pendingEnd, end + 8);
 }
 
-void _growPending() {
+bool _growPending() {
   final old = load64(heap + _pending), bytes = load64(heap + _pendingBytes);
-  final grown = _map(bytes * 2);
+  final grown = mapMemory(bytes * 2);
+  if (grown == 0) return false;
   for (var at = 0; at < bytes; at += 8) {
     store64(grown + at, load64(old + at));
   }
   unmapMemory(old, bytes);
   store64(heap + _pending, grown);
   store64(heap + _pendingBytes, bytes * 2);
+  return true;
 }
 
 /// Marks everything that marked objects refer to.
 void _scan() {
-  final table = classTable();
   while (load64(heap + _pendingEnd) > 0) {
     final end = load64(heap + _pendingEnd) - 8;
     store64(heap + _pendingEnd, end);
-    final object = load64(load64(heap + _pending) + end);
-    final record = table + load32(table + load32(object) * 4);
-    final count = load32(record);
-    for (var i = 0; i < count; i++) {
-      _mark(load64(object + load32(record + 4 + i * 4)));
+    _markFields(load64(load64(heap + _pending) + end));
+  }
+}
+
+void _markFields(int object) {
+  final table = classTable();
+  final record = table + load32(table + load32(object) * 4);
+  final count = load32(record);
+  for (var i = 0; i < count; i++) {
+    _mark(load64(object + load32(record + 4 + i * 4)));
+  }
+}
+
+/// Marks everything that any marked object refers to.
+void _scanMarked() {
+  var block = load64(heap + _blocks);
+  while (block != 0) {
+    final cell = load64(block + _cellBytes);
+    final end = block + load64(block + _blockBytes);
+    for (var at = block + _firstCell; at + cell <= end; at += cell) {
+      if (load32(at + _flags) & _marked != 0) {
+        _markFields(at);
+        _scan();
+      }
     }
+    block = load64(block + _next);
   }
 }
 

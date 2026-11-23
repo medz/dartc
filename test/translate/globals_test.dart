@@ -1,10 +1,8 @@
 import 'package:dartc/hir.dart';
-import 'package:dartc/lir.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
 
-import '../lower/support.dart';
 import '../support/new_compiler.dart';
 import 'support.dart';
 
@@ -298,19 +296,8 @@ int get get => x;''',
       );
       expect(
         [for (final function in module.functions) function.name],
-        ['main', 'A.new', 'h'],
+        ['main', 'A.new', 'h', 'throw stackOverflow', 'report'],
       );
-    });
-
-    test('checks that final variables are set once', () async {
-      final module = await translate('''
-        int calls = 0;
-        int f() => ++calls == 1 ? x + 1 : 5;
-        final int x = f();
-        void main() { x; }
-      ''');
-      expect(HirInterpreter(module).run, throwsA(anything));
-      expect(() => runLowered(module), throwsA(isA<LirFault>()));
     });
 
     test('lists what the program uses', () async {

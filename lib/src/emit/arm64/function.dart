@@ -4,9 +4,13 @@ import '../allocate.dart';
 import '../liveness.dart';
 import '../moves.dart';
 import '../stack_maps.dart';
+import '../support.dart';
 import 'assembler.dart';
 import 'convention.dart';
 import 'operations.dart';
+
+/// Holds the frame to continue in, like an argument.
+const _resumedFrame = 9;
 
 /// Emits one function.
 ///
@@ -17,15 +21,18 @@ final class Arm64Function(
   final Arm64Assembler _assembler,
 ) {
   final _labels = <LirBlock, Label>{};
-  final _maps = <StackMap>[];
+
+  /// What the calls keep alive, and where they continue if they throw.
+  final List<StackMap> stackMaps = [];
+  final List<ThrowTarget> throwTargets = [];
   late final _liveness = Liveness(function);
   late final _allocation = Allocation(_liveness, arm64Registers);
   late final _operations = Arm64Operations(_assembler);
   late final int _outgoing = _outgoingWords();
   late final List<InRegister> _saved = _savedRegisters();
 
-  /// Adds the code, returning what its calls keep alive.
-  List<StackMap> emit() {
+  /// Adds the code.
+  void emit() {
     for (final block in _liveness.order) {
       _labels[block] = Label();
     }
@@ -35,16 +42,19 @@ final class Arm64Function(
       block.instructions.forEach(_instruction);
       _terminator(block.terminator!);
     }
-    return _maps;
   }
 
+  /// The registers that callers rely on and this function changes.
+  ///
+  /// A throw caught here skips the functions that would restore the others.
   List<InRegister> _savedRegisters() {
     final used = _allocation.locations.values.toSet();
+    final catches = function.blocks.any((block) => block.terminator is Invoke);
     return [
       for (final MapEntry(key: bank, value: set) in arm64Registers.entries)
         for (final number in set.preserved)
           if (InRegister(bank, number) case final register
-              when used.contains(register))
+              when catches || used.contains(register))
             register,
     ];
   }
@@ -52,7 +62,7 @@ final class Arm64Function(
   int _outgoingWords() {
     var words = 0;
     for (final block in function.blocks) {
-      for (final call in block.instructions.whereType<LirCall>()) {
+      for (final call in callsOf(block)) {
         final extra = argumentLocations(
           call.signature,
           .outgoing,
@@ -73,6 +83,7 @@ final class Arm64Function(
       ..pushFrame()
       ..addImmediate(Arm64Assembler.frame, Arm64Assembler.stack, 0);
     final bytes = _frameBytes;
+    if (function.checksStack) _checkStack(bytes);
     if (bytes > 0) {
       _assembler
         ..constant(rightScratch, bytes)
@@ -86,6 +97,24 @@ final class Arm64Function(
       for (final (i, parameter) in function.entry.parameters.indexed)
         _between(incoming[i], _place(parameter), parameter.type),
     ]);
+  }
+
+  /// Calls a function that throws unless the stack has [bytes] left.
+  void _checkStack(int bytes) {
+    final enough = Label();
+    _assembler
+      ..constant(rightScratch, bytes)
+      ..sub(rightScratch, Arm64Assembler.frame, rightScratch)
+      ..address(farScratch, stackLimitSymbol)
+      ..load(farScratch, farScratch, 0)
+      ..cmp(rightScratch, farScratch)
+      ..cset(rightScratch, .lo)
+      ..jumpIfZero(rightScratch, enough)
+      ..call(stackOverflowSymbol);
+    stackMaps.add(StackMap(_assembler.offset, const []));
+    _assembler
+      ..breakpoint()
+      ..bind(enough);
   }
 
   void _epilogue() {
@@ -191,17 +220,23 @@ final class Arm64Function(
 
   void _instruction(LirInstruction instruction) {
     switch (instruction) {
-      case Call(:final symbol, :final arguments):
-        _call(instruction, arguments, () => _assembler.call(symbol));
-      case CallIndirect(:final address, :final arguments):
-        _call(
-          instruction,
-          arguments,
-          () => _assembler.callRegister(calleeScratch),
-          address: address,
-        );
-      case Alloc(:final size):
-        _call(instruction, [size], () => _assembler.call(allocateSymbol));
+      case final LirCall call:
+        _transfer(call);
+        if (call.type case final type?) {
+          _move([_between(resultLocation(type), _place(call), type)]);
+        }
+      case Resume(:final frame, :final code, :final exception, :final trace):
+        const address = InRegister(.word, _resumedFrame);
+        const target = InRegister(.word, calleeScratch);
+        _move([
+          _between(_place(exception), const InRegister(.word, 0), .ref),
+          _between(_place(trace), const InRegister(.word, 1), .ref),
+          _between(_place(frame), address, .i64),
+          _between(_place(code), target, .i64),
+        ]);
+        _assembler
+          ..mov(Arm64Assembler.frame, _resumedFrame)
+          ..jumpRegister(calleeScratch);
       case Store(:final base, :final index, :final value):
         final at = _use(base, 0);
         final by = index == null ? null : _use(index, 1);
@@ -217,24 +252,30 @@ final class Arm64Function(
     }
   }
 
-  void _call(
-    LirCall call,
-    List<LirValue> arguments,
-    void Function() transfer, {
-    LirValue? address,
-  }) {
+  /// Makes [call], leaving its result where calls leave it, and records what
+  /// it keeps alive.
+  void _transfer(LirCall call) {
     final outgoing = argumentLocations(call.signature, .outgoing);
+    final (arguments, address) = switch (call) {
+      Call(:final arguments) => (arguments, null),
+      CallIndirect(:final arguments, :final address) => (arguments, address),
+      Alloc(:final size) => ([size], null),
+    };
     _move([
       for (final (i, argument) in arguments.indexed)
         _between(_place(argument), outgoing[i], argument.type!),
       if (address != null)
         _between(_place(address), const InRegister(.word, calleeScratch), .ptr),
     ]);
-    transfer();
-    _maps.add(StackMap(_assembler.offset, _references(call)));
-    if (call.type case final type?) {
-      _move([_between(resultLocation(type), _place(call), type)]);
+    switch (call) {
+      case Call(:final symbol):
+        _assembler.call(symbol);
+      case CallIndirect():
+        _assembler.callRegister(calleeScratch);
+      case Alloc():
+        _assembler.call(allocateSymbol);
     }
+    stackMaps.add(StackMap(_assembler.offset, _references(call)));
   }
 
   /// Where references alive across [call] are, from the frame address.
@@ -265,17 +306,44 @@ final class Arm64Function(
         _follow(ifFalse);
       case Unreachable():
         _assembler.breakpoint();
-      case Throw() || Invoke():
-        throw StateError('Unchecked terminator: $end');
+      case Throw(:final exception, :final trace):
+        _move([
+          _between(_place(exception), const InRegister(.word, 0), .ref),
+          _between(_place(trace), const InRegister(.word, 1), .ref),
+        ]);
+        _assembler.call(throwSymbol);
+        stackMaps.add(StackMap(_assembler.offset, const []));
+        _assembler.breakpoint();
+      case final Invoke invoke:
+        _invoke(invoke);
     }
   }
 
-  void _follow(LirEdge edge) {
+  /// Makes a call and continues on one of its edges.
+  void _invoke(Invoke invoke) {
+    final Invoke(:call, :onReturn, :onThrow) = invoke;
+    _transfer(call);
+    final returnOffset = _assembler.offset;
+    _follow(onReturn, [if (call.type case final type?) resultLocation(type)]);
+    // The frame is found here again, without the stack it reached down to.
+    throwTargets.add(ThrowTarget(returnOffset, _assembler.offset));
+    _assembler
+      ..constant(rightScratch, _frameBytes)
+      ..sub(rightScratch, Arm64Assembler.frame, rightScratch)
+      ..addImmediate(Arm64Assembler.stack, rightScratch, 0);
+    _follow(onThrow, const [InRegister(.word, 0), InRegister(.word, 1)]);
+  }
+
+  /// Continues on [edge], whose target first receives what is at [supplied].
+  void _follow(LirEdge edge, [List<Location> supplied = const []]) {
+    final parameters = edge.target.parameters;
     _move([
+      for (final (i, source) in supplied.indexed)
+        _between(source, _place(parameters[i]), parameters[i].type),
       for (final (i, argument) in edge.arguments.indexed)
         _between(
           _place(argument),
-          _place(edge.target.parameters[i]),
+          _place(parameters[supplied.length + i]),
           argument.type!,
         ),
     ]);

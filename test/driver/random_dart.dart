@@ -18,9 +18,8 @@ typedef _Method = ({String name, Kind result, List<Kind> parameters});
 
 /// Reproducible random functions in the Dart that is supported.
 ///
-/// Every function takes constants for its arguments, terminates and has no
-/// operation that could throw: divisors and shifts are literals, and each loop
-/// counts its own variable down.
+/// Every function takes constants for its arguments and terminates: each loop
+/// counts its own variable down. Some operations throw, sometimes.
 final class RandomDart(int seed) {
   final Random _random = Random(seed);
   final _lines = <String>[];
@@ -30,6 +29,10 @@ final class RandomDart(int seed) {
   final _loops = <String?>[];
   final _methods = <_Method>[];
   late Kind _result;
+  int _tries = 0;
+
+  /// Whether to throw here, which is rarely done where nothing catches it.
+  bool get _mayThrow => _chance(_tries > 0 ? 2 : 100);
   int _names = 0, _depth = 0;
 
   /// Bodies call only methods numbered below this, so that calls end.
@@ -322,6 +325,12 @@ final class RandomDart(int seed) {
             if (fieldKind == kind) '$name.$field',
   ];
 
+  /// The variables that are not final, as caught exceptions are.
+  List<String> _assignable(Kind kind) => [
+    for (final name in _variables(kind))
+      if (!RegExp(r'^e\d+$').hasMatch(name)) name,
+  ];
+
   void _declare(Kind kind) {
     final name = 'v${_names++}';
     final value = _expression(kind, 2);
@@ -339,7 +348,7 @@ final class RandomDart(int seed) {
   }
 
   void _statement(int depth) {
-    switch (_random.nextInt(depth > 0 ? 18 : 9)) {
+    switch (_random.nextInt(depth > 0 ? 22 : 9)) {
       case 0 || 1:
         _declare(_any(Kind.values));
       case 2:
@@ -347,7 +356,7 @@ final class RandomDart(int seed) {
       case 3 || 4 || 5:
         _line('${_assignment(_any(Kind.values), 2)};');
       case 6:
-        final variable = _any(_variables(.integer));
+        final variable = _any(_assignable(.integer));
         _line('${_any(['$variable++', '--$variable', '$variable--'])};');
       case 7 when _loops.isNotEmpty:
         _leave();
@@ -371,7 +380,13 @@ final class RandomDart(int seed) {
       case 17:
         final name = 'c${_names++}', kind = _any(Kind.values);
         _line('const ${kind.name} $name = ${_constant(kind)};');
-        _line('${_any(_variables(kind))} = $name;');
+        _line('${_any(_assignable(kind))} = $name;');
+      case 18 || 19 || 20:
+        _try(depth - 1);
+      case 21 when _mayThrow:
+        _line(
+          'if (${_expression(.boolean, 2)}) throw ${_expression(.object, 1)};',
+        );
       case 8:
         _line("print('trace ${_names++} é');");
       default:
@@ -397,6 +412,40 @@ final class RandomDart(int seed) {
     final verb = _random.nextBool() ? 'break' : 'continue';
     // `break` inside a switch means the switch unless it names the loop.
     _line('if (${_expression(.boolean, 2)}) $verb$target;');
+  }
+
+  void _try(int depth) {
+    _tries++;
+    _block('try', () {
+      _statements(1 + _random.nextInt(4), depth);
+      if (_chance(3)) {
+        _line('if (${_expression(.boolean, 2)}) throw ${_literal(.object)};');
+      }
+    });
+    _tries--;
+    final catches = _random.nextInt(3);
+    for (var i = 0; i < catches; i++) {
+      final class_ = _any([
+        for (var i = 0; i < _classCount; i++) 'C$i',
+        'K',
+        'Error',
+        'UnsupportedError',
+        'Object',
+      ]);
+      final name = 'e${_names++}';
+      final isObject = class_.startsWith(RegExp('[CK]'));
+      _block('on $class_ catch ($name)', () {
+        if (isObject) _scopes.last.add((name, .object));
+        _statements(1 + _random.nextInt(2), depth);
+        if (_chance(5)) _line('if (${_expression(.boolean, 1)}) rethrow;');
+        // It is final, so nothing may assign it.
+      });
+    }
+    final catchesAll = !_chance(4);
+    if (catchesAll) _block('catch (_)', () => _statements(2, depth));
+    if (catches == 0 && !catchesAll || _chance(3)) {
+      _block('finally', () => _statements(1 + _random.nextInt(2), depth));
+    }
   }
 
   void _if(int depth) {

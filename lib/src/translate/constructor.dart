@@ -101,7 +101,7 @@ final class ConstructorTranslator(
         supplied[superConstructorParameter] = _builder.read(parameter);
       }
     }
-    _builder.add(
+    _builder.call(
       HirCall(_scope.initializerOf(target), [
         _builder.receiver!,
         ..._statements.expressions.calls.ordered(target, supplied),

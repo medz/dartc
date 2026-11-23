@@ -91,9 +91,12 @@ final class ObjectLayout(
 
   int numberOf(HirClass class_) => _classNumbers[class_]!;
 
-  /// Creates an object of [class_].
-  LirValue allocate(LirBlock block, HirClass class_) {
-    final object = block.add(Alloc(block.add(ConstInt(sizeOf(class_)))));
+  /// The allocation of an object of [class_], not yet part of [block].
+  Alloc allocation(LirBlock block, HirClass class_) =>
+      Alloc(block.add(ConstInt(sizeOf(class_))));
+
+  /// Makes [object] one of [class_].
+  LirValue setClass(LirBlock block, LirValue object, HirClass class_) {
     final number = block.add(ConstInt(numberOf(class_)));
     block.add(Store(.u32, object, number, offset: classOffset));
     return object;
@@ -115,6 +118,13 @@ final class ObjectLayout(
 
   /// A field of a class without objects is only used by code that never runs.
   int offsetOf(HirField field) => _fieldOffsets[field] ?? _headerBytes;
+
+  /// Reads the byte for the class of [object] in the table at [symbol].
+  LirValue isInstance(LirBlock block, String symbol, LirValue object) {
+    final number = block.add(Load(.u32, object, offset: classOffset));
+    final table = block.add(SymbolAddress(symbol));
+    return block.add(Load(.u8, table, index: number));
+  }
 
   /// The address of what the class of [receiver] has for [selector].
   LirValue lookUp(LirBlock block, HirSelector selector, LirValue receiver) {

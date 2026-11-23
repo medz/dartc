@@ -1,12 +1,14 @@
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'output.dart';
 import 'statics.dart';
 import 'system.dart';
 
-/// Lowers the operations of the collector.
+/// Lowers the operations of the runtime.
 final class MachineLowering(
-  final StaticData _statics, {
+  final StaticData _statics,
+  final OutputData _output, {
   required final bool collectsAlways,
 }) {
   /// Adds [op] to [block], returning its result if it has one.
@@ -34,6 +36,15 @@ final class MachineLowering(
       case .unmapMemory:
         block.add(callSystem('munmap', arguments));
         return null;
+      case .writeError:
+        _output.writeByte(block, standardError, arguments.single);
+        return null;
+      case .resume:
+        final [frame, code, exception, trace] = arguments;
+        block.add(Resume(frame, code, exception, trace));
+        return null;
+      case .handlers:
+        return symbol(handlerSymbol);
       case .trap:
         // Code never continues after it.
         return null;

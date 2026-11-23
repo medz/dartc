@@ -5,6 +5,7 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'calls.dart';
+import 'checks.dart';
 import 'constant.dart';
 import 'describe.dart';
 import 'members.dart';
@@ -20,7 +21,7 @@ final class ExpressionTranslator(
   final FunctionBuilder _builder,
 ) implements Evaluator {
   late final calls = CallTranslator(_scope, _builder, this);
-  late final _operators = OperatorTranslator(_builder, calls);
+  late final _operators = OperatorTranslator(_scope, _builder, calls);
   late final _statics = StaticTranslator(_scope, _builder);
   late final _places = PlaceTranslator(_builder, this, calls, _statics);
 
@@ -68,8 +69,17 @@ final class ExpressionTranslator(
   HirValue value(Expression node, {HirType placeholder = .integer}) {
     final inner = node.unParenthesized, type = inner.staticType;
     if (type is NeverType) {
-      if (inner is! MethodInvocation) _unsupported(inner, describe(inner));
-      calls.invocation(inner, isUsed: false);
+      switch (inner) {
+        case MethodInvocation():
+          calls.invocation(inner, isUsed: false);
+        case ThrowExpression(:final expression):
+          _throw(expression);
+        case RethrowExpression():
+          final (exception, trace) = _builder.caught.last;
+          _builder.raise(exception, trace);
+        default:
+          _unsupported(inner, describe(inner));
+      }
       return _builder.placeholder(placeholder);
     }
     switch (inner) {
@@ -101,7 +111,7 @@ final class ExpressionTranslator(
       case PrefixExpression():
         return _prefix(inner);
       case PostfixExpression(:final operator, :final operand):
-        if (operator.lexeme == '!') _unsupported(inner, 'operator !');
+        if (operator.lexeme == '!') return _notNull(inner, operand);
         return _step(inner, operand, operator.lexeme, after: false);
       case BinaryExpression():
         return _binary(inner);
@@ -119,6 +129,23 @@ final class ExpressionTranslator(
       default:
         _unsupported(inner, describe(inner));
     }
+  }
+
+  void _throw(Expression expression) {
+    final value = valueAs(expression, .reference);
+    final class_ = classOf(expression.staticType);
+    if (class_ == null) {
+      _unsupported(expression, 'throwing ${expression.staticType}');
+    }
+    _scope.addThrown(class_);
+    _builder.raise(value, _builder.create(_scope.traceClass));
+  }
+
+  HirValue _notNull(PostfixExpression node, Expression operand) {
+    if (CallTranslator.hasNullAware(operand)) {
+      _unsupported(node, 'null-aware chains');
+    }
+    return CheckedOperations(_scope, _builder).notNull(value(operand));
   }
 
   HirValue _integer(IntegerLiteral node, {required bool isNegated}) =>

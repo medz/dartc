@@ -87,18 +87,25 @@ final class ClassTable(final Declarations _declarations) {
   HirClass _class(ClassElement element) {
     CompileFailure unsupported(String what) =>
         _declarations.unsupported(element, what);
+    if (element.library.isInSdk) {
+      // An error thrown by the program itself, or a stack trace.
+      return HirClass(element.displayName, null, [
+        if (element.name != 'StackTrace') HirField('number', .integer),
+      ]);
+    }
     if (element.mixins.isNotEmpty) throw unsupported('mixins');
     if (element.primaryConstructor != null) {
       throw unsupported('primary constructors');
     }
     if (element.typeParameters.isNotEmpty) throw unsupported('generic classes');
     final superclass = element.supertype!.element as ClassElement;
-    if (superclass.library.isInSdk && !superclass.isDartCoreObject) {
+    final isBase = superclass.library.isDartCore && superclass.name == 'Error';
+    if (superclass.library.isInSdk && !superclass.isDartCoreObject && !isBase) {
       throw unsupported('extending ${superclass.name} of the SDK');
     }
     return HirClass(
       element.displayName,
-      superclass.isDartCoreObject ? null : classOf(superclass),
+      superclass.library.isInSdk ? null : classOf(superclass),
       [for (final field in instanceFields(element)) _field(field)],
     );
   }

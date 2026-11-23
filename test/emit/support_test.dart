@@ -34,13 +34,20 @@ void main() {
     );
   }
 
-  final normal = LirBlock()..end(Return());
+  rejects(
+    'f: no function .throw',
+    ending((entry) {
+      final none = entry.add(ConstNull());
+      return Throw(none, none);
+    }),
+  );
+  final normal = LirBlock([.ref])..end(Return());
   final handler = LirBlock([.ref, .ref])..end(Return());
   rejects(
-    'Invoke',
+    'f: no function .allocate',
     ending(
-      (_) => Invoke(
-        Call('g', LirSignature([]), []),
+      (entry) => Invoke(
+        Alloc(entry.parameters.single),
         LirEdge(normal),
         LirEdge(handler),
       ),

@@ -66,6 +66,7 @@ final class _Printer(final LirFunction function) {
     SymbolAddress(:final symbol) => 'address $symbol',
     StaticObject(:final symbol) => 'object $symbol',
     FrameAddress() => 'frame',
+    Resume(:final inputs) => 'resume ${_list(inputs)}',
     IntBinary(:final op, :final inputs) => 'int.${op.name} ${_list(inputs)}',
     FloatBinary(:final op, :final inputs) =>
       'float.${op.name} ${_list(inputs)}',

@@ -6,6 +6,7 @@ import 'package:dartc/src/emit/allocate.dart';
 import 'package:dartc/src/emit/arm64/convention.dart';
 import 'package:dartc/src/emit/liveness.dart';
 import 'package:dartc/src/emit/stack_maps.dart';
+import 'package:dartc/src/emit/support.dart';
 import 'package:test/test.dart';
 
 import '../lir/support.dart';
@@ -91,7 +92,7 @@ void main() {
         final liveness = Liveness(made);
         final allocation = Allocation(liveness, arm64Registers);
         for (final block in made.blocks) {
-          for (final call in block.instructions.whereType<LirCall>()) {
+          for (final call in callsOf(block)) {
             for (final value in liveness.liveAfter(call)) {
               expect(liveness.intervals[value]!.crossesCall, isTrue);
               if (value.type != .ref) continue;
@@ -103,6 +104,56 @@ void main() {
       }
     }
     expect(found, greaterThan(100));
+  });
+
+  test('what a handler needs is on the stack', () {
+    var found = 0;
+    for (var seed = 0; seed < 60; seed++) {
+      for (final made in RandomLir(seed).functions()) {
+        final allocation = Allocation(Liveness(made), arm64Registers);
+        for (final block in made.blocks) {
+          if (block.terminator case Invoke(:final onThrow)) {
+            for (final value in onThrow.arguments) {
+              found++;
+              expect(allocation.locations[value], isA<OnStack>());
+            }
+          }
+        }
+      }
+    }
+    expect(found, greaterThan(50));
+  });
+
+  test('throw targets are encoded for the runtime', () {
+    final bytes = encodeThrowTargets(const [
+      ThrowTarget(100, 200),
+      ThrowTarget(104, 60),
+    ]);
+    expect(bytes.buffer.asInt32List(), [2, 100, 200, 104, 60]);
+  });
+
+  test('targets follow the calls that return to them', () {
+    final entry = LirBlock([.i64]), normal = LirBlock([.ref]);
+    final handler = LirBlock([.ref, .ref]);
+    entry.end(
+      Invoke(Alloc(entry.parameters[0]), LirEdge(normal), LirEdge(handler)),
+    );
+    normal.end(Return());
+    handler.end(Return());
+    final code = emitArm64(
+      LirModule(
+        functions: [
+          function(allocateSymbol, [.i64], .ref, (block, _) {
+            return block.add(ConstNull());
+          }),
+          LirFunction('f', LirSignature([.i64]), [entry, normal, handler]),
+        ],
+      ),
+    );
+    final ThrowTarget(:returnOffset, :target) = code.throwTargets.single;
+    expect(code.stackMaps.single.returnOffset, returnOffset);
+    expect(target, greaterThan(returnOffset));
+    expect(code.data, isEmpty);
   });
 
   test('each call lists the stack words of its live references', () {

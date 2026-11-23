@@ -335,7 +335,11 @@ void main() {
       void main() { A().f(); if (1 > 2) other(null); }
       void other(C? c) => c?.f();
     ''');
-    expect(module.classes.map((c) => c.name), ['A']);
+    expect(module.classes.map((c) => c.name), [
+      'A',
+      'StackOverflowError',
+      'StackTrace',
+    ]);
     expect((HirInterpreter(module)..run()).output, 'A\n');
   });
 
@@ -380,8 +384,8 @@ A make() => A();''',
       '2:7: $what mixins.',
     );
     reports(
-      'class A implements Exception {}\nclass B extends Error {}\nvoid main() { A(); B(); }',
-      '2:7: $what extending Error of the SDK.',
+      'class A implements Exception {}\nclass B extends TypeError {}\nvoid main() { A(); B(); }',
+      '2:7: $what extending TypeError of the SDK.',
     );
     reports(
       'class A { A(); factory A.f() = A; }\nvoid main() { A.f(); }',
@@ -402,10 +406,6 @@ A make() => A();''',
     reports(
       'class A { void f() {} void g() { f; } }\nvoid main() { A().g(); }',
       '1:34: $what method tear-offs.',
-    );
-    reports(
-      'class A { int n = 1; }\nvoid f(A? a) { a!.n; }\nvoid main() { f(null); }',
-      '2:16: $what operator !.',
     );
     reports(
       'class A { int n = 1; }\nvoid f(A? a) { a?.n; }\nvoid main() { f(null); }',

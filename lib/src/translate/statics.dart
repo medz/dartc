@@ -40,8 +40,7 @@ final class StaticTranslator(
     } else {
       getter = _scope.functionOf(element) ?? _unsupported(node);
     }
-    final call = _builder.add(HirCall(getter, const []));
-    return call.type == null ? _unsupported(node) : call;
+    return _builder.call(HirCall(getter, const [])) ?? _unsupported(node);
   }
 
   /// Whether the program declares [setter].
@@ -52,7 +51,7 @@ final class StaticTranslator(
   /// Writes with a setter that the program declares.
   void write(SetterElement setter, HirValue value) {
     if (!setter.isOriginVariable) {
-      _builder.add(HirCall(_scope.functionOf(setter)!, [value]));
+      _builder.call(HirCall(_scope.functionOf(setter)!, [value]));
       return;
     }
     final GlobalVariable(:global, :isSet) = _scope.globalOf(setter.variable)!;

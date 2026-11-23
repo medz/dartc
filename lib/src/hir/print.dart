@@ -14,6 +14,8 @@ String printHir(HirModule module) => [
     'global ${type.dartName} $name = $initial',
   for (final MapEntry(key: selector, value: entries) in module.dispatch.entries)
     'dispatch ${selector.name}: ${entries.entries.map(_entry).join(', ')}',
+  for (final MapEntry(key: test, value: passing) in module.tests.entries)
+    'test ${test.name}: ${passing.map((class_) => class_.name).join(', ')}',
   for (final function in module.functions) _Printer(function).run(),
 ].join('\n');
 
@@ -101,6 +103,9 @@ final class _Printer(final HirFunction function) {
       '${_name(object)}.${field.name} = ${_name(value)}',
     HirVirtualCall(:final selector, :final receiver, :final arguments) =>
       '${_name(receiver)}->${selector.name}(${_list(arguments)})',
+    HirIsInstance(:final test, :final object) =>
+      '${_name(object)} is ${test.name}',
+    HirWriteError(:final text) => 'error ${jsonEncode(text)}',
     HirPrint(:final text) => 'print ${jsonEncode(text)}',
     HirCall(:final target, :final arguments) =>
       '${target.name}(${_list(arguments)})',
@@ -114,6 +119,10 @@ final class _Printer(final HirFunction function) {
     HirBranch(:final condition, :final ifTrue, :final ifFalse) =>
       'branch ${_name(condition)}, ${_edge(ifTrue)}, ${_edge(ifFalse)}',
     HirReturn(:final inputs) => 'return ${_list(inputs)}'.trimRight(),
+    HirThrow(:final inputs) => 'throw ${_list(inputs)}',
+    HirInvoke(:final call, :final onReturn, :final onThrow) =>
+      'invoke ${_instruction(call)}, ${_edge(onReturn)}, '
+          'throw ${_edge(onThrow)}',
     HirExit(:final code) => 'exit ${_name(code)}',
     HirUnreachable() => 'unreachable',
   };

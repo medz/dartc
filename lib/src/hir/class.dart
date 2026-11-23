@@ -22,6 +22,9 @@ final class HirClass(
   }
 }
 
+/// A question about the class of an object, told apart by itself.
+final class HirTypeTest(final String name);
+
 /// A member that calls look up in the class of their receiver.
 ///
 /// [parameters] excludes the receiver. Selectors are told apart by themselves.

@@ -21,6 +21,10 @@ const _fixedFlag = 4;
 final class StaticData(final HirModule module, final ObjectLayout _layout) {
   final _constants = <HirConstObject, String>{};
   final _objects = <LirStatic>[];
+  final _tests = <HirTypeTest, String>{};
+
+  /// The tables that tests read.
+  final List<LirData> tables = [];
   final _offsets = <HirGlobal, int>{};
 
   late final List<HirGlobal> _globals = [
@@ -40,6 +44,18 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
       _objects.add(words.build(globalsSymbol, writable: true));
     }
   }
+
+  /// The symbol of [test]: a byte for each class, 1 for those that pass.
+  String test(HirTypeTest test) => _tests.putIfAbsent(test, () {
+    final passing = module.tests[test]!;
+    final symbol = '.is.${_tests.length}';
+    tables.add(
+      LirData(symbol, [
+        for (final class_ in module.classes) passing.contains(class_) ? 1 : 0,
+      ]),
+    );
+    return symbol;
+  });
 
   /// Every object, once the program's functions are lowered.
   List<LirStatic> get objects => _objects;

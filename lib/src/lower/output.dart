@@ -4,30 +4,52 @@ import 'package:dartc/lir.dart';
 
 import 'system.dart';
 
-/// Writes bytes to standard output, given their address and count.
+/// Writes bytes to a descriptor, given their address and count.
 const writeSymbol = '.write';
-final writeSignature = LirSignature([.ptr, .i64]);
+final writeSignature = LirSignature([.i64, .ptr, .i64]);
 
-const _standardOutput = 1, _interrupted = 4, _brokenPipe = 13, _ignore = 1;
+const standardOutput = 1, standardError = 2;
+const _interrupted = 4, _brokenPipe = 13, _ignore = 1;
 
 /// The texts a program prints, each stored once.
 final class OutputData() {
   final _symbols = <String, String>{};
   final List<LirData> data = [];
 
+  /// Every byte, so that each has an address.
+  static const _bytes = '.bytes';
+  bool _hasBytes = false;
+
   bool get isUsed => data.isNotEmpty;
 
-  /// Adds a print of [text] to [block].
-  void print(LirBlock block, String text) {
-    final bytes = utf8.encode('$text\n');
+  /// Adds a write of [text] to [block].
+  void write(LirBlock block, int descriptor, String text) {
+    final bytes = utf8.encode(text);
     final symbol = _symbols.putIfAbsent(text, () {
       final name = '.text.${data.length}';
       data.add(LirData(name, bytes));
       return name;
     });
     final address = block.add(SymbolAddress(symbol));
-    final count = block.add(ConstInt(bytes.length));
-    block.add(Call(writeSymbol, writeSignature, [address, count]));
+    _write(block, descriptor, address, bytes.length);
+  }
+
+  /// Adds a write of the single byte [value] to [block].
+  void writeByte(LirBlock block, int descriptor, LirValue value) {
+    if (!_hasBytes) {
+      data.add(LirData(_bytes, List.generate(256, (i) => i)));
+      _hasBytes = true;
+    }
+    final mask = block.add(ConstInt(0xff));
+    final index = block.add(IntBinary(.and, value, mask));
+    final address = block.add(PtrAdd(block.add(SymbolAddress(_bytes)), index));
+    _write(block, descriptor, address, 1);
+  }
+
+  void _write(LirBlock block, int descriptor, LirValue address, int count) {
+    final to = block.add(ConstInt(descriptor));
+    final size = block.add(ConstInt(count));
+    block.add(Call(writeSymbol, writeSignature, [to, address, size]));
   }
 }
 
@@ -46,13 +68,13 @@ void ignoreBrokenPipes(LirBlock block) => block.add(
 /// It continues after partial and interrupted writes. Any other error ends it,
 /// as the official `print` ignores them.
 LirFunction writeFunction() {
-  final entry = LirBlock([.ptr, .i64]), loop = LirBlock([.ptr, .i64]);
+  final entry = LirBlock([.i64, .ptr, .i64]), loop = LirBlock([.ptr, .i64]);
   final attempt = LirBlock(), advance = LirBlock(), failed = LirBlock();
   final done = LirBlock(), retry = LirBlock();
-  entry.end(Jump(LirEdge(loop, entry.parameters)));
+  final [descriptor, ...bytes] = entry.parameters;
+  entry.end(Jump(LirEdge(loop, bytes)));
   final [address, count] = loop.parameters;
   loop.end(Branch(count, LirEdge(attempt), LirEdge(done)));
-  final descriptor = attempt.add(ConstInt(_standardOutput));
   final written = attempt.add(
     callSystem('write', [descriptor, address, count]),
   );

@@ -453,23 +453,6 @@ b0():
       '2:15: $what function declaration statement.',
     );
     reports(
-      'void f(int x) { x ~/ x; }\nvoid main() { f(1); }',
-      '2:17: $what operator ~/ with a variable right side.',
-    );
-    reports(
-      'void f(int x) { x << x; }\nvoid main() { f(1); }',
-      '2:17: $what operator << with a variable right side.',
-    );
-    reports(
-      'void main() { 1 % 0; }',
-      '2:15: $what operator % throwing an exception.',
-    );
-    reports(
-      'void main() { 1 >>> -1; }',
-      '2:15: $what operator >>> throwing an exception.',
-    );
-    reports('void main() { 1.5 ~/ 2; }', '2:15: $what operator ~/ on double.');
-    reports(
       'void main() { 1 == true; }',
       '2:15: $what operator == on these types.',
     );
@@ -495,12 +478,10 @@ b0():
       'const s = "a";\nvoid main() { s; }',
       '3:15: $what a constant of type String.',
     );
-    reports('void main() { throw 1; }', '2:15: $what throw expression.');
     reports(
       'void main() { true == 1; }',
       '2:15: $what operator == on these types.',
     );
-    reports('void main() { 1!; }', '2:15: $what operator !.');
     reports('void main() { 1 ?? 2; }', '2:15: $what using int as an object.');
     reports(
       'void f(int x) { x ??= 1; }\nvoid main() { f(1); }',
@@ -523,10 +504,6 @@ b0():
     reports('void main() { print("a" + "b"); }', '2:21: $what $printing.');
     reports('void main() { const x = 1; print(x); }', '2:34: $what $printing.');
     // Also where the code can never run.
-    reports(
-      'void main() { exit(1); 1 ~/ 0; }',
-      '2:24: $what operator ~/ throwing an exception.',
-    );
   });
 }
 

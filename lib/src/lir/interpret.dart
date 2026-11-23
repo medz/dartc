@@ -26,13 +26,16 @@ final class LirInterpreter(
   final LirModule module, {
   final Map<String, LirExternalBody> externals = const {},
   final int maxSteps = 10000000,
+
+  /// How many calls may be running before the stack overflows.
+  final int maxDepth = 500,
 }) {
   final LirMemory memory = LirMemory();
   final _functions = <String, LirFunction>{};
   final _addresses = <String, int>{};
   final _statics = <String, LirObject>{};
   final _callables = <int, String>{};
-  int _steps = 0;
+  int _steps = 0, _depth = 0;
 
   this {
     verifyModule(module);
@@ -77,7 +80,17 @@ final class LirInterpreter(
       throw LirFault('$symbol takes ${signature.parameters.length} arguments.');
     }
     final function = _functions[symbol];
-    if (function != null) return _run(function, arguments);
+    if (function != null) {
+      if (function.checksStack && _depth >= maxDepth) {
+        return call(stackOverflowSymbol);
+      }
+      _depth++;
+      try {
+        return _run(function, arguments);
+      } finally {
+        _depth--;
+      }
+    }
     final body = externals[symbol] ?? (throw LirFault('No external $symbol.'));
     return body(memory, arguments);
   }
@@ -162,7 +175,7 @@ final class LirInterpreter(
             (throw LirFault('$symbol has no address here.'));
       case StaticObject(:final symbol):
         return _statics[symbol];
-      case FrameAddress():
+      case FrameAddress() || Resume():
         throw LirFault('Frames are not simulated.');
       case IntBinary(:final op, :final left, :final right):
         return _integer(op, integer(left), integer(right));
