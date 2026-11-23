@@ -137,6 +137,14 @@ final class HirCompare(
   List<HirValue> get inputs => [left, right];
 }
 
+/// Writes [text] and a newline to standard output, as `print` does.
+final class HirPrint(final String text) extends HirInstruction {
+  @override
+  HirType? get type => null;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
 /// Calls [target] with one argument for each of its parameters.
 final class HirCall(final HirCallable target, Iterable<HirValue> arguments)
     extends HirInstruction {

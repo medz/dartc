@@ -4,6 +4,7 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'constant.dart';
 import 'operators.dart';
 import 'types.dart';
 
@@ -117,22 +118,11 @@ final class ExpressionTranslator(
 
   /// The value of the constant variable that [element] refers to.
   HirValue _constant(Expression node, Element? element) {
-    final variable = switch (element) {
-      GetterElement(:final variable) => variable,
-      VariableElement() => element,
-      _ => null,
-    };
-    if (variable == null || !variable.isConst) {
-      _unsupported(node, describe(node));
-    }
-    final constant = variable.computeConstantValue();
-    final Object? value = switch (valueType(variable.type)) {
-      .integer => constant?.toIntValue(),
-      .float => constant?.toDoubleValue(),
-      .boolean => constant?.toBoolValue(),
-      null => _unsupported(node, 'a constant of type ${variable.type}'),
-    };
-    if (value == null) throw StateError('Unevaluated constant $node.');
+    final variable = constantVariable(element);
+    if (variable == null) _unsupported(node, describe(node));
+    final value =
+        constantNumber(variable) ??
+        _unsupported(node, 'a constant of type ${variable.type}');
     return _builder.add(HirConst(value));
   }
 
@@ -242,6 +232,10 @@ final class ExpressionTranslator(
       _builder.end(HirExit(code));
       return null;
     }
+    if (_isPrint(element)) {
+      _print(node.argumentList.arguments.single.argumentExpression);
+      return null;
+    }
     final function =
         _functions(element) ??
         _unsupported(node, 'calling ${element.displayName} of the SDK');
@@ -252,6 +246,17 @@ final class ExpressionTranslator(
 
   static bool _isExit(TopLevelFunctionElement element) =>
       element.name == 'exit' && element.library.uri == Uri.parse('dart:io');
+
+  static bool _isPrint(TopLevelFunctionElement element) =>
+      element.name == 'print' && element.library.uri == Uri.parse('dart:core');
+
+  void _print(Expression argument) {
+    final text = constantText(argument.unParenthesized);
+    if (text == null) {
+      _unsupported(argument, 'printing anything but a constant string');
+    }
+    _builder.add(HirPrint(text));
+  }
 
   /// Arguments in parameter order, evaluated in source order.
   List<HirValue> _arguments(
@@ -274,13 +279,7 @@ final class ExpressionTranslator(
   }
 
   HirValue _default(MethodInvocation node, FormalParameterElement parameter) {
-    final constant = parameter.computeConstantValue();
-    final Object? value = switch (valueType(parameter.type)) {
-      .integer => constant?.toIntValue(),
-      .float => constant?.toDoubleValue(),
-      .boolean => constant?.toBoolValue(),
-      null => null,
-    };
+    final value = constantNumber(parameter);
     if (value == null) throw StateError('No default for ${parameter.name}.');
     return _builder.add(HirConst(value));
   }

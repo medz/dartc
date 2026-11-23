@@ -174,6 +174,8 @@ final class RandomDart(int seed) {
         final name = 'c${_names++}', kind = _any(Kind.values);
         _line('const ${kind.name} $name = ${_literal(kind)};');
         _line('${_any(_variables(kind))} = $name;');
+      case 8:
+        _line("print('trace ${_names++} é');");
       default:
         _line('${_expression(_any(Kind.values), 2)};');
     }

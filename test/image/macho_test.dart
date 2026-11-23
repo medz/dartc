@@ -114,6 +114,80 @@ void main() {
     expect(signature, contains('CodeDirectory v=20400'));
   }, skip: skipExecution);
 
+  test('constant data has its own section', () {
+    final directory = Directory.systemTemp.createTempSync('dartc-image-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final path = '${directory.path}/program';
+    final block = LirBlock();
+    block.end(Return(block.add(ConstInt(0))));
+    build(
+      LirModule(
+        functions: [
+          LirFunction('main', LirSignature([], .i64), [block]),
+        ],
+        data: [
+          LirData('a', [1]),
+          LirData('b', [2, 3]),
+        ],
+      ),
+      path,
+    );
+    final commands = '${Process.runSync('/usr/bin/otool', ['-l', path]).stdout}'
+        .replaceAll(RegExp(' +'), ' ');
+    expect(commands, contains('initprot 0x00000005\n nsects 2'));
+    // After the 24 bytes of code, aligned.
+    expect(
+      commands,
+      contains(
+        'sectname __const\n segname __TEXT\n addr 0x00000001000002d0\n'
+        ' size 0x0000000000000012\n offset 720\n align 2^4 (16)\n'
+        ' reloff 0\n nreloc 0\n flags 0x00000000',
+      ),
+    );
+    final bytes = File(path).readAsBytesSync();
+    expect(bytes.sublist(720, 738), [1, ...List.filled(15, 0), 2, 3]);
+    final verified = Process.runSync('/usr/bin/codesign', ['--verify', path]);
+    expect(verified.exitCode, 0, reason: '${verified.stderr}');
+  }, skip: skipExecution);
+
+  test('data without bytes needs no section', () {
+    Uint8List link(EmittedCode code) =>
+        linkMacho(code, entry: 'f', identifier: 'x');
+    expect(
+      link(
+        EmittedCode(
+          Uint8List(4),
+          {'f': 0},
+          [Relocation(0, .pageOffset12, 'empty')],
+          data: {'empty': Uint8List(0)},
+        ),
+      ),
+      hasLength(link(EmittedCode(Uint8List(4), {'f': 0}, [])).length),
+    );
+  });
+
+  test('data crossing a page moves what follows', () {
+    for (final size in [0x3000, 0x3d00, 0x4000, 0x9000]) {
+      final code = EmittedCode(
+        Uint8List(4),
+        {'f': 0},
+        [],
+        externals: ['labs'],
+        data: {'d': Uint8List(size)..fillRange(0, size, 0xab)},
+      );
+      final image = ByteData.sublistView(
+        linkMacho(code, entry: 'f', identifier: 'x'),
+      );
+      const section = 32 + 72 + 72 + 80;
+      final offset = image.getUint32(section + 48, .little);
+      expect(image.getUint64(section + 40, .little), size);
+      expect(image.getUint8(offset), 0xab);
+      expect(image.getUint8(offset + size - 1), 0xab);
+      final slots = (offset + size + 0x3fff) & ~0x3fff;
+      expect(image.getUint64(slots, .little), 1 << 63);
+    }
+  });
+
   test('the same program gives the same bytes', () {
     Uint8List link(int value) =>
         linkMacho(emitArm64(_returning(value)), entry: 'main', identifier: 'x');

@@ -9,9 +9,10 @@ const _loader = '/usr/lib/dyld', _system = '/usr/lib/libSystem.B.dylib';
 const _headerBytes = 32, _segment = 72, _section = 80, _linkedData = 16;
 const _loaderBytes = 32, _systemBytes = 56;
 
-int _commandBytes({required bool imports}) =>
+int _commandBytes({required bool imports, required bool constants}) =>
     3 * _segment +
     _section +
+    (constants ? _section : 0) +
     (imports ? _segment + _section + _linkedData : 0) +
     24 +
     80 +
@@ -23,8 +24,8 @@ int _commandBytes({required bool imports}) =>
     _linkedData;
 
 /// The file position after the header and its load commands.
-int commandsEnd({required bool imports}) =>
-    _headerBytes + _commandBytes(imports: imports);
+int commandsEnd({required bool imports, required bool constants}) =>
+    _headerBytes + _commandBytes(imports: imports, constants: constants);
 
 /// Writes the header and load commands.
 ///
@@ -35,6 +36,8 @@ void writeCommands(
   required int base,
   required int textOffset,
   required int textEnd,
+  required int constantsOffset,
+  required int constantsEnd,
   required int entryOffset,
   required int slotsBytes,
   required int tableBytes,
@@ -43,7 +46,8 @@ void writeCommands(
   required List<int> uuid,
 }) {
   final imports = slotsBytes > 0;
-  final textBytes = pageAlign(textEnd);
+  final constants = constantsEnd > constantsOffset;
+  final textBytes = pageAlign(constantsEnd);
   final linkOffset = textBytes + pageAlign(slotsBytes);
   final linkBytes = signatureOffset + signatureBytes - linkOffset;
   out
@@ -52,7 +56,7 @@ void writeCommands(
     ..u32(0)
     ..u32(2) // An executable.
     ..u32(imports ? 13 : 11)
-    ..u32(_commandBytes(imports: imports))
+    ..u32(_commandBytes(imports: imports, constants: constants))
     ..u32(0x200085) // No undefined symbols, dyld, two-level, PIE.
     ..u32(0);
   _writeSegment(out, '__PAGEZERO', memoryBytes: base);
@@ -63,7 +67,7 @@ void writeCommands(
     memoryBytes: textBytes,
     fileBytes: textBytes,
     protection: 5,
-    sections: 1,
+    sections: constants ? 2 : 1,
   );
   _writeSection(
     out,
@@ -75,6 +79,18 @@ void writeCommands(
     alignment: 4,
     flags: 0x80000400, // Only instructions.
   );
+  if (constants) {
+    _writeSection(
+      out,
+      '__const',
+      '__TEXT',
+      address: base + constantsOffset,
+      offset: constantsOffset,
+      bytes: constantsEnd - constantsOffset,
+      alignment: 4,
+      flags: 0,
+    );
+  }
   if (imports) {
     _writeSegment(
       out,
@@ -110,7 +126,7 @@ void writeCommands(
   if (imports) _writeLinkedData(out, 0x80000034, linkOffset, tableBytes);
   _writeLoaderCommands(out, entryOffset, uuid);
   _writeLinkedData(out, 0x1d, signatureOffset, signatureBytes);
-  if (out.length != commandsEnd(imports: imports)) {
+  if (out.length != commandsEnd(imports: imports, constants: constants)) {
     throw StateError('Load commands end at ${out.length}.');
   }
 }

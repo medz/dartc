@@ -1,23 +1,70 @@
+import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 import 'package:dartc/lower.dart';
 
-/// The `exit` argument observed by running lowered code.
-int? runLowered(HirModule module) {
-  try {
-    final result = LirInterpreter(
+/// Lowered code running with a simulated operating system.
+final class LoweredRun(
+  HirModule module, {
+
+  /// How many of the bytes offered to each write are accepted; a negative
+  /// answer fails with that error number.
+  final int Function(int count)? accept,
+}) {
+  final _written = BytesBuilder();
+
+  /// The calls made to the system, in order.
+  final List<String> calls = [];
+
+  /// The argument of `exit`, or null if the program returned.
+  int? code;
+  String get output => utf8.decode(_written.toBytes());
+
+  this {
+    int? errorAddress;
+    var error = 0;
+    int address(LirMemory memory) => errorAddress ??= memory.map(Uint8List(4));
+    final interpreter = LirInterpreter(
       lowerProgram(module),
       externals: {
         'exit': (_, arguments) => throw _Exit(arguments.single as int),
         'fmod': (_, arguments) =>
             (arguments[0] as double).remainder(arguments[1] as double),
+        'signal': (_, arguments) {
+          calls.add('signal$arguments');
+          return 0;
+        },
+        '__error': (memory, _) {
+          final at = address(memory);
+          memory.store(.i32, at, 0, error);
+          return at;
+        },
+        'write': (memory, arguments) {
+          final [descriptor as int, from as int, count as int] = arguments;
+          calls.add('write$descriptor');
+          final accepted = accept?.call(count) ?? count;
+          if (accepted < 0) {
+            error = -accepted;
+            return -1;
+          }
+          _written.add(memory.read(from, min(accepted, count)));
+          return min(accepted, count);
+        },
       },
-    ).call(entrySymbol);
-    if (result != 0) throw StateError('The program ended with $result.');
-    return null;
-  } on _Exit catch (exit) {
-    return exit.code;
+    );
+    try {
+      final result = interpreter.call(entrySymbol);
+      if (result != 0) throw StateError('The program ended with $result.');
+    } on _Exit catch (exit) {
+      code = exit.code;
+    }
   }
 }
+
+/// The `exit` argument observed by running lowered code.
+int? runLowered(HirModule module) => LoweredRun(module).code;
 
 final class _Exit(final int code) implements Exception;

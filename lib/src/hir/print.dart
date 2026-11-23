@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'block.dart';
 import 'instruction.dart';
 import 'module.dart';
@@ -66,6 +68,7 @@ final class _Printer(final HirFunction function) {
     ),
     HirUnary(:final operator, :final operand) =>
       '${operator.symbol}${_name(operand)}',
+    HirPrint(:final text) => 'print ${jsonEncode(text)}',
     HirCall(:final target, :final arguments) =>
       '${target.name}(${_list(arguments)})',
   };

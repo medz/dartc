@@ -3,6 +3,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
 import 'operators.dart';
+import 'output.dart';
 import 'system.dart';
 
 LirType _typeOf(HirType type) => switch (type) {
@@ -20,6 +21,7 @@ LirSignature signatureOf(HirCallable function) => LirSignature(
 final class FunctionLowering(
   final HirFunction function,
   final Map<HirCallable, String> symbols,
+  final OutputData output,
 ) {
   final _values = <HirValue, LirValue>{};
   final _blocks = <HirBlock, LirBlock>{};
@@ -40,7 +42,8 @@ final class FunctionLowering(
     for (final block in order) {
       final lowered = _blocks[block]!;
       for (final instruction in block.instructions) {
-        _values[instruction] = _instruction(lowered, instruction);
+        final value = _instruction(lowered, instruction);
+        if (value != null) _values[instruction] = value;
       }
       lowered.end(_terminator(lowered, block.terminator!));
     }
@@ -53,7 +56,7 @@ final class FunctionLowering(
 
   LirValue _value(HirValue value) => _values[value]!;
 
-  LirValue _instruction(LirBlock block, HirInstruction instruction) {
+  LirValue? _instruction(LirBlock block, HirInstruction instruction) {
     final operators = OperatorLowering(block);
     switch (instruction) {
       case HirConst(:final Object value):
@@ -78,6 +81,9 @@ final class FunctionLowering(
         return operators.unary(operator, _value(operand));
       case HirCompare(:final relation, :final left, :final right):
         return operators.compare(relation, _value(left), _value(right));
+      case HirPrint(:final text):
+        output.print(block, text);
+        return null;
       case HirCall(:final target, :final arguments):
         return block.add(
           Call(symbols[target]!, signatureOf(target), arguments.map(_value)),
@@ -97,7 +103,7 @@ final class FunctionLowering(
       case HirReturn(:final value):
         return Return(value == null ? null : _value(value));
       case HirExit(:final code):
-        block.add(Call('exit', exitSignature, [_value(code)]));
+        block.add(callSystem('exit', [_value(code)]));
         return Unreachable();
       case HirUnreachable():
         return Unreachable();

@@ -36,7 +36,11 @@ final class EmittedCode(
 
   /// Functions the system supplies, by their C names.
   Iterable<String> externals = const [],
+
+  /// Constant bytes, each aligned to 16.
+  Map<String, Uint8List> data = const {},
 }) {
+  final Map<String, Uint8List> data = .unmodifiable(data);
   final List<String> externals = .unmodifiable(externals);
   final Map<String, int> functions = .unmodifiable(functions);
   final List<Relocation> relocations = .unmodifiable(relocations);

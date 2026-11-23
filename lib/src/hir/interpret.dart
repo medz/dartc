@@ -12,6 +12,10 @@ final class HirInterpreter(
   final int maxSteps = 10000000,
 }) {
   int _steps = 0;
+  final _output = StringBuffer();
+
+  /// Everything printed so far.
+  String get output => '$_output';
 
   this {
     verifyHir(module);
@@ -95,6 +99,9 @@ final class HirInterpreter(
         };
       case HirCompare(:final relation):
         return _compare(relation, inputs[0], inputs[1]);
+      case HirPrint(:final text):
+        _output.writeln(text);
+        return null;
       case HirCall(:final target):
         return _call(target as HirFunction, inputs);
     }

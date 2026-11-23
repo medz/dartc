@@ -39,9 +39,27 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
         _convert(op, d, operands[0]);
       case PtrAdd():
         _assembler.add(d, operands[0], operands[1]);
-      case ConstNull() || Load() || Store() || LirCall():
+      case Load():
+        _load(instruction, d, operands);
+      case ConstNull() || Store() || LirCall():
         throw StateError('Unchecked instruction: $instruction');
     }
+  }
+
+  void _load(Load load, int d, List<int> operands) {
+    var base = operands[0], offset = load.offset;
+    if (load.index != null) {
+      _assembler.add(farScratch, base, operands[1]);
+      base = farScratch;
+    }
+    if (!Arm64Assembler.reaches(load.width, offset)) {
+      _assembler
+        ..constant(calleeScratch, offset)
+        ..add(farScratch, base, calleeScratch);
+      base = farScratch;
+      offset = 0;
+    }
+    _assembler.loadWidth(load.width, d, base, offset);
   }
 
   void _integer(IntOp op, int d, int l, int r) {

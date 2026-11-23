@@ -56,7 +56,7 @@ final class OperatorLowering(final LirBlock block) {
 
   /// The remainder, moved up by the divisor's magnitude if it is negative.
   LirValue _floatModulo(LirValue left, LirValue right) {
-    final rest = block.add(Call('fmod', fmodSignature, [left, right]));
+    final rest = block.add(callSystem('fmod', [left, right]));
     final bits = block.add(Convert(.floatBitsToInt, right));
     final magnitude = _apply(.and, bits, _int(0x7fffffffffffffff));
     final zero = block.add(ConstFloat(0));

@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:dartc/lir.dart';
+
 import '../code.dart';
 
 /// ARM64 condition codes, by encoding.
@@ -161,6 +163,32 @@ final class Arm64Assembler() {
       _three(float ? 0xfc606800 : 0xf8606800, t, n, m);
   void storeIndexed(int t, int n, int m, {bool float = false}) =>
       _three(float ? 0xfc206800 : 0xf8206800, t, n, m);
+
+  /// Loads [width] into [t], extending or converting it to a full register.
+  ///
+  /// [offset] must satisfy [reaches].
+  void loadWidth(Width width, int t, int n, int offset) {
+    final word = switch (width) {
+      .i8 => 0x39800000,
+      .u8 => 0x39400000,
+      .i16 => 0x79800000,
+      .u16 => 0x79400000,
+      .i32 => 0xb9800000,
+      .u32 => 0xb9400000,
+      .i64 || .ref || .ptr => 0xf9400000,
+      .f32 => 0xbd400000,
+      .f64 => 0xfd400000,
+    };
+    if (!reaches(width, offset)) {
+      throw RangeError('Offset out of reach: $offset');
+    }
+    _emit(word | offset ~/ width.bytes << 10 | n << 5 | t);
+    if (width == .f32) _three(0x1e22c000, t, t, 0);
+  }
+
+  /// Whether a load of [width] can encode [offset].
+  static bool reaches(Width width, int offset) =>
+      offset >= 0 && offset % width.bytes == 0 && offset ~/ width.bytes < 4096;
 
   void pushFrame() => _emit(0xa9bf7bfd);
   void popFrame() => _emit(0xa8c17bfd);

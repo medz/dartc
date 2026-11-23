@@ -30,9 +30,8 @@ void main() {
     'e: LirType.ref',
     LirModule(externals: [LirExternal('e', LirSignature([], .ref))]),
   );
-  rejects('data', LirModule(data: [LirData('d', [])]));
+  rejects('writable data', LirModule(data: [LirData('d', [], writable: true)]));
   rejects('ref', body([.ref], (_, _) {}));
-  rejects('Load', body([.ptr], (block, p) => block.add(Load(.i64, p[0]))));
   rejects(
     'Store',
     body([.ptr, .i64], (block, p) {

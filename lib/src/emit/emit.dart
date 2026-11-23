@@ -23,5 +23,6 @@ EmittedCode emitArm64(LirModule module) {
     functions,
     assembler.relocations,
     externals: module.externals.map((external) => external.name),
+    data: {for (final data in module.data) data.name: data.bytes},
   );
 }

@@ -88,7 +88,7 @@ final class _FunctionVerifier(
   void _checkUses(Iterable<HirValue> uses, HirBlock block, int position) {
     for (final value in uses) {
       final owner = _blockOf[value] ?? _fail('use of an undefined value');
-      if (value.type == null) _fail('use of a call without a result');
+      if (value.type == null) _fail('use of an operation without a result');
       if (owner == block
           ? _positionOf[value]! >= position
           : !_dominators.dominates(owner, block)) {
@@ -114,7 +114,7 @@ final class _FunctionVerifier(
 
   void _checkInstruction(HirInstruction instruction) {
     switch (instruction) {
-      case HirConst():
+      case HirConst() || HirPrint():
         break;
       case HirIntBinary(:final operator, :final left, :final right):
         _expect(left, .integer, operator.symbol);

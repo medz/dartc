@@ -2,6 +2,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
 import 'function.dart';
+import 'output.dart';
 import 'system.dart';
 
 /// The function that starts the program and returns its exit code.
@@ -15,12 +16,18 @@ LirModule lowerProgram(HirModule module) {
     for (final (i, function) in module.functions.indexed)
       function: 'dart.$i.${function.name}',
   };
-  final start = LirBlock()
-    ..add(Call(symbols[module.main]!, signatureOf(module.main), const []));
+  final output = OutputData();
+  final bodies = [
+    for (final function in module.functions)
+      FunctionLowering(function, symbols, output).lower(),
+  ];
+  final start = LirBlock();
+  if (output.isUsed) ignoreBrokenPipes(start);
+  start.add(Call(symbols[module.main]!, signatureOf(module.main), const []));
   start.end(Return(start.add(ConstInt(0))));
   final functions = [
-    for (final function in module.functions)
-      FunctionLowering(function, symbols).lower(),
+    ...bodies,
+    if (output.isUsed) writeFunction(),
     LirFunction(entrySymbol, LirSignature([], .i64), [start]),
   ];
   final called = {
@@ -31,11 +38,10 @@ LirModule lowerProgram(HirModule module) {
   return LirModule(
     functions: functions,
     externals: [
-      for (final external in [
-        LirExternal('exit', exitSignature),
-        LirExternal('fmod', fmodSignature),
-      ])
-        if (called.contains(external.name)) external,
+      for (final MapEntry(key: name, value: signature)
+          in systemFunctions.entries)
+        if (called.contains(name)) LirExternal(name, signature),
     ],
+    data: output.data,
   );
 }

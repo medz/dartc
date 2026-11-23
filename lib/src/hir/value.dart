@@ -7,7 +7,7 @@ enum HirType(final String dartName) {
 
 /// Something usable as an operand, defined exactly once.
 abstract class HirValue() {
-  /// The value's type; null for a call without a result.
+  /// The value's type; null for an operation without a result.
   HirType? get type;
 }
 

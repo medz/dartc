@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/arm64/assembler.dart';
 import 'package:test/test.dart';
 
@@ -111,6 +112,32 @@ void main() {
     _encodes(0xd63f0100, (a) => a.callRegister(8));
     _encodes(0xd65f03c0, (a) => a.ret());
     _encodes(0xd4200020, (a) => a.breakpoint());
+  });
+
+  test('loads of every width', () {
+    _encodes(0x39801441, (a) => a.loadWidth(.i8, 1, 2, 5));
+    _encodes(0x39401441, (a) => a.loadWidth(.u8, 1, 2, 5));
+    _encodes(0x79800c41, (a) => a.loadWidth(.i16, 1, 2, 6));
+    _encodes(0x79400c41, (a) => a.loadWidth(.u16, 1, 2, 6));
+    _encodes(0xb9800841, (a) => a.loadWidth(.i32, 1, 2, 8));
+    _encodes(0xb9400841, (a) => a.loadWidth(.u32, 1, 2, 8));
+    _encodes(0xf9400841, (a) => a.loadWidth(.i64, 1, 2, 16));
+    _encodes(0xf9400841, (a) => a.loadWidth(.ptr, 1, 2, 16));
+    _encodes(0xfd400841, (a) => a.loadWidth(.f64, 1, 2, 16));
+    final single = Arm64Assembler()..loadWidth(.f32, 1, 2, 8);
+    expect(_words(single), [0xbd400841, 0x1e22c021]);
+    for (final width in Width.values) {
+      final last = 4095 * width.bytes;
+      expect(Arm64Assembler.reaches(width, 0), isTrue);
+      expect(Arm64Assembler.reaches(width, last), isTrue);
+      expect(Arm64Assembler.reaches(width, last + width.bytes), isFalse);
+      expect(Arm64Assembler.reaches(width, -width.bytes), isFalse);
+      if (width.bytes > 1) expect(Arm64Assembler.reaches(width, 1), isFalse);
+      expect(
+        () => Arm64Assembler().loadWidth(width, 0, 0, -width.bytes),
+        throwsRangeError,
+      );
+    }
   });
 
   test('branches backward and forward', () {

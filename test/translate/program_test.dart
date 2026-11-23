@@ -519,6 +519,14 @@ b0():
       'void main() { switch (1) { case true: } }',
       '2:33: $what this kind of case.',
     );
+    const printing = 'printing anything but a constant string';
+    reports('void main() { print(1); }', '2:21: $what $printing.');
+    reports(
+      r'void main() { var x = 1; print("$x"); }',
+      '2:32: $what $printing.',
+    );
+    reports('void main() { print("a" + "b"); }', '2:21: $what $printing.');
+    reports('void main() { const x = 1; print(x); }', '2:34: $what $printing.');
     // Also where the code can never run.
     reports(
       'void main() { exit(1); 1 ~/ 0; }',

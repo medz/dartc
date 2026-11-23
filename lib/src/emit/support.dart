@@ -13,7 +13,7 @@ void checkSupported(LirModule module) {
     }
   }
   for (final data in module.data) {
-    throw EmitUnsupported(data.name, 'data');
+    if (data.writable) throw EmitUnsupported(data.name, 'writable data');
   }
   for (final function in module.functions) {
     Never reject(Object what) => throw EmitUnsupported(function.name, '$what');
@@ -23,7 +23,7 @@ void checkSupported(LirModule module) {
       }
       for (final instruction in block.instructions) {
         switch (instruction) {
-          case Load() || Store() || Alloc():
+          case Store() || Alloc():
             reject(instruction.runtimeType);
           default:
             break;

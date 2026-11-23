@@ -82,7 +82,7 @@ void main() {
       final entry = HirBlock()..end(HirJump(HirEdge(next, [HirConst(1)])));
       return blocks([entry, next]);
     });
-    rejects('use of a call without a result', () {
+    rejects('use of an operation without a result', () {
       final callee = HirFunction('f', const [])
         ..define([HirBlock()..end(HirReturn())]);
       return body((block) => HirExit(block.add(HirCall(callee, []))), [callee]);
@@ -310,6 +310,21 @@ void main() {
       );
     });
 
+    test('output keeps its order', () {
+      final interpreter = HirInterpreter(
+        body((block) {
+          block
+            ..add(HirPrint('a'))
+            ..add(HirPrint(''))
+            ..add(HirPrint('b'));
+          return HirReturn();
+        }),
+      );
+      expect(interpreter.output, isEmpty);
+      interpreter.run();
+      expect(interpreter.output, 'a\n\nb\n');
+    });
+
     test('a runaway program is stopped', () {
       final entry = HirBlock(), loop = HirBlock();
       entry.end(HirJump(HirEdge(loop)));
@@ -342,6 +357,7 @@ void main() {
     final i = entry.add(HirConst(-1)), b = entry.add(HirConst(true));
     final d = entry.add(HirUnary(.intToFloat, i));
     entry
+      ..add(HirPrint('a\n"'))
       ..add(HirCall(callee, [d]))
       ..add(HirIntBinary(.shiftLeft, i, entry.add(HirConst(2))))
       ..add(HirFloatBinary(.divide, d, d))
@@ -360,6 +376,7 @@ b0():
   v0 = -1
   v1 = true
   v2 = double v0
+  print "a\\n\\""
   v3 = f(v2)
   v4 = 2
   v5 = v0 << v4

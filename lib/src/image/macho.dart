@@ -11,6 +11,21 @@ import 'relocate.dart';
 
 const _base = 0x100000000;
 
+int _align16(int value) => (value + 15) & ~15;
+
+/// Joins [data], with the offset of each part.
+({Uint8List bytes, Map<String, int> offsets}) _pack(
+  Map<String, Uint8List> data,
+) {
+  final out = ByteWriter(.little), offsets = <String, int>{};
+  for (final MapEntry(key: name, value: bytes) in data.entries) {
+    out.align(16);
+    offsets[name] = out.length;
+    out.bytes(bytes);
+  }
+  return (bytes: out.finish(), offsets: offsets);
+}
+
 /// Builds a signed macOS ARM64 executable.
 ///
 /// [entry] takes no arguments; the low 8 bits of its result become the
@@ -24,10 +39,16 @@ Uint8List linkMacho(
   final entryOffset =
       code.functions[entry] ?? (throw ImageError('No entry function $entry.'));
   final externals = code.externals;
-  final textOffset = (commandsEnd(imports: externals.isNotEmpty) + 15) & ~15;
+  final (bytes: constants, offsets: constantOffsets) = _pack(code.data);
+  final hasData = constants.isNotEmpty;
+  final textOffset = _align16(
+    commandsEnd(imports: externals.isNotEmpty, constants: hasData),
+  );
   final stubsOffset = textOffset + code.text.length;
   final textEnd = stubsOffset + externals.length * stubBytes;
-  final slotsOffset = pageAlign(textEnd);
+  final constantsOffset = hasData ? _align16(textEnd) : textEnd;
+  final constantsEnd = constantsOffset + constants.length;
+  final slotsOffset = pageAlign(constantsEnd);
   final slots = importSlots(externals.length, pageBytes);
 
   final text = Uint8List.fromList(code.text);
@@ -36,6 +57,8 @@ Uint8List linkMacho(
       name: _base + stubsOffset + i * stubBytes,
     for (final MapEntry(:key, :value) in code.functions.entries)
       key: _base + textOffset + value,
+    for (final MapEntry(:key, :value) in constantOffsets.entries)
+      key: _base + constantsOffset + value,
   });
   final stubs = importStubs(
     externals,
@@ -52,7 +75,7 @@ Uint8List linkMacho(
           pageBytes: pageBytes,
         );
   final linkOffset = slotsOffset + pageAlign(slots.length);
-  final signatureOffset = linkOffset + ((table.length + 15) & ~15);
+  final signatureOffset = linkOffset + _align16(table.length);
 
   final out = ByteWriter(.little);
   writeCommands(
@@ -60,18 +83,25 @@ Uint8List linkMacho(
     base: _base,
     textOffset: textOffset,
     textEnd: textEnd,
+    constantsOffset: constantsOffset,
+    constantsEnd: constantsEnd,
     entryOffset: textOffset + entryOffset,
     slotsBytes: slots.length,
     tableBytes: table.length,
     signatureOffset: signatureOffset,
     signatureBytes: codeSignatureSize(signatureOffset, identifier),
     // The identity depends on the program alone, so builds are reproducible.
-    uuid: sha256.convert([...text, ...stubs, ...table]).bytes.sublist(0, 16),
+    uuid: sha256
+        .convert([...text, ...stubs, ...constants, ...table])
+        .bytes
+        .sublist(0, 16),
   );
   out
     ..align(16)
     ..bytes(text)
     ..bytes(stubs)
+    ..align(hasData ? 16 : 1)
+    ..bytes(constants)
     ..align(pageBytes)
     ..bytes(slots)
     ..align(pageBytes)

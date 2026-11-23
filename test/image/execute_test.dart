@@ -19,8 +19,9 @@ const _limit = 250;
 LirModule _program(
   List<LirFunction> functions,
   List<_Case> cases,
-  List<int> expected,
-) {
+  List<int> expected, [
+  List<LirData> data = const [],
+]) {
   final signatures = {for (final f in functions) f.name: f.signature};
   var block = LirBlock();
   final blocks = [block];
@@ -48,19 +49,26 @@ LirModule _program(
       ...functions,
       LirFunction('main', LirSignature([], .i64), blocks),
     ],
+    data: data,
   );
 }
 
 /// Checks that machine code agrees with the interpreter on every case.
-Future<void> _agree(List<LirFunction> functions, List<_Case> cases) async {
+Future<void> _agree(
+  List<LirFunction> functions,
+  List<_Case> cases, [
+  List<LirData> data = const [],
+]) async {
   for (var at = 0; at < cases.length; at += _limit) {
     final part = cases.skip(at).take(_limit).toList();
-    final interpreter = LirInterpreter(LirModule(functions: functions));
+    final interpreter = LirInterpreter(
+      LirModule(functions: functions, data: data),
+    );
     final expected = [
       for (final (:function, :arguments) in part)
         interpreter.call(function, arguments) as int,
     ];
-    final code = await execute(_program(functions, part, expected));
+    final code = await execute(_program(functions, part, expected, data));
     expect(
       code,
       0,
@@ -394,6 +402,68 @@ void main() {
         for (final a in [0, 7, -7, _max, _min])
           (function: name, arguments: [a, 0x7654321 - a]),
     ]);
+  }, skip: skipExecution);
+
+  test('loads of every width from constant data', () async {
+    // Every byte differs from its neighbors, and some are negative.
+    final bytes = [for (var i = 0; i < 70000; i++) (i * 167 + i ~/ 256) & 0xff];
+    final data = [
+      LirData('small', [0xff]),
+      LirData('empty', []),
+      LirData('big', bytes),
+    ];
+    final functions = <LirFunction>[], cases = <_Case>[];
+    // Near and far, aligned and not, forward and backward.
+    for (final offset in [0, 1, 8, 32760, 32761, 65536, -16]) {
+      for (final width in Width.values) {
+        if (width == .ref) continue;
+        for (final indexed in [true, false]) {
+          final name = '${width.name}.$offset.$indexed';
+          functions.add(
+            function(name, [.i64], .i64, (block, p) {
+              final start = block.add(SymbolAddress('big'));
+              final base = block.add(PtrAdd(start, block.add(ConstInt(16))));
+              // With many values alive, the operands come from the stack.
+              final many = [
+                for (var i = 0; i < 30; i++) block.add(ConstInt(i)),
+              ];
+              final value = block.add(
+                Load(width, base, offset: offset, index: indexed ? p[0] : null),
+              );
+              LirValue sum = switch (value.type) {
+                .f64 => block.add(Convert(.floatBitsToInt, value)),
+                .ptr => block.add(Convert(.ptrToInt, value)),
+                _ => value,
+              };
+              // Any NaN may stand for another.
+              if (value.type == .f64) {
+                final known = block.add(Compare(.eq, value, value));
+                sum = block.add(IntBinary(.mul, sum, known));
+              }
+              for (final (i, value) in many.indexed) {
+                sum = block.add(IntBinary(.add, sum, value));
+                if (i == 15) {
+                  final again = block.add(Load(.u8, base, index: p[0]));
+                  sum = block.add(IntBinary(.add, sum, again));
+                }
+              }
+              return sum;
+            }),
+          );
+          for (final index in [0, 3, 1000]) {
+            cases.add((function: name, arguments: [index]));
+          }
+        }
+      }
+    }
+    functions.add(
+      function('first', [], .i64, (block, _) {
+        final address = block.add(SymbolAddress('small'));
+        return block.add(Load(.i8, address));
+      }),
+    );
+    cases.add((function: 'first', arguments: []));
+    await _agree(functions, cases, data);
   }, skip: skipExecution);
 
   test('frames beyond the reach of load and store offsets', () async {
