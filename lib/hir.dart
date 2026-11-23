@@ -3,8 +3,10 @@ library;
 
 export 'src/hir/block.dart';
 export 'src/hir/class.dart';
+export 'src/hir/global.dart' show HirConstObject, HirGlobal;
 export 'src/hir/instruction.dart';
 export 'src/hir/interpret.dart' show HirInterpreter;
+export 'src/hir/machine.dart';
 export 'src/hir/module.dart';
 export 'src/hir/print.dart' show printHir;
 export 'src/hir/value.dart';

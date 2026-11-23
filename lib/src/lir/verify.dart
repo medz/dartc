@@ -19,9 +19,24 @@ void verifyModule(LirModule module) {
     ...module.externals.map((external) => external.name),
     ...module.data.map((data) => data.name),
     ...module.tables.map((table) => table.name),
+    ...module.statics.map((object) => object.name),
   ]) {
     if (!names.add(name)) throw LirError('Duplicate symbol: $name');
   }
+  final objects = {for (final object in module.statics) object.name};
+  for (final LirStatic(:name, :bytes, :references) in module.statics) {
+    references.forEach((offset, target) {
+      Never fail(String message) => throw LirError('$name: $message');
+      if (!objects.contains(target)) fail('unknown object $target');
+      if (offset < 0 || offset % 8 != 0 || offset + 8 > bytes.length) {
+        fail('no reference fits at $offset');
+      }
+      if (bytes.skip(offset).take(8).any((byte) => byte != 0)) {
+        fail('bytes where a reference belongs');
+      }
+    });
+  }
+  names.addAll(const [textSymbol, stackMapSymbol]);
   for (final table in module.tables) {
     for (final function in table.functions) {
       if (module.signatures.containsKey(function)) continue;
@@ -29,13 +44,14 @@ void verifyModule(LirModule module) {
     }
   }
   for (final function in module.functions) {
-    _FunctionVerifier(module, names, function).run();
+    _FunctionVerifier(module, names, objects, function).run();
   }
 }
 
 final class _FunctionVerifier(
   final LirModule module,
   final Set<String> symbols,
+  final Set<String> objects,
   final LirFunction function,
 ) {
   final _blockOf = <LirValue, LirBlock>{};
@@ -129,10 +145,12 @@ final class _FunctionVerifier(
 
   void _checkInstruction(LirInstruction instruction) {
     switch (instruction) {
-      case ConstInt() || ConstFloat() || ConstNull():
+      case ConstInt() || ConstFloat() || ConstNull() || FrameAddress():
         break;
       case SymbolAddress(:final symbol):
         if (!symbols.contains(symbol)) _fail('unknown symbol $symbol');
+      case StaticObject(:final symbol):
+        if (!objects.contains(symbol)) _fail('unknown object $symbol');
       case IntBinary(:final left, :final right):
         _expect(left, .i64, 'integer operand');
         _expect(right, .i64, 'integer operand');

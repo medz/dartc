@@ -25,9 +25,11 @@ final class Liveness(final LirFunction function) {
   final intervals = <LirValue, Interval>{};
   final _liveIn = <LirBlock, Set<LirValue>>{};
   final _calls = <int>[];
+  final _liveAfter = <LirCall, Set<LirValue>>{};
 
   this {
     _solve();
+    _recordCalls();
     _buildIntervals();
     for (final interval in intervals.values) {
       interval.crossesCall = _calls.any(
@@ -35,6 +37,9 @@ final class Liveness(final LirFunction function) {
       );
     }
   }
+
+  /// The values that exist before [call] and are used after it.
+  Set<LirValue> liveAfter(LirCall call) => _liveAfter[call]!;
 
   static List<LirValue> _endUses(LirBlock block) => [
     ...block.terminator!.inputs,
@@ -63,6 +68,18 @@ final class Liveness(final LirFunction function) {
         }
       }
     } while (changed);
+  }
+
+  /// Finds what is alive at each call, now that live-in sets are stable.
+  void _recordCalls() {
+    for (final block in order) {
+      final live = _liveOut(block)..addAll(_endUses(block));
+      for (final instruction in block.instructions.reversed) {
+        live.remove(instruction);
+        if (instruction is LirCall) _liveAfter[instruction] = Set.of(live);
+        live.addAll(instruction.inputs);
+      }
+    }
   }
 
   void _include(LirValue value, int position) =>

@@ -1,0 +1,55 @@
+/// What the collector needs of the machine it runs on.
+///
+/// Calls of the functions below become single operations in compiled programs.
+/// Elsewhere they use [machine].
+abstract interface class Machine() {
+  int load64(int address);
+  void store64(int address, int value);
+  int load32(int address);
+  int load32Signed(int address);
+  void store32(int address, int value);
+
+  /// Zeroed memory, or 0 if there is none.
+  int mapMemory(int bytes);
+  void unmapMemory(int address, int bytes);
+  Never trap();
+
+  /// The frame of the function calling.
+  int get frameAddress;
+
+  /// Where the program's code starts.
+  int get codeStart;
+
+  /// The encoded stack maps of the program's calls.
+  int get stackMaps;
+
+  /// A 32-bit word for each class, giving where its record is in the table.
+  /// A record is the number of its references and their offsets.
+  int get classTable;
+
+  /// The global variables that hold references.
+  int get globalRoots;
+  int get globalRootCount;
+
+  /// Whether to collect before every allocation, to find mistakes.
+  bool get collectsAlways;
+}
+
+/// The machine that the collector runs on outside compiled programs.
+late Machine machine;
+
+int load64(int address) => machine.load64(address);
+void store64(int address, int value) => machine.store64(address, value);
+int load32(int address) => machine.load32(address);
+int load32Signed(int address) => machine.load32Signed(address);
+void store32(int address, int value) => machine.store32(address, value);
+int mapMemory(int bytes) => machine.mapMemory(bytes);
+void unmapMemory(int address, int bytes) => machine.unmapMemory(address, bytes);
+Never trap() => machine.trap();
+int frameAddress() => machine.frameAddress;
+int codeStart() => machine.codeStart;
+int stackMaps() => machine.stackMaps;
+int classTable() => machine.classTable;
+int globalRoots() => machine.globalRoots;
+int globalRootCount() => machine.globalRootCount;
+bool collectsAlways() => machine.collectsAlways;

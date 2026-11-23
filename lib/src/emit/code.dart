@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'stack_maps.dart';
+
 /// LIR that this version cannot translate yet.
 final class EmitUnsupported(final String function, final String what)
     implements Exception {
@@ -26,6 +28,17 @@ final class Relocation(
   final String symbol,
 );
 
+/// An object that exists from the start.
+///
+/// [references] gives the objects that its words at some offsets refer to.
+final class EmittedObject(
+  final Uint8List bytes,
+  Map<int, String> references, {
+  required final bool writable,
+}) {
+  final Map<int, String> references = .unmodifiable(references);
+}
+
 /// Position-independent code before its final addresses are known.
 final class EmittedCode(
   final Uint8List text,
@@ -42,7 +55,15 @@ final class EmittedCode(
 
   /// Tables of 32-bit distances from the table to each function.
   Map<String, List<String>> tables = const {},
+
+  /// Objects that exist from the start, each aligned to 16.
+  Map<String, EmittedObject> objects = const {},
+
+  /// What each call keeps alive, sorted by where it returns to.
+  Iterable<StackMap> stackMaps = const [],
 }) {
+  final Map<String, EmittedObject> objects = .unmodifiable(objects);
+  final List<StackMap> stackMaps = .unmodifiable(stackMaps);
   final Map<String, List<String>> tables = .unmodifiable(tables);
   final Map<String, Uint8List> data = .unmodifiable(data);
   final List<String> externals = .unmodifiable(externals);

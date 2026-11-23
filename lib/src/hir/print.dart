@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'block.dart';
 import 'class.dart';
+import 'global.dart';
 import 'instruction.dart';
 import 'module.dart';
 import 'value.dart';
@@ -9,6 +10,8 @@ import 'value.dart';
 /// Readable text for a program, stable across runs.
 String printHir(HirModule module) => [
   for (final class_ in module.classes) _class(class_),
+  for (final HirGlobal(:type, :name, :initial) in module.globals)
+    'global ${type.dartName} $name = $initial',
   for (final MapEntry(key: selector, value: entries) in module.dispatch.entries)
     'dispatch ${selector.name}: ${entries.entries.map(_entry).join(', ')}',
   for (final function in module.functions) _Printer(function).run(),
@@ -87,6 +90,12 @@ final class _Printer(final HirFunction function) {
       '${operator.symbol}${_name(operand)}',
     HirNull() => 'null',
     HirNew(:final target) => 'new ${target.name}',
+    HirStatic(:final object) => 'const $object',
+    HirLoadGlobal(:final global) => global.name,
+    HirStoreGlobal(:final global, :final value) =>
+      '${global.name} = ${_name(value)}',
+    HirMachine(:final op, :final arguments) =>
+      '${op.name}(${_list(arguments)})',
     HirLoad(:final field, :final object) => '${_name(object)}.${field.name}',
     HirStore(:final field, :final object, :final value) =>
       '${_name(object)}.${field.name} = ${_name(value)}',

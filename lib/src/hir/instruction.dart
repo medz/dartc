@@ -1,4 +1,6 @@
 import 'class.dart';
+import 'global.dart';
+import 'machine.dart';
 import 'value.dart';
 
 /// An operation executed in order inside a block.
@@ -34,6 +36,39 @@ final class HirNew(final HirClass target) extends HirInstruction {
   HirType get type => .reference;
   @override
   List<HirValue> get inputs => const [];
+}
+
+/// The object that [object] is.
+final class HirStatic(final HirConstObject object) extends HirInstruction {
+  @override
+  HirType get type => .reference;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
+final class HirLoadGlobal(final HirGlobal global) extends HirInstruction {
+  @override
+  HirType get type => global.type;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
+final class HirStoreGlobal(final HirGlobal global, final HirValue value)
+    extends HirInstruction {
+  @override
+  HirType? get type => null;
+  @override
+  List<HirValue> get inputs => [value];
+}
+
+/// Performs [op] for the collector.
+final class HirMachine(final HirMachineOp op, Iterable<HirValue> arguments)
+    extends HirInstruction {
+  final List<HirValue> arguments = .unmodifiable(arguments);
+  @override
+  HirType? get type => op.result;
+  @override
+  List<HirValue> get inputs => arguments;
 }
 
 /// Reads [field] of [object], which is never null.

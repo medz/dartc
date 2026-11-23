@@ -439,7 +439,11 @@ void main() {
         final random = RandomLir(seed, prefix: 'r');
         for (final made in random.functions()) {
           functions.add(made);
-          if (made.signature.result != .i64) continue;
+          // Cases are given numbers and give integers.
+          if (made.signature.result != .i64 ||
+              made.signature.parameters.contains(LirType.ref)) {
+            continue;
+          }
           for (var i = 0; i < 4; i++) {
             final arguments = [
               ...made.signature.parameters.map(random.argument),

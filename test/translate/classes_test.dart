@@ -1,54 +1,13 @@
-import 'dart:io';
-
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
 
-import '../lower/support.dart';
 import '../support/new_compiler.dart';
-
-/// Checks that [source] prints and exits as the official runtime says, at both
-/// levels. It must print something, so that it cannot agree by doing nothing.
-void agrees(String name, String source) => test(name, () async {
-  final directory = writeSources({'main.dart': "import 'dart:io';\n$source"});
-  final official = await Process.run('$hostSdk/bin/dart', [
-    'run',
-    '${directory.path}/main.dart',
-  ]);
-  expect(official.stderr, isEmpty);
-  expect(official.stdout, isNotEmpty);
-  final module = await translate("import 'dart:io';\n$source");
-  final interpreter = HirInterpreter(module);
-  expect(interpreter.run() ?? 0, official.exitCode);
-  expect(interpreter.output, official.stdout);
-  final lowered = LoweredRun(module);
-  expect(lowered.code ?? 0, official.exitCode);
-  expect(lowered.output, official.stdout);
-});
-
-/// Prints the digits of small numbers, and other values.
-const _tools = r'''
-void digit(int n) {
-  switch (n) {
-    case 0: print('0'); case 1: print('1'); case 2: print('2');
-    case 3: print('3'); case 4: print('4'); case 5: print('5');
-    case 6: print('6'); case 7: print('7'); case 8: print('8');
-    case 9: print('9');
-  }
-}
-void number(int n) {
-  if (n < 0) { print('-'); n = -n; }
-  if (n > 9) number(n ~/ 10);
-  digit(n % 10);
-  print('.');
-}
-void truth(bool b) => b ? print('true') : print('false');
-int trace(int n) { number(n); return n; }
-''';
+import 'support.dart';
 
 void main() {
-  void shows(String name, String source) => agrees(name, '$_tools\n$source');
+  void shows(String name, String source) => agrees(name, '$tools\n$source');
 
   group('objects', () {
     shows('hold fields of every type', '''
@@ -425,10 +384,6 @@ A make() => A();''',
       '2:7: $what extending Error of the SDK.',
     );
     reports(
-      'class A { const A(); }\nvoid main() { const A(); }',
-      '2:15: $what constant objects.',
-    );
-    reports(
       'class A { A(); factory A.f() = A; }\nvoid main() { A.f(); }',
       '1:16: $what redirecting factories.',
     );
@@ -439,14 +394,6 @@ A make() => A();''',
     reports(
       'class A(final int x);\nvoid main() { A(1); }',
       '1:7: $what primary constructors.',
-    );
-    reports(
-      'class A { static int n = 1; }\nvoid main() { A.n; }',
-      '2:15: $what prefixed identifier.',
-    );
-    reports(
-      'class A { static int n = 1; }\nvoid main() { A.n = 2; }',
-      '2:15: $what assignment to prefixed identifier.',
     );
     reports(
       'class A { void f() {} }\nvoid main() { A().f; }',

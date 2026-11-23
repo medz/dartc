@@ -12,6 +12,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
   final _done = <LirFunction>[];
   final _pool = <LirValue>[];
   final _floats = <LirValue>[];
+  final _objects = <LirValue>[];
   late LirBlock _block;
   late LirType _result;
   late List<LirBlock> _blocks;
@@ -64,25 +65,37 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     return _done;
   }
 
-  LirType _type() => _random.nextInt(3) == 0 ? .f64 : .i64;
+  LirType _type() => switch (_random.nextInt(6)) {
+    0 || 1 => .f64,
+    2 => .ref,
+    _ => .i64,
+  };
+
+  static const _objectBytes = 40;
 
   LirFunction _function(String name) {
     final arity = _random.nextInt(21);
     final signature = LirSignature([
       for (var i = 0; i < arity; i++) _type(),
-    ], _random.nextInt(4) == 0 ? .f64 : .i64);
+    ], _random.nextInt(3) == 0 ? _type() : .i64);
     _result = signature.result!;
     _block = LirBlock(signature.parameters);
     _blocks = [_block];
     _pool.clear();
     _floats.clear();
+    _objects.clear();
     _block.parameters.forEach(_keep);
     _keep(_block.add(ConstInt(integer())));
     _keep(_block.add(ConstFloat(float())));
+    _allocate();
     _statements(8 + _random.nextInt(30), 2);
     // Reading every remaining value at the end keeps them all alive.
     var result = _pool.first;
-    for (final value in [..._pool.skip(1), ..._floats.map(_bits)]) {
+    for (final value in [
+      ..._pool.skip(1),
+      ..._floats.map(_bits),
+      ..._objects.map(_content),
+    ]) {
       final op = const <IntOp>[.add, .xor, .sub][_random.nextInt(3)];
       result = _block.add(IntBinary(op, result, value));
     }
@@ -90,8 +103,47 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     return LirFunction(name, signature, _blocks);
   }
 
-  void _keep(LirValue value) =>
-      (value.type == .f64 ? _floats : _pool).add(value);
+  void _keep(LirValue value) => switch (value.type!) {
+    .f64 => _floats,
+    .ref => _objects,
+    _ => _pool,
+  }.add(value);
+
+  /// A new object holding a number, another object and a double.
+  void _allocate() {
+    final object = _block.add(Alloc(_block.add(ConstInt(_objectBytes))));
+    _block.add(Store(.i64, object, _pick(), offset: 8));
+    if (_objects.isNotEmpty) {
+      _block.add(Store(.ref, object, _pickOf(.ref), offset: 16));
+    }
+    _block.add(Store(.f64, object, _pickOf(.f64), offset: 24));
+    _keep(object);
+  }
+
+  /// Reads or writes an object. Its link may be null, so it is only compared.
+  void _objectOperation() {
+    final object = _pickOf(.ref);
+    switch (_random.nextInt(6)) {
+      case 0:
+        _allocate();
+      case 1:
+        _block.add(Store(.i64, object, _pick(), offset: 8));
+      case 2:
+        _block.add(Store(.ref, object, _pickOf(.ref), offset: 16));
+      case 3:
+        final link = _block.add(Load(.ref, object, offset: 16));
+        final none = _block.add(ConstNull());
+        final other = _random.nextBool() ? none : _pickOf(.ref);
+        _keep(_block.add(Compare(.eq, link, other)));
+      case 4:
+        _keep(_block.add(Load(.f64, object, offset: 24)));
+      default:
+        _keep(_block.add(Load(.i64, object, offset: 8)));
+    }
+  }
+
+  LirValue _content(LirValue object) =>
+      _block.add(Load(.i64, object, offset: 8));
 
   /// The bits of a double, or 0 for NaN, whose bits are not specified.
   LirValue _bits(LirValue value) {
@@ -100,17 +152,23 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     return _block.add(IntBinary(.mul, bits, known));
   }
 
-  LirValue _convertTo(LirType type, LirValue value) =>
-      type == .f64 ? _block.add(Convert(.intToFloat, value)) : value;
+  LirValue _convertTo(LirType type, LirValue value) => switch (type) {
+    .f64 => _block.add(Convert(.intToFloat, value)),
+    .ref => _pickOf(.ref),
+    _ => value,
+  };
 
-  LirValue _pickOf(LirType type) =>
-      type == .f64 ? _floats[_random.nextInt(_floats.length)] : _pick();
+  LirValue _pickOf(LirType type) => switch (type) {
+    .f64 => _floats[_random.nextInt(_floats.length)],
+    .ref => _objects[_random.nextInt(_objects.length)],
+    _ => _pick(),
+  };
 
   LirValue _pick() => _pool[_random.nextInt(_pool.length)];
 
   void _statements(int count, int depth) {
     for (var i = 0; i < count; i++) {
-      switch (_random.nextInt(depth > 0 ? 20 : 17)) {
+      switch (_random.nextInt(depth > 0 ? 23 : 20)) {
         case 0:
           _pool.add(_block.add(ConstInt(integer())));
         case 1:
@@ -122,11 +180,13 @@ final class RandomLir(final int seed, {String prefix = ''}) {
           _call();
         case 13 || 14 || 15 || 16:
           _floatOperation();
-        case 17:
+        case 17 || 18 || 19:
+          _objectOperation();
+        case 20:
           _diamond(depth - 1);
-        case 18:
+        case 21:
           _loop(depth - 1);
-        case 19:
+        case 22:
           _exit();
         default:
           _arithmetic();
@@ -206,7 +266,14 @@ final class RandomLir(final int seed, {String prefix = ''}) {
   List<LirValue> _pickAll(List<LirType> types) => types.map(_pickOf).toList();
 
   /// Restores the values available before a nested region.
-  void _restore(List<LirValue> words, List<LirValue> floats) {
+  void _restore(
+    List<LirValue> words,
+    List<LirValue> floats,
+    List<LirValue> objects,
+  ) {
+    _objects
+      ..clear()
+      ..addAll(objects);
     _pool
       ..clear()
       ..addAll(words);
@@ -221,6 +288,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     final left = LirBlock(), right = LirBlock();
     _block.end(Branch(_pick(), LirEdge(left), LirEdge(right)));
     final words = List.of(_pool), floats = List.of(_floats);
+    final objects = List.of(_objects);
     final ends = <LirBlock>[], results = <List<LirValue>>[];
     for (final side in [left, right]) {
       _blocks.add(side);
@@ -228,7 +296,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
       _statements(1 + _random.nextInt(6), depth);
       ends.add(_block);
       results.add(_pickAll(types));
-      _restore(words, floats);
+      _restore(words, floats, objects);
     }
     final join = _open(types);
     for (final (i, end) in ends.indexed) {
@@ -249,6 +317,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
     head.end(Branch(counter, LirEdge(body), LirEdge(exit)));
     carried.forEach(_keep);
     final words = List.of(_pool), floats = List.of(_floats);
+    final objects = List.of(_objects);
     _blocks.add(body);
     _block = body;
     _statements(1 + _random.nextInt(6), depth);
@@ -263,7 +332,7 @@ final class RandomLir(final int seed, {String prefix = ''}) {
           _pickOf(type),
     ];
     _block.end(Jump(LirEdge(head, [next, ...rotated])));
-    _restore(words, floats);
+    _restore(words, floats, objects);
     _blocks.add(exit);
     _block = exit;
   }

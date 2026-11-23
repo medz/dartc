@@ -249,7 +249,10 @@ final class StatementTranslator(
     HirValue? result;
     for (final test in tests) {
       final constant = expressions.value(test);
-      if (constant.type != value.type) _unsupported(test, 'this kind of case');
+      // Equality of objects may be anything.
+      if (constant.type != value.type || constant is HirStatic) {
+        _unsupported(test, 'this kind of case');
+      }
       final same = _builder.add(HirCompare(.equal, constant, value));
       result = result == null
           ? same

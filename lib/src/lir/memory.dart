@@ -9,7 +9,7 @@ final class LirFault(final String message) implements Exception {
 }
 
 /// A managed object, whose references are kept apart from its plain bytes.
-final class LirObject(int size) {
+final class LirObject(int size, {final bool writable = true}) {
   final Uint8List bytes = Uint8List(size);
   final Map<int, LirObject> references = {};
 
@@ -66,6 +66,7 @@ final class LirMemory() {
       return;
     }
     _checkBounds(base, offset, width);
+    if (!base.writable) throw LirFault('Write to a constant object.');
     if (width == .ref) {
       if (!base.references.containsKey(offset)) {
         _checkNoReferenceBits(base, offset);

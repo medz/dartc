@@ -85,29 +85,36 @@ final class ObjectLayout(
       ]),
   ];
 
+  /// The bytes of an object of [class_].
+  int sizeOf(HirClass class_) =>
+      _headerBytes + class_.fields.length * _fieldBytes;
+
+  int numberOf(HirClass class_) => _classNumbers[class_]!;
+
   /// Creates an object of [class_].
   LirValue allocate(LirBlock block, HirClass class_) {
-    final size = _headerBytes + class_.fields.length * _fieldBytes;
-    final object = block.add(Alloc(block.add(ConstInt(size))));
-    final number = block.add(ConstInt(_classNumbers[class_]!));
+    final object = block.add(Alloc(block.add(ConstInt(sizeOf(class_)))));
+    final number = block.add(ConstInt(numberOf(class_)));
     block.add(Store(.u32, object, number, offset: classOffset));
     return object;
   }
 
-  static Width _width(HirField field) => switch (field.type) {
+  static Width widthOf(HirType type) => switch (type) {
     .integer || .boolean => .i64,
     .float => .f64,
     .reference => .ref,
   };
 
   LirValue load(LirBlock block, HirField field, LirValue object) =>
-      block.add(Load(_width(field), object, offset: _offsetOf(field)));
+      block.add(Load(widthOf(field.type), object, offset: offsetOf(field)));
 
   void store(LirBlock block, HirField field, LirValue object, LirValue value) =>
-      block.add(Store(_width(field), object, value, offset: _offsetOf(field)));
+      block.add(
+        Store(widthOf(field.type), object, value, offset: offsetOf(field)),
+      );
 
   /// A field of a class without objects is only used by code that never runs.
-  int _offsetOf(HirField field) => _fieldOffsets[field] ?? _headerBytes;
+  int offsetOf(HirField field) => _fieldOffsets[field] ?? _headerBytes;
 
   /// The address of what the class of [receiver] has for [selector].
   LirValue lookUp(LirBlock block, HirSelector selector, LirValue receiver) {

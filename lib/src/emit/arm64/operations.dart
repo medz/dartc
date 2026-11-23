@@ -41,6 +41,10 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
         _assembler.add(d, operands[0], operands[1]);
       case Load():
         _load(instruction, d, operands);
+      case StaticObject(:final symbol):
+        _assembler.address(d, symbol);
+      case FrameAddress():
+        _assembler.mov(d, Arm64Assembler.frame);
       case ConstNull():
         _assembler.constant(d, 0);
       case Store() || LirCall():
@@ -140,8 +144,8 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
         _assembler.bitsToFloat(d, n);
       case .floatBitsToInt:
         _assembler.floatToBits(d, n);
-      case .intToPtr || .ptrToInt:
-        // Integers and addresses share one form.
+      case .intToPtr || .ptrToInt || .intToRef:
+        // Integers, addresses and references share one form.
         _assembler.mov(d, n);
     }
   }

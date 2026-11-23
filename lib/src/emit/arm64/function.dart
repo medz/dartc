@@ -3,6 +3,7 @@ import 'package:dartc/lir.dart';
 import '../allocate.dart';
 import '../liveness.dart';
 import '../moves.dart';
+import '../stack_maps.dart';
 import 'assembler.dart';
 import 'convention.dart';
 import 'operations.dart';
@@ -16,13 +17,15 @@ final class Arm64Function(
   final Arm64Assembler _assembler,
 ) {
   final _labels = <LirBlock, Label>{};
+  final _maps = <StackMap>[];
   late final _liveness = Liveness(function);
   late final _allocation = Allocation(_liveness, arm64Registers);
   late final _operations = Arm64Operations(_assembler);
   late final int _outgoing = _outgoingWords();
   late final List<InRegister> _saved = _savedRegisters();
 
-  void emit() {
+  /// Adds the code, returning what its calls keep alive.
+  List<StackMap> emit() {
     for (final block in _liveness.order) {
       _labels[block] = Label();
     }
@@ -32,6 +35,7 @@ final class Arm64Function(
       block.instructions.forEach(_instruction);
       _terminator(block.terminator!);
     }
+    return _maps;
   }
 
   List<InRegister> _savedRegisters() {
@@ -62,11 +66,13 @@ final class Arm64Function(
   int _savedOffset(int index) =>
       (_outgoing + _allocation.spillCount + index) * 8;
 
+  late final int _frameBytes = (_savedOffset(_saved.length) + 15) & ~15;
+
   void _prologue() {
     _assembler
       ..pushFrame()
       ..addImmediate(Arm64Assembler.frame, Arm64Assembler.stack, 0);
-    final bytes = (_savedOffset(_saved.length) + 15) & ~15;
+    final bytes = _frameBytes;
     if (bytes > 0) {
       _assembler
         ..constant(rightScratch, bytes)
@@ -195,7 +201,7 @@ final class Arm64Function(
           address: address,
         );
       case Alloc(:final size):
-        _allocate(instruction, size);
+        _call(instruction, [size], () => _assembler.call(allocateSymbol));
       case Store(:final base, :final index, :final value):
         final at = _use(base, 0);
         final by = index == null ? null : _use(index, 1);
@@ -225,26 +231,21 @@ final class Arm64Function(
         _between(_place(address), const InRegister(.word, calleeScratch), .ptr),
     ]);
     transfer();
+    _maps.add(StackMap(_assembler.offset, _references(call)));
     if (call.type case final type?) {
       _move([_between(resultLocation(type), _place(call), type)]);
     }
   }
 
-  /// Allocates zeroed memory, stopping the program if there is none.
-  void _allocate(Alloc allocation, LirValue size) {
-    const result = InRegister(.word, 0), second = InRegister(.word, 1);
-    _move([_between(_place(size), second, .i64)]);
-    final failed = Label(), done = Label();
-    _assembler
-      ..constant(result.number, 1)
-      ..call(allocateSymbol)
-      ..jumpIfZero(result.number, failed)
-      ..jump(done)
-      ..bind(failed)
-      ..breakpoint()
-      ..bind(done);
-    _move([_between(result, _place(allocation), .ref)]);
-  }
+  /// Where references alive across [call] are, from the frame address.
+  List<int> _references(LirCall call) => [
+    for (final value in _liveness.liveAfter(call))
+      if (value.type == .ref)
+        if (_place(value) case OnStack(:final index))
+          (_outgoing + index) * 8 - _frameBytes
+        else
+          throw StateError('A reference is not on the stack.'),
+  ]..sort();
 
   void _terminator(LirTerminator end) {
     switch (end) {

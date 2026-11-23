@@ -5,6 +5,10 @@ import 'value.dart';
 
 /// Readable text for a whole module.
 String printModule(LirModule module) => [
+  for (final object in module.statics)
+    'object ${object.name}: ${object.bytes.length} bytes'
+        '${object.references.entries.map((e) => ', ${e.key}: ${e.value}').join()}'
+        '${object.writable ? ', writable' : ''}',
   for (final table in module.tables)
     'table ${table.name}: ${table.functions.join(', ')}',
   for (final data in module.data)
@@ -60,6 +64,8 @@ final class _Printer(final LirFunction function) {
     ConstFloat(:final value) => 'float $value',
     ConstNull() => 'null',
     SymbolAddress(:final symbol) => 'address $symbol',
+    StaticObject(:final symbol) => 'object $symbol',
+    FrameAddress() => 'frame',
     IntBinary(:final op, :final inputs) => 'int.${op.name} ${_list(inputs)}',
     FloatBinary(:final op, :final inputs) =>
       'float.${op.name} ${_list(inputs)}',

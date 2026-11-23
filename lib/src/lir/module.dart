@@ -25,6 +25,23 @@ final class LirData(
   final Uint8List bytes = Uint8List.fromList(bytes).asUnmodifiableView();
 }
 
+/// Symbols that emitted code defines: where it starts, and what is stored
+/// about references on the stack. Only the runtime uses them.
+const textSymbol = '.text', stackMapSymbol = '.stackMaps';
+
+/// An object that exists from the start and is never collected.
+///
+/// [references] gives the objects that [bytes], which are zero there, refer to.
+final class LirStatic(
+  final String name,
+  List<int> bytes, {
+  Map<int, String> references = const {},
+  final bool writable = false,
+}) {
+  final Uint8List bytes = Uint8List.fromList(bytes).asUnmodifiableView();
+  final Map<int, String> references = .unmodifiable(references);
+}
+
 /// Constant 32-bit words, each the distance from the table to a function.
 final class LirTable(final String name, Iterable<String> functions) {
   /// The functions' symbols, in order.
@@ -37,7 +54,9 @@ final class LirModule({
   Iterable<LirExternal> externals = const [],
   Iterable<LirData> data = const [],
   Iterable<LirTable> tables = const [],
+  Iterable<LirStatic> statics = const [],
 }) {
+  final List<LirStatic> statics = .unmodifiable(statics);
   final List<LirTable> tables = .unmodifiable(tables);
   final List<LirFunction> functions = .unmodifiable(functions);
   final List<LirExternal> externals = .unmodifiable(externals);

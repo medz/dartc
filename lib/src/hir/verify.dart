@@ -2,6 +2,7 @@ import 'package:dartc/graph.dart';
 
 import 'block.dart';
 import 'class.dart';
+import 'global.dart';
 import 'instruction.dart';
 import 'module.dart';
 import 'value.dart';
@@ -24,6 +25,24 @@ void verifyHir(HirModule module) {
   if (classes.length != module.classes.length) {
     throw HirError('a class is listed twice');
   }
+  final globals = module.globals.toSet();
+  if (globals.length != module.globals.length) {
+    throw HirError('a global is listed twice');
+  }
+  for (final HirGlobal(:name, :type, :initial) in module.globals) {
+    if (!isConstant(type, initial)) {
+      throw HirError('global $name starts with $initial');
+    }
+    _checkConstant(classes, initial);
+  }
+  if (module.allocate case final allocate?) {
+    if (!functions.contains(allocate)) throw HirError('allocate is not listed');
+    if (allocate.parameters.length != 1 ||
+        allocate.parameters.single != .integer ||
+        allocate.result != .integer) {
+      throw HirError('allocate has another signature');
+    }
+  }
   module.dispatch.forEach((selector, entries) {
     entries.forEach((class_, function) {
       Never fail(String message) =>
@@ -42,7 +61,27 @@ void verifyHir(HirModule module) {
     });
   });
   for (final function in module.functions) {
-    _FunctionVerifier(module, functions, classes, function).run();
+    _FunctionVerifier(module, functions, classes, globals, function).run();
+  }
+}
+
+/// Checks a constant and those it refers to, which form no cycle.
+void _checkConstant(Set<HirClass> classes, Object? value) {
+  if (value is! HirConstObject) return;
+  final HirConstObject(:target, :fields) = value;
+  if (!classes.contains(target)) {
+    throw HirError('unlisted class ${target.name}');
+  }
+  final expected = target.fields;
+  if (fields.length != expected.length ||
+      !expected.every(
+        (field) =>
+            fields.containsKey(field) && isConstant(field.type, fields[field]),
+      )) {
+    throw HirError('constant ${target.name} has wrong fields');
+  }
+  for (final field in fields.values) {
+    _checkConstant(classes, field);
   }
 }
 
@@ -50,6 +89,7 @@ final class _FunctionVerifier(
   final HirModule module,
   final Set<HirFunction> functions,
   final Set<HirClass> classes,
+  final Set<HirGlobal> globals,
   final HirFunction function,
 ) {
   final _blockOf = <HirValue, HirBlock>{};
@@ -140,6 +180,15 @@ final class _FunctionVerifier(
     switch (instruction) {
       case HirConst() || HirNull() || HirPrint():
         break;
+      case HirStatic(:final object):
+        _checkConstant(classes, object);
+      case HirLoadGlobal(:final global):
+        _checkGlobal(global);
+      case HirStoreGlobal(:final global, :final value):
+        _checkGlobal(global);
+        _expect(value, global.type, 'global ${global.name}');
+      case HirMachine(:final op, :final arguments):
+        _checkTypes(List.filled(op.parameters, .integer), arguments, op.name);
       case HirNew(:final target):
         if (!classes.contains(target)) _fail('unlisted class ${target.name}');
       case HirLoad(:final object):
@@ -177,6 +226,10 @@ final class _FunctionVerifier(
         }
         _checkTypes(target.parameters, arguments, 'call to ${target.name}');
     }
+  }
+
+  void _checkGlobal(HirGlobal global) {
+    if (!globals.contains(global)) _fail('unlisted global ${global.name}');
   }
 
   static bool _allows(HirIntOperator operator, HirValue right) {

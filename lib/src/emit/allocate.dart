@@ -82,6 +82,11 @@ final class Allocation(
       final bank = RegisterBank.of(current.value.type!);
       final active = inUse[bank]!, set = registers[bank]!;
       active.removeWhere((_, interval) => interval.end < current.start);
+      // The collector looks for references only on the stack.
+      if (current.crossesCall && current.value.type == .ref) {
+        _spill(current);
+        continue;
+      }
       final usable = [
         if (!current.crossesCall) ...set.volatile,
         ...set.preserved,

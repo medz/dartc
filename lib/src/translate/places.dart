@@ -7,6 +7,7 @@ import 'calls.dart';
 import 'describe.dart';
 import 'members.dart';
 import 'scope.dart';
+import 'statics.dart';
 import 'types.dart';
 
 /// Something that can be assigned, whose parts are evaluated already.
@@ -17,6 +18,14 @@ sealed class const Place() {
 
 final class const _Local(
   final VariableElement variable,
+  @override final HirType type,
+) extends Place;
+
+/// A variable or setter of a library or class.
+final class const _Static(
+  final AstNode node,
+  final Element? reader,
+  final SetterElement writer,
   @override final HirType type,
 ) extends Place;
 
@@ -37,6 +46,7 @@ final class PlaceTranslator(
   final FunctionBuilder _builder,
   final Evaluator _evaluator,
   final CallTranslator _calls,
+  final StaticTranslator _statics,
 ) {
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -48,6 +58,15 @@ final class PlaceTranslator(
       return _Local(writer, _builder.typeOf(writer)!);
     }
     Never reject() => _unsupported(to, 'assignment to ${describe(to)}');
+    HirType typeOf(FormalParameterElement parameter) =>
+        valueType(parameter.type) ??
+        _unsupported(to, 'a value of type ${parameter.type}');
+    if (writer is SetterElement &&
+        writer.isStatic &&
+        _statics.declares(writer)) {
+      final type = typeOf(writer.formalParameters.single);
+      return _Static(node, node.readElement, writer, type);
+    }
     if (writer is! ExecutableElement || !isInstanceMember(writer)) reject();
     final Expression? target;
     switch (to) {
@@ -67,9 +86,6 @@ final class PlaceTranslator(
         ? _builder.receiver ?? reject()
         : _calls.object(target);
     final parameters = writer.formalParameters;
-    HirType typeOf(FormalParameterElement parameter) =>
-        valueType(parameter.type) ??
-        _unsupported(to, 'a value of type ${parameter.type}');
     final reader = node.readElement;
     return _Member(
       node,
@@ -91,6 +107,7 @@ final class PlaceTranslator(
 
   HirValue read(Place place) => switch (place) {
     _Local(:final variable) => _builder.read(variable),
+    _Static(:final node, :final reader) => _statics.read(node, reader),
     _Member(:final reader?, :final positions) => _use(
       place,
       reader,
@@ -103,6 +120,8 @@ final class PlaceTranslator(
     switch (place) {
       case _Local(:final variable):
         _builder.assign(variable, value);
+      case _Static(:final writer):
+        _statics.write(writer, value);
       case _Member(:final writer, :final positions):
         _use(place, writer, [...positions, value]);
     }

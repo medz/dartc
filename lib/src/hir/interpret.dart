@@ -1,5 +1,6 @@
 import 'block.dart';
 import 'class.dart';
+import 'global.dart';
 import 'instruction.dart';
 import 'module.dart';
 import 'value.dart';
@@ -14,6 +15,10 @@ final class HirInterpreter(
 }) {
   int _steps = 0;
   final _output = StringBuffer();
+  final _constants = <HirConstObject, _Object>{};
+  late final _globals = {
+    for (final global in module.globals) global: _constant(global.initial),
+  };
 
   /// Everything printed so far.
   String get output => '$_output';
@@ -102,13 +107,24 @@ final class HirInterpreter(
         return _compare(relation, inputs[0], inputs[1]);
       case HirNull():
         return _null;
+      case HirStatic(:final object):
+        return _constant(object);
+      case HirLoadGlobal(:final global):
+        return _globals[global];
+      case HirStoreGlobal(:final global):
+        _globals[global] = inputs.single;
+        return null;
+      case HirMachine(:final op):
+        throw StateError('${op.name} is not simulated.');
       case HirNew(:final target):
         return _Object(target);
       case HirLoad(:final field):
         return _object(inputs[0], field).fields[field] ??
             (throw StateError('${field.name} is not set.'));
       case HirStore(:final field):
-        _object(inputs[0], field).fields[field] = inputs[1];
+        final object = _object(inputs[0], field);
+        if (object.isConstant) throw StateError('$object is constant.');
+        object.fields[field] = inputs[1];
         return null;
       case HirVirtualCall(:final selector):
         return _call(_implementation(selector, inputs[0]), inputs);
@@ -118,6 +134,18 @@ final class HirInterpreter(
       case HirCall(:final target):
         return _call(target as HirFunction, inputs);
     }
+  }
+
+  Object _constant(Object? value) {
+    if (value == null) return _null;
+    if (value is! HirConstObject) return value;
+    return _constants.putIfAbsent(value, () {
+      final object = _Object(value.target, isConstant: true);
+      value.fields.forEach((field, content) {
+        object.fields[field] = _constant(content);
+      });
+      return object;
+    });
   }
 
   /// The object [value], which must have [field].
@@ -176,7 +204,7 @@ final class const _Null() {
   String toString() => 'null';
 }
 
-final class _Object(final HirClass target) {
+final class _Object(final HirClass target, {final bool isConstant = false}) {
   final fields = <HirField, Object>{};
 
   this {

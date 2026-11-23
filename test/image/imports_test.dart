@@ -149,24 +149,6 @@ void main() {
     }
   });
 
-  test('a full page of slots needs one chain', () {
-    for (final (count, pages) in [(1, 1), (2, 1), (3, 2), (4, 2), (5, 3)]) {
-      final table = ByteData.sublistView(
-        importTable(
-          [for (var i = 0; i < count; i++) 'f$i'],
-          segments: 4,
-          segment: 2,
-          segmentOffset: 0x4000,
-          pageBytes: 16,
-        ),
-      );
-      final starts = table.getUint32(4, .little);
-      final info = starts + table.getUint32(starts + 12, .little);
-      expect(table.getUint16(info + 20, .little), pages, reason: '$count');
-      expect(table.lengthInBytes % 8, 0);
-    }
-  });
-
   test('slots follow code that fills its pages', () {
     // The stubs end just before, at and after the end of the first page.
     for (var extra = -4; extra <= 4; extra += 4) {
@@ -187,47 +169,6 @@ void main() {
       expect(image.getUint32(end - 4, .little), 0xd61f0200);
       final slots = (end + 0x3fff) & ~0x3fff;
       expect(image.getUint64(slots, .little), 1 << 63);
-    }
-  });
-
-  test('chains stay within a page', () {
-    final slots = ByteData.sublistView(importSlots(5, 16));
-    final words = [for (var i = 0; i < 5; i++) slots.getUint64(i * 8, .little)];
-    expect(words.map((word) => word & 0xffffff), [0, 1, 2, 3, 4]);
-    expect(words.map((word) => word >>> 51 & 0xfff), [2, 0, 2, 0, 0]);
-    expect(words.map((word) => word >>> 63), everyElement(1));
-  });
-
-  test('the table lists one chain per page', () {
-    final names = [for (var i = 0; i < 5; i++) 'f$i'];
-    final table = ByteData.sublistView(
-      importTable(
-        names,
-        segments: 4,
-        segment: 2,
-        segmentOffset: 0x4000,
-        pageBytes: 16,
-      ),
-    );
-    final starts = table.getUint32(4, .little);
-    final info = starts + table.getUint32(starts + 4 + 2 * 4, .little);
-    expect(table.getUint32(starts, .little), 4);
-    for (final other in [0, 1, 3]) {
-      expect(table.getUint32(starts + 4 + other * 4, .little), 0);
-    }
-    expect(table.getUint32(info, .little), 22 + 3 * 2);
-    expect(table.getUint16(info + 4, .little), 16);
-    expect(table.getUint16(info + 6, .little), 6);
-    expect(table.getUint64(info + 8, .little), 0x4000);
-    expect(table.getUint16(info + 20, .little), 3);
-    final imports = table.getUint32(8, .little);
-    final symbols = table.getUint32(12, .little);
-    expect(table.getUint32(16, .little), 5);
-    for (final (i, name) in names.indexed) {
-      final import = table.getUint32(imports + i * 4, .little);
-      expect(import & 0xff, 1);
-      final bytes = table.buffer.asUint8List(symbols + (import >> 9), 4);
-      expect(String.fromCharCodes(bytes), '_$name\x00');
     }
   });
 

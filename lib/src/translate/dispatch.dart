@@ -3,7 +3,6 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/world.dart';
 
 import 'classes.dart';
-import 'constant.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -20,6 +19,7 @@ final class DispatchBuilder(
   final Declarations _declarations,
   final HirFunction Function(ExecutableElement member) _memberOf,
   final HirField Function(FieldElement field) _fieldOf,
+  final HirInstruction Function(FormalParameterElement parameter) _defaultOf,
 ) {
   final _world = World<ClassElement, HirSelector>(isSubclass);
   final _selectors = <String, HirSelector>{};
@@ -185,7 +185,7 @@ final class DispatchBuilder(
       HirCall(target, [
         block.parameters.first,
         for (final parameter in found.formalParameters)
-          supplied[parameter] ?? defaultValue(block.add, parameter),
+          supplied[parameter] ?? block.add(_defaultOf(parameter)),
       ]),
     );
     block.end(HirReturn(selector.result == null ? null : call));

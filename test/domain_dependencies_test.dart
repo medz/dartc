@@ -16,6 +16,7 @@ void main() {
       'lower': {'hir', 'lir', 'graph'},
       'emit': {'lir', 'graph'},
       'image': {'emit'},
+      'heap': {},
       'driver': {'source', 'translate', 'lower', 'emit', 'image'},
       'ir': {'interop'},
       'optimizer': {'ir', 'abi', 'interop', 'layout'},

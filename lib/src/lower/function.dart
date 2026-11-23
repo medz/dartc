@@ -3,8 +3,10 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
 import 'dispatch.dart';
+import 'machine.dart';
 import 'operators.dart';
 import 'output.dart';
+import 'statics.dart';
 import 'system.dart';
 
 LirType _typeOf(HirType type) => switch (type) {
@@ -30,6 +32,8 @@ final class FunctionLowering(
   final Map<HirCallable, String> symbols,
   final OutputData output,
   final ObjectLayout layout,
+  final StaticData statics,
+  final MachineLowering machine,
 ) {
   final _values = <HirValue, LirValue>{};
   final _blocks = <HirBlock, LirBlock>{};
@@ -93,6 +97,28 @@ final class FunctionLowering(
         return block.add(ConstNull());
       case HirNew(:final target):
         return layout.allocate(block, target);
+      case HirStatic(:final object):
+        return block.add(StaticObject(statics.constant(object)));
+      case HirLoadGlobal(:final global):
+        return block.add(
+          Load(
+            ObjectLayout.widthOf(global.type),
+            block.add(StaticObject(globalsSymbol)),
+            offset: statics.offsetOf(global),
+          ),
+        );
+      case HirStoreGlobal(:final global, :final value):
+        block.add(
+          Store(
+            ObjectLayout.widthOf(global.type),
+            block.add(StaticObject(globalsSymbol)),
+            _value(value),
+            offset: statics.offsetOf(global),
+          ),
+        );
+        return null;
+      case HirMachine(:final op, :final arguments):
+        return machine.lower(block, op, arguments.map(_value).toList());
       case HirLoad(:final field, :final object):
         return layout.load(block, field, _value(object));
       case HirStore(:final field, :final object, :final value):

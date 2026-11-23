@@ -11,6 +11,12 @@ final systemFunctions = {
   /// The address of the 32-bit error number.
   '__error': LirSignature([], .ptr),
 
+  /// mmap(address, bytes, protection, flags, descriptor, offset).
+  'mmap': LirSignature(List.filled(6, .i64), .i64),
+
+  /// munmap(address, bytes).
+  'munmap': LirSignature([.i64, .i64], .i64),
+
   /// signal(number, handler).
   'signal': LirSignature([.i64, .i64], .i64),
 };

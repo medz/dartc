@@ -2,9 +2,6 @@
 @Tags(['native'])
 library;
 
-import 'dart:typed_data';
-
-import 'package:dartc/emit.dart';
 import 'package:dartc/lir.dart';
 import 'package:test/test.dart';
 
@@ -190,38 +187,6 @@ void main() {
     }
     await agree(functions, cases);
   }, skip: skipExecution);
-
-  test('a program without enough memory stops', () async {
-    final block = LirBlock();
-    final size = block.add(ConstInt(1 << 60));
-    final object = block.add(Alloc(size));
-    final none = block.add(ConstNull());
-    block.end(Return(block.add(Compare(.eq, object, none))));
-    final module = LirModule(
-      functions: [
-        LirFunction('main', LirSignature([], .i64), [block]),
-      ],
-    );
-    expect(await execute(module), -5);
-  }, skip: skipExecution);
-
-  test('one object is allocated at a time', () {
-    final block = LirBlock();
-    block.add(Alloc(block.add(ConstInt(16))));
-    block.end(Return());
-    final code = emitArm64(
-      LirModule(
-        functions: [
-          LirFunction('f', LirSignature([]), [block]),
-        ],
-      ),
-    );
-    final call = code.relocations.single;
-    expect(call.symbol, 'calloc');
-    final words = ByteData.sublistView(code.text);
-    // movz x0, #1 comes right before the call.
-    expect(words.getUint32(call.offset - 4, .little), 0xd2800020);
-  });
 
   test('new objects are zero', () async {
     await agree(

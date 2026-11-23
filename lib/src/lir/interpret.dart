@@ -30,6 +30,7 @@ final class LirInterpreter(
   final LirMemory memory = LirMemory();
   final _functions = <String, LirFunction>{};
   final _addresses = <String, int>{};
+  final _statics = <String, LirObject>{};
   final _callables = <int, String>{};
   int _steps = 0;
 
@@ -47,6 +48,16 @@ final class LirInterpreter(
       final address = memory.map(Uint8List(0));
       _addresses[name] = address;
       _callables[address] = name;
+    }
+    for (final static in module.statics) {
+      final object = LirObject(static.bytes.length, writable: static.writable);
+      object.bytes.setAll(0, static.bytes);
+      _statics[static.name] = object;
+    }
+    for (final static in module.statics) {
+      static.references.forEach((offset, target) {
+        _statics[static.name]!.references[offset] = _statics[target]!;
+      });
     }
     for (final table in module.tables) {
       final words = ByteData(table.functions.length * 4);
@@ -147,7 +158,12 @@ final class LirInterpreter(
       case ConstNull():
         return null;
       case SymbolAddress(:final symbol):
-        return _addresses[symbol];
+        return _addresses[symbol] ??
+            (throw LirFault('$symbol has no address here.'));
+      case StaticObject(:final symbol):
+        return _statics[symbol];
+      case FrameAddress():
+        throw LirFault('Frames are not simulated.');
       case IntBinary(:final op, :final left, :final right):
         return _integer(op, integer(left), integer(right));
       case FloatBinary(:final op, :final left, :final right):
@@ -258,6 +274,8 @@ final class LirInterpreter(
       case .floatBitsToInt:
         bits.setFloat64(0, value as double);
         return bits.getInt64(0);
+      case .intToRef:
+        throw LirFault('Objects are not integers here.');
       case .intToPtr || .ptrToInt:
         return value as int;
     }

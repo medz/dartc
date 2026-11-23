@@ -452,11 +452,6 @@ b0():
       'void main() { void f() {} }',
       '2:15: $what function declaration statement.',
     );
-    reports('int x = 1;\nvoid main() { x; }', '3:15: $what simple identifier.');
-    reports(
-      'int x = 1;\nvoid main() { x = 2; }',
-      '3:15: $what assignment to simple identifier.',
-    );
     reports(
       'void f(int x) { x ~/ x; }\nvoid main() { f(1); }',
       '2:17: $what operator ~/ with a variable right side.',

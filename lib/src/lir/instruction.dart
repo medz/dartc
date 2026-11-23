@@ -38,6 +38,22 @@ final class SymbolAddress(final String symbol) extends LirInstruction {
   List<LirValue> get inputs => const [];
 }
 
+/// The object that exists from the start under [symbol].
+final class StaticObject(final String symbol) extends LirInstruction {
+  @override
+  LirType get type => .ref;
+  @override
+  List<LirValue> get inputs => const [];
+}
+
+/// The address of this function's frame, for the runtime to find others.
+final class FrameAddress() extends LirInstruction {
+  @override
+  LirType get type => .i64;
+  @override
+  List<LirValue> get inputs => const [];
+}
+
 /// Integer arithmetic on 64-bit words; add, sub and mul wrap.
 enum IntOp() {
   add,
@@ -141,6 +157,9 @@ enum Conversion(final LirType from, final LirType to) {
   floatBitsToInt(.f64, .i64),
   intToPtr(.i64, .ptr),
   ptrToInt(.ptr, .i64),
+
+  /// An object where the runtime has put one.
+  intToRef(.i64, .ref),
 }
 
 final class Convert(final Conversion op, final LirValue operand)

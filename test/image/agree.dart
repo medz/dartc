@@ -6,6 +6,19 @@ import 'support.dart';
 /// A call to check, with its arguments.
 typedef Case = ({String function, List<Object> arguments});
 
+final callocExternal = LirExternal('calloc', LirSignature([.i64, .i64], .i64));
+
+/// Allocates from the system and never collects.
+final LirFunction allocateFunction = () {
+  final block = LirBlock([.i64]);
+  final one = block.add(ConstInt(1));
+  final address = block.add(
+    Call('calloc', callocExternal.signature, [one, block.parameters.single]),
+  );
+  block.end(Return(block.add(Convert(.intToRef, address))));
+  return LirFunction('.allocate', LirSignature([.i64], .ref), [block]);
+}();
+
 const _limit = 250;
 
 /// A program returning the 1-based number of the first case that differs from
@@ -42,8 +55,10 @@ LirModule program(
   return LirModule(
     functions: [
       ...functions,
+      allocateFunction,
       LirFunction('main', LirSignature([], .i64), blocks),
     ],
+    externals: [callocExternal],
     data: data,
     tables: tables,
   );
@@ -59,7 +74,12 @@ Future<void> agree(
   for (var at = 0; at < cases.length; at += _limit) {
     final part = cases.skip(at).take(_limit).toList();
     final interpreter = LirInterpreter(
-      LirModule(functions: functions, data: data, tables: tables),
+      LirModule(
+        functions: [...functions, allocateFunction],
+        externals: [callocExternal],
+        data: data,
+        tables: tables,
+      ),
     );
     final expected = [
       for (final (:function, :arguments) in part)

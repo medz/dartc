@@ -120,6 +120,9 @@ final class CallTranslator(
         ];
         return _builder.add(HirCompare(.equal, left, right));
     }
+    if (_scope.machineOpOf(element) case final op?) {
+      return _machine(op, arguments);
+    }
     final function = _scope.functionOf(element);
     if (function == null) {
       _unsupported(node, 'calling ${element.displayName} of the SDK');
@@ -127,6 +130,17 @@ final class CallTranslator(
     return _direct(function, element, [
       ...ordered(element, supplied(node.argumentList)),
     ]);
+  }
+
+  HirValue? _machine(HirMachineOp op, List<Argument> arguments) {
+    final call = _builder.add(
+      HirMachine(op, [
+        for (final argument in arguments)
+          _evaluator.valueAs(argument.argumentExpression, .integer),
+      ]),
+    );
+    if (op == .trap) _builder.end(HirUnreachable());
+    return call.type == null ? null : call;
   }
 
   static String? _coreName(ExecutableElement element) =>
@@ -154,7 +168,6 @@ final class CallTranslator(
 
   /// Creates an object, or calls a factory.
   HirValue creation(InstanceCreationExpression node) {
-    if (node.isConst) _unsupported(node, 'constant objects');
     final element = node.constructorName.element;
     final class_ = classOf(node.staticType);
     if (element == null || class_ == null) {
@@ -162,6 +175,13 @@ final class CallTranslator(
     }
     if (element.library.isInSdk) {
       _unsupported(node, 'calling ${class_.displayName} of the SDK');
+    }
+    if (node.isConst) {
+      final value = node.computeConstantValue()?.value;
+      return _builder.add(
+        _scope.constantOf(.reference, value) ??
+            _unsupported(node, 'a constant of type ${node.staticType}'),
+      );
     }
     if (element.isFactory) {
       final factory = _scope.factoryOf(element);
@@ -200,7 +220,7 @@ final class CallTranslator(
     Map<FormalParameterElement, HirValue> supplied,
   ) => [
     for (final parameter in element.formalParameters)
-      supplied[parameter] ?? defaultValue(_builder.add, parameter),
+      supplied[parameter] ?? _builder.add(_scope.defaultOf(parameter)),
   ];
 
   HirValue? _invoke(
@@ -309,7 +329,7 @@ final class CallTranslator(
             : read(receiver);
       }
     }
-    return result ?? _builder.placeholder(.integer);
+    return result ?? _unsupported(node, describe(node));
   }
 
   /// Reads `target[index]`.

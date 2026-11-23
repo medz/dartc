@@ -1,12 +1,15 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
 import 'classes.dart';
+import 'constant_table.dart';
 import 'constructor.dart';
 import 'dispatch.dart';
+import 'global_table.dart';
 import 'scope.dart';
 import 'statement.dart';
 import 'types.dart';
@@ -14,19 +17,43 @@ import 'types.dart';
 /// Translates everything the program's `main` can reach.
 ///
 /// Throws [CompileFailure] at the first construct not supported yet.
-HirModule translateProgram(SourceProgram program) =>
-    ProgramTranslator(program).translate();
+///
+/// A program that creates objects includes [collector], if given.
+HirModule translateProgram(SourceProgram program, {SourceProgram? collector}) =>
+    ProgramTranslator(program, collector).translate();
 
 /// Finds the functions a program needs and translates each once.
 ///
 /// Functions, classes and selectors only grow and are bounded by the source.
-final class ProgramTranslator(final SourceProgram program)
-    implements ProgramScope {
-  late final _declarations = Declarations(program);
+final class ProgramTranslator(
+  final SourceProgram program,
+  final SourceProgram? collector,
+) implements ProgramScope {
+  late final _declarations = Declarations([
+    ...program.libraries,
+    ...?collector?.libraries,
+  ]);
   late final _classes = ClassTable(_declarations);
-  late final _dispatch = DispatchBuilder(_declarations, memberOf, fieldOf);
+  late final _dispatch = DispatchBuilder(
+    _declarations,
+    memberOf,
+    fieldOf,
+    defaultOf,
+  );
+  late final _constants = ConstantTable(
+    _declarations,
+    _classes,
+    _dispatch.instantiate,
+  );
+  late final _globals = GlobalTable(
+    this,
+    _declarations,
+    _constants,
+    _pending.add,
+  );
   final _functions = <ExecutableElement, HirFunction>{};
-  final _pending = <ExecutableElement>[];
+  final _pending = <void Function()>[];
+  HirFunction? _allocate;
 
   HirModule translate() {
     final start = program.main.units.first;
@@ -41,23 +68,45 @@ final class ProgramTranslator(final SourceProgram program)
     }
     final main = HirFunction(entry.displayName, const []);
     _functions[entry] = main;
-    _pending.add(entry);
+    _pending.add(() => _translate(entry));
     do {
       while (_pending.isNotEmpty) {
-        _translate(_pending.removeLast());
+        _pending.removeLast()();
       }
     } while (_dispatch.update() || _pending.isNotEmpty);
     return HirModule(
       main,
-      [..._functions.values, ..._dispatch.made],
+      [..._functions.values, ..._globals.getters, ..._dispatch.made],
       classes: _dispatch.classes.map(_classes.classOf),
       dispatch: _dispatch.result(_classes.classOf),
+      globals: _globals.globals,
+      allocate: _allocate,
     );
   }
 
   @override
   HirFunction? functionOf(ExecutableElement element) =>
       _declarations[element] == null ? null : _declare(element);
+
+  @override
+  HirMachineOp? machineOpOf(ExecutableElement element) {
+    final libraries = collector?.libraries.skip(1) ?? const [];
+    return libraries.any((library) => library.element == element.library)
+        ? HirMachineOp.values.byName(element.displayName)
+        : null;
+  }
+
+  @override
+  GlobalVariable? globalOf(PropertyInducingElement element) =>
+      _globals.of(element);
+
+  @override
+  HirInstruction? constantOf(HirType? type, DartObject? object) =>
+      _constants.of(type, object)?.instruction;
+
+  @override
+  HirInstruction defaultOf(FormalParameterElement parameter) =>
+      _constants.defaultOf(parameter);
 
   @override
   HirFunction memberOf(ExecutableElement element) => _declare(element);
@@ -77,6 +126,8 @@ final class ProgramTranslator(final SourceProgram program)
   HirClass createdClass(ClassElement element) {
     final class_ = _classes.classOf(element);
     _dispatch.instantiate(element);
+    final allocate = collector?.main.element.getTopLevelFunction('allocate');
+    if (allocate != null) _allocate ??= _declare(allocate);
     return class_;
   }
 
@@ -94,7 +145,7 @@ final class ProgramTranslator(final SourceProgram program)
 
   HirFunction _declare(ExecutableElement element) =>
       _functions.putIfAbsent(element, () {
-        _pending.add(element);
+        _pending.add(() => _translate(element));
         final owner = element.enclosingElement;
         final result = element.returnType;
         final isInitializer = isInitializerElement(element);

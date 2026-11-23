@@ -1,7 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
-import 'package:dartc/hir.dart';
 
 import 'types.dart';
 
@@ -15,30 +13,14 @@ VariableElement? constantVariable(Element? element) {
   return variable != null && variable.isConst ? variable : null;
 }
 
-/// The `int`, `double` or `bool` that [variable] is always equal to.
-Object? constantNumber(VariableElement variable) {
-  final DartObject? constant = variable.computeConstantValue();
-  return switch (valueType(variable.type)) {
-    .integer => constant?.toIntValue(),
-    .float => constant?.toDoubleValue(),
-    .boolean => constant?.toBoolValue(),
-    .reference || null => null,
+/// The number that [node] is, after a minus sign if [isNegated], or null if its
+/// type is something else.
+Object? integerLiteral(IntegerLiteral node, {required bool isNegated}) {
+  return switch (valueType(node.staticType!)) {
+    .integer => node.parseIntValue(negated: isNegated),
+    .float => node.parseDoubleValue(negated: isNegated),
+    _ => null,
   };
-}
-
-/// The value that [parameter] has where a call leaves it out.
-HirValue defaultValue(
-  HirValue Function(HirInstruction) add,
-  FormalParameterElement parameter,
-) {
-  FormalParameterElement? found = parameter;
-  while (found is SuperFormalParameterElement && !found.hasDefaultValue) {
-    found = found.superConstructorParameter;
-  }
-  final value = found == null ? null : constantNumber(found);
-  if (value != null) return add(HirConst(value));
-  if (valueType(parameter.type) == .reference) return add(HirNull());
-  throw StateError('No default for ${parameter.name}.');
 }
 
 /// The text of a constant string, or null if [node] is something else.

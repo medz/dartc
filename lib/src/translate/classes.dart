@@ -6,16 +6,18 @@ import 'package:dartc/source.dart';
 import 'types.dart';
 
 /// Where the program declares each of its elements.
-final class Declarations(SourceProgram program) {
+final class Declarations(Iterable<SourceLibrary> libraries) {
   final _nodes = <Element, (SourceUnit, AstNode)>{};
 
   this {
-    for (final library in program.libraries) {
+    for (final library in libraries) {
       for (final unit in library.units) {
         for (final declaration in unit.ast.declarations) {
           switch (declaration) {
             case FunctionDeclaration(:final declaredFragment?):
               _nodes[declaredFragment.element] = (unit, declaration);
+            case TopLevelVariableDeclaration(:final variables):
+              _addVariables(unit, variables);
             case ClassDeclaration(:final declaredFragment?):
               _nodes[declaredFragment.element] = (unit, declaration);
               for (final member in declaration.body.members) {
@@ -38,13 +40,17 @@ final class Declarations(SourceProgram program) {
       case ConstructorDeclaration(:final declaredFragment?):
         _nodes[declaredFragment.element] = (unit, member);
       case FieldDeclaration(:final fields):
-        for (final field in fields.variables) {
-          if (field.declaredFragment case final fragment?) {
-            _nodes[fragment.element] = (unit, field);
-          }
-        }
+        _addVariables(unit, fields);
       default:
         break;
+    }
+  }
+
+  void _addVariables(SourceUnit unit, VariableDeclarationList list) {
+    for (final variable in list.variables) {
+      if (variable.declaredFragment case final fragment?) {
+        _nodes[fragment.element] = (unit, variable);
+      }
     }
   }
 

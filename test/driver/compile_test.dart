@@ -88,10 +88,17 @@ Future<void> _compareRandom(int seed) async {
   expect(machineLevel.code, 100, reason: reason(machineLevel.code));
   expect(machineLevel.output, checked.stdout, reason: 'seed $seed');
   final program = '${directory.path}/program';
-  writeProgram(await compileProgram(path, sdk: hostSdk), program);
-  final native = await Process.run(program, const []);
-  expect(native.exitCode, 100, reason: reason(native.exitCode));
-  expect(native.stdout, checked.stdout, reason: 'seed $seed');
+  for (final collectsAlways in [false, true]) {
+    final bytes = await compileProgram(
+      path,
+      sdk: hostSdk,
+      collectsAlways: collectsAlways,
+    );
+    writeProgram(bytes, program);
+    final native = await Process.run(program, const []);
+    expect(native.exitCode, 100, reason: reason(native.exitCode));
+    expect(native.stdout, checked.stdout, reason: 'seed $seed');
+  }
 }
 
 void main() {

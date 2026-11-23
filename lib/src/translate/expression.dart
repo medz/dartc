@@ -11,6 +11,7 @@ import 'members.dart';
 import 'operators.dart';
 import 'places.dart';
 import 'scope.dart';
+import 'statics.dart';
 import 'types.dart';
 
 /// Translates the expressions of one function.
@@ -20,7 +21,8 @@ final class ExpressionTranslator(
 ) implements Evaluator {
   late final calls = CallTranslator(_scope, _builder, this);
   late final _operators = OperatorTranslator(_builder, calls);
-  late final _places = PlaceTranslator(_builder, this, calls);
+  late final _statics = StaticTranslator(_scope, _builder);
+  late final _places = PlaceTranslator(_builder, this, calls, _statics);
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -72,7 +74,7 @@ final class ExpressionTranslator(
     }
     switch (inner) {
       case IntegerLiteral():
-        return _integer(inner, negated: false);
+        return _integer(inner, isNegated: false);
       case DoubleLiteral(value: final Object constant) ||
           BooleanLiteral(value: final Object constant):
         return _builder.add(HirConst(constant));
@@ -88,14 +90,14 @@ final class ExpressionTranslator(
       ):
         return isInstanceMember(element)
             ? calls.property(inner, prefix, element!)
-            : _constant(inner, element);
+            : _statics.read(inner, element);
       case PropertyAccess(
         :final realTarget,
         propertyName: SimpleIdentifier(:final element),
       ):
         return isInstanceMember(element)
             ? calls.property(inner, realTarget, element!)
-            : _constant(inner, element);
+            : _statics.read(inner, element);
       case PrefixExpression():
         return _prefix(inner);
       case PostfixExpression(:final operator, :final operand):
@@ -119,16 +121,13 @@ final class ExpressionTranslator(
     }
   }
 
-  HirValue _integer(IntegerLiteral node, {required bool negated}) {
-    final type = valueType(node.staticType!);
-    final Object? value = switch (type) {
-      .integer => node.parseIntValue(negated: negated),
-      .float => node.parseDoubleValue(negated: negated),
-      _ => _unsupported(node, 'a literal of type ${node.staticType}'),
-    };
-    if (value == null) throw StateError('Unchecked literal $node.');
-    return _builder.add(HirConst(value));
-  }
+  HirValue _integer(IntegerLiteral node, {required bool isNegated}) =>
+      _builder.add(
+        HirConst(
+          integerLiteral(node, isNegated: isNegated) ??
+              _unsupported(node, 'a literal of type ${node.staticType}'),
+        ),
+      );
 
   HirValue _identifier(Expression node, Element? element) {
     if (element is VariableElement &&
@@ -138,17 +137,7 @@ final class ExpressionTranslator(
     }
     return isInstanceMember(element)
         ? calls.property(node, null, element!)
-        : _constant(node, element);
-  }
-
-  /// The value of the constant variable that [element] refers to.
-  HirValue _constant(Expression node, Element? element) {
-    final variable = constantVariable(element);
-    if (variable == null) _unsupported(node, describe(node));
-    final value =
-        constantNumber(variable) ??
-        _unsupported(node, 'a constant of type ${variable.type}');
-    return _builder.add(HirConst(value));
+        : _statics.read(node, element);
   }
 
   HirValue _prefix(PrefixExpression node) {
@@ -157,7 +146,7 @@ final class ExpressionTranslator(
       case '++' || '--':
         return _step(node, operand, operator, after: true);
       case '-' when operand is IntegerLiteral:
-        return _integer(operand, negated: true);
+        return _integer(operand, isNegated: true);
       default:
         return _operators.unary(node, operator, value(operand));
     }
