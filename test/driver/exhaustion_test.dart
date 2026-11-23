@@ -58,8 +58,7 @@ final LirFunction _limitedUnmap = () {
 Future<ProcessResult> _runLimited(String source, int limit) async {
   final directory = writeSources({'main.dart': source});
   final program = translateProgram(
-    await loadProgram('${directory.path}/main.dart', sdk: hostSdk),
-    runtime: await loadRuntime(sdk: hostSdk),
+    await loadProgram('${directory.path}/main.dart', sdk: await packagedSdk()),
   );
   final lowered = lowerProgram(program);
   final limited = LirModule(
@@ -92,7 +91,7 @@ Future<ProcessResult> _runAfter(String command, String source) async {
   final directory = writeSources({'main.dart': source});
   final path = '${directory.path}/main.dart';
   final program = '${directory.path}/program';
-  writeProgram(await compileProgram(path, sdk: hostSdk), program);
+  writeProgram(await compileProgram(path), program);
   return Process.run('/bin/bash', ['-c', '$command; $program']);
 }
 
@@ -147,8 +146,8 @@ void main() {
         try { 1 << (zero() - 1); print('no'); }
         on ArgumentError { print('no'); }
         on OutOfMemoryError { print('b'); }
-        try { throw list ?? list!; } on OutOfMemoryError { print('c'); }
-        try { 1 ~/ zero(); } on OutOfMemoryError { print('d'); }
+        try { throw list ?? list!; } on P { print('c'); }
+        try { 1 ~/ zero(); } on UnsupportedError { print('d'); }
         if (list != null) print('e');
       }''', 8 << 20);
     expect(result.stdout, 'a\nb\nc\nd\ne\n');

@@ -18,7 +18,6 @@ void main() {
     'e: LirType.ref',
     LirModule(externals: [LirExternal('e', LirSignature([], .ref))]),
   );
-  rejects('writable data', LirModule(data: [LirData('d', [], writable: true)]));
 
   LirModule ending(
     LirTerminator Function(LirBlock entry) end, [

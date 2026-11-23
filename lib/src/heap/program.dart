@@ -7,26 +7,29 @@ import 'type_objects.dart';
 abstract interface class Program() {
   RuntimeType typeOf(Object object);
 
+  /// The object whose method [function] is, if it is one.
+  Object? receiverOf(Object function);
+
+  /// What else the text of [function] says.
+  String functionName(Object function);
+
   /// The supertypes of a class, other than `Object`.
   SuperList? superTypesOf(int number);
 
   /// The number of the class `Function`.
   int get functionNumber;
 
-  /// Write names to standard error.
-  void writeClassName(int number);
-  void writeParameterName(int number);
-  void writeBasicName(int kind);
-  void writeRequired();
+  String className(int number);
+  String parameterName(int number);
 }
 
 /// The program that the runtime is part of outside compiled programs.
 late Program program;
 
 RuntimeType typeOf(Object object) => program.typeOf(object);
+Object? receiverOf(Object function) => program.receiverOf(function);
+String functionName(Object function) => program.functionName(function);
 SuperList? superTypesOf(int number) => program.superTypesOf(number);
 int functionNumber() => program.functionNumber;
-void writeClassName(int number) => program.writeClassName(number);
-void writeParameterName(int number) => program.writeParameterName(number);
-void writeBasicName(int kind) => program.writeBasicName(kind);
-void writeRequired() => program.writeRequired();
+String className(int number) => program.className(number);
+String parameterName(int number) => program.parameterName(number);

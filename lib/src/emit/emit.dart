@@ -28,13 +28,17 @@ EmittedCode emitArm64(LirModule module) {
     assembler.relocations,
     externals: module.externals.map((external) => external.name),
     data: {
-      for (final data in module.data) data.name: data.bytes,
+      for (final data in module.data)
+        if (!data.writable) data.name: data.bytes,
       if (_uses(module, stackMapSymbol)) stackMapSymbol: encodeStackMaps(maps),
       if (_uses(module, handlerSymbol))
         handlerSymbol: encodeThrowTargets(targets),
     },
     tables: {for (final table in module.tables) table.name: table.functions},
     objects: {
+      for (final data in module.data)
+        if (data.writable)
+          data.name: EmittedObject(data.bytes, const {}, writable: true),
       for (final object in module.statics)
         object.name: EmittedObject(
           object.bytes,

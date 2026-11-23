@@ -1,14 +1,15 @@
 import 'dart:io';
 
+import 'package:dartc/driver.dart';
 import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
 import '../support/new_compiler.dart';
 
 void main() {
-  Future<SourceProgram> loadFiles(Map<String, String> files) {
+  Future<SourceProgram> loadFiles(Map<String, String> files) async {
     final directory = writeSources(files);
-    return loadProgram('${directory.path}/main.dart', sdk: hostSdk);
+    return loadProgram('${directory.path}/main.dart', sdk: await packagedSdk());
   }
 
   test('loads a library with its parts', () async {
@@ -27,7 +28,7 @@ void main() {
     final directory = writeSources({'real/main.dart': 'void main() {}'});
     final link = Link('${directory.path}/main.dart')
       ..createSync('${directory.path}/real/main.dart');
-    final program = await loadProgram(link.path, sdk: hostSdk);
+    final program = await loadProgram(link.path, sdk: await packagedSdk());
     expect(program.main.units.single.path, endsWith('/real/main.dart'));
   });
 
@@ -155,7 +156,7 @@ void main() {
 
   test('missing files are reported', () async {
     await expectLater(
-      loadProgram('/no/such/main.dart', sdk: hostSdk),
+      loadProgram('/no/such/main.dart', sdk: await packagedSdk()),
       failsWith(['main.dart:1:1: File not found.']),
     );
     await expectLater(

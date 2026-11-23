@@ -35,7 +35,8 @@ final class LirInterpreter(
   final _addresses = <String, int>{};
   final _statics = <String, LirObject>{};
   final _callables = <int, String>{};
-  int _steps = 0, _depth = 0;
+  final _places = Expando<int>();
+  int _steps = 0, _depth = 0, _placed = 0;
 
   this {
     verifyModule(module);
@@ -289,6 +290,8 @@ final class LirInterpreter(
         return bits.getInt64(0);
       case .intToRef:
         throw LirFault('Objects are not integers here.');
+      case .refToInt:
+        return _places[value!] ??= ++_placed * 16;
       case .intToPtr || .ptrToInt:
         return value as int;
     }

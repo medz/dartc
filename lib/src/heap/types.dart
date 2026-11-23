@@ -137,69 +137,124 @@ NamedList? _substituteNamed(NamedList? list, TypeList? own) => list == null
         _substituteNamed(list.tail, own),
       );
 
-/// Writes the type of [object] to standard error.
-void writeObjectType(Object? object) =>
-    writeType(object == null ? const BasicType(nullKind) : typeOf(object));
-
-/// Writes [type] to standard error.
-void writeType(RuntimeType type) {
-  if (type is BasicType) {
-    writeBasicName(type.kind);
-  } else if (type is InterfaceType) {
-    writeClassName(type.number);
-    if (type.arguments != null) {
-      writeError(60);
-      _writeList(type.arguments);
-      writeError(62);
-    }
-  } else if (type is NullableType) {
-    final inner = type.inner;
-    if (inner is FunctionType) writeError(40);
-    writeType(inner);
-    if (inner is FunctionType) writeError(41);
-    writeError(63);
-  } else if (type is FunctionType) {
-    _writeFunction(type);
+/// Whether [a] and [b] are the same type.
+bool isSameType(RuntimeType a, RuntimeType b) {
+  if (isSame(a, b)) return true;
+  if (a is BasicType) return b is BasicType && a.kind == b.kind;
+  if (a is NullableType)
+    return b is NullableType && isSameType(a.inner, b.inner);
+  if (a is InterfaceType) {
+    return b is InterfaceType &&
+        a.number == b.number &&
+        _areSame(a.arguments, b.arguments);
   }
+  return a is FunctionType &&
+      b is FunctionType &&
+      isSameType(a.result, b.result) &&
+      _areSame(a.required, b.required) &&
+      _areSame(a.optional, b.optional) &&
+      _areSameNamed(a.named, b.named);
 }
 
-void _writeList(TypeList? list) {
+bool _areSame(TypeList? a, TypeList? b) {
+  while (a != null && b != null) {
+    if (!isSameType(a.head, b.head)) return false;
+    a = a.tail;
+    b = b.tail;
+  }
+  return a == null && b == null;
+}
+
+bool _areSameNamed(NamedList? a, NamedList? b) {
+  while (a != null && b != null) {
+    final isSame =
+        a.name == b.name &&
+        a.isRequired == b.isRequired &&
+        isSameType(a.type, b.type);
+    if (!isSame) return false;
+    a = a.tail;
+    b = b.tail;
+  }
+  return a == null && b == null;
+}
+
+/// A number that is equal for equal types.
+int hashOfType(RuntimeType type) {
+  if (type is BasicType) return type.kind + 1;
+  if (type is NullableType) return hashOfType(type.inner) * 7 + 1;
+  if (type is InterfaceType) {
+    return (_hashOfList(type.arguments) * 31 + type.number) & 0x3fffffff;
+  }
+  if (type is! FunctionType) return 0;
+  var hash = hashOfType(type.result) + _hashOfList(type.required) * 5;
+  for (var at = type.named; at != null; at = at.tail) {
+    hash = (hash * 31 + at.name) & 0x3fffffff;
+  }
+  return (hash + _hashOfList(type.optional) * 3) & 0x3fffffff;
+}
+
+int _hashOfList(TypeList? list) {
+  var hash = 0;
   for (var at = list; at != null; at = at.tail) {
-    writeType(at.head);
-    if (at.tail != null) _writeComma();
+    hash = (hash * 31 + hashOfType(at.head)) & 0x3fffffff;
   }
+  return hash;
 }
 
-void _writeComma() {
-  writeError(44);
-  writeError(32);
+/// What the type of [object] is called.
+String objectTypeName(Object? object) =>
+    object == null ? 'Null' : typeName(typeOf(object));
+
+/// What [type] is called.
+String typeName(RuntimeType type) {
+  if (type is BasicType) return _basicName(type.kind);
+  if (type is InterfaceType) {
+    final name = className(type.number), arguments = type.arguments;
+    return arguments == null ? name : '$name<${_listName(arguments)}>';
+  }
+  if (type is NullableType) {
+    final inner = type.inner, name = typeName(inner);
+    return inner is FunctionType ? '($name)?' : '$name?';
+  }
+  return type is FunctionType ? _functionName(type) : '';
 }
 
-void _writeFunction(FunctionType type) {
-  writeError(40);
-  _writeList(type.required);
-  if (type.optional != null) {
-    if (type.required != null) _writeComma();
-    writeError(91);
-    _writeList(type.optional);
-    writeError(93);
+String _basicName(int kind) {
+  if (kind == dynamicKind) return 'dynamic';
+  if (kind == voidKind) return 'void';
+  if (kind == anyKind) return 'Object?';
+  if (kind == objectKind) return 'Object';
+  return kind == nullKind ? 'Null' : 'Never';
+}
+
+String _listName(TypeList list) {
+  var name = typeName(list.head);
+  for (var at = list.tail; at != null; at = at.tail) {
+    name = '$name, ${typeName(at.head)}';
   }
-  if (type.named != null) {
-    if (type.required != null) _writeComma();
-    writeError(123);
-    for (var at = type.named; at != null; at = at.tail) {
-      if (at.isRequired) writeRequired();
-      writeType(at.type);
-      writeError(32);
-      writeParameterName(at.name);
-      if (at.tail != null) _writeComma();
-    }
-    writeError(125);
+  return name;
+}
+
+String _functionName(FunctionType type) {
+  final required = type.required, optional = type.optional, named = type.named;
+  var parameters = required == null ? '' : _listName(required);
+  if (optional != null) {
+    if (required != null) parameters = '$parameters, ';
+    parameters = '$parameters[${_listName(optional)}]';
   }
-  writeError(41);
-  writeError(32);
-  writeError(61);
-  writeError(62);
-  writeError(32);
-  writeType(type.result);
+  if (named != null) {
+    if (required != null) parameters = '$parameters, ';
+    parameters = '$parameters{${_namedName(named)}}';
+  }
+  return '($parameters) => ${typeName(type.result)}';
+}
+
+String _namedName(NamedList list) {
+  var name = '';
+  for (NamedList? at = list; at != null; at = at.tail) {
+    final own = '${typeName(at.type)} ${parameterName(at.name)}';
+    name = '$name${at.isRequired ? 'required ' : ''}$own';
+    if (at.tail != null) name = '$name, ';
+  }
+  return name;
 }

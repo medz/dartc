@@ -5,7 +5,6 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
-import 'builtin_error.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'closure.dart';
@@ -34,8 +33,15 @@ abstract interface class ProgramScope() {
   /// A top-level or static function, or null if the SDK declares it.
   HirFunction? functionOf(ExecutableElement element);
 
-  /// The operation that calling [element] stands for, in the collector.
-  HirMachineOp? machineOpOf(ExecutableElement element);
+  /// What the runtime's source calls the operation that calling [element]
+  /// stands for, if it is one.
+  String? operationOf(ExecutableElement element);
+
+  /// The class of objects that values of [type] are without boxes.
+  ClassElement boxElement(HirType type);
+
+  /// What the annotation `@pragma` of [element] says about [name].
+  String? pragmaOf(Element element, String name);
 
   /// A top-level variable or static field, or null if the program does not
   /// declare it.
@@ -66,9 +72,6 @@ abstract interface class ProgramScope() {
   /// The selector of calls of functions that are values.
   HirSelector callSelector(int positional, List<String> named);
 
-  /// Whether objects are functions.
-  HirTypeTest get functionTest;
-
   /// The object that [element] is, if the program declares it.
   HirConstObject? functionObject(ExecutableElement element);
 
@@ -91,9 +94,6 @@ abstract interface class ProgramScope() {
   /// The value of [node] in the function of [builder], as one of [type].
   HirValue evaluate(FunctionBuilder builder, Expression node, DartType type);
 
-  /// The program's own element for [class_], which may be one of the SDK.
-  InterfaceElement canonicalClass(InterfaceElement class_);
-
   /// A class of the runtime.
   ClassElement runtimeClass(String name);
 
@@ -103,6 +103,9 @@ abstract interface class ProgramScope() {
   /// The object for [type], or null if it is generic.
   HirValue? typeValue(FunctionBuilder builder, DartType type);
 
+  /// The object that [type] is as a value, or null if it is not closed.
+  HirConstObject? typeObject(DartType type);
+
   /// The type of the method [element] as a function, or null if it is generic.
   HirValue? methodType(FunctionBuilder builder, ExecutableElement element);
 
@@ -111,6 +114,9 @@ abstract interface class ProgramScope() {
 
   /// The object for [types] if they are closed.
   Constant? constantTypes(List<DartType> types);
+
+  /// A list of [type] that holds [values] and does not grow.
+  HirValue list(FunctionBuilder builder, DartType type, List<HirValue> values);
 
   /// Where objects keep the type arguments of [level], if it has any.
   HirField? argumentsOf(Level level);
@@ -125,8 +131,11 @@ abstract interface class ProgramScope() {
   /// How to use members of objects of any class.
   HirSelector dynamicSelector(DynamicShape shape);
 
-  /// A number for a member that is missing.
-  int missingNumber(String kind, String name);
+  /// What [selector], of those, does for null.
+  HirFunction dynamicNull(HirSelector selector);
+
+  /// The constant string [value].
+  HirInstruction text(String value);
 
   /// Has [work] done later.
   void schedule(void Function() work);
@@ -137,24 +146,11 @@ abstract interface class ProgramScope() {
   /// The object that the constant [value] is.
   HirConstObject boxOf(Object value);
 
-  /// A number for what is said about a value that is not of [type], which is
-  /// null where it is known only when the program runs.
-  int castNumber(String? type, String ending);
-
   /// The function called [name] in the runtime.
   HirFunction runtime(String name);
 
-  /// A function that throws [error], given its number if it has one.
-  HirFunction throwerOf(BuiltinError error);
-
-  /// The number telling that [BuiltinError.late] says [text].
-  int lateNumber(String text);
-
-  /// The class of stack traces.
-  HirClass get traceClass;
-
-  /// Tells that objects of [class_] are thrown.
-  void addThrown(InterfaceElement class_);
+  /// The stack trace of what is thrown.
+  HirInstruction get trace;
 
   /// Whether objects are of [class_].
   HirTypeTest testOf(InterfaceElement class_);
@@ -169,8 +165,11 @@ abstract interface class ProgramScope() {
     ExecutableElement member,
     int positional,
     List<String> named,
-    Reject reject,
-  );
+    Reject reject, {
+
+    /// Whether the receiver may be taken as it is.
+    bool isUnboxed = false,
+  });
 
   /// The level of [class_] itself.
   Level levelOf(ClassElement class_);
@@ -180,6 +179,12 @@ abstract interface class ProgramScope() {
 
   /// A factory constructor.
   HirFunction factoryOf(ConstructorElement element);
+
+  /// The class of objects that are of [level].
+  HirClass classAt(Level level);
+
+  /// Whether [class_] can be compiled.
+  bool declares(InstanceElement class_);
 
   /// The class to create objects of.
   HirClass createdClass(ClassElement element);
@@ -219,6 +224,9 @@ abstract interface class ProgramScope() {
 
 /// Evaluates expressions of one function.
 abstract interface class Evaluator() {
+  /// Evaluates [node] without using its value.
+  void effect(Expression node);
+
   /// The value of [node].
   ///
   /// An expression that never completes stands for a value of type
@@ -230,4 +238,7 @@ abstract interface class Evaluator() {
 
   /// The value of [node], which must be represented as [type].
   HirValue valueAs(Expression node, HirType type);
+
+  /// The value of [node] as one of [type], which is an object then.
+  HirValue valueAsObject(Expression node, DartType type);
 }

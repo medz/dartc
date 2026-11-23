@@ -62,6 +62,33 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
 
   (SourceUnit, AstNode)? operator [](Element element) => _nodes[element];
 
+  /// What the objects of [class_] hold besides fields.
+  HirElements? elementsOf(ClassElement class_) =>
+      switch (pragmaOf(class_, 'dartc:elements')) {
+        final kind? => HirElements.values.byName(kind),
+        null => null,
+      };
+
+  /// What the annotation `@pragma` of [element] says about [name].
+  String? pragmaOf(Element element, String name) {
+    final node = _nodes[element]?.$2;
+    if (node is! AnnotatedNode) return null;
+    for (final annotation in node.metadata) {
+      final arguments = annotation.arguments?.arguments ?? const <Argument>[];
+      final texts = [
+        for (final argument in arguments)
+          if (argument.argumentExpression case StringLiteral(
+            :final stringValue?,
+          ))
+            stringValue,
+      ];
+      if (annotation.name.name == 'pragma' && texts.firstOrNull == name) {
+        return texts.elementAtOrNull(1) ?? '';
+      }
+    }
+    return null;
+  }
+
   /// The failure to translate the declaration of [element].
   CompileFailure unsupported(Element element, String what) {
     // What is inside of functions has no place of its own here.
@@ -110,42 +137,30 @@ final class ClassTable(final Declarations _declarations) {
     final Level(:element, :class_, :superLevel) = level;
     CompileFailure unsupported(String what) =>
         _declarations.unsupported(class_, what);
-    if (element.library.isInSdk) return _sdkClass(element);
+    if (plainType(element) case final plain?) {
+      return HirClass(element.displayName, null, [HirField('value', plain)]);
+    }
     if (element is ClassElement && element.primaryConstructor != null) {
       throw unsupported('primary constructors');
     }
-    final below = superLevel!.element;
-    final isBase = below.library.isDartCore && below.name == 'Error';
-    final isObject = below is ClassElement && below.isDartCoreObject;
-    if (below.library.isInSdk && !isObject && !isBase) {
+    final below = superLevel?.element;
+    final isRoot =
+        below == null || below is ClassElement && below.isDartCoreObject;
+    if (!isRoot && _declarations[below] == null) {
       throw unsupported('extending ${below.name} of the SDK');
     }
     return HirClass(
       level.isMixin
           ? '${class_.displayName} with ${element.displayName}'
           : element.displayName,
-      below.library.isInSdk ? null : atLevel(superLevel),
+      isRoot ? null : atLevel(superLevel!),
       [
         ?_arguments(level),
         for (final field in instanceFields(element)) ..._field(level, field),
       ],
+      level.isMixin ? null : _declarations.elementsOf(class_),
     );
   }
-
-  /// A number, an error thrown by the program itself, or a stack trace.
-  static HirClass _sdkClass(InterfaceElement element) =>
-      HirClass(element.displayName, null, switch (element.name) {
-        'StackTrace' => const [],
-        'int' => [HirField('value', .integer)],
-        'double' => [HirField('value', .float)],
-        'bool' => [HirField('value', .boolean)],
-        'TypeError' || 'NoSuchMethodError' => [
-          HirField('number', .integer),
-          HirField('object', .reference),
-          HirField('type', .reference),
-        ],
-        _ => [HirField('number', .integer)],
-      });
 
   /// Where objects keep the type arguments of [level], if it has any.
   HirField? argumentsOf(Level level) {
@@ -153,8 +168,21 @@ final class ClassTable(final Declarations _declarations) {
     return _argumentFields[level];
   }
 
+  /// The new field for the type arguments of [level], if it needs one.
+  ///
+  /// Those of mixins are known where they are mixed in.
   HirField? _arguments(Level level) {
-    if (level.element.typeParameters.isEmpty) return null;
+    if (level.isMixin || level.element.typeParameters.isEmpty) return null;
+    final superclass = level.class_.supertype!;
+    final own = level.type.typeArguments, given = superclass.typeArguments;
+    final isSame =
+        own.length == given.length &&
+        own.indexed.every((e) => e.$2 == given[e.$1]);
+    if (isSame) {
+      final below = levels.of(superclass.element as ClassElement);
+      _argumentFields[level] = argumentsOf(below)!;
+      return null;
+    }
     return _argumentFields[level] = HirField(
       '${level.element.displayName} types',
       .reference,

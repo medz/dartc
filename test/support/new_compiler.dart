@@ -25,19 +25,16 @@ Directory writeSources(Map<String, String> files) {
   return directory;
 }
 
-Future<SourceProgram> load(String source) {
+Future<SourceProgram> load(String source) async {
   final directory = writeSources({'main.dart': source});
-  return loadProgram('${directory.path}/main.dart', sdk: hostSdk);
+  return loadProgram(
+    '${directory.path}/main.dart',
+    sdk: await packagedSdk(),
+  );
 }
 
 Future<HirModule> translate(String source) async =>
     translateProgram(await load(source));
-
-/// Translates [source] together with the runtime.
-Future<HirModule> translateWhole(String source) async => translateProgram(
-  await load(source),
-  runtime: await loadRuntime(sdk: hostSdk),
-);
 
 /// Matches a failure whose problems print as [problems] after their file name.
 Matcher failsWith(List<String> problems) => throwsA(

@@ -1,7 +1,9 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'conversions.dart';
 import 'describe.dart';
 import 'expression.dart';
 import 'scope.dart';
@@ -45,7 +47,7 @@ final class StatementTranslator(
       case ExpressionStatement(:final expression):
         expressions.effect(expression);
       case VariableDeclarationStatement(:final variables):
-        _declare(variables);
+        expressions.loops.declare(variables);
       case IfStatement():
         _if(node);
       case WhileStatement():
@@ -53,8 +55,15 @@ final class StatementTranslator(
       case DoStatement():
         _do(node);
       case ForStatement(:final forLoopParts):
-        if (forLoopParts is! ForParts) _unsupported(node, 'for-in');
-        _for(node, forLoopParts);
+        expressions.loops.translate(
+          node,
+          forLoopParts,
+          () => statement(node.body),
+          within: (exit, next) {
+            _breaks[node] = (exit, _tries.depth);
+            _continues[node] = (next, _tries.depth);
+          },
+        );
       case SwitchStatement():
         _switch(node);
       case LabeledStatement(statement: final inner):
@@ -97,32 +106,19 @@ final class StatementTranslator(
     }
   }
 
-  void _declare(VariableDeclarationList list) {
-    for (final declaration in list.variables) {
-      final variable = declaration.declaredFragment!.element;
-      if (variable.isConst) continue;
-      final type =
-          valueType(variable.type) ??
-          _unsupported(declaration, 'a variable of type ${variable.type}');
-      if (list.isLate) {
-        expressions.lates.declare(declaration, variable, type);
-        continue;
-      }
-      final initializer = declaration.initializer;
-      final value = initializer == null
-          ? null
-          : expressions.valueTo(initializer, variable.type);
-      _builder.declare(variable, type);
-      if (value != null) _builder.assign(variable, value);
-    }
-  }
-
   void _if(IfStatement node) {
-    if (node.caseClause case final clause?) _unsupported(clause, 'if-case');
     final exit = _builder.join(node);
+    final HirValue condition;
+    void Function()? bind;
+    if (node.caseClause case final clause?) {
+      (condition, bind) = _caseOf(node.expression, clause);
+    } else {
+      condition = expressions.condition(node.expression);
+    }
     _builder.branch(
-      expressions.condition(node.expression),
+      condition,
       () {
+        bind?.call();
         statement(node.thenStatement);
         _builder.jump(exit);
       },
@@ -132,6 +128,29 @@ final class StatementTranslator(
       },
     );
     _builder.enter(exit);
+  }
+
+  /// Whether what [node] gives matches [clause], and what then declares the
+  /// variables.
+  (HirValue, void Function()) _caseOf(Expression node, CaseClause clause) {
+    final GuardedPattern(:pattern, :whenClause) = clause.guardedPattern;
+    if (whenClause != null || pattern is! DeclaredVariablePattern) {
+      _unsupported(clause, 'this pattern');
+    }
+    final variable = pattern.declaredFragment!.element, type = variable.type;
+    final value = expressions.valueAs(node, .reference);
+    final conversions = Conversions(_scope, _builder);
+    final matches = conversions.isInstance(value, type);
+    if (matches == null) _unsupported(clause, 'testing for $type');
+    return (
+      matches,
+      () {
+        final representation = valueType(type)!;
+        _builder
+          ..declare(variable, representation)
+          ..assign(variable, conversions.coerce(value, representation));
+      },
+    );
   }
 
   /// Runs [ifTrue] or leaves for [exit], depending on [condition].
@@ -176,41 +195,11 @@ final class StatementTranslator(
     _whileTrue(node.condition, exit, () => _builder.jump(head));
   }
 
-  void _for(ForStatement node, ForParts parts) {
-    switch (parts) {
-      case ForPartsWithDeclarations(:final variables):
-        if (variables.isLate) _unsupported(variables, 'late loop variables');
-        _declare(variables);
-      case ForPartsWithExpression(:final initialization):
-        if (initialization != null) expressions.effect(initialization);
-      default:
-        _unsupported(parts, describe(parts));
-    }
-    final head = _builder.join(node), exit = _builder.join(node);
-    final update = _builder.join(node);
-    _breaks[node] = (exit, _tries.depth);
-    _continues[node] = (update, _tries.depth);
-    _builder
-      ..jump(head)
-      ..enter(head);
-    _whileTrue(parts.condition, exit, () {
-      statement(node.body);
-      _builder
-        ..jump(update)
-        ..enter(update);
-      // Every round has its own variables.
-      if (parts case ForPartsWithDeclarations(:final variables)) {
-        for (final variable in variables.variables) {
-          _builder.renew(variable.declaredFragment!.element);
-        }
-      }
-      parts.updaters.forEach(expressions.effect);
-      _builder.jump(head);
-    });
-  }
-
   void _switch(SwitchStatement node) {
-    final value = expressions.value(node.expression);
+    final value = (
+      expressions.value(node.expression),
+      node.expression.staticType!,
+    );
     final exit = _builder.join(node);
     _breaks[node] = (exit, _tries.depth);
     _cases(node.members, 0, value, exit);
@@ -221,7 +210,7 @@ final class StatementTranslator(
   void _cases(
     List<SwitchMember> members,
     int index,
-    HirValue value,
+    (HirValue, DartType) value,
     Join exit,
   ) {
     if (index == members.length) {
@@ -267,15 +256,10 @@ final class StatementTranslator(
   }
 
   /// Whether [value] equals any of the constants [tests].
-  HirValue _matches(HirValue value, List<Expression> tests) {
+  HirValue _matches((HirValue, DartType) value, List<Expression> tests) {
     HirValue? result;
     for (final test in tests) {
-      final constant = expressions.value(test);
-      // Equality of objects may be anything.
-      if (constant.type != value.type || constant is HirStatic) {
-        _unsupported(test, 'this kind of case');
-      }
-      final same = _builder.add(HirCompare(.equal, constant, value));
+      final same = expressions.equal(test, value);
       result = result == null
           ? same
           : _builder.add(HirBoolBinary(.or, result, same));

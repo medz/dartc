@@ -115,10 +115,9 @@ void main() {
         return HirReturn();
       });
       final uncaught = _ending('uncaught', [.reference], (block) {
-        block
-          ..add(HirPrint('out'))
-          ..add(HirWriteError('a '))
-          ..add(HirWriteError('b\n'));
+        writeText(block, 1, 'out\n');
+        writeText(block, 2, 'a ');
+        writeText(block, 2, 'b\n');
         return HirReturn();
       });
       final run = HirInterpreter(_module(main, [_raise], uncaught: uncaught));
@@ -213,13 +212,12 @@ void main() {
 
     test('errors of the machine are collected', () {
       final module = body((block) {
-        for (final byte in [104, 105]) {
-          block.add(HirMachine(.writeError, [block.add(HirConst(byte))]));
-        }
+        writeText(block, 2, 'hé');
+        writeText(block, 2, 'i');
         return HirReturn();
       });
       final run = HirInterpreter(module)..run();
-      expect(run.errors, 'hi');
+      expect(run.errors, 'héi');
     });
   });
 
@@ -231,12 +229,9 @@ void main() {
     expect(RegExp(r'  throw v\d+, v\d+\n').hasMatch(text), isTrue);
     final errors = body((block) {
       final half = block.add(HirConst(0.5));
-      block
-        ..add(HirWriteError('a\n'))
-        ..add(HirUnary(.floatToInt, half));
+      block.add(HirUnary(.floatToInt, half));
       return HirReturn();
     });
-    expect(printHir(errors), contains(r'  error "a\n"'));
     expect(printHir(errors), contains('v1 = int v0'));
   });
 

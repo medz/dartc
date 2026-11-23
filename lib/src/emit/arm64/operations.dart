@@ -144,7 +144,7 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
         _assembler.bitsToFloat(d, n);
       case .floatBitsToInt:
         _assembler.floatToBits(d, n);
-      case .intToPtr || .ptrToInt || .intToRef:
+      case .intToPtr || .ptrToInt || .intToRef || .refToInt:
         // Integers, addresses and references share one form.
         _assembler.mov(d, n);
     }

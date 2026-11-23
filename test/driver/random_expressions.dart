@@ -31,6 +31,9 @@ extension on RandomDart {
       .maybe => ('??', _expression(.maybe, depth)),
       .any => ('??', _expression(.any, depth)),
       .function => ('', _expression(.function, depth)),
+      .text => ('+', _text()),
+      .list => ('', _expression(.list, depth)),
+      .map => ('', _expression(.map, depth)),
     };
     return '$variable $operator= $right';
   }
@@ -94,8 +97,45 @@ extension on RandomDart {
       .maybe => _maybe(inner),
       .any => _anything(inner),
       .function => _functionValue(inner),
+      .text => _textValue(inner),
+      .list => _list(inner),
+      .map => _map(inner),
     };
   }
+
+  String _textValue(String Function(Kind) inner) {
+    // What is made of texts must not become too long.
+    final text = _any(["'x'", '(${inner(.text)})']);
+    return switch (_random.nextInt(8)) {
+      0 => "'\${${inner(.integer)}}'",
+      1 => "'\${${inner(.boolean)}}-\${${inner(.float)}}'",
+      2 => '$text.replaceAll(${_text()}, ${_text()})',
+      3 => '$text.padLeft(${_random.nextInt(9)}, ${_text()})',
+      4 => '($text.length > 99 ? ${_text()} : $text + ${inner(.text)})',
+      5 => "(${inner(.map)}[${inner(.integer)}] ?? 'none')",
+      6 => '${inner(.list)}.take(3).join(${_text()})',
+      _ => "$text.split(${_text()}).reversed.take(5).join('|')",
+    };
+  }
+
+  String _list(String Function(Kind) inner) => switch (_random.nextInt(7)) {
+    0 => '[...${inner(.list)}.take(5), ${inner(.integer)}]',
+    1 => '(${inner(.list)}.map((x) => x ^ 3).toList())',
+    2 => '[for (final x in ${inner(.list)}) if (x.isEven) x]',
+    3 => '(${inner(.list)}.reversed.toList()..sort())',
+    4 => '(${inner(.map)}.keys.toList())',
+    5 => '(${inner(.text)}.codeUnits.take(4).toList())',
+    _ => '[if (${inner(.boolean)}) ${inner(.integer)}, ${inner(.integer)}]',
+  };
+
+  String _map(String Function(Kind) inner) => switch (_random.nextInt(4)) {
+    0 =>
+      '(<int, String>{...${inner(.map)}, ${inner(.integer)}: ${inner(.text)}})',
+    1 => "(<int, String>{for (final x in ${inner(.list)}) x & 7: '\$x'})",
+    2 => '(Map.of(${inner(.map)})..remove(${inner(.integer)}))',
+    _ =>
+      '(<int, String>{...${inner(.map)}}..[${inner(.integer)}] = ${inner(.text)})',
+  };
 
   String _functionValue(String Function(Kind) inner) {
     final objects = _variables(.object);
@@ -148,8 +188,10 @@ extension on RandomDart {
         return object == null ? null : '$object.${_any(['o0', 'a0'])}';
       case .function:
         return object == null ? null : '$object.leaf';
-      case .number || .maybe:
+      case .number || .maybe || .list || .map:
         return null;
+      case .text:
+        return '${any(.any)}.toString().substring(0, 0)';
     }
   }
 
@@ -240,7 +282,13 @@ extension on RandomDart {
   }
 
   String _integer(String Function(Kind) inner) {
-    switch (_random.nextInt(13)) {
+    switch (_random.nextInt(16)) {
+      case 13:
+        return '${inner(.text)}.length';
+      case 14:
+        return '${inner(.list)}.fold<int>(0, (a, b) => a * 3 + b)';
+      case 15:
+        return '${inner(.map)}.length';
       case 11 || 12 when !_isLeaf && _loops.isEmpty:
         return '${inner(.function)}(${inner(.integer)})';
       case 10:

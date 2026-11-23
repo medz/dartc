@@ -7,6 +7,7 @@ import 'package:dartc/hir.dart';
 
 import 'classes.dart';
 import 'members.dart';
+import 'text_hash.dart';
 import 'types.dart';
 
 /// A value known when compiling: an `int`, `double`, `bool`, object or null.
@@ -23,11 +24,18 @@ final class ConstantTable(
   final Declarations _declarations,
   final ClassTable _classes,
   final LibraryElement _core,
+  final ClassElement Function(HirType type) _boxElement,
+
+  /// The library of maps and sets.
+  final LibraryElement Function() _hashLibrary,
   final HirConstObject? Function(ExecutableElement element, DartType type)
   _functionObject,
 
   /// The object for a list of types.
   final Constant? Function(List<DartType> types) _listOf,
+
+  /// The object that a type is.
+  final HirConstObject? Function(DartType type) _typeObject,
 
   /// Tells that there are objects of a class.
   final void Function(ClassElement class_) _instantiate,
@@ -37,6 +45,7 @@ final class ConstantTable(
 
   /// What [object] is as a value of [type], or null if not supported yet.
   Constant? of(HirType? type, DartObject? object) {
+    if (type == .reference && (object?.isNull ?? false)) return Constant(null);
     final value = switch (type) {
       .integer => object?.toIntValue(),
       .float => object?.toDoubleValue(),
@@ -44,12 +53,17 @@ final class ConstantTable(
       .reference =>
         object == null
             ? null
-            : _number(object) ?? _function(object) ?? _object(object),
+            : _number(object) ??
+                  _text(object) ??
+                  _type(object) ??
+                  _function(object) ??
+                  _list(object) ??
+                  _map(object) ??
+                  _set(object) ??
+                  _object(object),
       null => null,
     };
-    if (value != null) return Constant(value);
-    final isNull = type == .reference && (object?.isNull ?? false);
-    return isNull ? Constant(null) : null;
+    return value == null ? null : Constant(value);
   }
 
   /// The value that [parameter] has where a call leaves it out.
@@ -87,6 +101,127 @@ final class ConstantTable(
         : _functionObject(element.baseElement, object.type!);
   }
 
+  HirConstObject? _text(DartObject object) {
+    final value = object.toStringValue();
+    return value == null ? null : text(value);
+  }
+
+  /// The string [value].
+  HirConstObject text(String value) {
+    final units = value.codeUnits;
+    final isNarrow = units.every((unit) => unit < 256);
+    final class_ = _core.getClass(
+      isNarrow ? '_OneByteString' : '_TwoByteString',
+    )!;
+    final target = _classes.classOf(class_);
+    _instantiate(class_);
+    return canonical(
+      class_,
+      HirConstObject(
+        target,
+        {target.fields.single: hashOfText(units)},
+        isNarrow
+            ? units
+            : [
+                for (final unit in units) ...[unit & 255, unit >> 8],
+              ],
+      ),
+    );
+  }
+
+  HirConstObject? _type(DartObject object) {
+    final type = object.toTypeValue();
+    return type == null ? null : _typeObject(type);
+  }
+
+  HirConstObject? _list(DartObject object) {
+    final values = object.toListValue();
+    if (values == null) return null;
+    final class_ = _core.getClass('_ImmutableList')!;
+    final target = _classes.classOf(class_);
+    final types = _listOf((object.type as InterfaceType).typeArguments);
+    final elements = [for (final value in values) of(.reference, value)];
+    if (types == null || elements.contains(null)) return null;
+    _instantiate(class_);
+    return canonical(
+      class_,
+      HirConstObject(
+        target,
+        {target.fields.single: types.value},
+        [for (final element in elements) _boxed(element!.value)],
+      ),
+    );
+  }
+
+  HirConstObject? _map(DartObject object) {
+    final values = object.toMapValue();
+    return values == null
+        ? null
+        : _hashed(object, '_ConstMap', [
+            for (final MapEntry(:key, :value) in values.entries) ...[
+              key,
+              value,
+            ],
+          ]);
+  }
+
+  HirConstObject? _set(DartObject object) {
+    final values = object.toSetValue();
+    return values == null
+        ? null
+        : _hashed(object, '_ConstSet', values.toList());
+  }
+
+  /// A map or set of `dart:_compact_hash` that holds [values].
+  HirConstObject? _hashed(
+    DartObject object,
+    String name,
+    List<DartObject?> values,
+  ) {
+    final class_ = _hashLibrary().getClass(name)!;
+    final type = object.type as InterfaceType;
+    final types = _listOf(type.typeArguments);
+    final elements = [for (final value in values) of(.reference, value)];
+    if (types == null || elements.contains(null)) return null;
+    final target = _classes.classOf(class_);
+    _instantiate(class_);
+    final dataClass = _core.getClass('_List')!;
+    final dataTarget = _classes.classOf(dataClass);
+    _instantiate(dataClass);
+    final dataTypes = _listOf([class_.library.typeProvider.dynamicType])!;
+    final data = canonical(
+      dataClass,
+      HirConstObject(
+        dataTarget,
+        {dataTarget.fields.single: dataTypes.value},
+        [for (final element in elements) _boxed(element!.value)],
+      ),
+    );
+    // As the maps do it when they make their index.
+    final least = (object.toMapValue() != null ? 1 : 2) * values.length;
+    final size = least <= 8 ? 8 : 1 << (least - 1).bitLength;
+    return canonical(
+      class_,
+      HirConstObject(target, {
+        for (final field in target.fields)
+          field: switch (field.name) {
+            '_data' => data,
+            '_usedData' => values.length,
+            '_hashMask' => (1 << (32 - (size.bitLength - 2))) - 1,
+            '_deletedKeys' => 0,
+            '_place' => _places['$name ${_key(data)}'] ??= _places.length,
+            '_ownIndex' => null,
+            _ => types.value,
+          },
+      }),
+    );
+  }
+
+  final _places = <String, int>{};
+
+  Object? _boxed(Object? value) =>
+      value is int || value is double || value is bool ? box(value!) : value;
+
   HirConstObject? _number(DartObject object) {
     final value =
         object.toIntValue() ?? object.toDoubleValue() ?? object.toBoolValue();
@@ -95,12 +230,11 @@ final class ConstantTable(
 
   /// The object that [value], an `int`, `double` or `bool`, is.
   HirConstObject box(Object value) {
-    final name = switch (value) {
-      int() => 'int',
-      double() => 'double',
-      _ => 'bool',
-    };
-    final class_ = _core.getClass(name)!;
+    final class_ = _boxElement(switch (value) {
+      int() => .integer,
+      double() => .float,
+      _ => .boolean,
+    });
     final target = _classes.classOf(class_);
     _instantiate(class_);
     return canonical(
@@ -111,15 +245,14 @@ final class ConstantTable(
 
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
-    if (class_ == null || class_.library.isInSdk) return null;
-    if (class_ is! ClassElement) return null;
+    if (class_ is! ClassElement || _declarations[class_] == null) return null;
     final target = _classes.classOf(class_);
     final fields = <HirField, Object?>{};
     DartObject? part = object;
     var own = type as InterfaceType;
     for (final level in _classes.levels.of(class_).chain) {
       final element = level.element;
-      if (element.library.isInSdk) break;
+      if (element is ClassElement && element.isDartCoreObject) break;
       final actual = level.isMixin
           ? own.mixins.firstWhere((mixin) => mixin.element == element)
           : level.class_ == own.element
@@ -146,12 +279,13 @@ final class ConstantTable(
 
   /// The object that [found] is the same as.
   HirConstObject canonical(ClassElement class_, HirConstObject found) {
-    final HirConstObject(:target, :fields) = found;
+    final HirConstObject(:target, :fields, :elements) = found;
     final key = [
       class_.library.uri,
       target.name,
       class_.typeParameters.length,
       for (final field in target.fields) _key(fields[field]),
+      for (final element in elements ?? const []) _key(element),
     ].join(' ');
     return _objects.putIfAbsent(key, () {
       _numbers[found] = _numbers.length;

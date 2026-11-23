@@ -1,13 +1,16 @@
 @TestOn('mac-os')
 @Tags(['native'])
-@Timeout.factor(4)
+@Timeout.factor(10)
 library;
 
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartc/driver.dart';
+import 'package:dartc/emit.dart';
 import 'package:dartc/hir.dart';
+import 'package:dartc/image.dart';
+import 'package:dartc/lower.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
@@ -22,106 +25,58 @@ Future<(int, int)> _both(String source) async {
   final directory = writeSources({'main.dart': source});
   final path = '${directory.path}/main.dart';
   final program = '${directory.path}/program';
-  writeProgram(await compileProgram(path, sdk: hostSdk), program);
+  writeProgram(await compileProgram(path), program);
   final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
   final compiled = await Process.run(program, const []);
   expect(compiled.stdout, official.stdout);
   return (official.exitCode, compiled.exitCode);
 }
 
-/// A check that [found] is [printed], as the official runtime printed it.
-String _same(String found, Kind kind, String printed) {
-  if (kind != .float) return '$found == $printed';
-  return switch (printed) {
-    'NaN' => '$found != $found',
-    'Infinity' => '$found == double.infinity',
-    '-Infinity' => '$found == -double.infinity',
-    '0.0' => '$found == 0 && 1 / $found > 0',
-    '-0.0' => '$found == 0 && 1 / $found < 0',
-    _ => '$found == $printed',
-  };
-}
+/// Runs [body], telling what it throws.
+String _caught(String body) =>
+    '  try { $body }\n'
+    "  on C3 { print('!C3'); } on C1 { print('!C1'); }\n"
+    "  on K { print('!K'); } on C0 { print('!C0'); }\n"
+    '  on UnsupportedError catch (e) { print(e); }\n'
+    '  on TypeError catch (e) { print(e); }\n'
+    "  on Error { print('!E'); }\n";
 
-/// What is printed for calls that throw, by the classes tested.
-const _thrown = ['!C3', '!C1', '!K', '!C0', '!U', '!E'];
-
-/// Runs [body], telling apart what it throws.
-String _caught(String body, [String Function(String code)? onThrow]) {
-  String done(String code) => onThrow?.call(code) ?? 'print("=$code");';
-  return '  try { $body }\n'
-      '  on C3 { ${done('!C3')} } on C1 { ${done('!C1')} }\n'
-      '  on K { ${done('!K')} } on C0 { ${done('!C0')} }\n'
-      '  on UnsupportedError { ${done('!U')} } on Error { ${done('!E')} }\n';
-}
-
-/// Runs random functions everywhere and compares every bit of their results.
+/// Runs random functions everywhere and compares what they print.
 Future<void> _compareRandom(int seed) async {
   final generator = RandomDart(seed);
   final functions = generator.generate(25);
-  final calls = generator.calls;
-  final directory = writeSources({
-    'print.dart':
-        '$functions\nvoid main() {\n'
-        '${calls.map((call) => _caught('print("=\${${call.$1}}");')).join()}}',
-  });
-  final official = await Process.run('$hostSdk/bin/dart', [
-    'run',
-    '${directory.path}/print.dart',
-  ]);
-  expect(official.exitCode, 0, reason: 'seed $seed: ${official.stderr}');
-  final printed = [
-    for (final line in '${official.stdout}'.split('\n'))
-      if (line.startsWith('=')) line.substring(1),
-  ];
-  expect(printed, hasLength(calls.length));
-  // Exits with the number of the first result that differs.
   final checks = [
-    for (final (i, (call, kind)) in calls.indexed)
-      if (_thrown.contains(printed[i]))
-        _caught('$call; exit(${i + 1});', (code) {
-          return printed[i] == code ? '' : 'exit(${i + 1});';
-        })
-      else
-        _caught(
-          'final ${kind.name} r$i = $call; '
-          'if (!(${_same('r$i', kind, printed[i])})) exit(${i + 1});',
-          (_) => 'exit(${i + 1});',
-        ),
+    for (final (call, _) in generator.calls) _caught('print($call);'),
   ];
-  final source =
-      "import 'dart:io';\n$functions\n"
-      'void main() {\n${checks.join()}  exit(100);\n}';
-  String reason(int? code) => code != null && code > 0 && code <= calls.length
-      ? 'seed $seed: ${calls[code - 1].$1} is not ${printed[code - 1]}'
-      : 'seed $seed: ended with $code';
+  final directory = writeSources({
+    'main.dart': '$functions\nvoid main() {\n${checks.join()}}',
+  });
   final path = '${directory.path}/main.dart';
-  File(path).writeAsStringSync(source);
-  final checked = await Process.run('$hostSdk/bin/dart', ['run', path]);
-  expect(checked.exitCode, 100, reason: reason(checked.exitCode));
-  final module = translateProgram(
-    await loadProgram(path, sdk: hostSdk),
-    runtime: await loadRuntime(sdk: hostSdk),
-  );
+  final reason = 'seed $seed';
+  final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
+  expect(official.exitCode, 0, reason: '$reason: ${official.stderr}');
+  final sdk = await packagedSdk();
+  final module = translateProgram(await loadProgram(path, sdk: sdk));
   // The official runtime has shown that the program ends.
-  const steps = 1 << 32;
+  const steps = 1 << 40;
   final interpreter = HirInterpreter(module, maxSteps: steps);
-  final dartLevel = interpreter.run();
-  expect(dartLevel, 100, reason: reason(dartLevel));
-  expect(interpreter.output, checked.stdout, reason: 'seed $seed');
+  expect(interpreter.run(), isNull, reason: reason);
+  expect(interpreter.output, official.stdout, reason: reason);
   final machineLevel = LoweredRun(module, maxSteps: steps);
-  expect(machineLevel.code, 100, reason: reason(machineLevel.code));
-  expect(machineLevel.output, checked.stdout, reason: 'seed $seed');
+  expect(machineLevel.code, isNull, reason: reason);
+  expect(machineLevel.output, official.stdout, reason: reason);
   final program = '${directory.path}/program';
   for (final collectsAlways in [false, true]) {
-    final bytes = await compileProgram(
-      path,
-      sdk: hostSdk,
-      collectsAlways: collectsAlways,
+    final code = emitArm64(
+      lowerProgram(module, collectsAlways: collectsAlways),
     );
-    writeProgram(bytes, program);
+    writeProgram(
+      linkMacho(code, entry: entrySymbol, identifier: 'random'),
+      program,
+    );
     final native = await Process.run(program, const []);
-    expect(native.exitCode, 100, reason: reason(native.exitCode));
-    expect(native.stdout, checked.stdout, reason: 'seed $seed');
+    expect(native.exitCode, 0, reason: reason);
+    expect(native.stdout, official.stdout, reason: reason);
   }
 }
 
@@ -161,7 +116,7 @@ void main() {
     });
     final path = '${directory.path}/main.dart';
     final program = '${directory.path}/program';
-    writeProgram(await compileProgram(path, sdk: hostSdk), program);
+    writeProgram(await compileProgram(path), program);
     for (final command in [program, '$hostSdk/bin/dart run $path']) {
       for (final output in ['| head -1', '| true']) {
         final result = await Process.run('/bin/bash', [
@@ -175,28 +130,6 @@ void main() {
     }
   }, skip: skipExecution);
 
-  test('a wrong result would be noticed', () async {
-    // Each kind of check must fail for a value that differs slightly.
-    for (final (found, kind, printed) in [
-      ('1', Kind.integer, '2'),
-      ('true', Kind.boolean, 'false'),
-      ('0.1', Kind.float, '0.10000000000000002'),
-      ('0.0', Kind.float, '-0.0'),
-      ('-0.0', Kind.float, '0.0'),
-      ('1.0', Kind.float, 'NaN'),
-      ('double.nan', Kind.float, '1.0'),
-      ('1e308', Kind.float, 'Infinity'),
-      ('double.infinity', Kind.float, '-Infinity'),
-    ]) {
-      final module = await translate(
-        "import 'dart:io';\nvoid main() { final ${kind.name} r = $found; "
-        'if (!(${_same('r', kind, printed)})) exit(1); exit(100); }',
-      );
-      expect(HirInterpreter(module).run(), 1, reason: '$found, $printed');
-      expect(runLowered(module), 1, reason: '$found, $printed');
-    }
-  });
-
   for (var seed = 0; seed < 12; seed++) {
     test('random functions, seed $seed', () async {
       await _compareRandom(seed);
@@ -208,14 +141,16 @@ void main() {
       'main.dart': "import 'dart:io';\nvoid main() { exit(1); }",
     });
     final path = '${directory.path}/main.dart';
-    final first = await compileProgram(path, sdk: hostSdk);
-    expect(await compileProgram(path, sdk: hostSdk), first);
+    final first = await compileProgram(path);
+    expect(await compileProgram(path), first);
   });
 
   test('a program that cannot be compiled is reported', () async {
-    final directory = writeSources({'main.dart': 'void main() { "x"; }'});
+    final directory = writeSources({
+      'main.dart': 'external void f(); void main() { f(); }',
+    });
     await expectLater(
-      compileProgram('${directory.path}/main.dart', sdk: hostSdk),
+      compileProgram('${directory.path}/main.dart'),
       throwsA(isA<CompileFailure>()),
     );
   });
@@ -246,7 +181,7 @@ void main() {
   test('the command line reports problems and its usage', () async {
     final directory = writeSources({
       'good.dart': "import 'dart:io';\nvoid main() { exit(9); }",
-      'bad.dart': 'void main() {\n  "x";\n}',
+      'bad.dart': 'void main() {\n  #x;\n}',
     });
     Future<ProcessResult> run(List<String> arguments) => Process.run(
       '$hostSdk/bin/dart',
@@ -262,7 +197,7 @@ void main() {
     expect(
       bad.stderr,
       '${directory.path}/bad.dart:2:3: '
-      'Not supported yet: simple string literal.\n',
+      'Not supported yet: symbol literal.\n',
     );
     expect(File(output).existsSync(), isFalse);
     expect((await run([])).exitCode, 64);

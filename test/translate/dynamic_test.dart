@@ -94,25 +94,10 @@ void main() {
 
   group('not supported yet:', () {
     void reports(String source, String problem) => test(problem, () async {
-      await expectLater(
-        translateWhole(source),
-        failsWith(['main.dart:$problem']),
-      );
+      await expectLater(translate(source), failsWith(['main.dart:$problem']));
     });
 
     const what = 'Not supported yet:';
-    reports(
-      'void main() { dynamic d = 1; d.abs(); }',
-      '1:30: $what calling abs of the SDK.',
-    );
-    reports(
-      'void main() { dynamic d = 1; d.toString(); }',
-      '1:30: $what calling toString of the SDK.',
-    );
-    reports(
-      'class A {}\nvoid main() { dynamic d = A(); d.hashCode; }',
-      '2:32: $what calling hashCode of the SDK.',
-    );
     reports(
       'class A { f() => 1; noSuchMethod(i) => 2; }\nvoid main() { dynamic d = A(); d.g(); }',
       '2:32: $what noSuchMethod.',

@@ -5,14 +5,13 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'chains.dart';
-import 'checks.dart';
 import 'closures.dart';
-import 'constant.dart';
 import 'conversions.dart';
 import 'creators.dart';
 import 'describe.dart';
 import 'dynamics.dart';
 import 'members.dart';
+import 'operations.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -25,6 +24,7 @@ final class CallTranslator(
   final ChainTranslator _chains,
 ) {
   late final _conversions = Conversions(_scope, _builder);
+  late final _operations = OperationTranslator(_scope, _builder, _evaluator);
   late final _dynamics = DynamicTranslator(_scope, _builder, _evaluator);
 
   Never _unsupported(AstNode node, String what) =>
@@ -50,10 +50,6 @@ final class CallTranslator(
     }
     if (!isInstanceMember(element)) return _static(node, element);
     if (element is! MethodElement) _unsupported(node, describe(node));
-    if (target != null && isNumber(_withoutNull(target.staticType))) {
-      final result = _numberMember(node, element, target);
-      if (result != null) return result;
-    }
     if (target is SuperExpression) {
       final (positional, named) = _given(node.argumentList);
       return superMember(
@@ -139,46 +135,29 @@ final class CallTranslator(
     return _closures.call(node, function, node.argumentList);
   }
 
-  /// The result of a conversion of the number [target], if it is one.
-  HirValue? _numberMember(
-    MethodInvocation node,
-    MethodElement element,
-    Expression target,
-  ) {
-    final name = element.displayName;
-    if (name != 'toInt' && name != 'toDouble') return null;
-    final value = _evaluator.value(target);
-    _chains.check(node, value);
-    if (value.type == .reference) {
-      final helper = name == 'toInt' ? 'numToInt' : 'numToDouble';
-      return _builder.call(HirCall(_scope.runtime(helper), [value]));
-    }
-    if (name == 'toInt') {
-      return CheckedOperations(_scope, _builder).toInt(value);
-    }
-    return value.type == .float
-        ? value
-        : _builder.add(HirUnary(.intToFloat, value));
-  }
-
-  DartType? _withoutNull(DartType? type) =>
-      type == null ? null : _builder.library.typeSystem.promoteToNonNull(type);
-
   HirValue _this(AstNode node) =>
       _builder.receiver ?? _unsupported(node, 'this here');
 
   /// The object that [target] is, of which [node] uses a member.
   HirValue object(Expression node, Expression target) {
-    if (classOf(target.staticType) == null) {
+    if (classFor(target.staticType) == null) {
       _unsupported(node, describe(node));
     }
-    final result = _evaluator.valueAs(target, .reference);
+    final result = _evaluator.value(target);
     _chains.check(node, result);
     return result;
   }
 
+  /// The class whose members values of [type] have.
+  InterfaceElement? classFor(DartType? type) =>
+      switch (type == null ? null : boundOf(type)) {
+        FunctionType() => _scope.functionClass,
+        DynamicType() || VoidType() => _conversions.types.objectElement,
+        _ => classOf(type),
+      };
+
   InterfaceElement _receiverClass(AstNode node, Expression? target) =>
-      (target == null ? _builder.receiverClass : classOf(target.staticType)) ??
+      (target == null ? _builder.receiverClass : classFor(target.staticType)) ??
       _unsupported(node, describe(node));
 
   HirValue? _static(MethodInvocation node, ExecutableElement element) {
@@ -192,17 +171,9 @@ final class CallTranslator(
         final type = _conversions.types.intType;
         _builder.end(HirExit(_evaluator.valueTo(code, type)));
         return null;
-      case 'dart:core print':
-        _print(arguments.single.argumentExpression);
-        return null;
-      case 'dart:core identical':
-        final [left, right] = [
-          for (final argument in arguments) argument.argumentExpression,
-        ];
-        return _identical(left, right);
     }
-    if (_scope.machineOpOf(element) case final op?) {
-      return _machine(op, arguments);
+    if (_scope.operationOf(element) case final name?) {
+      return _operations.call(node, name);
     }
     final function = _scope.functionOf(element.baseElement);
     if (function == null) {
@@ -215,42 +186,10 @@ final class CallTranslator(
     ]);
   }
 
-  HirValue _identical(Expression left, Expression right) {
-    final a = _evaluator.value(left), b = _evaluator.value(right);
-    if (a.type == b.type && a.type != .float && a.type != .reference) {
-      return _builder.add(HirCompare(.equal, a, b));
-    }
-    final objects = [
-      for (final value in [a, b]) _conversions.coerce(value, .reference),
-    ];
-    return canBeNumber(left.staticType!) && canBeNumber(right.staticType!)
-        ? _builder.call(HirCall(_scope.runtime('sameObjects'), objects))!
-        : _builder.add(HirCompare(.equal, objects[0], objects[1]));
-  }
-
-  HirValue? _machine(HirMachineOp op, List<Argument> arguments) {
-    final call = _builder.add(
-      HirMachine(op, [
-        for (final (i, argument) in arguments.indexed)
-          _evaluator.valueAs(argument.argumentExpression, op.parameters[i]),
-      ]),
-    );
-    if (op == .trap || op == .resume) _builder.end(HirUnreachable());
-    return call.type == null ? null : call;
-  }
-
   static String? _coreName(ExecutableElement element) =>
       element is TopLevelFunctionElement && element.library.isInSdk
       ? '${element.library.uri} ${element.name}'
       : null;
-
-  void _print(Expression argument) {
-    final text = constantText(argument.unParenthesized);
-    if (text == null) {
-      _unsupported(argument, 'printing anything but a constant string');
-    }
-    _builder.add(HirPrint(text));
-  }
 
   HirValue? _direct(
     HirFunction function,
@@ -273,9 +212,6 @@ final class CallTranslator(
     final class_ = classOf(node.staticType);
     if (element == null || class_ is! ClassElement) {
       _unsupported(node, 'objects of type ${node.staticType}');
-    }
-    if (element.library.isInSdk) {
-      _unsupported(node, 'calling ${class_.displayName} of the SDK');
     }
     if (node.isConst) {
       final value = node.computeConstantValue()?.value;
@@ -303,7 +239,7 @@ final class CallTranslator(
     Map<FormalParameterElement, HirValue> supplied,
   ) {
     final class_ = element.enclosingElement as ClassElement;
-    if (class_.library.isInSdk) {
+    if (!_scope.declares(class_)) {
       _unsupported(node, 'calling ${class_.displayName} of the SDK');
     }
     final base = element.baseElement;
@@ -389,34 +325,90 @@ final class CallTranslator(
     List<HirValue> positional = const [],
     Map<String, HirValue> named = const {},
     HirValue? types,
+    bool isSome = false,
   ]) {
     _checkMember(node, element);
     final names = named.keys.toList()..sort();
+    final arguments = [
+      ?types,
+      ...positional,
+      for (final name in names) named[name]!,
+    ];
+    final base = element.baseElement;
+    Never reject(String what) => _unsupported(node, what);
+    if (receiver.type != .reference) {
+      final level = _scope.levelOf(_scope.boxElement(receiver.type!));
+      final function = _scope.functionAt(
+        level,
+        base,
+        positional.length,
+        names,
+        reject,
+        isUnboxed: true,
+      );
+      if (function == null) reject(describe(node));
+      return _direct(function, element, [receiver, ...arguments]);
+    }
     final selector = _scope.selectorOf(
-      element.baseElement,
+      base,
       class_,
       positional.length,
       names,
-      (what) => _unsupported(node, what),
+      reject,
     );
-    final result = _builder.call(
+    HirValue? call() => _builder.call(
       HirVirtualCall(selector, receiver, [
-        for (final (i, value) in [
-          ?types,
-          ...positional,
-          for (final name in names) named[name]!,
-        ].indexed)
+        for (final (i, value) in arguments.indexed)
           _conversions.coerce(value, selector.parameters[i]),
       ]),
     );
+    final owner = base.enclosingElement;
+    final mayBeNull =
+        !isSome &&
+        owner is ClassElement &&
+        owner.isDartCoreObject &&
+        receiver != _builder.receiver;
+    if (mayBeNull && selector.result != null) {
+      return _orNull(node, receiver, base, selector, arguments, call);
+    }
+    final result = call();
     if (isNever(element.returnType)) _builder.end(HirUnreachable());
     return result;
+  }
+
+  /// What [call] gives, or what null does for [member] if [receiver] is null.
+  HirValue _orNull(
+    AstNode node,
+    HirValue receiver,
+    ExecutableElement member,
+    HirSelector selector,
+    List<HirValue> arguments,
+    HirValue? Function() call,
+  ) {
+    final type = selector.result!;
+    final null_ = _conversions.types.nullType.element as ClassElement;
+    final function = _scope.functionAt(
+      _scope.levelOf(null_),
+      member,
+      arguments.length,
+      const [],
+      (what) => _unsupported(node, what),
+    );
+    return _builder.choose(
+      _conversions.isNull(receiver),
+      type,
+      () => _conversions.coerce(
+        _direct(function!, member, [receiver, ...arguments])!,
+        type,
+      ),
+      () => call()!,
+    );
   }
 
   void _checkMember(AstNode node, ExecutableElement element) {
     final owner = element.enclosingElement;
     if (owner is! InterfaceElement) _unsupported(node, 'extensions');
-    if (owner.library.isInSdk && element.displayName != '==') {
+    if (!_scope.declares(owner)) {
       _unsupported(node, 'calling ${element.displayName} of the SDK');
     }
   }
@@ -462,7 +454,7 @@ final class CallTranslator(
     return _builder.call(
       HirVirtualCall(
         _scope.tearOffSelector(element.baseElement, class_),
-        receiver,
+        _conversions.coerce(receiver, .reference),
         const [],
       ),
     )!;

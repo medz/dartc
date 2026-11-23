@@ -56,7 +56,7 @@ final class EmittedCode(
   /// Tables of 32-bit distances from the table to each function.
   Map<String, List<String>> tables = const {},
 
-  /// Objects that exist from the start, each aligned to 16.
+  /// Objects and writable bytes that exist from the start, each aligned to 16.
   Map<String, EmittedObject> objects = const {},
 
   /// What each call keeps alive, sorted by where it returns to.

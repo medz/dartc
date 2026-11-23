@@ -8,10 +8,14 @@ const classes = <List<int>>[
   [8],
   [8, 16, 24],
   [16],
+  [8],
 ];
 
+/// Which class has objects that are arrays of references, after a field.
+const arrayClass = 4;
+
 /// The bytes of an object of each class.
-const sizes = [16, 16, 32, 24];
+const sizes = [16, 16, 32, 24, 24];
 
 /// Ends a simulated throw.
 final class const Resumed() implements Exception;
@@ -41,14 +45,14 @@ final class SimulatedMachine({
     _globals = mapMemory(globalCount * 8);
     _handlers = mapMemory(4096);
     final words = <int>[];
-    for (final offsets in classes) {
-      words.addAll([offsets.length, ...offsets]);
+    for (final (i, offsets) in classes.indexed) {
+      words.addAll([offsets.length, i == arrayClass ? 1 : 0, ...offsets]);
     }
     _classes = mapMemory((classes.length + words.length) * 4);
     var at = classes.length * 4;
     for (final (i, offsets) in classes.indexed) {
       store32(_classes + i * 4, at);
-      at += 4 + offsets.length * 4;
+      at += 8 + offsets.length * 4;
     }
     for (final (i, word) in words.indexed) {
       store32(_classes + (classes.length + i) * 4, word);
@@ -168,9 +172,6 @@ final class SimulatedMachine({
     region.setUint32(at, value, .little);
   }
 
-  /// What was written to standard error.
-  final List<int> errors = [];
-
   /// The calls that have handlers, by return address, and where those are.
   final Map<int, int> targets = {};
 
@@ -188,7 +189,22 @@ final class SimulatedMachine({
   }
 
   @override
-  void writeError(int byte) => errors.add(byte);
+  int get outputBuffer => throw UnimplementedError();
+  @override
+  int load8(int address) => throw UnimplementedError();
+  @override
+  void store8(int address, int value) => throw UnimplementedError();
+  @override
+  void write(int file, int address, int count) => throw UnimplementedError();
+  @override
+  void formatDouble(double value, int digits, int address) =>
+      throw UnimplementedError();
+  @override
+  double parseDouble(int address) => throw UnimplementedError();
+  @override
+  int classNumber(Object object) => throw UnimplementedError();
+  @override
+  int addressOf(Object object) => throw UnimplementedError();
 
   @override
   Never resume(int frame, int code, Object exception, Object trace) {

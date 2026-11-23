@@ -20,13 +20,31 @@ final class TypeFunctions(
   final _typeOf = <HirClass, HirFunction>{};
   final _named = <String, HirFunction>{};
 
-  /// What [typeOf] calls, by class.
-  Map<HirClass, HirFunction> get entries => _typeOf;
+  /// Gives the object whose method a function is.
+  final HirSelector receiverOf = HirSelector(
+    'receiverOf',
+    const [],
+    .reference,
+  );
+  final _receiverOf = <HirClass, HirFunction>{};
+
+  /// Gives what the text of a function ends with.
+  final HirSelector nameOf = HirSelector('functionName', const [], .reference);
+  final _nameOfFunction = <HirClass, HirFunction>{};
+
+  /// What the selectors call, by class.
+  Map<HirSelector, Map<HirClass, HirFunction>> get dispatch => {
+    if (isUsed) typeOf: _typeOf,
+    if (isUsed) receiverOf: _receiverOf,
+    if (isUsed) nameOf: _nameOfFunction,
+  };
 
   bool get isUsed => _named.isNotEmpty;
 
   Iterable<HirFunction> get functions => [
     ..._typeOf.values,
+    ..._receiverOf.values,
+    ..._nameOfFunction.values,
     for (final function in _named.values)
       if (_isDefined.contains(function)) function,
   ];
@@ -35,16 +53,25 @@ final class TypeFunctions(
   /// The function that the runtime calls [name].
   HirFunction named(String name) => _named.putIfAbsent(name, () {
     final function = switch (name) {
-      'typeOf' => HirFunction(name, const [.reference], .reference, false),
+      'typeOf' || 'receiverOf' || 'functionName' => HirFunction(
+        name,
+        const [.reference],
+        .reference,
+        false,
+      ),
       'superTypesOf' => HirFunction(name, const [.integer], .reference, false),
       'functionNumber' => HirFunction(name, const [], .integer, false),
-      'writeRequired' => HirFunction(name, const [], null, false),
-      _ => HirFunction(name, const [.integer], null, false),
+      _ => HirFunction(name, const [.integer], .reference, false),
     };
-    if (name == 'typeOf') {
+    if (function.parameters case [.reference]) {
+      final selector = switch (name) {
+        'typeOf' => typeOf,
+        'receiverOf' => receiverOf,
+        _ => nameOf,
+      };
       _define(function, (builder) {
         final [object] = builder.inputs;
-        final result = builder.call(HirVirtualCall(typeOf, object, const []));
+        final result = builder.call(HirVirtualCall(selector, object, const []));
         builder.end(HirReturn(result));
       });
     }
@@ -79,6 +106,20 @@ final class TypeFunctions(
         closure.class_,
         () => _entry(closure.class_.name, (builder) {
           return closure.typeValue(builder);
+        }),
+      );
+      _receiverOf.putIfAbsent(
+        closure.class_,
+        () => _entry('receiver of ${closure.class_.name}', (builder) {
+          return closure.isTearOff
+              ? closure.leading(builder, builder.inputs.single).single
+              : builder.add(HirNull());
+        }),
+      );
+      _nameOfFunction.putIfAbsent(
+        closure.class_,
+        () => _entry('text of ${closure.class_.name}', (builder) {
+          return builder.add(_scope.text(closure.text));
         }),
       );
     }
@@ -130,25 +171,10 @@ final class TypeFunctions(
             final number = _types.numberOf(_scope.functionClass);
             builder.end(HirReturn(builder.add(HirConst(number))));
           });
-        case 'writeRequired':
-          _define(function, (builder) {
-            builder.add(HirWriteError('required '));
-          });
-        case 'writeClassName':
-          _names(function, [
-            for (final class_ in _types.classes) class_.displayName,
-          ]);
-        case 'writeParameterName':
+        case 'className':
+          _names(function, _types.classes.map(_nameOf).toList());
+        case 'parameterName':
           _names(function, _types.parameterNames);
-        case 'writeBasicName':
-          _names(function, const [
-            'dynamic',
-            'void',
-            'Object?',
-            'Object',
-            'Null',
-            'Never',
-          ]);
       }
     }
   }
@@ -156,11 +182,21 @@ final class TypeFunctions(
   void _names(HirFunction function, List<String> names) =>
       _define(function, (builder) {
         _choose(builder, 0, names.length, (builder, i) {
-          builder
-            ..add(HirWriteError(names[i]))
-            ..end(HirReturn());
+          builder.end(HirReturn(builder.add(_scope.text(names[i]))));
         });
       });
+
+  /// What [class_] is called, as those that implement a class of the SDK are
+  /// not seen.
+  static String _nameOf(InterfaceElement class_) => class_.library.isDartCore
+      ? switch (class_.name!) {
+          '_Mint' => 'int',
+          '_Double' => 'double',
+          '_OneByteString' || '_TwoByteString' => 'String',
+          '_GrowableList' || '_List' || '_ImmutableList' => 'List',
+          final name => name,
+        }
+      : class_.displayName;
 
   /// Does [work] for the number that the function is given.
   void _choose(

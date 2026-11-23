@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dartc/graph.dart';
 import 'package:dartc/hir.dart';
 
@@ -101,4 +103,16 @@ HirModule loopingCalls() {
   done.end(HirExit(b));
   final main = HirFunction('main', const [])..define([entry, loop, done]);
   return HirModule(main, [main, add]);
+}
+
+/// Adds a write of [text] to a file of the system.
+void writeText(HirBlock block, int file, String text) {
+  HirValue number(int value) => block.add(HirConst(value));
+  final bytes = utf8.encode(text);
+  final buffer = block.add(HirMachine(.mapMemory, [number(bytes.length)]));
+  for (final (i, byte) in bytes.indexed) {
+    final at = block.add(HirIntBinary(.add, buffer, number(i)));
+    block.add(HirMachine(.store8, [at, number(byte)]));
+  }
+  block.add(HirMachine(.write, [number(file), buffer, number(bytes.length)]));
 }

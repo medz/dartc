@@ -7,6 +7,7 @@ These sources are compiled for the user's target platform. They ship with dartc 
 | `std/` | Unmodified official Dart SDK library sources, license, version and commit. |
 | `runtime/` | Dart implementations of allocation, collection, finalization, scheduling and other execution support. |
 | `patches/` | Target implementations installed into their owning standard libraries during analysis, and shared library helpers. |
+| `native/` | What the new compiler (`tool/compile.dart`) supplies for the standard libraries after the official patches. |
 
 The compiler and runtime share the declarations in `lib/runtime/contracts.dart` and the memory layout exposed by `lib/layout/memory.dart`. Those files have one source definition and are included when packaging the SDK.
 

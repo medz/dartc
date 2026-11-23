@@ -205,15 +205,13 @@ void main() {
   test('a program ends with what nothing catches', () {
     final thrower = _throwing(_b);
     final uncaught = _function('uncaught', [.reference], (block) {
-      block
-        ..add(HirWriteError('error é '))
-        ..add(HirWriteError('b\n'));
+      writeText(block, 2, 'error é ');
+      writeText(block, 2, 'b\n');
       return HirReturn();
     });
     final module = body((block) {
-      block
-        ..add(HirPrint('out'))
-        ..add(HirCall(thrower, []));
+      writeText(block, 1, 'out\n');
+      block.add(HirCall(thrower, []));
       return HirReturn();
     }, [thrower, uncaught]);
     final run = LoweredRun(
@@ -227,16 +225,6 @@ void main() {
     expect(run.code, 255);
     expect(run.output, 'out\n');
     expect(run.errors, 'error é b\n');
-  });
-
-  test('single bytes are written to standard error', () {
-    final module = body((block) {
-      for (final byte in [0, 104, 255]) {
-        block.add(HirMachine(.writeError, [block.add(HirConst(byte))]));
-      }
-      return HirReturn();
-    });
-    expect(LoweredRun(module).errorBytes, [0, 104, 255]);
   });
 
   group('the stack', () {

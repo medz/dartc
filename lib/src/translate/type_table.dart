@@ -22,10 +22,8 @@ final class TypeTable(
   List<String> get parameterNames => _parameterNames;
 
   /// The number of [class_] in types.
-  int numberOf(InterfaceElement class_) => _numbers.putIfAbsent(
-    _scope.canonicalClass(class_),
-    () => _numbers.length,
-  );
+  int numberOf(InterfaceElement class_) =>
+      _numbers.putIfAbsent(class_, () => _numbers.length);
 
   int _nameOf(String name) {
     if (!_parameterNames.contains(name)) _parameterNames.add(name);
@@ -74,6 +72,8 @@ final class TypeTable(
       case TypeParameterType(:final element):
         if (owner == null || element.enclosingElement != owner) return null;
         return _object('VariableType', [owner.typeParameters.indexOf(element)]);
+      case InterfaceType(isDartAsyncFutureOr: true):
+        return null;
       case InterfaceType(:final element, :final typeArguments):
         final arguments = list(typeArguments, owner: owner);
         if (arguments == null) return null;
@@ -189,6 +189,8 @@ final class TypeTable(
     switch (type) {
       case TypeParameterType(:final element):
         return _parameter(builder, element);
+      case InterfaceType(isDartAsyncFutureOr: true):
+        return null;
       case InterfaceType(:final element, :final typeArguments):
         final arguments = listValue(builder, typeArguments);
         if (arguments == null) return null;
@@ -268,9 +270,16 @@ final class TypeTable(
     var list = builder.typesOf(owner);
     final receiver = builder.receiver;
     final level = builder.level;
-    if (list == null && receiver != null && owner == level?.element) {
-      final field = _classes.argumentsOf(level!);
-      list = field == null ? null : builder.add(HirLoad(field, receiver));
+    if (list == null && receiver != null && level != null) {
+      if (level.isMixin && owner == level.element) {
+        // Known where it is mixed in.
+        final index = parameters.indexOf(element);
+        return value(builder, level.type.typeArguments[index]);
+      }
+      if (owner == level.class_) {
+        final field = _classes.argumentsOf(_classes.levels.of(level.class_));
+        list = field == null ? null : builder.add(HirLoad(field, receiver));
+      }
     }
     if (list == null) return null;
     for (var i = parameters.indexOf(element); i > 0; i--) {

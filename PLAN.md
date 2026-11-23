@@ -57,8 +57,8 @@ void main() { exit(1 + 2 * 3); }
 **10 标准库。** 官方源码用到的语言功能先补上。分小步，每小步单独完成和提交：
 
 - 10a（完成）：官方源码要用的语言功能：mixin、级联、`?.` 链、`late`、重定向工厂。
-- 10b：读 `sdk/std` 的官方源码，加补丁后一起分析和编译；数组、字符串、`print`；错误用官方的类。
-- 10c：列表、集合、映射、`for-in`、字面量。`hello`、`print_integers`、`map_sum`、`persistent_cell` 四个程序通过。
+- 10b（完成）：读 `sdk/std` 的官方源码，加补丁后一起分析和编译；数组、字符串、`print`；错误用官方的类。
+- 10c（完成）：列表、集合、映射、`for-in`、字面量。`hello`、`print_integers`、`map_sum`、`persistent_cell` 四个程序通过。
 - 10d：其余的 `dart:core`，以及加入 `noSuchMethod`。取消第 8、9 步的限制：SDK 的异常对象还不能由程序创建，也不能读它们的成员；抛出的对象如果有自己的 `toString`，只支持常量文字；堆栈的文字不打印；没有成员时只打印第一行；抛出的 `double` 没有文字；`Type` 的值、泛型函数本身当作值、提取泛型方法还不支持。
 
 **11 的补充。** 还有主构造函数。
@@ -93,12 +93,8 @@ void main() { exit(1 + 2 * 3); }
 
 | 借用 | 谁用 | 何时消失 |
 | --- | --- | --- |
-| 本机 Dart SDK 的库声明，用来做类型分析 | `source` | 第 10 步，改用 `sdk/std` |
 | 按名字识别 `dart:io` 的 `exit`，直接调用系统的 `exit` | `translate` `lower` | 编译官方 `dart:io` 源码时 |
-| 按名字识别 `dart:core` 的 `print`，只接受常量字符串 | `translate` `lower` | 第 10 步 |
-| 按名字识别 `dart:core` 的 `identical` | `translate` | 第 10 步 |
-| 按名字识别 `dart:core` 的错误类、数字类、`toInt`、`toDouble`，错误对象没有官方的字段 | `translate` | 第 10 步 |
-| 运行时的源码从 `package:dartc` 的路径读取，编译器自己必须用源码运行 | `driver` | 第 10 步，和标准库源码一起处理 |
+| 标准库、补丁和运行时的源码从 `package:dartc` 的路径读取，编译器自己必须用源码运行 | `driver` | 第 15 步，换掉旧编译器时一起打包 |
 
 ## 保存的旧内容
 

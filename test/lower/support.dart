@@ -49,6 +49,24 @@ final class LoweredRun(
           memory.store(.i32, at, 0, error);
           return at;
         },
+        'mmap': (memory, arguments) =>
+            memory.map(Uint8List(arguments[1] as int)),
+        'gcvt': (memory, arguments) {
+          final [value as double, digits as int, at as int] = arguments;
+          final text = formatExactly(value, digits);
+          for (final (i, byte) in [...ascii.encode(text), 0].indexed) {
+            memory.store(.u8, at, i, byte);
+          }
+          return at;
+        },
+        'strtod': (memory, arguments) {
+          final at = arguments.first as int;
+          var count = 0;
+          while (memory.load(.u8, at, count) != 0) {
+            count++;
+          }
+          return double.parse(ascii.decode(memory.read(at, count)));
+        },
         'write': (memory, arguments) {
           final [descriptor as int, from as int, count as int] = arguments;
           calls.add('write$descriptor');

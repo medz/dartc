@@ -10,36 +10,35 @@ import 'package:dartc/translate.dart';
 
 /// Compiles the program at [path] to a macOS ARM64 executable.
 ///
-/// [sdk] is the Dart SDK whose libraries the program uses. Throws
-/// [CompileFailure] if the program has an error or is not supported yet.
+/// Throws [CompileFailure] if the program has an error or is not supported
+/// yet.
 ///
 /// If [collectsAlways], the program collects before every allocation.
 Future<Uint8List> compileProgram(
   String path, {
-  required String sdk,
   bool collectsAlways = false,
 }) async {
   final program = translateProgram(
-    await loadProgram(path, sdk: sdk),
-    runtime: await loadRuntime(sdk: sdk),
+    await loadProgram(path, sdk: await packagedSdk()),
   );
   final code = emitArm64(lowerProgram(program, collectsAlways: collectsAlways));
   final name = Uri.file(path).pathSegments.last;
   return linkMacho(code, entry: entrySymbol, identifier: name);
 }
 
-final _runtimes = <String, Future<SourceProgram>>{};
+Future<SdkSources>? _sdk;
 
-/// The source of the runtime, against the Dart SDK at [sdk].
-Future<SourceProgram> loadRuntime({required String sdk}) =>
-    _runtimes[sdk] ??= _loadRuntime(sdk);
-
-Future<SourceProgram> _loadRuntime(String sdk) async {
+/// The standard libraries that come with the compiler.
+Future<SdkSources> packagedSdk() => _sdk ??= () async {
   final package = Uri.parse('package:dartc/heap.dart');
   final file = await Isolate.resolvePackageUri(package);
   if (file == null) throw StateError('$package is missing.');
-  return loadProgram(file.toFilePath(), sdk: sdk);
-}
+  return SdkSources(
+    root: file.resolve('../sdk/std').toFilePath(),
+    patches: file.resolve('../sdk/native').toFilePath(),
+    runtime: file.resolve('src/heap').toFilePath(),
+  );
+}();
 
 /// Writes an executable file, replacing [output] only once it is complete.
 void writeProgram(Uint8List program, String output) {

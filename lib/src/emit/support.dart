@@ -18,9 +18,7 @@ void checkSupported(LirModule module) {
       }
     }
   }
-  for (final data in module.data) {
-    if (data.writable) throw EmitUnsupported(data.name, 'writable data');
-  }
+
   final allocate = module.signatures[allocateSymbol];
   final canAllocate = allocate == LirSignature([.i64], .ref);
   final thrower = module.signatures[throwSymbol];

@@ -173,6 +173,26 @@ void main() {
       expect(count, 100000);
     });
 
+    test('follows the elements of arrays', () {
+      final array = allocate(24 + 5 * 8);
+      _machine
+        ..store32(array, arrayClass)
+        ..store64(array + 16, 5)
+        ..setGlobal(0, array);
+      final [field, lost, ...elements] = [
+        for (var i = 0; i < 6; i++) _create(0),
+      ];
+      _machine.store64(array + 8, field);
+      for (final (i, element) in elements.indexed) {
+        _machine.store64(array + 24 + i * 8, element);
+      }
+      collect();
+      expect(_isAllocated(lost), isFalse);
+      for (final kept in [field, ...elements]) {
+        expect(_isAllocated(kept), isTrue);
+      }
+    });
+
     test('follows many references at once', () {
       // Each object of the chain leaves two others to be scanned later.
       const length = 20000;

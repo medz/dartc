@@ -174,6 +174,9 @@ enum Conversion(final LirType from, final LirType to) {
 
   /// An object where the runtime has put one.
   intToRef(.i64, .ref),
+
+  /// Where an object is.
+  refToInt(.ref, .i64),
 }
 
 final class Convert(final Conversion op, final LirValue operand)

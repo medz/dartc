@@ -12,6 +12,9 @@ extension on RandomDart {
   String _constant(Kind kind) => switch (kind) {
     .object => 'const ${_constantObject()}',
     .any => _constant(_any(Kind.values.take(5).toList())),
+    .text => _text(),
+    .list => 'const [${_random.nextInt(9)}, 2]',
+    .map => "const {1: 'one', ${2 + _random.nextInt(9)}: 'x'}",
     .function => 'leaf${_random.nextInt(3)}',
     _ => _literal(kind),
   };
@@ -22,7 +25,29 @@ extension on RandomDart {
     return 'K(${values.join(', ')}$rest)';
   }
 
+  String _text() => _any(const [
+    "''",
+    "'a'",
+    "'hello'",
+    "'é'",
+    r"'\u4e2d\u{1f600}'",
+    "'abcabc'",
+    "'7'",
+  ]);
+
+  String _several(String Function() make) =>
+      {for (var i = _random.nextInt(4); i > 0; i--) make()}.join(', ');
+
   String _literal(Kind kind) => switch (kind) {
+    .text => _text(),
+    .list =>
+      _chance(4)
+          ? _constant(kind)
+          : '<int>[${_several(() => _literal(.integer))}]',
+    .map =>
+      _chance(4)
+          ? _constant(kind)
+          : '<int, String>{${_several(() => '${_literal(.integer)}: ${_text()}')}}',
     .object => _chance(3) ? _constant(kind) : _creation(_literal),
     .boolean => '${_random.nextBool()}',
     .number => _literal(_any([.integer, .float])),

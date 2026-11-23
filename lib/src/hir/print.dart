@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'block.dart';
 import 'class.dart';
 import 'global.dart';
@@ -25,7 +23,10 @@ String _class(HirClass class_) {
   final fields = class_.ownFields.map(
     (field) => '${field.type.dartName} ${field.name}; ',
   );
-  return 'class ${class_.name}$parent { ${fields.join()}}';
+  final elements = class_.elements == null
+      ? ''
+      : ' of ${class_.elements!.name}';
+  return 'class ${class_.name}$parent$elements { ${fields.join()}}';
 }
 
 String _entry(MapEntry<HirClass, HirFunction> entry) =>
@@ -105,8 +106,14 @@ final class _Printer(final HirFunction function) {
       '${_name(receiver)}->${selector.name}(${_list(arguments)})',
     HirIsInstance(:final test, :final object) =>
       '${_name(object)} is ${test.name}',
-    HirWriteError(:final text) => 'error ${jsonEncode(text)}',
-    HirPrint(:final text) => 'print ${jsonEncode(text)}',
+    HirNewArray(:final target, :final length) =>
+      'new ${target.name}[${_name(length)}]',
+    HirLength(:final array) => '${_name(array)}.length',
+    HirLoadElement(:final element, :final array, :final index) =>
+      '${_name(array)}[${element.name} ${_name(index)}]',
+    HirStoreElement(:final element, :final array, :final index, :final value) =>
+      '${_name(array)}[${element.name} ${_name(index)}] = ${_name(value)}',
+    HirClassNumber(:final target) => 'number ${target.name}',
     HirCall(:final target, :final arguments) =>
       '${target.name}(${_list(arguments)})',
   };

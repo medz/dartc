@@ -15,10 +15,13 @@ enum Kind(final String name) {
   number('num'),
   maybe('int?'),
   any('Object?'),
-  function('int Function(int)');
+  function('int Function(int)'),
+  text('String'),
+  list('List<int>'),
+  map('Map<int, String>');
 
   /// The kinds that the official runtime can print.
-  static const List<Kind> plain = [integer, float, boolean];
+  static const List<Kind> plain = [integer, float, boolean, text, list, map];
 }
 
 typedef _Method = ({String name, Kind result, List<Kind> parameters});

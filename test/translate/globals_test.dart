@@ -1,3 +1,4 @@
+import 'package:dartc/driver.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
@@ -102,7 +103,7 @@ int get get => x;''',
       });
       final program = await loadProgram(
         '${directory.path}/main.dart',
-        sdk: hostSdk,
+        sdk: await packagedSdk(),
       );
       expect(HirInterpreter(translateProgram(program)).run(), 169);
     });
@@ -290,13 +291,21 @@ int get get => x;''',
         A? e; A f = const A(); const k = A(); A g = k; A h = A();
         void main() { a; b; c; d; e; f; g; h; }
       ''');
+      final own = RegExp(r'^[a-h]( is set)?$');
+      expect(module.globals.map((global) => global.name).where(own.hasMatch), [
+        'a',
+        'b',
+        'c',
+        'd',
+        'e',
+        'f',
+        'g',
+        'h',
+        'h is set',
+      ]);
       expect(
-        [for (final global in module.globals) global.name],
-        ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'h is set'],
-      );
-      expect(
-        [for (final function in module.functions) function.name],
-        ['main', 'A.new', 'h', 'throw stackOverflow', 'report'],
+        module.functions.map((function) => function.name).where(own.hasMatch),
+        ['h'],
       );
     });
 
@@ -329,18 +338,6 @@ int get get => x;''',
     reports(
       "import 'dart:io';\nvoid main() { exitCode = 1; }",
       '2:15: $what assignment to simple identifier.',
-    );
-    reports(
-      'class A { final String s; const A(this.s); }\nvoid main() { const A("a"); }',
-      '1:24: $what a field of type String.',
-    );
-    reports(
-      'class A { const A(); }\nvoid f(A a) { switch (a) { case const A(): } }\nvoid main() { f(A()); }',
-      '2:39: $what this kind of case.',
-    );
-    reports(
-      'class A { const A(); static const k = A(); }\nvoid f(A a) { switch (a) { case A.k: } }\nvoid main() { f(A()); }',
-      '2:33: $what this kind of case.',
     );
   });
 }

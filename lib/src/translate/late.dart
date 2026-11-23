@@ -58,22 +58,20 @@ final class LateAccess(
 ) {
   List<HirValue> _about(String what) {
     final kind = _variable is LocalVariableElement ? 'Local' : 'Field';
-    final number = _scope.lateNumber(
-      "$kind '${_variable.displayName}' has $what.",
-    );
-    return [_builder.add(HirConst(number))];
+    final text = "$kind '${_variable.displayName}' has $what.";
+    return [_builder.add(_scope.text(text))];
   }
 
   void _throwIfSet(String what) => _builder.throwIf(
     _storage.isSet(_builder),
-    _scope.throwerOf(.late),
+    _scope.runtime('throwLate'),
     _about(what),
   );
 
   /// Reads the variable, which nothing else gives a value.
   HirValue read() {
     final isUnset = _builder.add(HirUnary(.not, _storage.isSet(_builder)));
-    final thrower = _scope.throwerOf(.late);
+    final thrower = _scope.runtime('throwLate');
     _builder.throwIf(isUnset, thrower, _about('not been initialized'));
     return _storage.load(_builder);
   }

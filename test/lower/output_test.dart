@@ -7,7 +7,7 @@ import 'support.dart';
 
 HirModule _printing(List<String> texts) => body((block) {
   for (final text in texts) {
-    block.add(HirPrint(text));
+    writeText(block, 1, '$text\n');
   }
   return HirReturn();
 });
@@ -17,16 +17,6 @@ void main() {
     final run = LoweredRun(_printing(['a', '', 'é😀', 'x\u0000y\n']));
     expect(run.output, 'a\n\né😀\nx\u0000y\n\n');
     expect(run.calls, ['signal[13, 1]', ...List.filled(4, 'write1')]);
-    expect(LoweredRun(_printing(['\uD800'])).output, '�\n');
-  });
-
-  test('each text is stored once', () {
-    final module = lowerProgram(_printing(['a', 'b', 'a']));
-    expect(module.data.map((data) => data.bytes), [
-      [97, 10],
-      [98, 10],
-    ]);
-    expect(module.data.map((data) => data.writable), everyElement(isFalse));
   });
 
   test('a program that does not print needs nothing for it', () {

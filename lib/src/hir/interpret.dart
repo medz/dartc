@@ -1,8 +1,12 @@
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'block.dart';
 import 'class.dart';
 import 'global.dart';
 import 'instruction.dart';
 import 'module.dart';
+import 'simulate.dart';
 import 'value.dart';
 import 'verify.dart';
 
@@ -17,17 +21,17 @@ final class HirInterpreter(
   final int maxDepth = 500,
 }) {
   int _steps = 0, _depth = 0;
-  final _output = StringBuffer(), _errors = StringBuffer();
-  final _constants = <HirConstObject, _Object>{};
+  late final _machine = HirMachineState(module);
+  final _constants = <HirConstObject, HirObject>{};
   late final _globals = {
     for (final global in module.globals) global: _constant(global.initial),
   };
 
   /// Everything printed so far.
-  String get output => '$_output';
+  String get output => _machine.output;
 
   /// Everything written to standard error so far.
-  String get errors => '$_errors';
+  String get errors => _machine.errors;
 
   this {
     verifyHir(module);
@@ -153,11 +157,18 @@ final class HirInterpreter(
             (operand as double).isFinite
                 ? operand.toInt()
                 : throw StateError('$operand is not finite.'),
+          .floatBits => (ByteData(
+            8,
+          )..setFloat64(0, operand as double)).getInt64(0),
+          .bitsFloat => (ByteData(
+            8,
+          )..setInt64(0, operand as int)).getFloat64(0),
+          .squareRoot => sqrt(operand as double),
         };
       case HirCompare(:final relation):
         return _compare(relation, inputs[0], inputs[1]);
       case HirNull():
-        return _null;
+        return hirNull;
       case HirStatic(:final object):
         return _constant(object);
       case HirLoadGlobal(:final global):
@@ -165,60 +176,72 @@ final class HirInterpreter(
       case HirStoreGlobal(:final global):
         _globals[global] = inputs.single;
         return null;
-      case HirMachine(op: .isSame):
-        return identical(inputs[0], inputs[1]);
-      case HirMachine(op: .writeError):
-        _errors.writeCharCode(inputs.single as int);
-        return null;
-      case HirWriteError(:final text):
-        _errors.write(text);
-        return null;
+      case HirMachine(:final op):
+        return _machine.run(op, inputs);
       case HirIsInstance(:final test):
         final object = inputs.single;
-        if (object is! _Object) throw StateError('$object has no class.');
+        if (object is! HirObject) throw StateError('$object has no class.');
         return module.tests[test]!.contains(object.target);
-      case HirMachine(:final op):
-        throw StateError('${op.name} is not simulated.');
       case HirNew(:final target):
-        return _Object(target);
+        return HirObject(target);
+      case HirNewArray(:final target):
+        return HirObject(target, length: inputs.single as int);
+      case HirLength():
+        return _array(inputs.single).length;
+      case HirLoadElement(:final element):
+        return _array(inputs[0]).load(element, inputs[1] as int);
+      case HirStoreElement(:final element):
+        _array(inputs[0]).store(element, inputs[1] as int, inputs[2]);
+        return null;
+      case HirClassNumber(:final target):
+        return module.classes.indexOf(target);
       case HirLoad(:final field):
         return _object(inputs[0], field).fields[field] ??
             (throw StateError('${field.name} is not set.'));
       case HirStore(:final field):
         final object = _object(inputs[0], field);
-        if (object.isConstant) throw StateError('$object is constant.');
+        object.checkWritable();
         object.fields[field] = inputs[1];
         return null;
       case HirVirtualCall(:final selector):
         return _call(_implementation(selector, inputs[0]), inputs);
-      case HirPrint(:final text):
-        _output.writeln(text);
-        return null;
       case HirCall(:final target):
         return _call(target as HirFunction, inputs);
     }
   }
 
   Object _constant(Object? value) {
-    if (value == null) return _null;
+    if (value == null) return hirNull;
     if (value is! HirConstObject) return value;
     return _constants.putIfAbsent(value, () {
-      final object = _Object(value.target, isConstant: true);
+      final elements = value.elements;
+      final object = HirObject(value.target, length: elements?.length);
       value.fields.forEach((field, content) {
         object.fields[field] = _constant(content);
       });
+      for (final (i, element) in (elements ?? const []).indexed) {
+        final isByte = value.target.elements == .bytes;
+        object.store(isByte ? .uint8 : .reference, i, _constant(element));
+      }
+      object.isConstant = true;
       return object;
     });
   }
 
   /// The object [value], which must have [field].
-  _Object _object(Object value, HirField field) {
-    if (value is _Object && value.target.fields.contains(field)) return value;
+  HirObject _object(Object value, HirField field) {
+    if (value is HirObject && value.target.fields.contains(field)) return value;
     throw StateError('No field ${field.name} in $value.');
   }
 
+  /// The array [value].
+  HirObject _array(Object value) =>
+      value is HirObject && value.target.elements != null
+      ? value
+      : throw StateError('$value is no array.');
+
   HirFunction _implementation(HirSelector selector, Object receiver) {
-    final function = receiver is _Object
+    final function = receiver is HirObject
         ? module.dispatch[selector]![receiver.target]
         : null;
     return function ?? (throw StateError('No ${selector.name} in $receiver.'));
@@ -263,26 +286,6 @@ final class HirInterpreter(
       _ => a >= b,
     };
   }
-}
-
-const _null = _Null();
-
-final class const _Null() {
-  @override
-  String toString() => 'null';
-}
-
-final class _Object(final HirClass target, {final bool isConstant = false}) {
-  final fields = <HirField, Object>{};
-
-  this {
-    for (final field in target.fields) {
-      if (field.type == .reference) fields[field] = _null;
-    }
-  }
-
-  @override
-  String toString() => target.name;
 }
 
 final class _Thrown(final Object exception, final Object trace)

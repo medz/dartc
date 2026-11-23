@@ -3,3 +3,4 @@ library;
 
 export 'src/source/library.dart' show SourceLibrary, SourceProgram, SourceUnit, loadProgram;
 export 'src/source/problem.dart';
+export 'src/source/sdk.dart';

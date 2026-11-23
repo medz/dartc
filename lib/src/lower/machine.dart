@@ -1,16 +1,22 @@
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'dispatch.dart';
 import 'output.dart';
 import 'statics.dart';
 import 'system.dart';
 
 /// Lowers the operations of the runtime.
 final class MachineLowering(
-  final StaticData _statics,
-  final OutputData _output, {
+  final StaticData _statics, {
   required final bool collectsAlways,
 }) {
+  /// Whether the program writes to files.
+  bool writesOutput = false;
+
+  /// Whether it uses the buffer at [bufferSymbol].
+  bool usesBuffer = false;
+
   /// Adds [op] to [block], returning its result if it has one.
   LirValue? lower(LirBlock block, HirMachineOp op, List<LirValue> arguments) {
     LirValue number(int value) => block.add(ConstInt(value));
@@ -36,9 +42,32 @@ final class MachineLowering(
       case .unmapMemory:
         block.add(callSystem('munmap', arguments));
         return null;
-      case .writeError:
-        _output.writeByte(block, standardError, arguments.single);
+      case .outputBuffer:
+        usesBuffer = true;
+        return symbol(bufferSymbol);
+      case .load8:
+        return load(.u8);
+      case .store8:
+        block.add(Store(.u8, address(), arguments[1]));
         return null;
+      case .write:
+        writesOutput = true;
+        final [file, from, count] = arguments;
+        final start = block.add(Convert(.intToPtr, from));
+        block.add(Call(writeSymbol, writeSignature, [file, start, count]));
+        return null;
+      case .formatDouble:
+        final [value, digits, to] = arguments;
+        final start = block.add(Convert(.intToPtr, to));
+        block.add(callSystem('gcvt', [value, digits, start]));
+        return null;
+      case .parseDouble:
+        final none = block.add(Convert(.intToPtr, number(0)));
+        return block.add(callSystem('strtod', [address(), none]));
+      case .classNumber:
+        return block.add(Load(.u32, arguments.single, offset: classOffset));
+      case .addressOf:
+        return block.add(Convert(.refToInt, arguments.single));
       case .resume:
         final [frame, code, exception, trace] = arguments;
         block.add(Resume(frame, code, exception, trace));

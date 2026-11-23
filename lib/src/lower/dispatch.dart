@@ -5,6 +5,10 @@ import 'package:dartc/lir.dart';
 const classOffset = 0;
 const _headerBytes = 8, _fieldBytes = 8;
 
+/// Where arrays have the number of their elements, after their only field, and
+/// where those are.
+const lengthOffset = 16, elementsOffset = 24;
+
 const _tableSymbol = '.dispatch', _holeSymbol = '.hole';
 
 /// Overlays sparse [rows] in one list, so that entry c of row i is at its
@@ -85,20 +89,35 @@ final class ObjectLayout(
       ]),
   ];
 
-  /// The bytes of an object of [class_].
-  int sizeOf(HirClass class_) =>
-      _headerBytes + class_.fields.length * _fieldBytes;
+  /// The bytes of an object of [class_], without its elements.
+  int sizeOf(HirClass class_) => class_.elements == null
+      ? _headerBytes + class_.fields.length * _fieldBytes
+      : elementsOffset;
 
-  int numberOf(HirClass class_) => _classNumbers[class_]!;
+  int? numberOf(HirClass class_) => _classNumbers[class_];
 
   /// The allocation of an object of [class_], not yet part of [block].
-  Alloc allocation(LirBlock block, HirClass class_) =>
-      Alloc(block.add(ConstInt(sizeOf(class_))));
+  Alloc allocation(LirBlock block, HirClass class_, [LirValue? length]) {
+    final size = block.add(ConstInt(sizeOf(class_)));
+    if (length == null) return Alloc(size);
+    final elements = class_.elements == .references
+        ? block.add(IntBinary(.shl, length, block.add(ConstInt(3))))
+        : length;
+    return Alloc(block.add(IntBinary(.add, size, elements)));
+  }
 
-  /// Makes [object] one of [class_].
-  LirValue setClass(LirBlock block, LirValue object, HirClass class_) {
-    final number = block.add(ConstInt(numberOf(class_)));
+  /// Makes [object] one of [class_], with [length] elements if it has any.
+  LirValue setClass(
+    LirBlock block,
+    LirValue object,
+    HirClass class_, [
+    LirValue? length,
+  ]) {
+    final number = block.add(ConstInt(numberOf(class_)!));
     block.add(Store(.u32, object, number, offset: classOffset));
+    if (length != null) {
+      block.add(Store(.i64, object, length, offset: lengthOffset));
+    }
     return object;
   }
 
@@ -115,6 +134,57 @@ final class ObjectLayout(
       block.add(
         Store(widthOf(field.type), object, value, offset: offsetOf(field)),
       );
+
+  static Width _elementWidth(HirElement element) => switch (element) {
+    .reference => .ref,
+    .int8 => .i8,
+    .uint8 => .u8,
+    .int16 => .i16,
+    .uint16 => .u16,
+    .int32 => .i32,
+    .uint32 => .u32,
+    .int64 => .i64,
+    .float32 => .f32,
+    .float64 => .f64,
+  };
+
+  static LirValue _scaled(LirBlock block, HirElement element, LirValue index) =>
+      element == .reference
+      ? block.add(IntBinary(.shl, index, block.add(ConstInt(3))))
+      : index;
+
+  LirValue length(LirBlock block, LirValue array) =>
+      block.add(Load(.i64, array, offset: lengthOffset));
+
+  LirValue loadElement(
+    LirBlock block,
+    HirElement element,
+    LirValue array,
+    LirValue index,
+  ) => block.add(
+    Load(
+      _elementWidth(element),
+      array,
+      offset: elementsOffset,
+      index: _scaled(block, element, index),
+    ),
+  );
+
+  void storeElement(
+    LirBlock block,
+    HirElement element,
+    LirValue array,
+    LirValue index,
+    LirValue value,
+  ) => block.add(
+    Store(
+      _elementWidth(element),
+      array,
+      value,
+      offset: elementsOffset,
+      index: _scaled(block, element, index),
+    ),
+  );
 
   /// A field of a class without objects is only used by code that never runs.
   int offsetOf(HirField field) => _fieldOffsets[field] ?? _headerBytes;

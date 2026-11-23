@@ -1,6 +1,5 @@
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
 import 'support.dart';
 
 const _classes = r'''
@@ -324,43 +323,4 @@ void main() {
     dynamic k(bool b) { if (b) return true; }
     void main() { truth(f(0) == null); number(f(2)!.n); show(g(true)); show(g(false)); show(h(3)); show(k(true)); show(k(false)); }
   ''');
-
-  group('not supported yet:', () {
-    void reports(String source, String problem) => test(problem, () async {
-      await expectLater(
-        translateWhole(source),
-        failsWith(['main.dart:$problem']),
-      );
-    });
-
-    const what = 'Not supported yet:';
-    reports(
-      'void main() { Object o = "a"; }',
-      '1:26: $what simple string literal.',
-    );
-    reports(
-      'void main() { Object o = 1; o is String; }',
-      '1:34: $what testing for String.',
-    );
-    reports(
-      'void main() { Object o = 1; o as String; }',
-      '1:34: $what testing for String.',
-    );
-    reports(
-      'void main() { 5.toString(); }',
-      '1:15: $what calling toString of the SDK.',
-    );
-    reports(
-      'void main() { num n = 5; n.abs(); }',
-      '1:26: $what calling abs of the SDK.',
-    );
-    reports(
-      'void main() { Object o = 5; o.hashCode; }',
-      '1:29: $what calling hashCode of the SDK.',
-    );
-    reports(
-      'void main() { int i = 5; i.isEven; }',
-      '1:26: $what calling isEven of the SDK.',
-    );
-  });
 }

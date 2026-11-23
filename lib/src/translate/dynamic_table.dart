@@ -1,15 +1,15 @@
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
-import 'checks.dart';
 import 'closure.dart';
 import 'conversions.dart';
 import 'dynamic_shape.dart';
+import 'levels.dart';
 import 'members.dart';
 import 'scope.dart';
+import 'types.dart';
 
 /// Finds what uses of members by their names reach.
 ///
@@ -127,17 +127,16 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     });
   }
 
+  /// What [selector] does for null.
+  HirFunction forNull(HirSelector selector, ClassElement nullClass) =>
+      _forNull[selector] ??= _member(nullClass, selector, _shapes[selector]!);
+  final _forNull = <HirSelector, HirFunction>{};
+
   HirFunction _member(
     ClassElement class_,
     HirSelector selector,
     DynamicShape shape,
   ) {
-    if (_numberOperator(class_, shape) case final operation?) {
-      return _make('$class_ ${shape.name}', selector, operation);
-    }
-    if (class_.library.isInSdk && _declares(class_, shape)) {
-      shape.reject('calling ${shape.name} of the SDK');
-    }
     final own = _scope.levelOf(class_);
     final method = shape.use == .set
         ? null
@@ -153,9 +152,6 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     if (found == null) {
       _rejectHandler(class_, shape);
       return _missing(selector, shape);
-    }
-    if (found.element.library.isInSdk) {
-      shape.reject('calling ${shape.name} of the SDK');
     }
     if (method == null) {
       return _make(selector.name, selector, (builder, conversions) {
@@ -178,7 +174,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       final types = _typeArguments(builder, element, shape);
       return builder.call(
         HirCall(_scope.memberOf(level, element), [
-          receiver,
+          _own(conversions, receiver, level),
           ?types,
           ..._arguments(builder, conversions, element.formalParameters, shape),
         ]),
@@ -186,19 +182,11 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     });
   }
 
-  /// Whether [class_] of the SDK has the member used, even if abstract here.
-  static bool _declares(ClassElement class_, DynamicShape shape) =>
-      [class_, for (final type in class_.allSupertypes) type.element].any(
-        (owner) =>
-            owner.getMethod(shape.name) != null ||
-            owner.getGetter(shape.name) != null ||
-            owner.getSetter(shape.name) != null,
-      );
-
   void _rejectHandler(ClassElement class_, DynamicShape shape) {
     final level = _scope.levelOf(class_);
     final handler = memberNamed(level, 'noSuchMethod', null);
-    if (handler != null && !handler.element.library.isInSdk) {
+    final isOwn = handler?.level.superLevel != null;
+    if (isOwn) {
       shape.reject('noSuchMethod');
     }
   }
@@ -229,6 +217,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     final receiver = builder.inputs.first;
     final field = fieldOfAccessor(accessor);
     builder.setReceiver(receiver, level);
+    final own = _own(conversions, receiver, level);
     if (shape.use == .set) {
       final value = _checked(
         conversions,
@@ -239,15 +228,13 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       if (field != null) {
         _scope.storeField(builder, level, field, receiver, value);
       } else {
-        builder.call(
-          HirCall(_scope.memberOf(level, accessor), [receiver, value]),
-        );
+        builder.call(HirCall(_scope.memberOf(level, accessor), [own, value]));
       }
       return builder.inputs[1];
     }
     final value = field != null
         ? _scope.loadField(builder, level, field, receiver)
-        : builder.call(HirCall(_scope.memberOf(level, accessor), [receiver]));
+        : builder.call(HirCall(_scope.memberOf(level, accessor), [own]));
     if (shape.use == .get || value == null) return value;
     // A property that is called.
     return dynamicUse(
@@ -265,6 +252,13 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       builder.inputs.skip(1).toList(),
     );
   }
+
+  /// [receiver] as members of [level] take it.
+  static HirValue _own(
+    Conversions conversions,
+    HirValue receiver,
+    Level level,
+  ) => conversions.coerce(receiver, plainType(level.element) ?? .reference);
 
   HirValue _checked(
     Conversions conversions,
@@ -313,109 +307,6 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     final at = shape.named.indexOf(parameter.name!);
     return at < 0 ? null : shape.positional + at;
   }
-
-  /// What numbers and bools do for an operator, which the SDK declares.
-  HirValue? Function(FunctionBuilder builder, Conversions conversions)?
-  _numberOperator(ClassElement class_, DynamicShape shape) {
-    if (!class_.library.isDartCore || shape.use != .call) return null;
-    final isUnary = shape.positional == 0;
-    if (shape.positional > 1 || shape.named.isNotEmpty) return null;
-    return switch (class_.name) {
-      'int' || 'double' when isUnary => _unaryOf(class_.name!, shape.name),
-      'int' || 'double' => _binaryOf(class_.name!, shape),
-      'bool' when !isUnary => _boolOf(shape),
-      _ => null,
-    };
-  }
-
-  HirValue? Function(FunctionBuilder, Conversions)? _unaryOf(
-    String class_,
-    String name,
-  ) {
-    final helper = switch (name) {
-      'unary-' => 'numNegate',
-      'toInt' => 'numToInt',
-      'toDouble' => 'numToDouble',
-      _ => null,
-    };
-    if (helper != null) {
-      return (builder, _) =>
-          builder.call(HirCall(_scope.runtime(helper), builder.inputs));
-    }
-    if (name != '~' || class_ != 'int') return null;
-    return (builder, conversions) => builder.add(
-      HirUnary(
-        .complement,
-        conversions.coerce(builder.inputs.single, .integer),
-      ),
-    );
-  }
-
-  HirValue? Function(FunctionBuilder, Conversions)? _binaryOf(
-    String class_,
-    DynamicShape shape,
-  ) {
-    HirValue other(
-      FunctionBuilder builder,
-      Conversions conversions,
-      DartType type,
-    ) => conversions.cast(
-      builder.inputs[1],
-      conversions.types.objectQuestionType,
-      type,
-      ending: " of 'other'",
-    )!;
-    final helper = numberHelpers[shape.name];
-    if (helper != null) {
-      return (builder, conversions) {
-        final operands = [
-          builder.inputs[0],
-          other(builder, conversions, conversions.types.numType),
-        ];
-        return builder.call(
-          HirCall(
-            _scope.runtime(helper.name),
-            helper.isSwapped ? operands.reversed : operands,
-          ),
-        );
-      };
-    }
-    if (class_ != 'int') return null;
-    for (final operator in HirIntOperator.values) {
-      if (operator.symbol != shape.name) continue;
-      return (builder, conversions) =>
-          CheckedOperations(_scope, builder).integer(
-            operator,
-            conversions.coerce(builder.inputs[0], .integer),
-            other(builder, conversions, conversions.types.intType),
-          );
-    }
-    return null;
-  }
-
-  HirValue? Function(FunctionBuilder, Conversions)? _boolOf(
-    DynamicShape shape,
-  ) {
-    for (final operator in HirBoolOperator.values) {
-      if (operator.symbol != shape.name) continue;
-      return (builder, conversions) {
-        final other = conversions.cast(
-          builder.inputs[1],
-          conversions.types.objectQuestionType,
-          conversions.types.boolType,
-          ending: " of 'other'",
-        )!;
-        return builder.add(
-          HirBoolBinary(
-            operator,
-            conversions.coerce(builder.inputs[0], .boolean),
-            other,
-          ),
-        );
-      };
-    }
-    return null;
-  }
 }
 
 /// The runtime's functions for operators of numbers of any kind.
@@ -461,13 +352,12 @@ void throwMissing(
     .get => 'getter',
     .set => 'setter',
   };
-  final number = scope.missingNumber(kind, shape.name);
   builder
     ..call(
-      HirCall(scope.throwerOf(.missingMember), [
+      HirCall(scope.runtime('throwMissing'), [
         object,
-        builder.add(HirNull()),
-        builder.add(HirConst(number)),
+        builder.add(scope.text(kind)),
+        builder.add(scope.text(shape.name)),
       ]),
     )
     ..end(HirUnreachable());
@@ -481,11 +371,13 @@ HirValue dynamicUse(
   DynamicShape shape,
   List<HirValue> arguments,
 ) {
-  final isSome = builder.add(
-    HirCompare(.notEqual, object, builder.add(HirNull())),
+  final selector = scope.dynamicSelector(shape);
+  return builder.choose(
+    builder.add(HirCompare(.equal, object, builder.add(HirNull()))),
+    .reference,
+    () => builder.call(
+      HirCall(scope.dynamicNull(selector), [object, ...arguments]),
+    )!,
+    () => builder.call(HirVirtualCall(selector, object, arguments))!,
   );
-  builder.unless(isSome, () => throwMissing(scope, builder, object, shape));
-  return builder.call(
-    HirVirtualCall(scope.dynamicSelector(shape), object, arguments),
-  )!;
 }

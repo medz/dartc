@@ -22,6 +22,9 @@ final class Closure(
   /// Makes what types in its parameters are made of known.
   final void Function(FunctionBuilder builder, HirValue self)? bind,
 
+  /// What their text says after their type.
+  final String text = '',
+
   /// Whether closures of one object's method are equal.
   final bool isTearOff = false,
 }) {

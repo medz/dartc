@@ -407,47 +407,6 @@ void main() {
     ''');
   });
 
-  group('not supported yet:', () {
-    void reports(String source, String problem) => test(problem, () async {
-      await expectLater(translate(source), failsWith(['main.dart:$problem']));
-    });
-
-    const what = 'Not supported yet:';
-    reports('void main() { throw "a"; }', '1:21: $what simple string literal.');
-    reports(
-      'void main() { throw Exception("a"); }',
-      '1:21: $what calling Exception of the SDK.',
-    );
-    reports(
-      'void main() { try {} on String { } }',
-      '1:25: $what catching String.',
-    );
-    reports(
-      'void main() { try {} on Error catch (e) { e.stackTrace; } }',
-      '1:43: $what calling stackTrace of the SDK.',
-    );
-    reports(
-      'void main() { try {} catch (e, s) { s.toString(); } }',
-      '1:37: $what calling toString of the SDK.',
-    );
-    reports(
-      'int n = 0;\nclass A { String toString() => "\$n"; }\nvoid main() { throw A(); }',
-      '2:18: $what throwing an object with this toString.',
-    );
-    reports(
-      'int n = 0;\nclass A { String toString() { n++; return "a"; } }\nvoid main() { throw A(); }',
-      '2:18: $what throwing an object with this toString.',
-    );
-    reports(
-      'class A extends ArgumentError {}\nvoid main() { A(); }',
-      '1:7: $what extending ArgumentError of the SDK.',
-    );
-    reports(
-      'void main() { 1.5.round(); }',
-      '1:15: $what calling round of the SDK.',
-    );
-  });
-
   test('objects that are never thrown may have any toString', () async {
     await translate('''
       int n = 0;

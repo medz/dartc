@@ -94,6 +94,9 @@ final class OperatorLowering(final LirBlock block) {
         .not => _apply(.xor, operand, _int(1)),
         .intToFloat => block.add(Convert(.intToFloat, operand)),
         .floatToInt => _truncate(operand),
+        .floatBits => block.add(Convert(.floatBitsToInt, operand)),
+        .bitsFloat => block.add(Convert(.intBitsToFloat, operand)),
+        .squareRoot => block.add(FloatUnary(.sqrt, operand)),
       };
 
   /// Takes the place of values beyond the range of `int` by its ends.

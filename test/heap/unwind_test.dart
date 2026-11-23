@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dartc/heap.dart';
 import 'package:test/test.dart';
 
@@ -57,22 +55,5 @@ void main() {
       expect(() => raise('e', 't'), throwsStateError);
       expect(simulated.resumed, isNull);
     });
-  });
-
-  test('numbers are written in decimal', () {
-    for (final value in [
-      0,
-      7,
-      -7,
-      10,
-      12345,
-      -900,
-      0x7fffffffffffffff,
-      -0x8000000000000000,
-    ]) {
-      simulated.errors.clear();
-      writeNumber(value);
-      expect(ascii.decode(simulated.errors), '$value');
-    }
   });
 }

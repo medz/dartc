@@ -35,8 +35,6 @@ final class DispatchBuilder(
   /// Functions made here rather than declared by the program.
   final List<HirFunction> made = [];
 
-  late final HirFunction _objectEquals = _makeObjectEquals();
-
   List<ClassElement> get classes => _world.classes.cast();
 
   void instantiate(ClassElement class_) => _world.instantiate(class_);
@@ -97,12 +95,13 @@ final class DispatchBuilder(
     ExecutableElement member,
     int positional,
     List<String> named,
-    Reject reject,
-  ) {
+    Reject reject, {
+    bool isUnboxed = false,
+  }) {
     final found = implementationIn(level, member);
     if (found == null) return null;
     final selector = _selector(member, positional, named, reject);
-    return _function(level, found, selector);
+    return _function(level, found, selector, isUnboxed: isUnboxed);
   }
 
   /// How to get the method [member] of objects of [receiver].
@@ -162,13 +161,15 @@ final class DispatchBuilder(
   Map<HirSelector, Map<HirClass, HirFunction>> result(
     HirClass Function(ClassElement element) classOf,
     ClosureTable closures,
+    ClassElement functionClass,
   ) => {
     for (final MapEntry(key: selector, value: entries) in _entries.entries)
       selector: {
         for (final MapEntry(:key, :value) in entries.entries)
           classOf(key): value,
-        if (selector.name == '==')
-          ...closures.equalities(selector, _objectEquals),
+        // Functions have the members of one class.
+        if (entries[functionClass] case final function?)
+          for (final closure in closures.closures) closure.class_: function,
       },
   };
 
@@ -189,32 +190,17 @@ final class DispatchBuilder(
   HirFunction _function(
     Level level,
     Implementation found,
-    HirSelector selector,
-  ) {
-    if (found.element.library.isInSdk) {
-      return _numberEquals(level, selector) ?? _objectEquals;
-    }
+    HirSelector selector, {
+    bool isUnboxed = false,
+  }) {
     final checked = _checkedParameters(level.class_, found.element);
-    return _adapters[(found, selector, '$checked')] ??= _adapt(
+    return _adapters[(found, selector, '$checked $isUnboxed')] ??= _adapt(
       found,
       selector,
       _shapes[selector]!,
       checked,
+      isUnboxed: isUnboxed,
     );
-  }
-
-  /// How a number compares itself, if [level] is that of numbers.
-  HirFunction? _numberEquals(Level level, HirSelector selector) {
-    final class_ = level.class_, isInt = class_.name == 'int';
-    if (!class_.library.isInSdk || !isInt && class_.name != 'double') {
-      return null;
-    }
-    return _make('$class_ ==', selector, level, (builder, conversions) {
-      final [self, other] = builder.inputs;
-      final value = conversions.coerce(self, isInt ? .integer : .float);
-      final helper = _scope.runtime(isInt ? 'intEquals' : 'doubleEquals');
-      return builder.call(HirCall(helper, [value, other]));
-    });
   }
 
   /// The places of parameters that calls may give values of other types, as
@@ -224,12 +210,6 @@ final class DispatchBuilder(
     final parameters = found.formalParameters;
     final checked = <int>{};
     for (final other in overriddenBy(class_, found)) {
-      // Of the SDK's members only those of Object can be called yet.
-      final owner = other.enclosingElement;
-      if (other.library.isInSdk &&
-          !(owner is ClassElement && owner.isDartCoreObject)) {
-        continue;
-      }
       for (final declared in other.formalParameters) {
         final place = declared.isNamed
             ? parameters.indexWhere((p) => p.isNamed && p.name == declared.name)
@@ -254,8 +234,9 @@ final class DispatchBuilder(
     Implementation implementation,
     HirSelector selector,
     _Shape shape,
-    List<int> checked,
-  ) {
+    List<int> checked, {
+    required bool isUnboxed,
+  }) {
     final (element: found, :level) = implementation;
     final field = fieldOfAccessor(found);
     final isGeneric = found.typeParameters.isNotEmpty;
@@ -296,6 +277,7 @@ final class DispatchBuilder(
     final target = _scope.memberOf(level, found);
     final isSame =
         checked.isEmpty &&
+        (isUnboxed || target.parameters.first == .reference) &&
         given.length == parameters.length &&
         given.indexed.every((e) => e.$2 == parameters[e.$1]) &&
         given.indexed.every(
@@ -312,7 +294,7 @@ final class DispatchBuilder(
       if (isGeneric) builder.bindTypes(found, builder.inputs[1]);
       return builder.call(
         HirCall(target, [
-          builder.inputs.first,
+          conversions.coerce(builder.inputs.first, target.parameters.first),
           if (isGeneric) builder.inputs[1],
           for (final parameter in parameters)
             argument(builder, conversions, parameter),
@@ -342,18 +324,6 @@ final class DispatchBuilder(
       builder.end(HirReturn(conversions.coerce(given, result)));
     }
     builder.finish();
-    made.add(function);
-    return function;
-  }
-
-  HirFunction _makeObjectEquals() {
-    final block = HirBlock([.reference, .reference]);
-    final [left, right] = block.parameters;
-    block.end(HirReturn(block.add(HirCompare(.equal, left, right))));
-    final function = HirFunction('Object.==', [
-      .reference,
-      .reference,
-    ], .boolean)..define([block]);
     made.add(function);
     return function;
   }

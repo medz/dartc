@@ -7,6 +7,7 @@ analyzer:
     # Checked in their owning SDK libraries by sdk_patches_test.dart and compilation.
     - sdk/patches/**
     - sdk/std/**
+    - sdk/native/**
 
 linter:
   rules:

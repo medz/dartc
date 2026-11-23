@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/analysis/session.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/token.dart';
 import 'package:analyzer/dart/element/element.dart';
@@ -12,6 +13,7 @@ import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:analyzer/source/line_info.dart';
 
 import 'problem.dart';
+import 'sdk.dart';
 
 /// One resolved file.
 final class SourceUnit(
@@ -41,27 +43,35 @@ final class SourceLibrary(
 /// A program free of static errors.
 ///
 /// [libraries] starts with the one holding `main` and includes every library
-/// reached outside the SDK.
-final class SourceProgram(Iterable<SourceLibrary> libraries) {
+/// reached outside the SDK. Of the SDK, [sdk] has those that can be compiled.
+final class SourceProgram(
+  Iterable<SourceLibrary> libraries,
+  Iterable<SourceLibrary> sdk,
+) {
   final List<SourceLibrary> libraries = .unmodifiable(libraries);
+  final List<SourceLibrary> sdk = .unmodifiable(sdk);
   SourceLibrary get main => libraries.first;
 }
 
-/// Resolves the program at [path] against the Dart SDK at [sdk].
+/// Resolves the program at [path] against the libraries of [sdk].
 ///
 /// Throws [CompileFailure] if it, or any library it reaches outside the SDK,
 /// has a static error.
-Future<SourceProgram> loadProgram(String path, {required String sdk}) async {
+Future<SourceProgram> loadProgram(
+  String path, {
+  required SdkSources sdk,
+}) async {
   final file = File(path);
   if (!file.existsSync()) {
     throw CompileFailure([SourceProblem(path, 1, 1, 'File not found.')]);
   }
   final resolved = file.resolveSymbolicLinksSync();
   final files = OverlayResourceProvider(PhysicalResourceProvider.INSTANCE);
-  var libraries = await _resolveAll(resolved, sdk, files);
+  sdk.install(files);
+  var (libraries, core) = await _resolveAll(resolved, sdk, files);
   // Comments may hide errors from the analyzer, but they are errors still.
   if (_disableIgnores(libraries, files)) {
-    libraries = await _resolveAll(resolved, sdk, files);
+    (libraries, core) = await _resolveAll(resolved, sdk, files);
   }
   final problems = [
     for (final library in libraries)
@@ -71,24 +81,25 @@ Future<SourceProgram> loadProgram(String path, {required String sdk}) async {
             _unit(unit).problemAt(diagnostic.offset, diagnostic.message),
   ];
   if (problems.isNotEmpty) throw CompileFailure(problems);
-  return SourceProgram([
-    for (final library in libraries)
-      SourceLibrary(library.element, library.units.map(_unit)),
-  ]);
+  return SourceProgram(libraries.map(_library), core.map(_library));
 }
+
+SourceLibrary _library(ResolvedLibraryResult result) =>
+    SourceLibrary(result.element, result.units.map(_unit));
 
 SourceUnit _unit(ResolvedUnitResult result) =>
     SourceUnit(result.path, result.unit, result.lineInfo);
 
-/// The library at [path], then every library it reaches outside the SDK.
-Future<List<ResolvedLibraryResult>> _resolveAll(
+/// The library at [path], then every library it reaches outside the SDK. Also
+/// the libraries of the SDK that can be compiled.
+Future<(List<ResolvedLibraryResult>, List<ResolvedLibraryResult>)> _resolveAll(
   String path,
-  String sdk,
+  SdkSources sdk,
   ResourceProvider files,
 ) async {
   final contexts = AnalysisContextCollection(
     includedPaths: [path],
-    sdkPath: sdk,
+    sdkPath: sdk.root,
     resourceProvider: files,
   );
   try {
@@ -108,17 +119,29 @@ Future<List<ResolvedLibraryResult>> _resolveAll(
         ...library.exportedLibraries,
       ]) {
         if (next.isInSdk || !seen.add(next)) continue;
-        final result = await session.getResolvedLibraryByElement(next);
-        if (result is! ResolvedLibraryResult) {
-          throw StateError('Unresolved library ${next.uri}.');
-        }
-        results.add(result);
+        results.add(await _resolve(session, next));
       }
     }
-    return results;
+    final core = <ResolvedLibraryResult>[];
+    for (final uri in sdk.libraries) {
+      final found = await session.getLibraryByUri(uri);
+      if (found is! LibraryElementResult) throw StateError('No library $uri.');
+      core.add(await _resolve(session, found.element));
+    }
+    return (results, core);
   } finally {
     await contexts.dispose();
   }
+}
+
+Future<ResolvedLibraryResult> _resolve(
+  AnalysisSession session,
+  LibraryElement library,
+) async {
+  final result = await session.getResolvedLibraryByElement(library);
+  return result is ResolvedLibraryResult
+      ? result
+      : throw StateError('Unresolved library ${library.uri}.');
 }
 
 /// Overlays every file having ignore comments with a copy where they say

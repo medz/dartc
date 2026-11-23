@@ -13,11 +13,15 @@ import 'conversions.dart';
 import 'describe.dart';
 import 'dynamics.dart';
 import 'late_locals.dart';
+import 'literals.dart';
+import 'loops.dart';
 import 'members.dart';
 import 'operators.dart';
 import 'places.dart';
+import 'references.dart';
 import 'scope.dart';
 import 'statics.dart';
+import 'texts.dart';
 import 'types.dart';
 
 /// Translates the expressions of one function.
@@ -53,6 +57,16 @@ final class ExpressionTranslator(
   late final _dynamics = DynamicTranslator(_scope, _builder, this);
   late final _statics = StaticTranslator(_scope, _builder);
   late final _conversions = Conversions(_scope, _builder);
+  late final _references = ReferenceTranslator(_scope, _builder);
+  late final _texts = TextTranslator(_scope, _builder, this);
+  late final LoopTranslator loops = LoopTranslator(
+    _scope,
+    _builder,
+    this,
+    calls,
+    lates,
+  );
+  late final _literals = LiteralTranslator(_scope, _builder, this, loops);
   late final _places = PlaceTranslator(
     _builder,
     this,
@@ -67,7 +81,7 @@ final class ExpressionTranslator(
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
-  /// Evaluates [node] without using its value.
+  @override
   void effect(Expression node) {
     final inner = node.unParenthesized;
     if (_chains.isWhole(inner)) {
@@ -122,6 +136,10 @@ final class ExpressionTranslator(
       _conversions.coerce(value(node, placeholder: type), type);
 
   @override
+  HirValue valueAsObject(Expression node, DartType type) =>
+      _conversions.coerce(valueTo(node, type), .reference);
+
+  @override
   HirValue value(Expression node, {HirType placeholder = .integer}) {
     final result = _value(node, placeholder);
     final type = node.staticType;
@@ -148,13 +166,10 @@ final class ExpressionTranslator(
       return _builder.placeholder(placeholder);
     }
     switch (inner) {
-      case IntegerLiteral():
-        return _integer(inner, isNegated: false);
-      case DoubleLiteral(value: final Object constant) ||
-          BooleanLiteral(value: final Object constant):
-        return _builder.add(HirConst(constant));
-      case NullLiteral():
-        return _builder.add(HirNull());
+      case Literal():
+        return _literal(inner);
+      case TypeLiteral(type: TypeAnnotation(:final DartType type)):
+        return _references.type(inner, type);
       case ThisExpression():
         return _builder.receiver ?? _unsupported(inner, 'this here');
       case SimpleIdentifier(:final element):
@@ -178,9 +193,9 @@ final class ExpressionTranslator(
         return closures.invocation(inner) ??
             _unsupported(inner, 'using a value of type $type');
       case FunctionReference():
-        return _reference(inner);
+        return _references.function(inner);
       case ConstructorReference(:final constructorName):
-        return _constructor(inner, constructorName);
+        return _references.constructor(inner, constructorName);
       case ImplicitCallReference(:final expression, :final element):
         final class_ = classOf(expression.staticType);
         if (class_ == null || element == null) {
@@ -206,6 +221,35 @@ final class ExpressionTranslator(
             _unsupported(inner, 'using a value of type $type');
       case CascadeExpression():
         return _cascade(inner);
+      default:
+        _unsupported(inner, describe(inner));
+    }
+  }
+
+  HirValue _literal(Literal inner) {
+    switch (inner) {
+      case IntegerLiteral():
+        return _integer(inner, isNegated: false);
+      case DoubleLiteral(value: final Object constant) ||
+          BooleanLiteral(value: final Object constant):
+        return _builder.add(HirConst(constant));
+      case NullLiteral():
+        return _builder.add(HirNull());
+      case StringLiteral():
+        return _texts.string(inner);
+      case TypedLiteral(isConst: true):
+        final found = _scope.constantOf(
+          .reference,
+          inner.computeConstantValue()?.value,
+        );
+        return _builder.add(
+          found ??
+              _unsupported(inner, 'a constant of type ${inner.staticType}'),
+        );
+      case ListLiteral():
+        return _literals.list(inner);
+      case SetOrMapLiteral():
+        return _literals.setOrMap(inner);
       default:
         _unsupported(inner, describe(inner));
     }
@@ -303,59 +347,11 @@ final class ExpressionTranslator(
 
   void _throw(Expression expression) {
     final value = valueAs(expression, .reference);
-    final class_ = classOf(expression.staticType);
-    if (class_ == null) {
-      _unsupported(expression, 'throwing ${expression.staticType}');
-    }
-    _scope.addThrown(class_);
-    _builder.raise(value, _builder.create(_scope.traceClass));
+    _builder.raise(value, _builder.add(_scope.trace));
   }
 
   HirValue _notNull(Expression operand) =>
       CheckedOperations(_scope, _builder).notNull(value(operand));
-
-  HirValue _constructor(Expression node, ConstructorName name) {
-    final element = name.element?.baseElement, type = node.staticType;
-    if (element == null || classOf(element.returnType) == null) {
-      _unsupported(node, describe(node));
-    }
-    return _instantiate(node, element, type!);
-  }
-
-  /// A generic function with its type arguments.
-  HirValue _reference(FunctionReference node) {
-    final function = node.function;
-    final element = switch (function) {
-      SimpleIdentifier(:final element) => element,
-      PrefixedIdentifier(identifier: SimpleIdentifier(:final element)) =>
-        element,
-      PropertyAccess(propertyName: SimpleIdentifier(:final element)) => element,
-      ConstructorReference(:final constructorName) => constructorName.element,
-      _ => null,
-    };
-    if (element is! ExecutableElement || _builder.typeOf(element) != null) {
-      _unsupported(node, describe(node));
-    }
-    if (isInstanceMember(element)) {
-      _unsupported(node, 'tear-offs of generic methods');
-    }
-    return _instantiate(node, element.baseElement, node.staticType!);
-  }
-
-  HirValue _instantiate(
-    Expression node,
-    ExecutableElement element,
-    DartType type,
-  ) {
-    if (type is! FunctionType || type.typeParameters.isNotEmpty) {
-      _unsupported(node, 'generic functions as values');
-    }
-    final types = takesTypes(element) == null
-        ? const <DartType>[]
-        : typeArgumentsOf(element, type);
-    return _scope.instantiate(_builder, element, types) ??
-        _unsupported(node, describe(node));
-  }
 
   HirValue _isExpression(IsExpression node) {
     final type = node.type.type!;
@@ -387,6 +383,9 @@ final class ExpressionTranslator(
       );
 
   HirValue _identifier(Expression node, Element? element) {
+    if (ReferenceTranslator.typeNamed(element) case final type?) {
+      return _references.type(node, type);
+    }
     if (element != null &&
         _builder.typeOf(element) != null &&
         !(element is VariableElement && element.isConst)) {
@@ -491,6 +490,10 @@ final class ExpressionTranslator(
     final declared = element.formalParameters.single.type;
     return (valueTo(right, declared), declared);
   }
+
+  /// Whether the constant [node] equals [value].
+  HirValue equal(Expression node, (HirValue, DartType) value) => _operators
+      .binary(node, '==', (this.value(node), node.staticType!), value);
 
   DartType _resultType(Expression node) {
     final type = node.staticType!;

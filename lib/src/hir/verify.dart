@@ -25,6 +25,15 @@ void verifyHir(HirModule module) {
   if (classes.length != module.classes.length) {
     throw HirError('a class is listed twice');
   }
+  for (final class_ in module.classes) {
+    final superclass = class_.superclass;
+    if (superclass?.elements != null) {
+      throw HirError('class ${class_.name} extends an array');
+    }
+    if (class_.elements != null && class_.fields.length > 1) {
+      throw HirError('array ${class_.name} has several fields');
+    }
+  }
   final globals = module.globals.toSet();
   if (globals.length != module.globals.length) {
     throw HirError('a global is listed twice');
@@ -102,8 +111,16 @@ void _checkConstant(Set<HirClass> classes, Object? value) {
       )) {
     throw HirError('constant ${target.name} has wrong fields');
   }
-  for (final field in fields.values) {
-    _checkConstant(classes, field);
+  final isRight = switch (target.elements) {
+    null => value.elements == null,
+    .references => value.elements?.every((e) => isConstant(.reference, e)),
+    .bytes => value.elements?.every((e) => e is int && e >= 0 && e < 256),
+  };
+  if (isRight != true) {
+    throw HirError('constant ${target.name} has wrong elements');
+  }
+  for (final part in [...fields.values, ...?value.elements]) {
+    _checkConstant(classes, part);
   }
 }
 
@@ -208,8 +225,26 @@ final class _FunctionVerifier(
 
   void _checkInstruction(HirInstruction instruction) {
     switch (instruction) {
-      case HirConst() || HirNull() || HirPrint() || HirWriteError():
+      case HirConst() || HirNull() || HirClassNumber():
         break;
+      case HirNewArray(:final target, :final length):
+        if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+        if (target.elements == null) _fail('${target.name} has no elements');
+        _expect(length, .integer, 'length');
+      case HirLength(:final array):
+        _expect(array, .reference, 'array');
+      case HirLoadElement(:final array, :final index):
+        _expect(array, .reference, 'array');
+        _expect(index, .integer, 'index');
+      case HirStoreElement(
+        :final element,
+        :final array,
+        :final index,
+        :final value,
+      ):
+        _expect(array, .reference, 'array');
+        _expect(index, .integer, 'index');
+        _expect(value, element.type, 'element');
       case HirStatic(:final object):
         _checkConstant(classes, object);
       case HirLoadGlobal(:final global):
@@ -226,6 +261,7 @@ final class _FunctionVerifier(
         _expect(object, .reference, 'is ${test.name}');
       case HirNew(:final target):
         if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+        if (target.elements != null) _fail('${target.name} has elements');
       case HirLoad(:final object):
         _expect(object, .reference, 'object');
       case HirStore(:final field, :final object, :final value):

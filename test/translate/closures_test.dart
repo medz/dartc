@@ -185,32 +185,13 @@ void main() {
 
   group('not supported yet:', () {
     void reports(String source, String problem) => test(problem, () async {
-      await expectLater(
-        translateWhole(source),
-        failsWith(['main.dart:$problem']),
-      );
+      await expectLater(translate(source), failsWith(['main.dart:$problem']));
     });
 
     const what = 'Not supported yet:';
     reports(
       'void main() { final f = () async {}; f(); }',
       '1:28: $what async and generator functions.',
-    );
-    reports(
-      'void main() { final f = (String s) {}; }',
-      '1:25: $what a parameter of type String.',
-    );
-    reports(
-      'void main() { final f = () => "a"; }',
-      '1:25: $what a result of type String.',
-    );
-    reports(
-      'void main() { final f = main; f.hashCode; }',
-      '1:31: $what prefixed identifier.',
-    );
-    reports(
-      'void main() { throw main; }',
-      '1:21: $what throwing void Function().',
     );
   });
 }

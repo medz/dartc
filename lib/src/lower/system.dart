@@ -8,6 +8,12 @@ final systemFunctions = {
   /// write(descriptor, address, count).
   'write': LirSignature([.i64, .ptr, .i64], .i64),
 
+  /// gcvt(value, digits, address), the address.
+  'gcvt': LirSignature([.f64, .i64, .ptr], .ptr),
+
+  /// strtod(address, end).
+  'strtod': LirSignature([.ptr, .ptr], .f64),
+
   /// The address of the 32-bit error number.
   '__error': LirSignature([], .ptr),
 

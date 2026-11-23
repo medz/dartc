@@ -54,6 +54,9 @@ final class Conversions(
     HirValue constant(bool value) => _builder.add(HirConst(value));
     if (isTop(type)) return constant(true);
     if (value.type != .reference) {
+      if (type is InterfaceType && plainType(type.element) == value.type) {
+        return constant(true);
+      }
       final exact = switch (value.type!) {
         .integer => types.intType,
         .float => types.doubleType,
@@ -68,14 +71,7 @@ final class Conversions(
           : constant(false);
     }
     if (type.isDartCoreNull) return isNull(value);
-    final HirTypeTest test;
-    if (type.isDartCoreFunction) {
-      test = _scope.functionTest;
-    } else if (_isPlain(type)) {
-      final class_ = classOf(type)!;
-      if (type.isDartCoreObject) return _not(isNull(value));
-      test = _scope.testOf(class_);
-    } else {
+    if (!_isPlain(type)) {
       if (valueType(type) == null) return null;
       final wanted = _scope.typeValue(_builder, type);
       if (wanted == null) return null;
@@ -83,6 +79,8 @@ final class Conversions(
         HirCall(_scope.runtime('isInstance'), [value, wanted]),
       );
     }
+    if (type.isDartCoreObject) return _not(isNull(value));
+    final test = _scope.testOf(classOf(type)!);
     return _builder.choose(
       isNull(value),
       .boolean,
@@ -115,19 +113,16 @@ final class Conversions(
     }
     final fits = isInstance(value, to);
     if (fits == null) return null;
-    // The name of an open type is known only when the program runs.
-    final number = _scope.castNumber(
-      isOpen(to) ? null : describeType(to),
-      ending,
-    );
     _builder.unless(fits, () {
+      // The name of an open type is known only when the program runs.
+      final isKnown = !isOpen(to);
       _builder.call(
-        HirCall(_scope.throwerOf(.wrongType), [
+        HirCall(_scope.runtime(isKnown ? 'throwCast' : 'throwCastTo'), [
           coerce(value, .reference),
-          isOpen(to)
-              ? _scope.typeValue(_builder, to)!
-              : _builder.add(HirNull()),
-          _builder.add(HirConst(number)),
+          isKnown
+              ? _builder.add(_scope.text(describeType(to)))
+              : _scope.typeValue(_builder, to)!,
+          _builder.add(_scope.text(ending)),
         ]),
       );
     });

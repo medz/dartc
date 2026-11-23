@@ -182,10 +182,7 @@ void main() {
 
   group('not supported yet:', () {
     void reports(String source, String problem) => test(problem, () async {
-      await expectLater(
-        translateWhole(source),
-        failsWith(['main.dart:$problem']),
-      );
+      await expectLater(translate(source), failsWith(['main.dart:$problem']));
     });
 
     const what = 'Not supported yet:';
@@ -198,16 +195,8 @@ void main() {
       '1:21: $what a variable of type T Function<T>(T).',
     );
     reports(
-      'class A<T> { Type t() => T; }\nvoid main() { A<int>().t(); }',
-      '2:15: $what a result of type Type.',
-    );
-    reports(
       'class A { S f<S>(S s) => s; }\nvoid main() { int Function(int) g = A().f; }',
       '2:37: $what tear-offs of generic methods.',
-    );
-    reports(
-      'void main() { Comparable<int>? c; }',
-      '1:32: $what a variable of type Comparable<int>?.',
     );
   });
 }

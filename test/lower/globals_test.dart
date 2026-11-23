@@ -157,11 +157,12 @@ void main() {
       final record = words.getUint32(class_ * 4, .little);
       return [
         for (var i = 0; i < words.getUint32(record, .little); i++)
-          words.getUint32(record + 4 + i * 4, .little),
+          words.getUint32(record + 8 + i * 4, .little),
       ];
     }
 
     expect(offsets(0), [16]);
+    expect(words.getUint32(words.getUint32(0, .little) + 4, .little), 0);
     expect(offsets(1), [16]);
   });
 

@@ -41,6 +41,59 @@ final class HirNew(final HirClass target) extends HirCalling {
   List<HirValue> get inputs => const [];
 }
 
+/// An array of [target] with [length] elements, which is not negative.
+///
+/// They are null or 0.
+final class HirNewArray(final HirClass target, final HirValue length)
+    extends HirCalling {
+  @override
+  HirType get type => .reference;
+  @override
+  List<HirValue> get inputs => [length];
+}
+
+/// How many elements [array] has.
+final class HirLength(final HirValue array) extends HirInstruction {
+  @override
+  HirType get type => .integer;
+  @override
+  List<HirValue> get inputs => [array];
+}
+
+/// Reads an element of [array] at [index], which is one of its elements or,
+/// among bytes, the first of those that [element] takes.
+final class HirLoadElement(
+  final HirElement element,
+  final HirValue array,
+  final HirValue index,
+) extends HirInstruction {
+  @override
+  HirType get type => element.type;
+  @override
+  List<HirValue> get inputs => [array, index];
+}
+
+/// Writes [value] like [HirLoadElement] reads it.
+final class HirStoreElement(
+  final HirElement element,
+  final HirValue array,
+  final HirValue index,
+  final HirValue value,
+) extends HirInstruction {
+  @override
+  HirType? get type => null;
+  @override
+  List<HirValue> get inputs => [array, index, value];
+}
+
+/// The number of [target], or -1 if it has no objects.
+final class HirClassNumber(final HirClass target) extends HirInstruction {
+  @override
+  HirType get type => .integer;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
 /// The object that [object] is.
 final class HirStatic(final HirConstObject object) extends HirInstruction {
   @override
@@ -195,6 +248,11 @@ enum HirUnaryOperator(
 
   /// Truncates a finite `double` to the nearest `int` there is.
   floatToInt('int ', .float, .integer),
+
+  /// The same 64 bits.
+  floatBits('bits ', .float, .integer),
+  bitsFloat('of bits ', .integer, .float),
+  squareRoot('sqrt ', .float, .float),
 }
 
 final class HirUnary(final HirUnaryOperator operator, final HirValue operand)
@@ -237,22 +295,6 @@ final class HirIsInstance(final HirTypeTest test, final HirValue object)
   HirType get type => .boolean;
   @override
   List<HirValue> get inputs => [object];
-}
-
-/// Writes [text] to standard error.
-final class HirWriteError(final String text) extends HirInstruction {
-  @override
-  HirType? get type => null;
-  @override
-  List<HirValue> get inputs => const [];
-}
-
-/// Writes [text] and a newline to standard output, as `print` does.
-final class HirPrint(final String text) extends HirInstruction {
-  @override
-  HirType? get type => null;
-  @override
-  List<HirValue> get inputs => const [];
 }
 
 /// Calls [target] with one argument for each of its parameters.

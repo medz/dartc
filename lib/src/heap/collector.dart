@@ -23,6 +23,9 @@ const _stateBytes = 1024;
 // A block: the next one, the size of its cells, and its own size.
 const _next = 0, _cellBytes = 8, _blockBytes = 16, _firstCell = 32;
 
+// Where arrays have their number of elements, and where those are.
+const _length = 16, _elements = 24;
+
 // A free cell holds the next one after its header.
 const _nextFree = 8;
 
@@ -186,7 +189,12 @@ void _markFields(int object) {
   final record = table + load32(table + load32(object) * 4);
   final count = load32(record);
   for (var i = 0; i < count; i++) {
-    _mark(load64(object + load32(record + 4 + i * 4)));
+    _mark(load64(object + load32(record + 8 + i * 4)));
+  }
+  if (load32(record + 4) == 0) return;
+  final length = load64(object + _length);
+  for (var i = 0; i < length; i++) {
+    _mark(load64(object + _elements + i * 8));
   }
 }
 

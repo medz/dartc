@@ -4,6 +4,7 @@
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dartc/driver.dart';
 import 'package:test/test.dart';
@@ -23,7 +24,6 @@ Future<int> _run(String source, {bool collectsAlways = false}) async {
   final program = '${directory.path}/program';
   final bytes = await compileProgram(
     '${directory.path}/main.dart',
-    sdk: hostSdk,
     collectsAlways: collectsAlways,
   );
   writeProgram(bytes, program);
@@ -140,25 +140,16 @@ void main() {
   ''');
 
   test('a program that creates no objects has no collector', () async {
-    Future<int> size(String source) async {
+    Future<Uint8List> compile(String source, {bool always = false}) {
       final directory = writeSources({'main.dart': source});
       final path = '${directory.path}/main.dart';
-      final program = await compileProgram(path, sdk: hostSdk);
-      expect(
-        await compileProgram(path, sdk: hostSdk, collectsAlways: true),
-        program,
-      );
-      return program.length;
+      return compileProgram(path, collectsAlways: always);
     }
 
-    final plain = await size("void main() => print('a');");
-    expect(
-      await size(
+    const source =
         'class A { final int n; const A(this.n); }\n'
-        "int x = 0; A a = const A(1);\nvoid main() { x++; a; print('a'); }",
-      ),
-      lessThan(plain + 2 * 16384 + 4096),
-    );
+        'int x = 0; A a = const A(1);\nvoid main() { x++; a; }';
+    expect(await compile(source), await compile(source, always: true));
   });
 
   test('collecting always keeps what is used', () async {

@@ -44,7 +44,6 @@ final class ConstructorTranslator(
       final list = _builder.typesOf(class_)!;
       _builder.add(HirStore(field, _builder.receiver!, list));
     }
-    _setMixinTypes(level);
     _setFields(level);
     for (final parameter in element.formalParameters) {
       if (parameter case FieldFormalParameterElement(:final field?)) {
@@ -70,7 +69,7 @@ final class ConstructorTranslator(
       }
     }
     final parent = explicit?.element ?? element.superConstructor;
-    if (parent != null && !parent.library.isInSdk) {
+    if (parent != null && !_isObject(parent)) {
       _run(
         parent,
         explicit?.argumentList,
@@ -85,15 +84,8 @@ final class ConstructorTranslator(
     }
   }
 
-  /// Keeps the type arguments of the mixins of [level].
-  void _setMixinTypes(Level level) {
-    for (final below in level.chain.skip(1).takeWhile((l) => l.isMixin)) {
-      final field = _scope.argumentsOf(below);
-      if (field == null) continue;
-      final list = _scope.typeList(_builder, below.type.typeArguments)!;
-      _builder.add(HirStore(field, _builder.receiver!, list));
-    }
-  }
+  static bool _isObject(ConstructorElement element) =>
+      (element.enclosingElement as ClassElement).isDartCoreObject;
 
   void _setMixinFields(Level level) {
     for (final below in level.chain.skip(1).takeWhile((l) => l.isMixin)) {
@@ -130,7 +122,14 @@ final class ConstructorTranslator(
     final class_ = element.enclosingElement as ClassElement;
     final owner = takesTypes(target.baseElement);
     if (owner == null) return null;
-    if (owner == class_) return _builder.typesOf(class_);
+    final own = _builder.typesOf(class_);
+    if (owner == class_) return own;
+    final given = class_.supertype!.typeArguments;
+    final isSame =
+        own != null &&
+        given.length == class_.typeParameters.length &&
+        given.indexed.every((e) => e.$2 == class_.thisType.typeArguments[e.$1]);
+    if (isSame) return own;
     return _scope.typeList(_builder, class_.supertype!.typeArguments)!;
   }
 

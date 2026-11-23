@@ -10,9 +10,8 @@ Future<void> main(List<String> arguments) async {
     exit(64);
   }
   final [source, output] = arguments;
-  final sdk = File(Platform.resolvedExecutable).parent.parent.path;
   try {
-    writeProgram(await compileProgram(source, sdk: sdk), output);
+    writeProgram(await compileProgram(source), output);
   } on CompileFailure catch (failure) {
     stderr.writeln(failure);
     exit(1);

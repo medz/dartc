@@ -1,3 +1,4 @@
+import 'package:dartc/driver.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
@@ -335,11 +336,9 @@ void main() {
       void main() { A().f(); if (1 > 2) other(null); }
       void other(C? c) => c?.f();
     ''');
-    expect(module.classes.map((c) => c.name), [
-      'A',
-      'StackOverflowError',
-      'StackTrace',
-    ]);
+    final names = module.classes.map((class_) => class_.name);
+    expect(names, contains('A'));
+    expect(names, isNot(anyOf(contains('B'), contains('C'))));
     expect((HirInterpreter(module)..run()).output, 'A\n');
   });
 
@@ -355,7 +354,7 @@ A make() => A();''',
     });
     final program = await loadProgram(
       '${directory.path}/main.dart',
-      sdk: hostSdk,
+      sdk: await packagedSdk(),
     );
     final interpreter = HirInterpreter(translateProgram(program))..run();
     expect(interpreter.output, 'ok\n');
@@ -368,24 +367,12 @@ A make() => A();''',
 
     const what = 'Not supported yet:';
     reports(
-      'class A implements Exception {}\nclass B extends TypeError {}\nvoid main() { A(); B(); }',
-      '2:7: $what extending TypeError of the SDK.',
-    );
-    reports(
       'class A(int x) {}\nvoid main() { A(1); }',
       '1:7: $what primary constructors.',
     );
     reports(
       'class A(final int x);\nvoid main() { A(1); }',
       '1:7: $what primary constructors.',
-    );
-    reports(
-      'class A {}\nvoid main() { A().toString(); }',
-      '2:15: $what calling toString of the SDK.',
-    );
-    reports(
-      'class A {}\nvoid main() { A().hashCode; }',
-      '2:15: $what calling hashCode of the SDK.',
     );
     reports(
       'class A { external void f(); }\nvoid main() { A().f(); }',
@@ -404,28 +391,8 @@ A make() => A();''',
       '3:15: $what extensions.',
     );
     reports(
-      'class A { int f() => 1; }\nvoid main() { A().f().toString(); }',
-      '2:15: $what calling toString of the SDK.',
-    );
-    reports(
-      'class A { String toString() => "a"; }\nvoid main() { A().toString(); }',
-      '2:15: $what a result of type String.',
-    );
-    reports(
       'enum E { a }\nvoid main() { E.a; }',
       '2:15: $what a constant of type E.',
-    );
-    reports(
-      'void main() { Object(); }',
-      '1:15: $what calling Object of the SDK.',
-    );
-    reports(
-      'class A { int f() => super.hashCode; }\nvoid main() { A().f(); }',
-      '1:22: $what calling hashCode of the SDK.',
-    );
-    reports(
-      'class A { void f() { super.toString(); } }\nvoid main() { A().f(); }',
-      '1:22: $what calling toString of the SDK.',
     );
   });
 }

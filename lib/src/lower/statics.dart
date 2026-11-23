@@ -68,14 +68,27 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
 
   /// The symbol of [object].
   String constant(HirConstObject object) => _constants.putIfAbsent(object, () {
-    final HirConstObject(:target, :fields) = object;
-    final words = _Words(_layout.sizeOf(target));
+    final HirConstObject(:target, :fields, :elements) = object;
+    final elementBytes = target.elements == .references ? 8 : 1;
+    final words = _Words(
+      _layout.sizeOf(target) + (elements?.length ?? 0) * elementBytes,
+    );
     words.data
-      ..setUint32(classOffset, _layout.numberOf(target), .little)
+      ..setUint32(classOffset, _layout.numberOf(target)!, .little)
       ..setUint32(classOffset + 4, _fixedFlag, .little);
     fields.forEach((field, value) {
       _set(words, _layout.offsetOf(field), value);
     });
+    if (elements != null) {
+      words.data.setInt64(lengthOffset, elements.length, .little);
+    }
+    for (final (i, element) in (elements ?? const []).indexed) {
+      if (target.elements == .references) {
+        _set(words, elementsOffset + i * 8, element);
+      } else {
+        words.data.setUint8(elementsOffset + i, element as int);
+      }
+    }
     final symbol = '.const.${_constants.length}';
     // Those it refers to took their numbers already.
     _objects.add(words.build(symbol, writable: false));
@@ -98,7 +111,8 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
   }
 
   /// For each class, where its record is; then each record: the number of
-  /// references in objects and their offsets.
+  /// references in fields, whether elements are references too, and the
+  /// offsets of the former.
   LirData classTable() {
     final words = <int>[], starts = <int>[];
     for (final class_ in module.classes) {
@@ -107,7 +121,8 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
           if (field.type == .reference) _layout.offsetOf(field),
       ];
       starts.add((module.classes.length + words.length) * 4);
-      words.addAll([offsets.length, ...offsets]);
+      final isArray = class_.elements == .references;
+      words.addAll([offsets.length, isArray ? 1 : 0, ...offsets]);
     }
     return LirData(
       classTableSymbol,

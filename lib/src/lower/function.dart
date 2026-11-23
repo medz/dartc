@@ -5,7 +5,6 @@ import 'package:dartc/lir.dart';
 import 'dispatch.dart';
 import 'machine.dart';
 import 'operators.dart';
-import 'output.dart';
 import 'statics.dart';
 import 'system.dart';
 
@@ -30,7 +29,6 @@ LirSignature _selectorSignature(HirSelector selector) => LirSignature([
 final class FunctionLowering(
   final HirFunction function,
   final Map<HirCallable, String> symbols,
-  final OutputData output,
   final ObjectLayout layout,
   final StaticData statics,
   final MachineLowering machine,
@@ -99,6 +97,17 @@ final class FunctionLowering(
           block.add(layout.allocation(block, target)),
           target,
         );
+      case HirNewArray(:final target, :final length):
+        return layout.setClass(
+          block,
+          block.add(layout.allocation(block, target, _value(length))),
+          target,
+          _value(length),
+        );
+      case HirLength() || HirLoadElement() || HirStoreElement():
+        return _element(block, instruction);
+      case HirClassNumber(:final target):
+        return block.add(ConstInt(layout.numberOf(target) ?? -1));
       case HirStatic(:final object):
         return block.add(StaticObject(statics.constant(object)));
       case HirLoadGlobal(:final global):
@@ -128,14 +137,23 @@ final class FunctionLowering(
         return null;
       case HirVirtualCall() || HirCall():
         return block.add(_call(block, instruction as HirCalling));
-      case HirPrint(:final text):
-        output.write(block, standardOutput, '$text\n');
-        return null;
-      case HirWriteError(:final text):
-        output.write(block, standardError, text);
-        return null;
       case HirIsInstance(:final test, :final object):
         return layout.isInstance(block, statics.test(test), _value(object));
+    }
+  }
+
+  /// A use of the elements of an array.
+  LirValue? _element(LirBlock block, HirInstruction instruction) {
+    final [array, ...rest] = instruction.inputs.map(_value).toList();
+    switch (instruction) {
+      case HirLoadElement(:final element):
+        return layout.loadElement(block, element, array, rest.single);
+      case HirStoreElement(:final element):
+        final [index, value] = rest;
+        layout.storeElement(block, element, array, index, value);
+        return null;
+      default:
+        return layout.length(block, array);
     }
   }
 
@@ -144,6 +162,8 @@ final class FunctionLowering(
     switch (calling) {
       case HirNew(:final target):
         return layout.allocation(block, target);
+      case HirNewArray(:final target, :final length):
+        return layout.allocation(block, target, _value(length));
       case HirVirtualCall(:final selector, :final receiver, :final arguments):
         final object = _value(receiver);
         return CallIndirect(
@@ -163,11 +183,20 @@ final class FunctionLowering(
   Invoke _invoke(LirBlock block, HirInvoke invoke) {
     final HirInvoke(:call, :onReturn, :onThrow) = invoke;
     var normal = _edge(onReturn);
-    if (call is HirNew) {
+    final created = switch (call) {
+      HirNew(:final target) || HirNewArray(:final target) => target,
+      _ => null,
+    };
+    if (created != null) {
       // Objects get their class before they are used.
       final made = LirBlock([.ref]);
       _added.add(made);
-      layout.setClass(made, made.parameters.single, call.target);
+      layout.setClass(
+        made,
+        made.parameters.single,
+        created,
+        call is HirNewArray ? _value(call.length) : null,
+      );
       made.end(
         Jump(
           LirEdge(normal.target, [made.parameters.single, ...normal.arguments]),

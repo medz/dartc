@@ -6,7 +6,6 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
-import 'builtin_error.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'closure.dart';
@@ -17,15 +16,16 @@ import 'creators.dart';
 import 'dispatch.dart';
 import 'dynamic_shape.dart';
 import 'dynamic_table.dart';
-import 'error_table.dart';
 import 'expression.dart';
 import 'field_table.dart';
 import 'global_table.dart';
 import 'levels.dart';
 import 'members.dart';
-import 'report.dart';
+import 'origins.dart';
+import 'runtime_links.dart';
 import 'scope.dart';
 import 'statement.dart';
+import 'test_table.dart';
 import 'type_functions.dart';
 import 'type_table.dart';
 import 'types.dart';
@@ -34,23 +34,20 @@ import 'types.dart';
 ///
 /// Throws [CompileFailure] at the first construct not supported yet.
 ///
-/// A program that needs it includes the [runtime], if given.
-HirModule translateProgram(SourceProgram program, {SourceProgram? runtime}) =>
-    ProgramTranslator(program, runtime).translate();
+HirModule translateProgram(SourceProgram program) =>
+    ProgramTranslator(program).translate();
 
 /// Finds the functions a program needs and translates each once.
 ///
 /// Functions, classes and selectors only grow and are bounded by the source.
-final class ProgramTranslator(
-  final SourceProgram program,
-  final SourceProgram? _runtime,
-) implements ProgramScope {
+final class ProgramTranslator(final SourceProgram program)
+    implements ProgramScope {
   SourceUnit get _unit => program.main.units.first;
   LibraryElement get _core =>
       program.main.element.typeProvider.objectElement.library;
   late final _declarations = Declarations([
     ...program.libraries,
-    ...?_runtime?.libraries,
+    ...program.sdk,
   ]);
   late final _classes = ClassTable(_declarations);
   late final _dispatch = DispatchBuilder(this, _declarations, _unit);
@@ -58,8 +55,11 @@ final class ProgramTranslator(
     _declarations,
     _classes,
     _core,
+    boxElement,
+    () => _links.library('dart:_compact_hash'),
     _functionConstant,
     (types) => _types.list(types),
+    typeObject,
     _dispatch.instantiate,
   );
   late final TypeTable _types = TypeTable(this, _classes, _constants);
@@ -71,7 +71,8 @@ final class ProgramTranslator(
   );
   late final _dynamics = DynamicTable(this, _unit);
   late final _fields = FieldTable(this, _declarations, _classes);
-  late final _errors = ErrorTable(_classes, _core, _dispatch.instantiate);
+  late final _tests = TestTable(_classes);
+  late final _links = RuntimeLinks(program, _core, createdClass, _constants);
   late final _globals = GlobalTable(
     this,
     _declarations,
@@ -89,8 +90,7 @@ final class ProgramTranslator(
 
   /// The classes of local functions and variables that are no values.
   final _localClasses = <HirClass>[];
-  final _thrown = <InterfaceElement>{};
-  HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _writeNumber;
+  HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
 
   HirModule translate() {
     final start = program.main.units.first;
@@ -105,7 +105,7 @@ final class ProgramTranslator(
     }
     final main = HirFunction(entry.displayName, const []);
     _functions[(entry, null)] = main;
-    _pending.add(() => _translate(entry, null));
+    _pending.add(() => _translate(entry, null, null));
     do {
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
@@ -114,7 +114,9 @@ final class ProgramTranslator(
     } while (_dispatch.update() ||
         _closures.update() ||
         _dynamics.update(
-          _dispatch.classes.where((class_) => !_isRuntime(class_.library)),
+          _dispatch.classes.where(
+            (class_) => !RuntimeLinks.isRuntime(class_.library),
+          ),
           _classes.classOf,
           _closures.closures,
         ) ||
@@ -122,23 +124,14 @@ final class ProgramTranslator(
         _pending.isNotEmpty);
     _typeFunctions.finish();
     final dispatch = {
-      ..._dispatch.result(_classes.classOf, _closures),
+      ..._dispatch.result(_classes.classOf, _closures, _functionClass),
       ..._closures.dispatch,
       ..._dynamics.dispatch,
-      if (_typeFunctions.isUsed) _typeFunctions.typeOf: _typeFunctions.entries,
+      ..._typeFunctions.dispatch,
     };
-    final report = ReportBuilder(
-      _declarations,
-      _classes,
-      _errors,
-      _thrown,
-      _writeNumber,
-      runtime,
-    );
-    final uncaught = _canThrow ? report.build(_dispatch.classes) : null;
     return HirModule(
       main,
-      [..._allFunctions, ?uncaught],
+      _allFunctions,
       classes: [
         ..._dispatch.classes.map(_classes.classOf),
         for (final closure in _closures.closures) closure.class_,
@@ -147,17 +140,16 @@ final class ProgramTranslator(
       ],
       dispatch: dispatch,
       globals: _globals.globals,
-      tests: {
-        ..._errors.results(_dispatch.classes),
-        ..._closures.tests,
-        ..._closures.exact,
-        ...report.tests,
-      },
+      tests: _tests.results(
+        _dispatch.classes,
+        _closures.closures,
+        _functionClass,
+      ),
       allocate: _allocate,
       raise: _raise,
       stackOverflow: _stackOverflow,
       outOfMemory: _outOfMemory,
-      uncaught: uncaught,
+      uncaught: _uncaught,
     );
   }
 
@@ -171,7 +163,7 @@ final class ProgramTranslator(
     ..._bodies,
     ..._creators.functions,
     ..._typeFunctions.functions,
-    ..._errors.functions,
+    ..._links.functions,
   ];
 
   /// Whether the program throws, or calls what may use up the stack.
@@ -186,43 +178,17 @@ final class ProgramTranslator(
 
   /// Adds what the functions found so far need of the runtime.
   void _addRuntime() {
+    if (_closures.closures.isNotEmpty) _dispatch.instantiate(_functionClass);
     if (!_canThrow) return;
-    _stackOverflow ??= _errors.throwerOf(.stackOverflow);
-    _raise ??= _runtimeFunction('raise');
-    if (_allocate != null) _outOfMemory ??= _errors.throwerOf(.outOfMemory);
-    final int = _core.getClass('int')!;
-    final throwsInts =
-        _dispatch.classes.contains(int) &&
-        _thrown.any((class_) => isSubclass(int, class_));
-    final throwsGenerics = _dispatch.classes.any(
-      (class_) =>
-          class_.typeParameters.isNotEmpty &&
-          _thrown.any((thrown) => isSubclass(class_, thrown)),
-    );
-    if (throwsGenerics) runtime('writeObjectType');
-    if (throwsInts || _errors.throwerIfMade(.negativeShift) != null) {
-      _writeNumber ??= _runtimeFunction('writeNumber');
-    }
+    _stackOverflow ??= _links.exhaustion('StackOverflowError');
+    _raise ??= runtime('raise');
+    _uncaught ??= runtime('reportUncaught');
+    if (_allocate == null) return;
+    _outOfMemory ??= _links.exhaustion('OutOfMemoryError');
   }
-
-  /// The function called [name] in the runtime, if there is one.
-  HirFunction? _runtimeFunction(String name) {
-    for (final library in _runtime?.libraries ?? const <SourceLibrary>[]) {
-      final found = library.element.getTopLevelFunction(name);
-      if (found != null) return _declare(found);
-    }
-    return null;
-  }
-
-  bool _isRuntime(LibraryElement library) =>
-      _runtime?.libraries.any((own) => own.element == library) ?? false;
 
   @override
-  HirFunction throwerOf(BuiltinError error) {
-    final thrower = _errors.throwerOf(error);
-    if (!error.isExhaustion) _addAllocation();
-    return thrower;
-  }
+  HirFunction runtime(String name) => _declare(_links.function(name));
 
   @override
   Captures capturesOf(AstNode declaration) =>
@@ -254,9 +220,6 @@ final class ProgramTranslator(
   @override
   HirSelector callSelector(int positional, List<String> named) =>
       _closures.selectorOf(positional, named);
-
-  @override
-  HirTypeTest get functionTest => _closures.anyFunction;
 
   /// Whether the program declares [element].
   bool _declares(ExecutableElement element) =>
@@ -301,27 +264,30 @@ final class ProgramTranslator(
   }
 
   @override
-  InterfaceElement canonicalClass(InterfaceElement class_) {
-    final base = class_.baseElement as InterfaceElement;
-    return base.library.isDartCore ? _core.getClass(base.name!) ?? base : base;
-  }
-
-  @override
-  ClassElement runtimeClass(String name) {
-    for (final library in _runtime?.libraries ?? const <SourceLibrary>[]) {
-      final found = library.element.getClass(name);
-      if (found != null) return found;
-    }
-    throw StateError('No runtime with $name.');
-  }
+  ClassElement runtimeClass(String name) => _links.heapClass(name);
 
   @override
   ClassElement get functionClass => _core.getClass('Function')!;
+
+  /// The class of objects that are functions.
+  ClassElement get _functionClass => _core.getClass('_Closure')!;
 
   @override
   HirValue? typeValue(FunctionBuilder builder, DartType type) {
     _prepareTypes();
     return _types.value(builder, type);
+  }
+
+  @override
+  HirConstObject? typeObject(DartType type) {
+    _prepareTypes();
+    final own = _types.constant(type);
+    if (own == null) return null;
+    final class_ = _core.getClass('_Type')!, target = createdClass(class_);
+    return _constants.canonical(
+      class_,
+      HirConstObject(target, {target.fields.single: own}),
+    );
   }
 
   @override
@@ -337,6 +303,20 @@ final class ProgramTranslator(
   }
 
   @override
+  HirValue list(FunctionBuilder builder, DartType type, List<HirValue> values) {
+    final element = _core.getClass('_List')!, class_ = createdClass(element);
+    final length = builder.add(HirConst(values.length));
+    final array = builder.call(HirNewArray(class_, length))!;
+    final types = typeList(builder, [type])!;
+    builder.add(HirStore(class_.fields.single, array, types));
+    for (final (i, value) in values.indexed) {
+      final index = builder.add(HirConst(i));
+      builder.add(HirStoreElement(.reference, array, index, value));
+    }
+    return array;
+  }
+
+  @override
   Constant? constantTypes(List<DartType> types) => _types.list(types);
 
   @override
@@ -344,7 +324,6 @@ final class ProgramTranslator(
 
   /// Makes the classes that describe types part of the program.
   void _prepareTypes() {
-    if (_runtime == null) return;
     for (final name in const ['BasicType', 'SuperList', 'VariableType']) {
       createdClass(runtimeClass(name));
     }
@@ -381,64 +360,57 @@ final class ProgramTranslator(
       _dynamics.selectorOf(shape);
 
   @override
-  int missingNumber(String kind, String name) {
-    runtime('writeObjectType');
-    return _errors.missingNumber(kind, name);
-  }
+  HirFunction dynamicNull(HirSelector selector) =>
+      _dynamics.forNull(selector, _core.getClass('Null')!);
+
+  @override
+  HirInstruction text(String value) => HirStatic(_constants.text(value));
 
   @override
   void schedule(void Function() work) => _pending.add(work);
 
   @override
-  HirClass boxClass(HirType type) => createdClass(
-    _core.getClass(type.dartName) ?? (throw StateError('No box of $type.')),
-  );
+  HirClass boxClass(HirType type) => createdClass(boxElement(type));
+
+  @override
+  ClassElement boxElement(HirType type) => _core.getClass(switch (type) {
+    .integer => '_Mint',
+    .float => '_Double',
+    _ => 'bool',
+  })!;
 
   @override
   HirConstObject boxOf(Object value) => _constants.box(value);
 
   @override
-  int castNumber(String? type, String ending) {
-    runtime('writeObjectType');
-    if (type == null) runtime('writeType');
-    return _errors.castNumber(type, ending);
-  }
+  HirInstruction get trace => _links.trace;
 
   @override
-  HirFunction runtime(String name) =>
-      _runtimeFunction(name) ?? (throw StateError('No runtime with $name.'));
-
-  @override
-  int lateNumber(String text) => _errors.lateNumber(text);
-
-  @override
-  HirClass get traceClass {
-    _addAllocation();
-    return _errors.trace;
-  }
-
-  @override
-  void addThrown(InterfaceElement class_) => _thrown.add(class_);
-
-  @override
-  HirTypeTest testOf(InterfaceElement class_) => _errors.testOf(class_);
+  HirTypeTest testOf(InterfaceElement class_) => _tests.testOf(class_);
 
   @override
   HirFunction? functionOf(ExecutableElement element) {
     final library = element.library;
-    if (_isRuntime(library) && library.uri.path.endsWith('/program.dart')) {
+    if ('${library.uri}' == 'dart:_heap/program.dart') {
       return _typeFunctions.named(element.displayName);
     }
     return _declarations[element] == null ? null : _declare(element);
   }
 
   @override
-  HirMachineOp? machineOpOf(ExecutableElement element) {
-    final library = element.library;
-    return _isRuntime(library) && library.uri.path.endsWith('/machine.dart')
-        ? HirMachineOp.values.byName(element.displayName)
-        : null;
-  }
+  String? operationOf(ExecutableElement element) =>
+      RuntimeLinks.operationOf(element);
+
+  @override
+  String? pragmaOf(Element element, String name) =>
+      _declarations.pragmaOf(element, name);
+
+  @override
+  bool declares(InstanceElement class_) =>
+      _declarations[class_.baseElement] != null;
+
+  @override
+  HirClass classAt(Level level) => _classes.atLevel(level);
 
   @override
   GlobalVariable? globalOf(PropertyInducingElement element) =>
@@ -462,8 +434,16 @@ final class ProgramTranslator(
     ExecutableElement member,
     int positional,
     List<String> named,
-    Reject reject,
-  ) => _dispatch.functionAt(level, member, positional, named, reject);
+    Reject reject, {
+    bool isUnboxed = false,
+  }) => _dispatch.functionAt(
+    level,
+    member,
+    positional,
+    named,
+    reject,
+    isUnboxed: isUnboxed,
+  );
 
   @override
   Level levelOf(ClassElement class_) => _classes.levels.of(class_);
@@ -482,7 +462,7 @@ final class ProgramTranslator(
     return class_;
   }
 
-  void _addAllocation() => _allocate ??= _runtimeFunction('allocate');
+  void _addAllocation() => _allocate ??= runtime('allocate');
 
   @override
   FieldPlace fieldOf(Level level, FieldElement element) =>
@@ -520,7 +500,8 @@ final class ProgramTranslator(
   HirFunction _declare(ExecutableElement element, [Level? given]) {
     final level = given ?? _ownLevel(element);
     return _functions.putIfAbsent((element, level), () {
-      _pending.add(() => _translate(element, level));
+      final by = _origins.current;
+      _pending.add(() => _translate(element, level, by));
       final owner = element.enclosingElement;
       final result = element.returnType;
       final isInitializer = isInitializerElement(element);
@@ -529,7 +510,7 @@ final class ProgramTranslator(
             ? '${owner.displayName}.${element.lookupName}'
             : element.displayName,
         [
-          if (hasReceiver(element)) .reference,
+          if (level != null) plainType(level.element) ?? .reference,
           if (takesTypes(element) != null) .reference,
           for (final parameter in element.formalParameters)
             valueType(parameter.type) ??
@@ -545,7 +526,7 @@ final class ProgramTranslator(
                     element,
                     'a result of type $result',
                   )),
-        !_isRuntime(element.library),
+        !RuntimeLinks.isRuntime(element.library),
       );
     });
   }
@@ -555,7 +536,15 @@ final class ProgramTranslator(
       ? levelOf(element.enclosingElement as ClassElement)
       : null;
 
-  void _translate(ExecutableElement element, Level? level) {
+  final _origins = Origins();
+
+  void _translate(
+    ExecutableElement element,
+    Level? level,
+    ExecutableElement? by,
+  ) => _origins.within(element, by, () => _translateDeclared(element, level));
+
+  void _translateDeclared(ExecutableElement element, Level? level) {
     final declared = _declarations[element];
     final owner = element.enclosingElement;
     final (unit, node) = declared ?? _declarations[owner as ClassElement]!;

@@ -34,16 +34,6 @@ final class ClosureTable(
   /// Functions made here.
   final List<HirFunction> made = [];
 
-  HirTypeTest? _anyFunction;
-
-  /// Whether objects are functions.
-  HirTypeTest get anyFunction => _anyFunction ??= HirTypeTest('Function');
-
-  /// The classes that pass each test.
-  Map<HirTypeTest, Set<HirClass>> get tests => {
-    ?_anyFunction: {for (final closure in closures) closure.class_},
-  };
-
   void add(Closure closure) => closures.add(closure);
 
   /// The selector of calls with arguments of a shape; names are sorted.
@@ -155,6 +145,7 @@ final class ClosureTable(
         }
         return _scope.typeValue(builder, _withoutParameters(element.type))!;
       },
+      text: " from Function '${_nameOf(element)}': static.",
     );
     add(made);
     return made;
@@ -167,6 +158,12 @@ final class ClosureTable(
         HirConstObject(class_, {
           for (final field in class_.fields) field: types,
         });
+  }
+
+  static String _nameOf(ExecutableElement element) {
+    if (element is! ConstructorElement) return element.displayName;
+    final name = element.name == 'new' ? '' : element.name;
+    return '${element.enclosingElement.displayName}.$name';
   }
 
   final _constants = <String, HirConstObject>{};
@@ -205,6 +202,7 @@ final class ClosureTable(
           );
           return _scope.methodType(builder, element)!;
         },
+        text: " from Function '${element.displayName}':.",
         isTearOff: true,
       );
       add(made);
@@ -214,44 +212,4 @@ final class ClosureTable(
     builder.add(HirStore(closure.class_.fields.single, object, receiver));
     return object;
   }
-
-  /// How functions compare themselves, in place of `Object`'s [equals].
-  Map<HirClass, HirFunction> equalities(
-    HirSelector selector,
-    HirFunction equals,
-  ) => {
-    for (final closure in closures)
-      closure.class_: closure.isTearOff
-          ? _equalities[closure] ??= _tearOffEquals(closure, selector)
-          : equals,
-  };
-
-  final _equalities = <Closure, HirFunction>{};
-
-  HirFunction _tearOffEquals(Closure closure, HirSelector selector) {
-    final function = HirFunction('== of ${closure.class_.name}', [
-      .reference,
-      .reference,
-    ], .boolean);
-    final builder = FunctionBuilder(_unit, function, const []);
-    final test = HirTypeTest(closure.class_.name);
-    exact[test] = {closure.class_};
-    final [self, other] = builder.inputs;
-    final field = closure.class_.fields.single;
-    HirValue receiver(HirValue object) => builder.add(HirLoad(field, object));
-    final result = builder.choose(
-      builder.add(HirIsInstance(test, other)),
-      .boolean,
-      () => builder.add(HirCompare(.equal, receiver(self), receiver(other))),
-      () => builder.add(HirConst(false)),
-    );
-    builder
-      ..end(HirReturn(result))
-      ..finish();
-    made.add(function);
-    return function;
-  }
-
-  /// Tests for single classes.
-  final exact = <HirTypeTest, Set<HirClass>>{};
 }

@@ -339,6 +339,27 @@ void main() {
     ]);
   }, skip: skipExecution);
 
+  test('writable data keeps what is written', () async {
+    final functions = [
+      function('f', [.i64, .i64], .i64, (block, p) {
+        final address = block.add(SymbolAddress('bytes'));
+        final before = block.add(Load(.i64, address, offset: 8));
+        block
+          ..add(Store(.i64, address, p[0], offset: 8))
+          ..add(Store(.u8, address, p[1], offset: 8));
+        final after = block.add(Load(.i64, address, offset: 8));
+        return block.add(IntBinary(.sub, after, before));
+      }),
+    ];
+    final data = [
+      LirData('bytes', List.generate(32, (i) => i), writable: true),
+      LirData('others', [1, 2, 3]),
+    ];
+    await agree(functions, [
+      for (final a in [0, 7, _max, _min]) (function: 'f', arguments: [a, 200]),
+    ], data: data);
+  }, skip: skipExecution);
+
   test('loads of every width from constant data', () async {
     // Every byte differs from its neighbors, and some are negative.
     final bytes = [for (var i = 0; i < 70000; i++) (i * 167 + i ~/ 256) & 0xff];

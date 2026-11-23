@@ -5,6 +5,10 @@ final class const SourceProblem(
   final int column,
   final String message,
 ) {
+  /// The same problem, with the reason that it matters.
+  SourceProblem because(String reason) =>
+      SourceProblem(path, line, column, '$message ($reason)');
+
   @override
   String toString() => '$path:$line:$column: $message';
 }

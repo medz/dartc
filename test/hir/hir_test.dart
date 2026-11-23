@@ -289,10 +289,9 @@ void main() {
     test('output keeps its order', () {
       final interpreter = HirInterpreter(
         body((block) {
-          block
-            ..add(HirPrint('a'))
-            ..add(HirPrint(''))
-            ..add(HirPrint('b'));
+          writeText(block, 1, 'a\n');
+          writeText(block, 1, '');
+          writeText(block, 1, '\nb\n');
           return HirReturn();
         }),
       );
@@ -333,7 +332,6 @@ void main() {
     final i = entry.add(HirConst(-1)), b = entry.add(HirConst(true));
     final d = entry.add(HirUnary(.intToFloat, i));
     entry
-      ..add(HirPrint('a\n"'))
       ..add(HirCall(callee, [d]))
       ..add(HirIntBinary(.shiftLeft, i, entry.add(HirConst(2))))
       ..add(HirFloatBinary(.divide, d, d))
@@ -352,7 +350,6 @@ b0():
   v0 = -1
   v1 = true
   v2 = double v0
-  print "a\\n\\""
   v3 = f(v2)
   v4 = 2
   v5 = v0 << v4

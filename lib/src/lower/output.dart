@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dartc/lir.dart';
 
 import 'system.dart';
@@ -8,50 +6,11 @@ import 'system.dart';
 const writeSymbol = '.write';
 final writeSignature = LirSignature([.i64, .ptr, .i64]);
 
-const standardOutput = 1, standardError = 2;
 const _interrupted = 4, _brokenPipe = 13, _ignore = 1;
 
-/// The texts a program prints, each stored once.
-final class OutputData() {
-  final _symbols = <String, String>{};
-  final List<LirData> data = [];
-
-  /// Every byte, so that each has an address.
-  static const _bytes = '.bytes';
-  bool _hasBytes = false;
-
-  bool get isUsed => data.isNotEmpty;
-
-  /// Adds a write of [text] to [block].
-  void write(LirBlock block, int descriptor, String text) {
-    final bytes = utf8.encode(text);
-    final symbol = _symbols.putIfAbsent(text, () {
-      final name = '.text.${data.length}';
-      data.add(LirData(name, bytes));
-      return name;
-    });
-    final address = block.add(SymbolAddress(symbol));
-    _write(block, descriptor, address, bytes.length);
-  }
-
-  /// Adds a write of the single byte [value] to [block].
-  void writeByte(LirBlock block, int descriptor, LirValue value) {
-    if (!_hasBytes) {
-      data.add(LirData(_bytes, List.generate(256, (i) => i)));
-      _hasBytes = true;
-    }
-    final mask = block.add(ConstInt(0xff));
-    final index = block.add(IntBinary(.and, value, mask));
-    final address = block.add(PtrAdd(block.add(SymbolAddress(_bytes)), index));
-    _write(block, descriptor, address, 1);
-  }
-
-  void _write(LirBlock block, int descriptor, LirValue address, int count) {
-    final to = block.add(ConstInt(descriptor));
-    final size = block.add(ConstInt(count));
-    block.add(Call(writeSymbol, writeSignature, [to, address, size]));
-  }
-}
+/// Where bytes are before they are written.
+const bufferSymbol = '.buffer';
+const bufferBytes = 4096;
 
 /// Prepares output at the start of the program.
 ///

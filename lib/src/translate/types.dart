@@ -4,10 +4,8 @@ import 'package:dartc/hir.dart';
 
 /// The representation of values of [type], or null if not supported yet.
 HirType? valueType(DartType type) {
-  if (type.nullabilitySuffix == .none) {
-    if (type.isDartCoreInt) return .integer;
-    if (type.isDartCoreDouble) return .float;
-    if (type.isDartCoreBool) return .boolean;
+  if (type.nullabilitySuffix == .none && type is InterfaceType) {
+    if (plainType(type.element) case final plain?) return plain;
   }
   return isTop(type) ||
           type is FunctionType && type.typeParameters.isEmpty ||
@@ -18,6 +16,23 @@ HirType? valueType(DartType type) {
       ? .reference
       : null;
 }
+
+/// How objects of [class_] are represented without boxes, if they are.
+HirType? plainType(InterfaceElement class_) => class_.library.isDartCore
+    ? switch (class_.name) {
+        'int' || '_IntegerImplementation' || '_Smi' || '_Mint' => .integer,
+        'double' || '_Double' => .float,
+        'bool' => .boolean,
+        _ => null,
+      }
+    : null;
+
+/// Whether objects of [class_] are numbers.
+bool _isNumeric(InterfaceElement class_) =>
+    class_.library.isDartCore &&
+    (class_.name == 'num' ||
+        plainType(class_) == .integer ||
+        plainType(class_) == .float);
 
 /// Whether every value is of [type].
 bool isTop(DartType type) =>
@@ -30,9 +45,8 @@ bool canBeNumber(DartType declared) {
   final type = boundOf(declared);
   return isTop(type) ||
       type.isDartCoreObject ||
-      type.isDartCoreNum ||
-      type.isDartCoreInt ||
-      type.isDartCoreDouble;
+      type is InterfaceType &&
+          (_isNumeric(type.element) || type.element.name == 'Comparable');
 }
 
 /// Whether the type given is that of numbers, without null.
@@ -40,7 +54,8 @@ bool isNumber(DartType? declared) {
   if (declared == null || declared.nullabilitySuffix != .none) return false;
   final type = boundOf(declared);
   return type.nullabilitySuffix == .none &&
-      (type.isDartCoreNum || type.isDartCoreInt || type.isDartCoreDouble);
+      type is InterfaceType &&
+      _isNumeric(type.element);
 }
 
 /// The type that a value of [type], a type parameter, has for sure.
@@ -81,39 +96,12 @@ bool isOpen(DartType type) => switch (type) {
 };
 
 /// The class whose objects, or null, are the values of a type.
-///
-/// Of the SDK's classes only `Object`, numbers, `bool`, errors, exceptions and
-/// stack traces are supported yet.
 InterfaceElement? classOf(DartType? declared) {
   final type = declared == null ? null : boundOf(declared);
-  if (type is! InterfaceType) return null;
+  if (type is! InterfaceType || type.isDartAsyncFutureOr) return null;
   final element = type.element;
-  if (element is! ClassElement && element is! MixinElement) return null;
-  final isKnown =
-      !element.library.isInSdk ||
-      element is ClassElement &&
-          _isKnown(element) &&
-          type.typeArguments.isEmpty;
-  return isKnown ? element : null;
+  return element is ClassElement || element is MixinElement ? element : null;
 }
-
-bool _isKnown(ClassElement class_) =>
-    class_.library.isDartCore &&
-    (class_.isDartCoreObject ||
-        const {
-          'num',
-          'int',
-          'double',
-          'bool',
-          'Function',
-        }.contains(class_.name) ||
-        class_.name == 'StackTrace' ||
-        _isFailure(class_) ||
-        class_.allSupertypes.any((type) => _isFailure(type.element)));
-
-bool _isFailure(InterfaceElement class_) =>
-    class_.library.isDartCore &&
-    (class_.name == 'Error' || class_.name == 'Exception');
 
 /// [type] as the official runtime calls it.
 String describeType(DartType type) {
@@ -187,13 +175,15 @@ List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
 
 /// Whether objects of [sub] are objects of [superclass] too.
 bool isSubclass(InterfaceElement sub, InterfaceElement superclass) =>
-    _isSameClass(sub, superclass) ||
-    sub.allSupertypes.any((type) => _isSameClass(type.element, superclass));
+    sub == superclass ||
+    sub.allSupertypes.any((type) => type.element == superclass) ||
+    _isHiddenSubclass(sub, superclass);
 
-/// The program and the runtime have each their own elements for the SDK.
-bool _isSameClass(InterfaceElement a, InterfaceElement b) =>
-    a == b ||
-    a.library.isInSdk &&
-        b.library.isInSdk &&
-        a.name == b.name &&
-        a.library.uri == b.library.uri;
+/// Every integer is one of those that the official runtime calls small, and
+/// the class of functions does not tell that it implements another.
+bool _isHiddenSubclass(InterfaceElement sub, InterfaceElement superclass) =>
+    superclass.library.isDartCore &&
+    (superclass.name == '_Smi' && plainType(sub) == .integer ||
+        superclass.name == 'Function' &&
+            sub.library.isDartCore &&
+            sub.name == '_Closure');

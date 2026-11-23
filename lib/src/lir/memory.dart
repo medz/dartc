@@ -20,13 +20,13 @@ final class LirObject(int size, {final bool writable = true}) {
 
 /// Simulated storage that rejects accesses a real machine would corrupt.
 final class LirMemory() {
-  final _regions = <int, ({Uint8List bytes, bool writable})>{};
+  final _regions = <({int start, Uint8List bytes, bool writable})>[];
   int _next = 0x10000;
 
   /// Adds native bytes and returns their address.
   int map(Uint8List bytes, {bool writable = true}) {
     final address = _next;
-    _regions[address] = (bytes: bytes, writable: writable);
+    _regions.add((start: address, bytes: bytes, writable: writable));
     // The unmapped gap makes an access past the end fail.
     _next = (address + bytes.length + 0x1000) & ~0xfff;
     return address;
@@ -89,15 +89,21 @@ final class LirMemory() {
       : (base as int) + offset;
 
   (ByteData, int) _native(int address, int length, {required bool write}) {
-    for (final MapEntry(key: start, value: region) in _regions.entries) {
-      final at = address - start;
-      if (at < 0 || length < 0 || at + length > region.bytes.length) continue;
-      if (write && !region.writable) {
-        throw LirFault('Write to read-only address $address.');
-      }
-      return (ByteData.sublistView(region.bytes), at);
+    // The last region that starts before it, as they are in order.
+    var low = 0, high = _regions.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      _regions[middle].start <= address ? low = middle + 1 : high = middle;
     }
-    throw LirFault('Invalid address $address.');
+    if (low == 0) throw LirFault('Invalid address $address.');
+    final region = _regions[low - 1], at = address - region.start;
+    if (length < 0 || at + length > region.bytes.length) {
+      throw LirFault('Invalid address $address.');
+    }
+    if (write && !region.writable) {
+      throw LirFault('Write to read-only address $address.');
+    }
+    return (ByteData.sublistView(region.bytes), at);
   }
 
   void _checkBounds(LirObject object, int offset, Width width) {

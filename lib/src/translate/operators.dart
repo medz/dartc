@@ -164,7 +164,16 @@ final class OperatorTranslator(
       ),
       .boolean,
       identical,
-      () => _calls.invoke(node, left, class_, method, [right])!,
+      () => _calls.invoke(
+        node,
+        left,
+        class_,
+        method,
+        [right],
+        const {},
+        null,
+        true,
+      )!,
     );
   }
 

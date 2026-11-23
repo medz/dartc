@@ -25,31 +25,19 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
     for (final (i, function) in module.functions.indexed)
       function: 'dart.$i.${function.name}',
   };
-  final output = OutputData();
   final layout = ObjectLayout(module, symbols);
   final statics = StaticData(module, layout);
-  final machine = MachineLowering(
-    statics,
-    output,
-    collectsAlways: collectsAlways,
-  );
+  final machine = MachineLowering(statics, collectsAlways: collectsAlways);
   final bodies = [
     for (final function in module.functions)
-      FunctionLowering(
-        function,
-        symbols,
-        output,
-        layout,
-        statics,
-        machine,
-      ).lower(),
+      FunctionLowering(function, symbols, layout, statics, machine).lower(),
   ];
   final functions = [
     ...bodies,
     ...layout.functions,
     ...runtimeFunctions(module, symbols),
-    if (output.isUsed) writeFunction(),
-    _startFunction(module, symbols, output),
+    if (machine.writesOutput) writeFunction(),
+    _startFunction(module, symbols, machine),
   ];
   final called = {
     for (final function in functions)
@@ -64,8 +52,9 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
         if (called.contains(name)) LirExternal(name, signature),
     ],
     data: [
-      ...output.data,
       ...statics.tables,
+      if (machine.usesBuffer)
+        LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
       if (module.allocate != null) statics.classTable(),
     ],
     tables: layout.tables,
@@ -80,11 +69,11 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
 LirFunction _startFunction(
   HirModule module,
   Map<HirCallable, String> symbols,
-  OutputData output,
+  MachineLowering machine,
 ) {
   final start = LirBlock(), done = LirBlock();
   final blocks = [start, done];
-  if (output.isUsed) ignoreBrokenPipes(start);
+  if (machine.writesOutput) ignoreBrokenPipes(start);
   if (module.stackOverflow != null) setStackLimit(start);
   final main = Call(symbols[module.main]!, signatureOf(module.main), const []);
   if (module.uncaught case final uncaught?) {

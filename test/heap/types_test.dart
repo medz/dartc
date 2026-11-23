@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:analyzer/dart/element/element.dart' as analyzer;
 import 'package:analyzer/dart/element/type.dart' as analyzer;
 import 'package:dartc/heap.dart';
+import 'package:dartc/src/translate/types.dart' show describeType;
 import 'package:test/test.dart';
 
 import '../support/new_compiler.dart';
@@ -96,13 +97,13 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   @override
   RuntimeType typeOf(Object object) => throw UnimplementedError();
   @override
-  void writeClassName(int number) => throw UnimplementedError();
+  Object? receiverOf(Object function) => throw UnimplementedError();
   @override
-  void writeParameterName(int number) => throw UnimplementedError();
+  String functionName(Object function) => throw UnimplementedError();
   @override
-  void writeBasicName(int kind) => throw UnimplementedError();
+  String className(int number) => classes[number].displayName;
   @override
-  void writeRequired() => throw UnimplementedError();
+  String parameterName(int number) => String.fromCharCode(number);
 }
 
 /// Types that differ little.
@@ -199,6 +200,10 @@ void main() {
     ]);
     program = program_;
     final found = [for (final type in types) program_.of(type)];
+    for (final (i, type) in found.indexed) {
+      final name = describeType(types[i]).replaceAll('Never?', 'Null');
+      expect(typeName(type), name, reason: texts[i]);
+    }
     var positive = 0;
     for (final (i, a) in types.indexed) {
       for (final (j, b) in types.indexed) {

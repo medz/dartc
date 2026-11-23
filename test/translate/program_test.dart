@@ -1,3 +1,4 @@
+import 'package:dartc/driver.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
@@ -8,7 +9,7 @@ import '../support/new_compiler.dart';
 Future<HirModule> _files(Map<String, String> files) async {
   final directory = writeSources(files);
   return translateProgram(
-    await loadProgram('${directory.path}/main.dart', sdk: hostSdk),
+    await loadProgram('${directory.path}/main.dart', sdk: await packagedSdk()),
   );
 }
 
@@ -413,8 +414,7 @@ b0():
       '2:21: $what async and generator functions.',
     );
     reports('external void main();', '2:21: $what a function without a body.');
-    reports('void main() { for (final x in [1]) {} }', '2:15: $what for-in.');
-    reports('void main() { if (1 case 1) {} }', '2:21: $what if-case.');
+    reports('void main() { if (1 case 1) {} }', '2:21: $what this pattern.');
     reports(
       'void main() { switch (1) { case < 2: } }',
       '2:28: $what this kind of case.',
@@ -427,40 +427,10 @@ b0():
       'void main() { switch (1) { a: case 1: continue a; } }',
       '2:28: $what a labeled case.',
     );
-    reports('void main() { "a"; }', '2:15: $what simple string literal.');
-    reports('void main() { 1.abs(); }', '2:15: $what calling abs of the SDK.');
-    reports(
-      'void main() { exit(main.hashCode); }',
-      '2:20: $what prefixed identifier.',
-    );
-    reports(
-      'void main() { exit(1.hashCode); }',
-      '2:20: $what calling hashCode of the SDK.',
-    );
-    reports(
-      "import 'dart:math';\nvoid main() { max(1, 2); }",
-      '3:15: $what calling max of the SDK.',
-    );
-    reports(
-      'const s = "a";\nvoid main() { s; }',
-      '3:15: $what a constant of type String.',
-    );
     reports(
       'void main() { for (var (a, b) = (1, 2); a < b; a++) {} }',
       '2:20: $what for parts with pattern.',
     );
-    reports(
-      'void main() { switch (1) { case true: } }',
-      '2:33: $what this kind of case.',
-    );
-    const printing = 'printing anything but a constant string';
-    reports('void main() { print(1); }', '2:21: $what $printing.');
-    reports(
-      r'void main() { var x = 1; print("$x"); }',
-      '2:32: $what $printing.',
-    );
-    reports('void main() { print("a" + "b"); }', '2:21: $what $printing.');
-    reports('void main() { const x = 1; print(x); }', '2:34: $what $printing.');
     // Also where the code can never run.
   });
 }
