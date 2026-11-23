@@ -5,7 +5,12 @@ import 'code.dart';
 /// Throws [EmitUnsupported] for anything code generation cannot translate.
 void checkSupported(LirModule module) {
   for (final external in module.externals) {
-    throw EmitUnsupported(external.name, 'external function');
+    final LirSignature(:parameters, :result) = external.signature;
+    for (final type in [...parameters, ?result]) {
+      if (type == .f64 || type == .ref) {
+        throw EmitUnsupported(external.name, '$type');
+      }
+    }
   }
   for (final data in module.data) {
     throw EmitUnsupported(data.name, 'data');

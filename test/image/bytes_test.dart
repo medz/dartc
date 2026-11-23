@@ -5,13 +5,14 @@ void main() {
   test('integers follow the byte order', () {
     void write(ByteWriter out) => out
       ..u8(1)
+      ..u16(0x0910)
       ..u32(0x01020304)
       ..u64(0x0102030405060708);
     final little = ByteWriter(.little), big = ByteWriter(.big);
     write(little);
     write(big);
-    expect(little.finish(), [1, 4, 3, 2, 1, 8, 7, 6, 5, 4, 3, 2, 1]);
-    expect(big.finish(), [1, 1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(little.finish(), [1, 16, 9, 4, 3, 2, 1, 8, 7, 6, 5, 4, 3, 2, 1]);
+    expect(big.finish(), [1, 9, 16, 1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   test('text and padding fill exact sizes', () {

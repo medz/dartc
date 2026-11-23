@@ -14,6 +14,7 @@ final class ByteWriter(final Endian endian) {
   }
 
   void u8(int value) => _word(1, (data) => data.setUint8(0, value));
+  void u16(int value) => _word(2, (data) => data.setUint16(0, value, endian));
   void u32(int value) => _word(4, (data) => data.setUint32(0, value, endian));
   void u64(int value) => _word(8, (data) => data.setUint64(0, value, endian));
 

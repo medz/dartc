@@ -32,8 +32,12 @@ final class EmittedCode(
 
   /// The offset of each function in [text].
   Map<String, int> functions,
-  Iterable<Relocation> relocations,
-) {
+  Iterable<Relocation> relocations, {
+
+  /// Functions the system supplies, by their C names.
+  Iterable<String> externals = const [],
+}) {
+  final List<String> externals = .unmodifiable(externals);
   final Map<String, int> functions = .unmodifiable(functions);
   final List<Relocation> relocations = .unmodifiable(relocations);
 }

@@ -27,8 +27,16 @@ void main() {
   );
 
   rejects(
-    'external',
-    LirModule(externals: [LirExternal('e', LirSignature([]))]),
+    'e: LirType.f64',
+    LirModule(
+      externals: [
+        LirExternal('e', LirSignature([.f64])),
+      ],
+    ),
+  );
+  rejects(
+    'e: LirType.ref',
+    LirModule(externals: [LirExternal('e', LirSignature([], .ref))]),
   );
   rejects('data', LirModule(data: [LirData('d', [])]));
   rejects('f64', body([.f64], (_, _) {}));

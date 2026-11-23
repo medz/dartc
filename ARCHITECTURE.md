@@ -12,6 +12,8 @@
 5. **不会就报错。** 还不支持的语法，报出源码位置并停止。不猜，不生成可能错的代码。
 6. **每一步都端到端。** 每加一个语言功能，都要能编出程序并运行，不先堆空架子。
 
+静态错误以官方为准：`// ignore` 注释、`analysis_options.yaml` 都不能让有错误的程序通过。
+
 使用旧代码的条件：某个旧文件如果合适，先按新测试验证，再**搬进**新目录并由新测试负责。
 新目录不 import 旧目录。PLAN 中列出的临时借用除外，每个借用都写明何时消失。
 
@@ -53,7 +55,7 @@
 | `lir` | 机器层 IR：数据、验证、打印、解释 | 无 |
 | `hir` | Dart 层 IR：数据、验证、打印、解释 | 无 |
 | `source` | 调用 analyzer | analyzer |
-| `translate` | AST → HIR | `source` `hir` |
+| `translate` | AST → HIR | `source` `hir` analyzer |
 | `world` | 全程序闭包 | `hir` |
 | `lower` | HIR → LIR | `hir` `world` `lir` |
 | `emit` | LIR → 机器码 | `lir` |
