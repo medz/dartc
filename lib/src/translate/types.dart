@@ -84,14 +84,16 @@ bool isOpen(DartType type) => switch (type) {
 ///
 /// Of the SDK's classes only `Object`, numbers, `bool`, errors, exceptions and
 /// stack traces are supported yet.
-ClassElement? classOf(DartType? declared) {
+InterfaceElement? classOf(DartType? declared) {
   final type = declared == null ? null : boundOf(declared);
   if (type is! InterfaceType) return null;
   final element = type.element;
-  if (element is! ClassElement) return null;
+  if (element is! ClassElement && element is! MixinElement) return null;
   final isKnown =
       !element.library.isInSdk ||
-      _isKnown(element) && type.typeArguments.isEmpty;
+      element is ClassElement &&
+          _isKnown(element) &&
+          type.typeArguments.isEmpty;
   return isKnown ? element : null;
 }
 
@@ -184,7 +186,7 @@ List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
 }
 
 /// Whether objects of [sub] are objects of [superclass] too.
-bool isSubclass(ClassElement sub, ClassElement superclass) =>
+bool isSubclass(InterfaceElement sub, InterfaceElement superclass) =>
     _isSameClass(sub, superclass) ||
     sub.allSupertypes.any((type) => _isSameClass(type.element, superclass));
 

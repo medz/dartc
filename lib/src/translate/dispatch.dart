@@ -7,6 +7,7 @@ import 'builder.dart';
 import 'classes.dart';
 import 'closure_table.dart';
 import 'conversions.dart';
+import 'levels.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -25,24 +26,35 @@ final class DispatchBuilder(
   final SourceUnit _unit,
 ) {
   final _tearOffs = <HirSelector>{};
-  final _world = World<ClassElement, HirSelector>(isSubclass);
+  final _world = World<InterfaceElement, HirSelector>(isSubclass);
   final _selectors = <String, HirSelector>{};
   final _shapes = <HirSelector, _Shape>{};
   final _entries = <HirSelector, Map<ClassElement, HirFunction>>{};
-  final _adapters = <(ExecutableElement, HirSelector, String), HirFunction>{};
+  final _adapters = <(Implementation, HirSelector, String), HirFunction>{};
 
   /// Functions made here rather than declared by the program.
   final List<HirFunction> made = [];
 
   late final HirFunction _objectEquals = _makeObjectEquals();
 
-  List<ClassElement> get classes => _world.classes;
+  List<ClassElement> get classes => _world.classes.cast();
 
   void instantiate(ClassElement class_) => _world.instantiate(class_);
 
   HirSelector selectorOf(
     ExecutableElement member,
-    ClassElement receiver,
+    InterfaceElement receiver,
+    int positional,
+    List<String> named,
+    Reject reject,
+  ) {
+    final selector = _selector(member, positional, named, reject);
+    _world.call(selector, receiver);
+    return selector;
+  }
+
+  HirSelector _selector(
+    ExecutableElement member,
     int positional,
     List<String> named,
     Reject reject,
@@ -71,18 +83,33 @@ final class DispatchBuilder(
       types,
       result,
     ].join('|');
-    final selector = _selectors.putIfAbsent(key, () {
+    return _selectors.putIfAbsent(key, () {
       final made = HirSelector(name, types, result);
       _shapes[made] = (member: member, positional: positional, named: named);
       _entries[made] = {};
       return made;
     });
-    _world.call(selector, receiver);
-    return selector;
+  }
+
+  /// What [level] has for [member], or null if it is abstract there.
+  HirFunction? functionAt(
+    Level level,
+    ExecutableElement member,
+    int positional,
+    List<String> named,
+    Reject reject,
+  ) {
+    final found = implementationIn(level, member);
+    if (found == null) return null;
+    final selector = _selector(member, positional, named, reject);
+    return _function(level, found, selector);
   }
 
   /// How to get the method [member] of objects of [receiver].
-  HirSelector tearOffSelector(ExecutableElement member, ClassElement receiver) {
+  HirSelector tearOffSelector(
+    ExecutableElement member,
+    InterfaceElement receiver,
+  ) {
     final owner = member.isPrivate ? member.library.uri : '';
     final key = 'tear-off|${member.lookupName}|$owner';
     final selector = _selectors.putIfAbsent(key, () {
@@ -125,7 +152,8 @@ final class DispatchBuilder(
   /// Adds the entries found since the last time. Returns whether there were any.
   bool update() {
     final entries = _world.takeEntries();
-    for (final (class_, selector) in entries) {
+    for (final (found, selector) in entries) {
+      final class_ = found as ClassElement;
       _entries[selector]![class_] = _entry(class_, selector);
     }
     return entries.isNotEmpty;
@@ -145,34 +173,43 @@ final class DispatchBuilder(
   };
 
   HirFunction _entry(ClassElement class_, HirSelector selector) {
-    final shape = _shapes[selector]!;
+    final level = _scope.levelOf(class_);
     final found =
-        implementationIn(class_, shape.member) ??
+        implementationIn(level, _shapes[selector]!.member) ??
         (throw _declarations.unsupported(class_, 'noSuchMethod'));
     if (_tearOffs.contains(selector)) {
-      return _make(selector.name, selector, (builder, _) {
+      return _make(selector.name, selector, found.level, (builder, _) {
         return _scope.tearOff(builder, found, builder.inputs.first);
       });
     }
-    if (found.library.isInSdk) {
-      return _numberEquals(class_, selector) ?? _objectEquals;
+    return _function(level, found, selector);
+  }
+
+  /// What does the work of [found] for objects whose class is at [level].
+  HirFunction _function(
+    Level level,
+    Implementation found,
+    HirSelector selector,
+  ) {
+    if (found.element.library.isInSdk) {
+      return _numberEquals(level, selector) ?? _objectEquals;
     }
-    final checked = _checkedParameters(class_, found);
+    final checked = _checkedParameters(level.class_, found.element);
     return _adapters[(found, selector, '$checked')] ??= _adapt(
       found,
       selector,
-      shape,
+      _shapes[selector]!,
       checked,
     );
   }
 
-  /// How a number compares itself, if [class_] is one of numbers.
-  HirFunction? _numberEquals(ClassElement class_, HirSelector selector) {
-    final isInt = class_.name == 'int';
+  /// How a number compares itself, if [level] is that of numbers.
+  HirFunction? _numberEquals(Level level, HirSelector selector) {
+    final class_ = level.class_, isInt = class_.name == 'int';
     if (!class_.library.isInSdk || !isInt && class_.name != 'double') {
       return null;
     }
-    return _make('$class_ ==', selector, (builder, conversions) {
+    return _make('$class_ ==', selector, level, (builder, conversions) {
       final [self, other] = builder.inputs;
       final value = conversions.coerce(self, isInt ? .integer : .float);
       final helper = _scope.runtime(isInt ? 'intEquals' : 'doubleEquals');
@@ -197,6 +234,8 @@ final class DispatchBuilder(
         final place = declared.isNamed
             ? parameters.indexWhere((p) => p.isNamed && p.name == declared.name)
             : other.formalParameters.indexOf(declared);
+        // What overrides [found] may take more.
+        if (place < 0 || place >= parameters.length) continue;
         if (!system.isSubtypeOf(declared.type, parameters[place].type)) {
           checked.add(place);
         }
@@ -209,14 +248,15 @@ final class DispatchBuilder(
     return checked.toList()..sort();
   }
 
-  /// A function called as [selector] says that does the work of [found], after
-  /// checking some parameters.
+  /// A function called as [selector] says that does the work of
+  /// [implementation], after checking some parameters.
   HirFunction _adapt(
-    ExecutableElement found,
+    Implementation implementation,
     HirSelector selector,
     _Shape shape,
     List<int> checked,
   ) {
+    final (element: found, :level) = implementation;
     final field = fieldOfAccessor(found);
     final isGeneric = found.typeParameters.isNotEmpty;
     final given = _given(found, shape.positional, shape.named);
@@ -243,18 +283,17 @@ final class DispatchBuilder(
     }
 
     if (field != null) {
-      final place = _scope.fieldOf(field);
-      return _make(selector.name, selector, (builder, conversions) {
+      return _make(selector.name, selector, level, (builder, conversions) {
         final receiver = builder.inputs.first;
         if (found is GetterElement) {
-          return builder.add(HirLoad(place, receiver));
+          return _scope.loadField(builder, level, field, receiver);
         }
         final value = argument(builder, conversions, parameters.single);
-        builder.add(HirStore(place, receiver, value));
+        _scope.storeField(builder, level, field, receiver, value);
         return null;
       });
     }
-    final target = _scope.memberOf(found);
+    final target = _scope.memberOf(level, found);
     final isSame =
         checked.isEmpty &&
         given.length == parameters.length &&
@@ -266,7 +305,10 @@ final class DispatchBuilder(
         ) &&
         target.result == selector.result;
     if (isSame) return target;
-    return _make('adapt ${target.name}', selector, (builder, conversions) {
+    return _make('adapt ${target.name}', selector, level, (
+      builder,
+      conversions,
+    ) {
       if (isGeneric) builder.bindTypes(found, builder.inputs[1]);
       return builder.call(
         HirCall(target, [
@@ -283,6 +325,7 @@ final class DispatchBuilder(
   HirFunction _make(
     String name,
     HirSelector selector,
+    Level level,
     HirValue? Function(FunctionBuilder builder, Conversions conversions) build,
   ) {
     final function = HirFunction(name, [
@@ -291,7 +334,7 @@ final class DispatchBuilder(
     ], selector.result);
     final builder = FunctionBuilder(_unit, function, const []);
     final conversions = Conversions(_scope, builder);
-    builder.setReceiver(builder.inputs.first);
+    builder.setReceiver(builder.inputs.first, level);
     final value = build(builder, conversions);
     final result = selector.result;
     if (result != null) {

@@ -413,10 +413,6 @@ b0():
       '2:21: $what async and generator functions.',
     );
     reports('external void main();', '2:21: $what a function without a body.');
-    reports(
-      'void main() { late int x; x = 1; }',
-      '2:15: $what late variables.',
-    );
     reports('void main() { for (final x in [1]) {} }', '2:15: $what for-in.');
     reports('void main() { if (1 case 1) {} }', '2:21: $what if-case.');
     reports(

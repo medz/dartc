@@ -1,6 +1,7 @@
 import 'dart:math';
 
 part 'random_expressions.dart';
+part 'random_literals.dart';
 
 enum Kind(final String name) {
   integer('int'),
@@ -175,28 +176,47 @@ final class RandomDart(int seed) {
       ));
     }
     for (var i = 0; i < _classCount; i++) {
+      if (i == 1) _mixins();
       final isAlone = i > 0 && _chance(5);
       final parent = i == 0 ? null : _random.nextInt(i);
       final relation = i == 0
           ? ''
           : isAlone
           ? ' implements C0'
-          : ' extends C$parent';
+          : ' extends C$parent${_any(['', '', ' with M0', ' with M1, M0'])}';
       _class('C$i', relation, isWhole: i == 0 || isAlone);
     }
     _constants();
   }
 
+  /// Mixins of what extends C0.
+  void _mixins() {
+    for (final name in ['M0', 'M1']) {
+      _block('mixin $name on C0', () {
+        _line('late int late$name = i0 ^ ${_literal(.integer)};');
+        _line('C0? field$name = const ${_constantObject()};');
+        _line('@override int leaf(int at) => super.leaf(at) + late$name++;');
+        _line('@override C0? get o0 => super.o0 ?? field$name;');
+        for (final (i, method) in _methods.indexed) {
+          if (_chance(3)) _method(method, i, isWhole: false, isRoot: false);
+        }
+      });
+    }
+  }
+
   void _class(String name, String relation, {required bool isWhole}) {
     _block('class $name$relation', () {
       if (isWhole) {
-        for (final (field, kind) in _fields) {
+        for (final (field, kind) in _given) {
           _line('${kind.name} $field;');
         }
+        final isLate = _random.nextBool();
+        _line(isLate ? 'late num n0 = i0;' : 'num n0;');
+        _line(isLate ? 'late Object? a0 = d0;' : 'Object? a0;');
         _line('C0? o0;');
         _line(
-          '$name(this.i0, this.d0, [this.b0 = ${_literal(.boolean)}]) '
-          ': n0 = i0, a0 = d0;',
+          '$name(this.i0, this.d0, [this.b0 = ${_literal(.boolean)}])'
+          '${isLate ? '' : ' : n0 = i0, a0 = d0'};',
         );
         _line('C0 operator +(C0 other) => b0 ? this : other;');
         _line('int leaf(int at) => i0 ^ at;');
@@ -340,64 +360,6 @@ final class RandomDart(int seed) {
     _functions.add((name: name, result: _result, parameters: parameters));
   }
 
-  String _creation(String Function(Kind kind) argument) {
-    final rest = _random.nextBool() ? ', ${argument(.boolean)}' : '';
-    final class_ = 'C${_random.nextInt(_classCount)}';
-    return '$class_(${argument(.integer)}, ${argument(.float)}$rest)';
-  }
-
-  /// An expression that is constant.
-  String _constant(Kind kind) => switch (kind) {
-    .object => 'const ${_constantObject()}',
-    .any => _constant(_any(Kind.values.take(5).toList())),
-    .function => 'leaf${_random.nextInt(3)}',
-    _ => _literal(kind),
-  };
-
-  String _constantObject() {
-    final rest = _random.nextBool() ? ', ${_constantObject()}' : '';
-    final values = [for (final (_, kind) in _given) _literal(kind)];
-    return 'K(${values.join(', ')}$rest)';
-  }
-
-  String _literal(Kind kind) => switch (kind) {
-    .object => _chance(3) ? _constant(kind) : _creation(_literal),
-    .boolean => '${_random.nextBool()}',
-    .number => _literal(_any([.integer, .float])),
-    .function => _isLeaf || _chance(3) ? _constant(kind) : _closure(),
-    .maybe => _chance(3) ? '(null as int?)' : _literal(.integer),
-    .any =>
-      _chance(6)
-          ? '(null as Object?)'
-          : _literal(_any(Kind.values.take(6).toList())),
-    .integer => switch (_random.nextInt(4)) {
-      0 => _any([
-        '0',
-        '1',
-        '-1',
-        '0x7fffffffffffffff',
-        '-9223372036854775808',
-        '9007199254740993',
-      ]),
-      1 => '${_random.nextInt(1 << 32) * _random.nextInt(1 << 31)}',
-      _ => '${_random.nextInt(40) - 20}',
-    },
-    .float => switch (_random.nextInt(4)) {
-      0 => _any([
-        '0.0',
-        '-0.0',
-        '1e308',
-        '5e-324',
-        'double.infinity',
-        'double.nan',
-        '9007199254740992.0',
-      ]),
-      1 => '${_random.nextDouble() * 1000 - 500}',
-      2 => '${_random.nextInt(9)}.0',
-      _ => '${_random.nextInt(80) / 8 - 5}',
-    },
-  };
-
   List<String> _variables(Kind kind) => [
     for (final scope in _scopes)
       for (final (name, type) in scope)
@@ -418,6 +380,11 @@ final class RandomDart(int seed) {
     final name = 'v${_names++}';
     final value = _expression(kind, 2);
     // Elsewhere, the type of the value may be another one.
+    if (_chance(8)) {
+      _line('late ${kind.name} $name = $value;');
+      _scopes.last.add((name, kind));
+      return;
+    }
     final isSafe = kind != .integer && kind != .boolean || !_chance(3);
     final head = isSafe ? kind.name : 'var';
     _line('$head $name = $value;');

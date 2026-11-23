@@ -165,7 +165,31 @@ extension on RandomDart {
     };
   }
 
-  String _maybe(String Function(Kind) inner) => switch (_random.nextInt(4)) {
+  /// A chain that may end with null, from an object that may be null.
+  String? _chain(String rest) {
+    final objects = _variables(.object);
+    return objects.isEmpty ? null : '(${_any(objects)}.o0$rest)';
+  }
+
+  String _maybe(String Function(Kind) inner) => switch (_random.nextInt(7)) {
+    4 || 5 || 6 =>
+      _chain(
+            _any(
+              [
+                '?.i0',
+                '?.o0?.i0',
+                '?[${inner(.integer)}]',
+                '?.leaf(${inner(.integer)})',
+                '?.o0?.leaf(${inner(.integer)}).toDouble().toInt()',
+                '?.i0 = ${inner(.integer)}',
+                '?.o0?.i0 ${_any(['+', '^', '*'])}= ${inner(.integer)}',
+                '?[${inner(.integer)}] ${_any(['+', '-'])}= ${inner(.integer)}',
+                '?.i0++',
+                '?.o0?.o0!.i0',
+              ].take(_mayThrow ? 10 : 9).toList(),
+            ),
+          ) ??
+          inner(.integer),
     0 => '(null as int?)',
     1 => inner(.integer),
     2 => '(${inner(.boolean)} ? ${inner(.integer)} : null)',
@@ -189,7 +213,9 @@ extension on RandomDart {
   String _anything(String Function(Kind) inner) {
     final kind = _any(Kind.values.where((kind) => kind != .any).toList());
     final value = inner(kind);
-    return switch (_random.nextInt(5)) {
+    return switch (_random.nextInt(6)) {
+      5 =>
+        _chain(_any(['?.o0', '?.o0?.a0', '?.n0 = ${inner(.number)}'])) ?? value,
       0 => 'Box<${kind.name}>($value)',
       1 => 'Sub<${kind.name}>($value)',
       _ => value,
@@ -200,8 +226,12 @@ extension on RandomDart {
     final variables = _variables(.object);
     if (variables.isEmpty || _chance(3)) return _creation(inner);
     final variable = _any(variables);
-    return switch (_random.nextInt(_mayThrow ? 5 : 4)) {
-      4 => '$variable.o0!',
+    return switch (_random.nextInt(_mayThrow ? 7 : 6)) {
+      4 =>
+        '($variable..i0 = ${inner(.integer)}..[${inner(.integer)}] = 4'
+            '..o0?.d0 = ${inner(.float)})',
+      5 => '(($variable.o0?..b0 = ${inner(.boolean)}) ?? $variable)',
+      6 => '$variable.o0!',
       0 => '(${inner(.object)} + ${inner(.object)})',
       1 => '($variable.o0 ?? ${inner(.object)})',
       2 => '($variable.o0 ??= ${inner(.object)})',

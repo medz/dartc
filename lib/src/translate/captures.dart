@@ -5,32 +5,35 @@ import 'package:analyzer/dart/element/element.dart';
 import 'assigned.dart';
 
 /// Which variables the closures inside one declaration use.
+///
+/// The initializer of a `late` local variable, which is evaluated later, counts
+/// as a closure, and is told by the variable's declaration.
 final class Captures._(
-  final Map<FunctionExpression, Set<Element>> _captured,
+  final Map<AstNode, Set<Element>> _captured,
   final Set<Element> _cells,
 ) {
   factory of(AstNode declaration) {
     final visitor = _Captures();
     declaration.accept(visitor);
     final used = {for (final elements in visitor.captured.values) ...elements};
-    return Captures._(
-      visitor.captured,
-      used.intersection(assignedIn(declaration)),
-    );
+    return Captures._(visitor.captured, {
+      for (final variable in assignedIn(declaration))
+        if (!variable.isLate && used.contains(variable)) variable,
+    });
   }
 
   /// The outer variables and local functions that [closure] uses.
-  List<Element> usedBy(FunctionExpression closure) => [...?_captured[closure]];
+  List<Element> usedBy(AstNode closure) => [...?_captured[closure]];
 
   /// Whether closures share changes of [variable].
   bool isCell(Element variable) => _cells.contains(variable);
 }
 
 final class _Captures() extends RecursiveAstVisitor<void> {
-  final captured = <FunctionExpression, Set<Element>>{};
+  final captured = <AstNode, Set<Element>>{};
 
   /// The closures around, and where each element is declared among them.
-  final _closures = <FunctionExpression>[];
+  final _closures = <AstNode>[];
   final _depths = <Element, int>{};
 
   void _declare(Element? element) {
@@ -52,12 +55,15 @@ final class _Captures() extends RecursiveAstVisitor<void> {
     final isClosure =
         parent is! FunctionDeclaration ||
         parent.parent is FunctionDeclarationStatement;
-    if (isClosure) {
-      captured[node] = {};
-      _closures.add(node);
-    }
-    super.visitFunctionExpression(node);
-    if (isClosure) _closures.removeLast();
+    void visit() => super.visitFunctionExpression(node);
+    isClosure ? _within(node, visit) : visit();
+  }
+
+  void _within(AstNode closure, void Function() visit) {
+    captured[closure] = {};
+    _closures.add(closure);
+    visit();
+    _closures.removeLast();
   }
 
   @override
@@ -70,8 +76,14 @@ final class _Captures() extends RecursiveAstVisitor<void> {
 
   @override
   void visitVariableDeclaration(VariableDeclaration node) {
-    _declare(node.declaredFragment?.element);
-    super.visitVariableDeclaration(node);
+    final element = node.declaredFragment?.element;
+    _declare(element);
+    void visit() => super.visitVariableDeclaration(node);
+    final isLater =
+        element is LocalVariableElement &&
+        element.isLate &&
+        node.initializer != null;
+    isLater ? _within(node, visit) : visit();
   }
 
   @override

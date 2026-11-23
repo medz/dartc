@@ -319,14 +319,6 @@ int get get => x;''',
 
     const what = 'Not supported yet:';
     reports(
-      'late int x;\nvoid main() { x = 1; }',
-      '1:10: $what late variables.',
-    );
-    reports(
-      'class A { static late int x; }\nvoid main() { A.x = 1; }',
-      '1:27: $what late variables.',
-    );
-    reports(
       'external int x;\nvoid main() { x; }',
       '1:14: $what external variables.',
     );
@@ -337,14 +329,6 @@ int get get => x;''',
     reports(
       "import 'dart:io';\nvoid main() { exitCode = 1; }",
       '2:15: $what assignment to simple identifier.',
-    );
-    reports(
-      'mixin M { static int n = 1; }\nvoid main() { M.n; }',
-      '2:15: $what prefixed identifier.',
-    );
-    reports(
-      'mixin M { static int n = 1; }\nvoid main() { M.n = 2; }',
-      '2:15: $what assignment to prefixed identifier.',
     );
     reports(
       'class A { final String s; const A(this.s); }\nvoid main() { const A("a"); }',

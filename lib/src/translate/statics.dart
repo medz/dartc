@@ -5,6 +5,7 @@ import 'package:dartc/hir.dart';
 import 'builder.dart';
 import 'constant.dart';
 import 'describe.dart';
+import 'late.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -64,8 +65,11 @@ final class StaticTranslator(
       return;
     }
     final GlobalVariable(:global, :isSet) = _scope.globalOf(setter.variable)!;
-    _builder.add(HirStoreGlobal(global, value));
-    if (isSet == null) return;
-    _builder.add(HirStoreGlobal(isSet, _builder.add(HirConst(true))));
+    if (isSet == null) {
+      _builder.add(HirStoreGlobal(global, value));
+    } else {
+      final storage = GlobalStorage(global, isSet);
+      LateAccess(_scope, _builder, setter.variable, storage).write(value);
+    }
   }
 }

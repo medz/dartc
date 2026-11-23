@@ -29,7 +29,7 @@ final class ClosureTable(
   final _selectors = <String, HirSelector>{};
   final _entries = <HirSelector, Map<HirClass, HirFunction>>{};
   final _static = <ExecutableElement, Closure>{};
-  final _tearOffs = <ExecutableElement, Closure>{};
+  final _tearOffs = <Implementation, Closure>{};
 
   /// Functions made here.
   final List<HirFunction> made = [];
@@ -111,7 +111,7 @@ final class ClosureTable(
 
     final target = closure.target();
     final leading = closure.leading(builder, builder.inputs.first);
-    if (closure.isTearOff) builder.setReceiver(leading.first);
+    if (closure.isTearOff) closure.bindTypes(builder, builder.inputs.first);
     final result = builder.call(
       HirCall(target, [
         ...leading,
@@ -180,26 +180,28 @@ final class ClosureTable(
             parameter.instantiate(nullabilitySuffix: .none),
         ]);
 
-  /// Gives the method [element] of [receiver], however it is overridden.
+  /// Gives the method [found] of [receiver], however it is overridden.
   HirValue tearOff(
     FunctionBuilder builder,
-    ExecutableElement element,
+    Implementation found,
     HirValue receiver,
   ) {
-    final closure = _tearOffs[element] ??= () {
+    final (:element, :level) = found;
+    final closure = _tearOffs[found] ??= () {
       final field = HirField('receiver', .reference);
       final made = Closure(
         HirClass('tear-off ${element.displayName}', null, [field]),
         element.type,
         element.formalParameters,
-        () => _scope.memberOf(element),
+        () => _scope.memberOf(level, element),
         (builder, self) => [builder.add(HirLoad(field, self))],
         bind: (builder, self) {
-          builder.setReceiver(builder.add(HirLoad(field, self)));
+          builder.setReceiver(builder.add(HirLoad(field, self)), level);
         },
         typeValue: (builder) {
           builder.setReceiver(
             builder.add(HirLoad(field, builder.inputs.single)),
+            level,
           );
           return _scope.methodType(builder, element)!;
         },

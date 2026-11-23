@@ -6,6 +6,7 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'classes.dart';
+import 'members.dart';
 import 'types.dart';
 
 /// A value known when compiling: an `int`, `double`, `bool`, object or null.
@@ -54,6 +55,13 @@ final class ConstantTable(
   /// The value that [parameter] has where a call leaves it out.
   HirInstruction defaultOf(FormalParameterElement parameter) {
     FormalParameterElement found = parameter;
+    for (
+      var next = redirectedParameter(found);
+      next != null;
+      next = redirectedParameter(next)
+    ) {
+      found = next;
+    }
     while (!found.hasDefaultValue && found is SuperFormalParameterElement) {
       final inherited = found.superConstructorParameter;
       if (inherited == null) break;
@@ -104,25 +112,33 @@ final class ConstantTable(
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
     if (class_ == null || class_.library.isInSdk) return null;
+    if (class_ is! ClassElement) return null;
     final target = _classes.classOf(class_);
     final fields = <HirField, Object?>{};
     DartObject? part = object;
-    InterfaceType? level = type as InterfaceType;
-    while (level != null && !level.isDartCoreObject) {
-      final element = level.element as ClassElement;
-      if (_classes.argumentsOf(element) case final own?) {
-        final list = _listOf(level.typeArguments);
-        if (list == null) return null;
-        fields[own] = list.value;
+    var own = type as InterfaceType;
+    for (final level in _classes.levels.of(class_).chain) {
+      final element = level.element;
+      if (element.library.isInSdk) break;
+      final actual = level.isMixin
+          ? own.mixins.firstWhere((mixin) => mixin.element == element)
+          : level.class_ == own.element
+          ? own
+          : own = own.superclass!;
+      if (_classes.argumentsOf(level) case final list?) {
+        final types = _listOf(actual.typeArguments);
+        if (types == null) return null;
+        fields[list] = types.value;
       }
       for (final field in ClassTable.instanceFields(element)) {
-        final own = _classes.fieldOf(field);
-        final value = of(own.type, part?.getField(field.name!));
+        // Mixins cannot declare fields for constants.
+        if (level.isMixin) return null;
+        final place = _classes.fieldOf(level, field).value;
+        final value = of(place.type, part?.getField(field.name!));
         if (value == null) return null;
-        fields[own] = value.value;
+        fields[place] = value.value;
       }
-      part = part?.getField('(super)');
-      level = level.superclass;
+      if (!level.isMixin) part = part?.getField('(super)');
     }
     _instantiate(class_);
     return canonical(class_, HirConstObject(target, fields));

@@ -443,10 +443,6 @@ void main() {
       '1:7: $what extending ArgumentError of the SDK.',
     );
     reports(
-      'class A { A? b; }\nvoid f(A? a) { a?.b!; }\nvoid main() { f(null); }',
-      '2:16: $what null-aware chains.',
-    );
-    reports(
       'void main() { 1.5.round(); }',
       '1:15: $what calling round of the SDK.',
     );

@@ -8,6 +8,7 @@ import 'captures.dart';
 import 'closure.dart';
 import 'conversions.dart';
 import 'dynamics.dart';
+import 'environment.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -21,7 +22,7 @@ final class ClosureTranslator(
   final HirValue? Function(
     Expression node,
     HirValue receiver,
-    ClassElement class_,
+    InterfaceElement class_,
     MethodElement element,
     ArgumentList list,
   )
@@ -60,26 +61,18 @@ final class ClosureTranslator(
     if (node.body.isAsynchronous || node.body.isGenerator) {
       _unsupported(node.body, 'async and generator functions');
     }
-    final captures = _scope.capturesOf(declarationOf(node));
-    final used = [
-      for (final used in captures.usedBy(node))
-        if (used != name) used,
-    ];
-    final receiver = _builder.receiver;
-    final fields = [for (final used in used) _field(used)];
-    final self = HirField('this', .reference);
-    final lists = {
-      for (final owner in _builder.typeLists.keys)
-        owner: HirField('types', .reference),
-    };
+    final environment = Environment.of(
+      _builder,
+      node,
+      _scope.capturesOf(declarationOf(node)),
+      name: name,
+    );
     // An open type is found where the closure is created.
     final type = isOpen(element.type) && !isGeneric
         ? HirField('type', .reference)
         : null;
     final class_ = HirClass(_describe(element), null, [
-      if (receiver != null) self,
-      ...fields,
-      ...lists.values,
+      ...environment.fields,
       ?type,
     ]);
     final function = HirFunction(
@@ -96,68 +89,39 @@ final class ClosureTranslator(
           : valueType(element.returnType) ??
                 _unsupported(node, 'a result of type ${element.returnType}'),
     );
-    final closure = Closure(
-      class_,
-      element.type,
-      element.formalParameters,
-      () => function,
-      (_, self) => [self],
-      bind: (builder, object) {
-        if (receiver != null) {
-          builder.setReceiver(builder.add(HirLoad(self, object)));
-        }
-        lists.forEach((owner, field) {
-          builder.bindTypes(owner, builder.add(HirLoad(field, object)));
-        });
-      },
-      typeValue: (builder) => type == null
-          ? _scope.typeValue(builder, element.type)!
-          : builder.add(HirLoad(type, builder.inputs.first)),
-    );
-    _scope.addClosure(closure, function, isValue: !isGeneric);
-    if (name != null) _scope.setLocalFunction(name, function);
-    final outer = _builder;
+    _scope.addLocalFunction(function);
+    if (isGeneric) {
+      _scope.addLocalClass(class_);
+    } else {
+      _scope.addClosure(
+        Closure(
+          class_,
+          element.type,
+          element.formalParameters,
+          () => function,
+          (_, self) => [self],
+          bind: environment.bindTypes,
+          typeValue: (builder) => type == null
+              ? _scope.typeValue(builder, element.type)!
+              : builder.add(HirLoad(type, builder.inputs.first)),
+        ),
+      );
+    }
+    if (name != null) _builder.locals.functions[name] = function;
     _scope.schedule(() {
-      final builder = FunctionBuilder(
-        outer.unit,
+      final builder = environment.build(
         function,
         element.formalParameters,
-        receiverClass: outer.receiverClass,
-        receiverField: receiver == null ? null : self,
-        isClosure: true,
         typeOwner: isGeneric ? element : null,
         returnType: element.returnType,
-        captures: captures,
-        cellClass: _scope.cellClass,
       );
-      lists.forEach((owner, field) {
-        builder.bindTypes(
-          owner,
-          builder.add(HirLoad(field, builder.inputs.first)),
-        );
-      });
-      for (final (i, used) in used.indexed) {
-        builder.bind(
-          used,
-          builder.add(HirLoad(fields[i], builder.inputs.first)),
-          outer.typeOf(used)!,
-        );
-      }
       if (name != null) {
         builder.bind(name, builder.inputs.first, .reference);
       }
       _scope.translateBody(builder, node.body);
     });
     final object = _builder.create(class_);
-    if (receiver != null) {
-      _builder.add(HirStore(self, object, receiver));
-    }
-    for (final (i, used) in used.indexed) {
-      _builder.add(HirStore(fields[i], object, _builder.raw(used)));
-    }
-    lists.forEach((owner, field) {
-      _builder.add(HirStore(field, object, _builder.typeLists[owner]!));
-    });
+    environment.store(object);
     if (type != null) {
       final value =
           _scope.typeValue(_builder, element.type) ??
@@ -166,9 +130,6 @@ final class ClosureTranslator(
     }
     return object;
   }
-
-  HirField _field(Element used) =>
-      HirField(used.displayName, _builder.rawTypeOf(used)!);
 
   static String _describe(ExecutableElement element) =>
       describeType(element.type);

@@ -14,10 +14,10 @@ final class ErrorTable(
   final void Function(ClassElement class_) _instantiate,
 ) {
   final _throwers = <BuiltinError, HirFunction>{};
-  final _tests = <ClassElement, HirTypeTest>{};
+  final _tests = <InterfaceElement, HirTypeTest>{};
 
-  /// The names of the variables that [BuiltinError.late] can be about.
-  final List<String> lateNames = [];
+  /// What [BuiltinError.late] can say.
+  final List<String> lateTexts = [];
 
   /// The types that values are not of, and what is said after them.
   final List<(String?, String)> castTexts = [];
@@ -44,7 +44,7 @@ final class ErrorTable(
   }
 
   /// Whether objects are of [class_].
-  HirTypeTest testOf(ClassElement class_) =>
+  HirTypeTest testOf(InterfaceElement class_) =>
       _tests[class_] ??= HirTypeTest(class_.displayName);
 
   /// The classes that pass each test, of [classes].
@@ -62,8 +62,7 @@ final class ErrorTable(
   int missingNumber(String kind, String name) =>
       _numberIn(missing, (kind, name));
 
-  /// A number for the variable called [name].
-  int lateNumber(String name) => _numberIn(lateNames, name);
+  int lateNumber(String text) => _numberIn(lateTexts, text);
 
   /// A number for [type] and [ending], which is not 0.
   int castNumber(String? type, String ending) =>

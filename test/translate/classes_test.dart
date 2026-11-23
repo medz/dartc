@@ -368,20 +368,8 @@ A make() => A();''',
 
     const what = 'Not supported yet:';
     reports(
-      'class A { late int x; }\nvoid main() { A(); }',
-      '1:20: $what late fields.',
-    );
-    reports(
-      'mixin M {}\nclass A with M {}\nvoid main() { A(); }',
-      '2:7: $what mixins.',
-    );
-    reports(
       'class A implements Exception {}\nclass B extends TypeError {}\nvoid main() { A(); B(); }',
       '2:7: $what extending TypeError of the SDK.',
-    );
-    reports(
-      'class A { A(); factory A.f() = A; }\nvoid main() { A.f(); }',
-      '1:16: $what redirecting factories.',
     );
     reports(
       'class A(int x) {}\nvoid main() { A(1); }',
@@ -390,14 +378,6 @@ A make() => A();''',
     reports(
       'class A(final int x);\nvoid main() { A(1); }',
       '1:7: $what primary constructors.',
-    );
-    reports(
-      'class A { A? n; A get m => this; }\nvoid f(A? a) { a?.n?.n; a?.m.m; }\nvoid main() { f(null); }',
-      '2:25: $what null-aware chains.',
-    );
-    reports(
-      'class A { A? n; }\nvoid f(A? a) { a?.n = a; }\nvoid main() { f(null); }',
-      '2:16: $what null-aware assignments.',
     );
     reports(
       'class A {}\nvoid main() { A().toString(); }',
@@ -412,16 +392,8 @@ A make() => A();''',
       '1:28: $what a function without a body.',
     );
     reports(
-      'class A { A get a => this; void f() {} }\nvoid main() { A()..f()..f(); }',
-      '2:15: $what cascade expression.',
-    );
-    reports(
       'class A { noSuchMethod(i) => 1; int f(); }\nvoid main() { A().f(); }',
       '1:7: $what noSuchMethod.',
-    );
-    reports(
-      'class A {}\nmixin M {}\nclass B = A with M;\nvoid main() { B(); }',
-      '3:7: $what mixins.',
     );
     reports(
       'class A { external A(); }\nvoid main() { A(); }',
@@ -429,11 +401,7 @@ A make() => A();''',
     );
     reports(
       'class A {}\nextension E on A { void f() {} }\nvoid main() { A().f(); }',
-      '3:15: $what extensions and mixins.',
-    );
-    reports(
-      'mixin M { void f() {} }\nclass A with M {}\nvoid use(M m) {}\nvoid main() { use(A()); }',
-      '3:6: $what a parameter of type M.',
+      '3:15: $what extensions.',
     );
     reports(
       'class A { int f() => 1; }\nvoid main() { A().f().toString(); }',

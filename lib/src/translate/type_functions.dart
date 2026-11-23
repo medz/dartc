@@ -68,7 +68,7 @@ final class TypeFunctions(
         () => _entry(class_.displayName, (builder) {
           final parameters = class_.typeParameters;
           if (parameters.isNotEmpty) {
-            builder.setReceiver(builder.inputs.single);
+            builder.setReceiver(builder.inputs.single, _scope.levelOf(class_));
           }
           return _types.value(builder, class_.thisType)!;
         }),

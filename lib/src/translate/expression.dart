@@ -5,12 +5,14 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'calls.dart';
+import 'chains.dart';
 import 'checks.dart';
 import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'describe.dart';
 import 'dynamics.dart';
+import 'late_locals.dart';
 import 'members.dart';
 import 'operators.dart';
 import 'places.dart';
@@ -28,6 +30,7 @@ final class ExpressionTranslator(
     _builder,
     this,
     closures,
+    _chains,
   );
   late final ClosureTranslator closures = ClosureTranslator(
     _scope,
@@ -36,6 +39,11 @@ final class ExpressionTranslator(
     (node, receiver, class_, element, list) =>
         calls.method(node, receiver, class_, element, list),
   );
+  late final LateTranslator lates = LateTranslator(_scope, _builder);
+  late final _chains = ChainTranslator(_builder);
+
+  /// The targets of cascades, which are evaluated already.
+  final _targets = <Expression, HirValue>{};
   late final _operators = OperatorTranslator(
     _scope,
     _builder,
@@ -52,6 +60,8 @@ final class ExpressionTranslator(
     _statics,
     _conversions,
     _dynamics,
+    lates,
+    _chains,
   );
 
   Never _unsupported(AstNode node, String what) =>
@@ -60,9 +70,16 @@ final class ExpressionTranslator(
   /// Evaluates [node] without using its value.
   void effect(Expression node) {
     final inner = node.unParenthesized;
+    if (_chains.isWhole(inner)) {
+      _chains.translate(inner, null, () {
+        effect(inner);
+        return null;
+      });
+      return;
+    }
     switch (inner) {
       case MethodInvocation():
-        calls.invocation(inner, isUsed: false);
+        calls.invocation(inner);
       case FunctionExpressionInvocation():
         closures.invocation(inner);
       case ConditionalExpression(:final DartType staticType)
@@ -117,6 +134,15 @@ final class ExpressionTranslator(
 
   HirValue _value(Expression node, HirType placeholder) {
     final inner = node.unParenthesized, type = inner.staticType;
+    if (_targets[inner] case final value?) return value;
+    if (_chains.isWhole(inner)) {
+      final result = valueType(_resultType(inner))!;
+      return _chains.translate(
+        inner,
+        result,
+        () => _conversions.coerce(_value(inner, result), result),
+      )!;
+    }
     if (isNever(type)) {
       _never(inner);
       return _builder.placeholder(placeholder);
@@ -138,7 +164,7 @@ final class ExpressionTranslator(
       case PrefixExpression():
         return _prefix(inner);
       case PostfixExpression(:final operator, :final operand):
-        if (operator.lexeme == '!') return _notNull(inner, operand);
+        if (operator.lexeme == '!') return _notNull(operand);
         return _step(inner, operand, operator.lexeme, after: false);
       case BinaryExpression():
         return _binary(inner);
@@ -175,18 +201,51 @@ final class ExpressionTranslator(
       case IndexExpression():
         return calls.index(inner);
       case MethodInvocation():
-        return calls.invocation(inner, isUsed: true) ??
+        return calls.invocation(inner) ??
+            _neverResult(inner.methodName.element, placeholder) ??
             _unsupported(inner, 'using a value of type $type');
+      case CascadeExpression():
+        return _cascade(inner);
       default:
         _unsupported(inner, describe(inner));
     }
+  }
+
+  /// What stands for the result of calling [element], if that never returns.
+  ///
+  /// The call itself is of another type where it can be skipped.
+  HirValue? _neverResult(Element? element, HirType placeholder) =>
+      element is ExecutableElement && isNever(element.returnType)
+      ? _builder.placeholder(placeholder)
+      : null;
+
+  HirValue _cascade(CascadeExpression node) {
+    final target = node.target.unParenthesized;
+    final result = value(target);
+    void sections() {
+      _targets[target] = result;
+      node.cascadeSections.forEach(effect);
+      _targets.remove(target);
+    }
+
+    if (!node.isNullAware || result.type != .reference) {
+      sections();
+      return result;
+    }
+    final exit = _builder.join(node);
+    _builder.branch(_conversions.isNull(result), () => _builder.jump(exit), () {
+      sections();
+      _builder.jump(exit);
+    });
+    _builder.enter(exit);
+    return result;
   }
 
   /// Evaluates [inner], which gives no value.
   void _never(Expression inner) {
     switch (inner) {
       case MethodInvocation():
-        calls.invocation(inner, isUsed: false);
+        calls.invocation(inner);
       case ThrowExpression(:final expression):
         _throw(expression);
       case FunctionExpressionInvocation():
@@ -205,15 +264,11 @@ final class ExpressionTranslator(
       case PrefixedIdentifier(:final prefix, :final identifier)
           when prefix.staticType is DynamicType:
         return _dynamics.get(inner, value(prefix), identifier.name);
-      case PropertyAccess(
-            :final realTarget,
-            :final propertyName,
-            :final isNullAware,
-          )
+      case PropertyAccess(:final realTarget, :final propertyName)
           when realTarget.staticType is DynamicType:
         final object = value(realTarget);
-        HirValue read() => _dynamics.get(inner, object, propertyName.name);
-        return isNullAware ? calls.unlessNull(inner, object, read)! : read();
+        _chains.check(inner, object);
+        return _dynamics.get(inner, object, propertyName.name);
       case PrefixedIdentifier(
             prefix: Expression(staticType: FunctionType()) &&
                 final Expression function,
@@ -223,9 +278,10 @@ final class ExpressionTranslator(
             target: Expression(staticType: FunctionType()) &&
                 final Expression function,
             propertyName: SimpleIdentifier(name: 'call'),
-            isNullAware: false,
           ):
-        return value(function);
+        final result = value(function);
+        _chains.check(inner, result);
+        return result;
       case PrefixedIdentifier(
         :final prefix,
         identifier: SimpleIdentifier(:final element),
@@ -255,12 +311,8 @@ final class ExpressionTranslator(
     _builder.raise(value, _builder.create(_scope.traceClass));
   }
 
-  HirValue _notNull(PostfixExpression node, Expression operand) {
-    if (CallTranslator.hasNullAware(operand)) {
-      _unsupported(node, 'null-aware chains');
-    }
-    return CheckedOperations(_scope, _builder).notNull(value(operand));
-  }
+  HirValue _notNull(Expression operand) =>
+      CheckedOperations(_scope, _builder).notNull(value(operand));
 
   HirValue _constructor(Expression node, ConstructorName name) {
     final element = name.element?.baseElement, type = node.staticType;
@@ -341,7 +393,7 @@ final class ExpressionTranslator(
       if (element is ExecutableElement && element.typeParameters.isNotEmpty) {
         _unsupported(node, 'generic functions as values');
       }
-      return _builder.read(element);
+      return lates.read(element) ?? _builder.read(element);
     }
     return isInstanceMember(element)
         ? calls.property(node, null, element!)

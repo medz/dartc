@@ -7,9 +7,12 @@ import 'package:dartc/hir.dart';
 import 'builder.dart';
 import 'builtin_error.dart';
 import 'captures.dart';
+import 'classes.dart';
 import 'closure.dart';
 import 'constant_table.dart';
 import 'dynamic_shape.dart';
+import 'levels.dart';
+import 'members.dart';
 
 /// Reports that something is not supported yet.
 typedef Reject = Never Function(String what);
@@ -51,16 +54,14 @@ abstract interface class ProgramScope() {
   /// The class of the cells that closures share variables of [type] through.
   HirClass cellClass(HirType type);
 
-  /// Adds what calls [function], which can be a value itself.
-  void addClosure(
-    Closure closure,
-    HirFunction function, {
-    required bool isValue,
-  });
+  /// Adds functions that are values.
+  void addClosure(Closure closure);
 
-  /// The function of the local function [element].
-  HirFunction localFunction(Element element);
-  void setLocalFunction(Element element, HirFunction function);
+  /// Adds the function of a closure, or of a variable's initializer.
+  void addLocalFunction(HirFunction function);
+
+  /// Adds the class of objects that are no values of the program.
+  void addLocalClass(HirClass class_);
 
   /// The selector of calls of functions that are values.
   HirSelector callSelector(int positional, List<String> named);
@@ -72,17 +73,23 @@ abstract interface class ProgramScope() {
   HirConstObject? functionObject(ExecutableElement element);
 
   /// How to get the method [element] of objects of [receiver].
-  HirSelector tearOffSelector(ExecutableElement element, ClassElement receiver);
+  HirSelector tearOffSelector(
+    ExecutableElement element,
+    InterfaceElement receiver,
+  );
 
-  /// Gives the method [element] of [receiver] itself.
+  /// Gives the method [found] of [receiver] itself.
   HirValue tearOff(
     FunctionBuilder builder,
-    ExecutableElement element,
+    Implementation found,
     HirValue receiver,
   );
 
   /// Translates [body] as that of the function of [builder], later.
   void translateBody(FunctionBuilder builder, FunctionBody body);
+
+  /// The value of [node] in the function of [builder], as one of [type].
+  HirValue evaluate(FunctionBuilder builder, Expression node, DartType type);
 
   /// The program's own element for [class_], which may be one of the SDK.
   InterfaceElement canonicalClass(InterfaceElement class_);
@@ -105,8 +112,8 @@ abstract interface class ProgramScope() {
   /// The object for [types] if they are closed.
   Constant? constantTypes(List<DartType> types);
 
-  /// Where objects keep the type arguments of [class_], if it is generic.
-  HirField? argumentsOf(ClassElement class_);
+  /// Where objects keep the type arguments of [level], if it has any.
+  HirField? argumentsOf(Level level);
 
   /// The function [element] with [types], or null if they are generic.
   HirValue? instantiate(
@@ -140,20 +147,33 @@ abstract interface class ProgramScope() {
   /// A function that throws [error], given its number if it has one.
   HirFunction throwerOf(BuiltinError error);
 
-  /// The number telling that [BuiltinError.late] is about the variable [name].
-  int lateNumber(String name);
+  /// The number telling that [BuiltinError.late] says [text].
+  int lateNumber(String text);
 
   /// The class of stack traces.
   HirClass get traceClass;
 
   /// Tells that objects of [class_] are thrown.
-  void addThrown(ClassElement class_);
+  void addThrown(InterfaceElement class_);
 
   /// Whether objects are of [class_].
-  HirTypeTest testOf(ClassElement class_);
+  HirTypeTest testOf(InterfaceElement class_);
 
-  /// An instance member's own body, taking the receiver first.
-  HirFunction memberOf(ExecutableElement element);
+  /// An instance member's own body at [level], taking the receiver first.
+  HirFunction memberOf(Level level, ExecutableElement element);
+
+  /// What [level] has for a member, called like a selector of
+  /// [selectorOf]. Null if it is abstract there.
+  HirFunction? functionAt(
+    Level level,
+    ExecutableElement member,
+    int positional,
+    List<String> named,
+    Reject reject,
+  );
+
+  /// The level of [class_] itself.
+  Level levelOf(ClassElement class_);
 
   /// A generative constructor's work on an object already created.
   HirFunction initializerOf(ConstructorElement element);
@@ -164,13 +184,33 @@ abstract interface class ProgramScope() {
   /// The class to create objects of.
   HirClass createdClass(ClassElement element);
 
-  HirField fieldOf(FieldElement element);
+  /// A field that [level] adds to objects, to be initialized.
+  ///
+  /// One that is `late` also tells whether that has been done.
+  FieldPlace fieldOf(Level level, FieldElement element);
+
+  /// Reads a field of [object], an object of [level].
+  HirValue loadField(
+    FunctionBuilder builder,
+    Level level,
+    FieldElement element,
+    HirValue object,
+  );
+
+  /// Assigns [value] to a field of [object], an object of [level].
+  void storeField(
+    FunctionBuilder builder,
+    Level level,
+    FieldElement element,
+    HirValue object,
+    HirValue value,
+  );
 
   /// How to call [member] on objects of [receiver], giving [positional]
   /// arguments and those [named], in alphabetical order.
   HirSelector selectorOf(
     ExecutableElement member,
-    ClassElement receiver,
+    InterfaceElement receiver,
     int positional,
     List<String> named,
     Reject reject,

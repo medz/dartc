@@ -5,9 +5,11 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'calls.dart';
+import 'chains.dart';
 import 'conversions.dart';
 import 'describe.dart';
 import 'dynamics.dart';
+import 'late_locals.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'statics.dart';
@@ -47,7 +49,7 @@ final class const _Dynamic(
 final class const _Member(
   final AstNode node,
   final HirValue receiver,
-  final ClassElement? class_,
+  final InterfaceElement? class_,
   final ExecutableElement? reader,
   final ExecutableElement writer,
   final List<HirValue> positions,
@@ -62,6 +64,8 @@ final class PlaceTranslator(
   final StaticTranslator _statics,
   final Conversions _conversions,
   final DynamicTranslator _dynamics,
+  final LateTranslator _lates,
+  final ChainTranslator _chains,
 ) {
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -99,9 +103,8 @@ final class PlaceTranslator(
         target = null;
       case PrefixedIdentifier(:final prefix):
         target = prefix;
-      case PropertyAccess(:final realTarget, :final isNullAware) ||
-          IndexExpression(:final realTarget, :final isNullAware):
-        if (isNullAware) _unsupported(node, 'null-aware assignments');
+      case PropertyAccess(:final realTarget) ||
+          IndexExpression(:final realTarget):
         target = realTarget;
       default:
         reject();
@@ -109,7 +112,7 @@ final class PlaceTranslator(
     final isSuper = target is SuperExpression;
     final receiver = target == null || isSuper
         ? _builder.receiver ?? reject()
-        : _calls.object(target);
+        : _calls.object(to, target);
     final parameters = writer.formalParameters;
     final reader = node.readElement;
     return _Member(
@@ -131,15 +134,11 @@ final class PlaceTranslator(
   }
 
   Place _dynamicPlace(Expression to, Expression owner) {
-    final isNullAware = switch (to) {
-      PropertyAccess(:final isNullAware) ||
-      IndexExpression(:final isNullAware) => isNullAware,
-      _ => false,
-    };
-    if (isNullAware) _unsupported(to, 'null-aware assignments');
+    final object = _evaluator.value(owner);
+    _chains.check(to, object);
     return _Dynamic(
       to,
-      _evaluator.value(owner),
+      object,
       switch (to) {
         PrefixedIdentifier(:final identifier) => identifier.name,
         PropertyAccess(:final propertyName) => propertyName.name,
@@ -161,7 +160,7 @@ final class PlaceTranslator(
       '[]',
       [index],
     ),
-    _Local(:final variable) => _builder.read(variable),
+    _Local(:final variable) => _lates.read(variable) ?? _builder.read(variable),
     _Static(:final node, :final reader) => _statics.read(node, reader),
     _Member(:final reader?, :final positions) => _use(
       place,
@@ -176,7 +175,7 @@ final class PlaceTranslator(
     final value = _conversions.coerce(given, valueType(place.type)!);
     switch (place) {
       case _Local(:final variable):
-        _builder.assign(variable, value);
+        if (!_lates.write(variable, value)) _builder.assign(variable, value);
       case _Dynamic(:final node, :final object, :final name, index: null):
         _dynamics.set(node, object, name, value);
       case _Dynamic(:final node, :final object, :final index?):

@@ -4,10 +4,12 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'chains.dart';
 import 'checks.dart';
 import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
+import 'creators.dart';
 import 'describe.dart';
 import 'dynamics.dart';
 import 'members.dart';
@@ -20,6 +22,7 @@ final class CallTranslator(
   final FunctionBuilder _builder,
   final Evaluator _evaluator,
   final ClosureTranslator _closures,
+  final ChainTranslator _chains,
 ) {
   late final _conversions = Conversions(_scope, _builder);
   late final _dynamics = DynamicTranslator(_scope, _builder, _evaluator);
@@ -27,19 +30,19 @@ final class CallTranslator(
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
-  /// The result of [node], if it has one and [isUsed].
-  HirValue? invocation(MethodInvocation node, {required bool isUsed}) {
+  /// The result of [node], if it has one.
+  HirValue? invocation(MethodInvocation node) {
     final element = node.methodName.element, target = node.realTarget;
     if (target != null && target.staticType is DynamicType) {
-      return _dynamicCall(node, target, isUsed: isUsed);
+      return _dynamicCall(node, target);
     }
     if (target?.staticType is FunctionType) {
-      return _callFunction(node, target!, isUsed: isUsed);
+      return _callFunction(node, target!);
     }
     if (target != null &&
         (target.staticType?.isDartCoreFunction ?? false) &&
         node.methodName.name == 'call') {
-      return _dynamicCall(node, target, isUsed: isUsed);
+      return _dynamicCall(node, target);
     }
     if (element is! ExecutableElement) _unsupported(node, describe(node));
     if (_builder.typeOf(element.baseElement) != null) {
@@ -47,19 +50,22 @@ final class CallTranslator(
     }
     if (!isInstanceMember(element)) return _static(node, element);
     if (element is! MethodElement) _unsupported(node, describe(node));
-    if (target != null && isNumber(target.staticType)) {
-      final result = _numberMember(element, target);
+    if (target != null && isNumber(_withoutNull(target.staticType))) {
+      final result = _numberMember(node, element, target);
       if (result != null) return result;
     }
     if (target is SuperExpression) {
+      final (positional, named) = _given(node.argumentList);
       return superMember(
         node,
         element,
-        ordered(element.baseElement, supplied(node.argumentList)),
+        positional,
+        named: named,
         types: _typeList(node, node.typeArgumentTypes),
       );
     }
-    HirValue? call(HirValue receiver) => _checked(
+    final receiver = target == null ? _this(node) : object(node, target);
+    return _checked(
       node,
       element,
       method(
@@ -71,11 +77,6 @@ final class CallTranslator(
         types: node.typeArgumentTypes,
       ),
     );
-    if (target == null) return call(_this(node));
-    final receiver = object(target, isNullAware: node.isNullAware);
-    return node.isNullAware
-        ? unlessNull(node, receiver, () => call(receiver), isUsed: isUsed)
-        : call(receiver);
   }
 
   /// [result] of [element], checked if it can be of another type than [node],
@@ -102,7 +103,7 @@ final class CallTranslator(
     final self = _builder.read(element);
     final arguments = ordered(element, supplied(node.argumentList));
     final types = _typeList(node, node.typeArgumentTypes);
-    return _direct(_scope.localFunction(element), element, [
+    return _direct(_builder.locals.functions[element]!, element, [
       self,
       ?types,
       ...arguments,
@@ -116,45 +117,38 @@ final class CallTranslator(
         _unsupported(node, 'these type arguments');
   }
 
-  HirValue? _dynamicCall(
-    MethodInvocation node,
-    Expression target, {
-    required bool isUsed,
-  }) {
+  HirValue? _dynamicCall(MethodInvocation node, Expression target) {
     final object = _evaluator.value(target);
-    HirValue? call() => _dynamics.call(
+    _chains.check(node, object);
+    return _dynamics.call(
       node,
       object,
       node.methodName.name,
       node.argumentList,
       types: node.typeArguments,
     );
-    return node.isNullAware
-        ? unlessNull(node, object, call, isUsed: isUsed)
-        : call();
   }
 
-  HirValue? _callFunction(
-    MethodInvocation node,
-    Expression target, {
-    required bool isUsed,
-  }) {
+  HirValue? _callFunction(MethodInvocation node, Expression target) {
     if (node.methodName.name != 'call') {
       final name = node.methodName.name;
       _unsupported(node, 'calling $name of the SDK');
     }
     final function = _evaluator.value(target);
-    HirValue? call() => _closures.call(node, function, node.argumentList);
-    return node.isNullAware
-        ? unlessNull(node, function, call, isUsed: isUsed)
-        : call();
+    _chains.check(node, function);
+    return _closures.call(node, function, node.argumentList);
   }
 
   /// The result of a conversion of the number [target], if it is one.
-  HirValue? _numberMember(MethodElement element, Expression target) {
+  HirValue? _numberMember(
+    MethodInvocation node,
+    MethodElement element,
+    Expression target,
+  ) {
     final name = element.displayName;
     if (name != 'toInt' && name != 'toDouble') return null;
     final value = _evaluator.value(target);
+    _chains.check(node, value);
     if (value.type == .reference) {
       final helper = name == 'toInt' ? 'numToInt' : 'numToDouble';
       return _builder.call(HirCall(_scope.runtime(helper), [value]));
@@ -167,62 +161,25 @@ final class CallTranslator(
         : _builder.add(HirUnary(.intToFloat, value));
   }
 
+  DartType? _withoutNull(DartType? type) =>
+      type == null ? null : _builder.library.typeSystem.promoteToNonNull(type);
+
   HirValue _this(AstNode node) =>
       _builder.receiver ?? _unsupported(node, 'this here');
 
-  /// The object that [target] is, on which a member is used.
-  ///
-  /// Where a null-aware target is null, a use that [isNullAware] itself is
-  /// skipped anyway; others would have to be skipped with it.
-  HirValue object(Expression target, {bool isNullAware = false}) {
-    if (hasNullAware(target) && !isNullAware) {
-      _unsupported(target.parent!, 'null-aware chains');
-    }
+  /// The object that [target] is, of which [node] uses a member.
+  HirValue object(Expression node, Expression target) {
     if (classOf(target.staticType) == null) {
-      _unsupported(target.parent!, describe(target.parent!));
+      _unsupported(node, describe(node));
     }
-    return _evaluator.valueAs(target, .reference);
+    final result = _evaluator.valueAs(target, .reference);
+    _chains.check(node, result);
+    return result;
   }
 
-  static bool hasNullAware(Expression target) => switch (target) {
-    MethodInvocation(:final isNullAware) ||
-    PropertyAccess(:final isNullAware) ||
-    IndexExpression(:final isNullAware) => isNullAware,
-    _ => false,
-  };
-
-  ClassElement _receiverClass(AstNode node, Expression? target) =>
+  InterfaceElement _receiverClass(AstNode node, Expression? target) =>
       (target == null ? _builder.receiverClass : classOf(target.staticType)) ??
       _unsupported(node, describe(node));
-
-  /// Runs [call] unless [receiver] is null, which is then the result.
-  HirValue? unlessNull(
-    Expression node,
-    HirValue receiver,
-    HirValue? Function() call, {
-    bool isUsed = true,
-  }) {
-    final type = valueType(node.staticType!);
-    if (isUsed && type == null) {
-      _unsupported(node, 'a value of type ${node.staticType}');
-    }
-    final exit = _builder.join(node, isUsed ? type : null);
-    final isNull = _builder.add(
-      HirCompare(.equal, receiver, _builder.add(HirNull())),
-    );
-    _builder.branch(
-      isNull,
-      () => _builder.jump(exit, isUsed ? _builder.add(HirNull()) : null),
-      () {
-        final result = call();
-        _builder.jump(
-          exit,
-          isUsed ? _conversions.coerce(result!, type!) : null,
-        );
-      },
-    );
-    return _builder.enter(exit);
-  }
 
   HirValue? _static(MethodInvocation node, ExecutableElement element) {
     final isFunction =
@@ -314,7 +271,7 @@ final class CallTranslator(
   HirValue creation(InstanceCreationExpression node) {
     final element = node.constructorName.element;
     final class_ = classOf(node.staticType);
-    if (element == null || class_ == null) {
+    if (element == null || class_ is! ClassElement) {
       _unsupported(node, 'objects of type ${node.staticType}');
     }
     if (element.library.isInSdk) {
@@ -327,17 +284,39 @@ final class CallTranslator(
             _unsupported(node, 'a constant of type ${node.staticType}'),
       );
     }
+    var target = element, given = supplied(node.argumentList);
+    for (
+      var next = redirectionOf(target);
+      next != null;
+      next = redirectionOf(target)
+    ) {
+      given = redirected(given);
+      target = next;
+    }
+    return _create(node, target, given);
+  }
+
+  /// Creates an object with [element], giving [supplied] to its parameters.
+  HirValue _create(
+    Expression node,
+    ConstructorElement element,
+    Map<FormalParameterElement, HirValue> supplied,
+  ) {
+    final class_ = element.enclosingElement as ClassElement;
+    if (class_.library.isInSdk) {
+      _unsupported(node, 'calling ${class_.displayName} of the SDK');
+    }
     final base = element.baseElement;
-    final types = (node.staticType as InterfaceType).typeArguments;
+    final types = element.returnType.typeArguments;
     if (element.isFactory) {
-      final arguments = ordered(base, supplied(node.argumentList));
+      final arguments = ordered(base, supplied);
       return _direct(_scope.factoryOf(base), element, [
         ?_typeList(node, types),
         ...arguments,
       ])!;
     }
     final created = _scope.createdClass(class_);
-    final arguments = ordered(base, supplied(node.argumentList));
+    final arguments = ordered(base, supplied);
     final list = _typeList(node, types);
     final object = _builder.create(created);
     _direct(_scope.initializerOf(base), element, [object, ?list, ...arguments]);
@@ -372,24 +351,31 @@ final class CallTranslator(
       supplied[parameter] ?? _builder.add(_scope.defaultOf(parameter)),
   ];
 
+  /// The positional and named arguments of a call.
+  (List<HirValue>, Map<String, HirValue>) _given(ArgumentList list) {
+    final given = supplied(list);
+    return (
+      [
+        for (final MapEntry(:key, :value) in given.entries)
+          if (key.isPositional) value,
+      ],
+      {
+        for (final MapEntry(:key, :value) in given.entries)
+          if (key.isNamed) key.name!: value,
+      },
+    );
+  }
+
   /// Calls the method [element] on [receiver].
   HirValue? method(
     AstNode node,
     HirValue receiver,
-    ClassElement class_,
+    InterfaceElement class_,
     MethodElement element,
     ArgumentList list, {
     List<DartType>? types,
   }) {
-    final given = supplied(list);
-    final positional = [
-      for (final MapEntry(:key, :value) in given.entries)
-        if (key.isPositional) value,
-    ];
-    final named = {
-      for (final MapEntry(:key, :value) in given.entries)
-        if (key.isNamed) key.name!: value,
-    };
+    final (positional, named) = _given(list);
     final typeList = _typeList(node, types);
     return invoke(node, receiver, class_, element, positional, named, typeList);
   }
@@ -398,7 +384,7 @@ final class CallTranslator(
   HirValue? invoke(
     AstNode node,
     HirValue receiver,
-    ClassElement class_,
+    InterfaceElement class_,
     ExecutableElement element, [
     List<HirValue> positional = const [],
     Map<String, HirValue> named = const {},
@@ -429,7 +415,7 @@ final class CallTranslator(
 
   void _checkMember(AstNode node, ExecutableElement element) {
     final owner = element.enclosingElement;
-    if (owner is! ClassElement) _unsupported(node, 'extensions and mixins');
+    if (owner is! InterfaceElement) _unsupported(node, 'extensions');
     if (owner.library.isInSdk && element.displayName != '==') {
       _unsupported(node, 'calling ${element.displayName} of the SDK');
     }
@@ -440,37 +426,25 @@ final class CallTranslator(
     AstNode node,
     ExecutableElement given,
     List<HirValue> values, {
+    Map<String, HirValue> named = const {},
     HirValue? types,
   }) {
     final element = given.baseElement;
     _checkMember(node, element);
-    final parent = _builder.receiverClass!.supertype!.element as ClassElement;
-    if (implementationIn(parent, element) != element) {
-      _unsupported(node, 'this use of super');
-    }
-    final receiver = _this(node);
-    if (fieldOfAccessor(element) case final field?) {
-      final found = _scope.fieldOf(field);
-      if (element is GetterElement) {
-        return _builder.add(HirLoad(found, receiver));
-      }
-      _builder.add(
-        HirStore(
-          found,
-          receiver,
-          _conversions.coerce(values.single, found.type),
-        ),
-      );
-      return null;
-    }
-    if (element.library.isInSdk) {
-      // Only the equality of Object, which is identity.
-      return _builder.add(HirCompare(.equal, receiver, values.single));
-    }
-    return _direct(_scope.memberOf(element), element, [
-      receiver,
+    final names = named.keys.toList()..sort();
+    final function = _scope.functionAt(
+      _builder.level!.superLevel!,
+      element,
+      values.length,
+      names,
+      (what) => _unsupported(node, what),
+    );
+    if (function == null) _unsupported(node, 'this use of super');
+    return _direct(function, element, [
+      _this(node),
       ?types,
       ...values,
+      for (final name in names) named[name]!,
     ]);
   }
 
@@ -478,7 +452,7 @@ final class CallTranslator(
   HirValue tearOff(
     AstNode node,
     HirValue receiver,
-    ClassElement class_,
+    InterfaceElement class_,
     MethodElement element,
   ) {
     _checkMember(node, element);
@@ -498,20 +472,13 @@ final class CallTranslator(
     final method = found.baseElement;
     if (target is SuperExpression) {
       _checkMember(node, method);
-      final parent = _builder.receiverClass!.supertype!.element as ClassElement;
-      if (implementationIn(parent, method) != method) {
-        _unsupported(node, 'this use of super');
-      }
-      return _scope.tearOff(_builder, method, _this(node));
+      final found = implementationIn(_builder.level!.superLevel!, method);
+      if (found == null) _unsupported(node, 'this use of super');
+      return _scope.tearOff(_builder, found, _this(node));
     }
     final class_ = _receiverClass(node, target);
     if (target == null) return tearOff(node, _this(node), class_, method);
-    final isNullAware = node is PropertyAccess && node.isNullAware;
-    final receiver = object(target, isNullAware: isNullAware);
-    HirValue read() => tearOff(node, receiver, class_, method);
-    return isNullAware
-        ? unlessNull(node, receiver, read, isUsed: true)!
-        : read();
+    return tearOff(node, object(node, target), class_, method);
   }
 
   /// Reads the property [element] of [target], or of `this` if that is null.
@@ -523,17 +490,9 @@ final class CallTranslator(
       result = superMember(node, element, const []);
     } else {
       final class_ = _receiverClass(node, target);
-      HirValue? read(HirValue receiver) =>
-          _checked(node, element, invoke(node, receiver, class_, element));
-      if (target == null) {
-        result = read(_this(node));
-      } else {
-        final isNullAware = node is PropertyAccess && node.isNullAware;
-        final receiver = object(target, isNullAware: isNullAware);
-        result = isNullAware
-            ? unlessNull(node, receiver, () => read(receiver), isUsed: true)
-            : read(receiver);
-      }
+      final receiver = target == null ? _this(node) : object(node, target);
+      final read = invoke(node, receiver, class_, element);
+      result = _checked(node, element, read);
     }
     return result ?? _unsupported(node, describe(node));
   }
@@ -541,19 +500,18 @@ final class CallTranslator(
   /// Reads `target[index]`.
   HirValue index(IndexExpression node) {
     final element = node.element, target = node.realTarget;
-    if (target.staticType is DynamicType && !node.isNullAware) {
+    if (target.staticType is DynamicType) {
       final object = _evaluator.value(target);
+      _chains.check(node, object);
       return _dynamics.operate(node, object, '[]', [
         _evaluator.value(node.index, placeholder: .reference),
       ]);
     }
-    if (element == null || node.isNullAware) {
-      _unsupported(node, describe(node));
-    }
+    if (element == null) _unsupported(node, describe(node));
     final type = element.formalParameters.first.type;
     if (valueType(type) == null) _unsupported(node, describe(node));
     final isSuper = target is SuperExpression;
-    final receiver = isSuper ? _this(node) : object(target);
+    final receiver = isSuper ? _this(node) : object(node, target);
     final position = _evaluator.valueTo(node.index, type);
     final result = isSuper
         ? superMember(node, element, [position])

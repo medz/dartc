@@ -98,13 +98,16 @@ final class StatementTranslator(
   }
 
   void _declare(VariableDeclarationList list) {
-    if (list.isLate) _unsupported(list, 'late variables');
     for (final declaration in list.variables) {
       final variable = declaration.declaredFragment!.element;
       if (variable.isConst) continue;
       final type =
           valueType(variable.type) ??
           _unsupported(declaration, 'a variable of type ${variable.type}');
+      if (list.isLate) {
+        expressions.lates.declare(declaration, variable, type);
+        continue;
+      }
       final initializer = declaration.initializer;
       final value = initializer == null
           ? null
@@ -176,6 +179,7 @@ final class StatementTranslator(
   void _for(ForStatement node, ForParts parts) {
     switch (parts) {
       case ForPartsWithDeclarations(:final variables):
+        if (variables.isLate) _unsupported(variables, 'late loop variables');
         _declare(variables);
       case ForPartsWithExpression(:final initialization):
         if (initialization != null) expressions.effect(initialization);

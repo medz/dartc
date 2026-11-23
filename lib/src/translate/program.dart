@@ -13,11 +13,15 @@ import 'closure.dart';
 import 'closure_table.dart';
 import 'constant_table.dart';
 import 'constructor.dart';
+import 'creators.dart';
 import 'dispatch.dart';
 import 'dynamic_shape.dart';
 import 'dynamic_table.dart';
 import 'error_table.dart';
+import 'expression.dart';
+import 'field_table.dart';
 import 'global_table.dart';
+import 'levels.dart';
 import 'members.dart';
 import 'report.dart';
 import 'scope.dart';
@@ -60,8 +64,13 @@ final class ProgramTranslator(
   );
   late final TypeTable _types = TypeTable(this, _classes, _constants);
   late final _typeFunctions = TypeFunctions(this, _unit, _classes, _types);
-  late final _closures = ClosureTable(this, _unit, _creatorOf);
+  late final _closures = ClosureTable(
+    this,
+    _unit,
+    (element) => _creators.of(element),
+  );
   late final _dynamics = DynamicTable(this, _unit);
+  late final _fields = FieldTable(this, _declarations, _classes);
   late final _errors = ErrorTable(_classes, _core, _dispatch.instantiate);
   late final _globals = GlobalTable(
     this,
@@ -69,19 +78,18 @@ final class ProgramTranslator(
     _constants,
     _pending.add,
   );
-  final _functions = <ExecutableElement, HirFunction>{};
+  final _functions = <(ExecutableElement, Level?), HirFunction>{};
   final _pending = <void Function()>[];
   final _captures = <AstNode, Captures>{};
   final _cells = <HirType, HirClass>{};
 
-  /// The functions of closures.
+  /// The functions of closures and local variables.
   final _bodies = <HirFunction>[];
-  final _creators = <ConstructorElement, HirFunction>{};
-  final _locals = <Element, HirFunction>{};
+  late final _creators = CreatorTable(this, _unit);
 
-  /// The classes of local functions that are no values.
+  /// The classes of local functions and variables that are no values.
   final _localClasses = <HirClass>[];
-  final _thrown = <ClassElement>{};
+  final _thrown = <InterfaceElement>{};
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _writeNumber;
 
   HirModule translate() {
@@ -96,8 +104,8 @@ final class ProgramTranslator(
       throw _declarations.unsupported(entry, 'parameters of main');
     }
     final main = HirFunction(entry.displayName, const []);
-    _functions[entry] = main;
-    _pending.add(() => _translate(entry));
+    _functions[(entry, null)] = main;
+    _pending.add(() => _translate(entry, null));
     do {
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
@@ -156,11 +164,12 @@ final class ProgramTranslator(
   Iterable<HirFunction> get _allFunctions => [
     ..._functions.values,
     ..._globals.getters,
+    ..._fields.functions,
     ..._dispatch.made,
     ..._closures.made,
     ..._dynamics.made,
     ..._bodies,
-    ..._creators.values,
+    ..._creators.functions,
     ..._typeFunctions.functions,
     ..._errors.functions,
   ];
@@ -228,22 +237,19 @@ final class ProgramTranslator(
   }
 
   @override
-  void addClosure(
-    Closure closure,
-    HirFunction function, {
-    required bool isValue,
-  }) {
-    _bodies.add(function);
-    isValue ? _closures.add(closure) : _localClasses.add(closure.class_);
+  void addClosure(Closure closure) {
+    _closures.add(closure);
     _addAllocation();
   }
 
   @override
-  HirFunction localFunction(Element element) => _locals[element]!;
+  void addLocalFunction(HirFunction function) => _bodies.add(function);
 
   @override
-  void setLocalFunction(Element element, HirFunction function) =>
-      _locals[element] = function;
+  void addLocalClass(HirClass class_) {
+    _localClasses.add(class_);
+    _addAllocation();
+  }
 
   @override
   HirSelector callSelector(int positional, List<String> named) =>
@@ -334,7 +340,7 @@ final class ProgramTranslator(
   Constant? constantTypes(List<DartType> types) => _types.list(types);
 
   @override
-  HirField? argumentsOf(ClassElement class_) => _classes.argumentsOf(class_);
+  HirField? argumentsOf(Level level) => _classes.argumentsOf(level);
 
   /// Makes the classes that describe types part of the program.
   void _prepareTypes() {
@@ -347,17 +353,17 @@ final class ProgramTranslator(
   @override
   HirSelector tearOffSelector(
     ExecutableElement element,
-    ClassElement receiver,
+    InterfaceElement receiver,
   ) => _dispatch.tearOffSelector(element, receiver);
 
   @override
   HirValue tearOff(
     FunctionBuilder builder,
-    ExecutableElement element,
+    Implementation found,
     HirValue receiver,
   ) {
     _addAllocation();
-    return _closures.tearOff(builder, element, receiver);
+    return _closures.tearOff(builder, found, receiver);
   }
 
   @override
@@ -365,6 +371,10 @@ final class ProgramTranslator(
     StatementTranslator(this, builder).body(body);
     builder.finish();
   }
+
+  @override
+  HirValue evaluate(FunctionBuilder builder, Expression node, DartType type) =>
+      ExpressionTranslator(this, builder).valueTo(node, type);
 
   @override
   HirSelector dynamicSelector(DynamicShape shape) =>
@@ -378,27 +388,6 @@ final class ProgramTranslator(
 
   @override
   void schedule(void Function() work) => _pending.add(work);
-
-  /// A function that creates an object and initializes it.
-  HirFunction _creatorOf(ConstructorElement element) {
-    if (element.isFactory) return factoryOf(element);
-    return _creators[element] ??= () {
-      final initializer = initializerOf(element);
-      final class_ = element.enclosingElement as ClassElement;
-      final function = HirFunction(
-        'create ${initializer.name}',
-        initializer.parameters.skip(1),
-        .reference,
-      );
-      final builder = FunctionBuilder(_unit, function, const []);
-      final object = builder.create(createdClass(class_));
-      builder
-        ..call(HirCall(initializer, [object, ...builder.inputs]))
-        ..end(HirReturn(object))
-        ..finish();
-      return function;
-    }();
-  }
 
   @override
   HirClass boxClass(HirType type) => createdClass(
@@ -420,7 +409,7 @@ final class ProgramTranslator(
       _runtimeFunction(name) ?? (throw StateError('No runtime with $name.'));
 
   @override
-  int lateNumber(String name) => _errors.lateNumber(name);
+  int lateNumber(String text) => _errors.lateNumber(text);
 
   @override
   HirClass get traceClass {
@@ -429,10 +418,10 @@ final class ProgramTranslator(
   }
 
   @override
-  void addThrown(ClassElement class_) => _thrown.add(class_);
+  void addThrown(InterfaceElement class_) => _thrown.add(class_);
 
   @override
-  HirTypeTest testOf(ClassElement class_) => _errors.testOf(class_);
+  HirTypeTest testOf(InterfaceElement class_) => _errors.testOf(class_);
 
   @override
   HirFunction? functionOf(ExecutableElement element) {
@@ -464,18 +453,26 @@ final class ProgramTranslator(
       _constants.defaultOf(parameter);
 
   @override
-  HirFunction memberOf(ExecutableElement element) => _declare(element);
+  HirFunction memberOf(Level level, ExecutableElement element) =>
+      _declare(element, level);
+
+  @override
+  HirFunction? functionAt(
+    Level level,
+    ExecutableElement member,
+    int positional,
+    List<String> named,
+    Reject reject,
+  ) => _dispatch.functionAt(level, member, positional, named, reject);
+
+  @override
+  Level levelOf(ClassElement class_) => _classes.levels.of(class_);
 
   @override
   HirFunction initializerOf(ConstructorElement element) => _declare(element);
 
   @override
-  HirFunction factoryOf(ConstructorElement element) {
-    if (element.redirectedConstructor != null) {
-      throw _declarations.unsupported(element, 'redirecting factories');
-    }
-    return _declare(element);
-  }
+  HirFunction factoryOf(ConstructorElement element) => _declare(element);
 
   @override
   HirClass createdClass(ClassElement element) {
@@ -488,57 +485,85 @@ final class ProgramTranslator(
   void _addAllocation() => _allocate ??= _runtimeFunction('allocate');
 
   @override
-  HirField fieldOf(FieldElement element) => _classes.fieldOf(element);
+  FieldPlace fieldOf(Level level, FieldElement element) =>
+      _classes.fieldOf(level, element);
+
+  @override
+  HirValue loadField(
+    FunctionBuilder builder,
+    Level level,
+    FieldElement element,
+    HirValue object,
+  ) => _fields.load(builder, level, element, object);
+
+  @override
+  void storeField(
+    FunctionBuilder builder,
+    Level level,
+    FieldElement element,
+    HirValue object,
+    HirValue value,
+  ) => _fields.store(builder, level, element, object, value);
 
   @override
   HirSelector selectorOf(
     ExecutableElement member,
-    ClassElement receiver,
+    InterfaceElement receiver,
     int positional,
     List<String> named,
     Reject reject,
   ) => _dispatch.selectorOf(member, receiver, positional, named, reject);
 
-  HirFunction _declare(ExecutableElement element) =>
-      _functions.putIfAbsent(element, () {
-        _pending.add(() => _translate(element));
-        final owner = element.enclosingElement;
-        final result = element.returnType;
-        final isInitializer = isInitializerElement(element);
-        return HirFunction(
-          owner is InstanceElement
-              ? '${owner.displayName}.${element.lookupName}'
-              : element.displayName,
-          [
-            if (hasReceiver(element)) .reference,
-            if (takesTypes(element) != null) .reference,
-            for (final parameter in element.formalParameters)
-              valueType(parameter.type) ??
+  /// The function of [element], which can be a member of a level.
+  ///
+  /// Members of a mixin have one for each class that they are mixed in.
+  HirFunction _declare(ExecutableElement element, [Level? given]) {
+    final level = given ?? _ownLevel(element);
+    return _functions.putIfAbsent((element, level), () {
+      _pending.add(() => _translate(element, level));
+      final owner = element.enclosingElement;
+      final result = element.returnType;
+      final isInitializer = isInitializerElement(element);
+      return HirFunction(
+        owner is InstanceElement
+            ? '${owner.displayName}.${element.lookupName}'
+            : element.displayName,
+        [
+          if (hasReceiver(element)) .reference,
+          if (takesTypes(element) != null) .reference,
+          for (final parameter in element.formalParameters)
+            valueType(parameter.type) ??
+                (throw _declarations.unsupported(
+                  element,
+                  'a parameter of type ${parameter.type}',
+                )),
+        ],
+        isInitializer || hasNoResult(result)
+            ? null
+            : valueType(result) ??
                   (throw _declarations.unsupported(
                     element,
-                    'a parameter of type ${parameter.type}',
+                    'a result of type $result',
                   )),
-          ],
-          isInitializer || hasNoResult(result)
-              ? null
-              : valueType(result) ??
-                    (throw _declarations.unsupported(
-                      element,
-                      'a result of type $result',
-                    )),
-          !_isRuntime(element.library),
-        );
-      });
+        !_isRuntime(element.library),
+      );
+    });
+  }
 
-  void _translate(ExecutableElement element) {
+  /// The level that a function works on objects of, if it is not a mixin's.
+  Level? _ownLevel(ExecutableElement element) => hasReceiver(element)
+      ? levelOf(element.enclosingElement as ClassElement)
+      : null;
+
+  void _translate(ExecutableElement element, Level? level) {
     final declared = _declarations[element];
     final owner = element.enclosingElement;
     final (unit, node) = declared ?? _declarations[owner as ClassElement]!;
     final builder = FunctionBuilder(
       unit,
-      _functions[element]!,
+      _functions[(element, level)]!,
       element.formalParameters,
-      receiverClass: hasReceiver(element) ? owner as ClassElement : null,
+      ownLevel: level,
       returnType: element.returnType,
       typeOwner: takesTypes(element),
       captures: capturesOf(declarationOf(node)),

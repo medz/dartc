@@ -3,6 +3,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
+import 'levels.dart';
 import 'types.dart';
 
 /// Where the program declares each of its elements.
@@ -19,6 +20,11 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
             case TopLevelVariableDeclaration(:final variables):
               _addVariables(unit, variables);
             case ClassDeclaration(:final declaredFragment?):
+              _nodes[declaredFragment.element] = (unit, declaration);
+              for (final member in declaration.body.members) {
+                _addMember(unit, member);
+              }
+            case MixinDeclaration(:final declaredFragment?):
               _nodes[declaredFragment.element] = (unit, declaration);
               for (final member in declaration.body.members) {
                 _addMember(unit, member);
@@ -78,24 +84,57 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
   }
 }
 
+/// Where objects keep the value of a variable, and whether it has one if that
+/// is not certain.
+typedef FieldPlace = ({HirField value, HirField? isSet});
+
 /// The program's classes and their fields.
 final class ClassTable(final Declarations _declarations) {
-  final _classes = <ClassElement, HirClass>{};
-  final _fields = <FieldElement, HirField>{};
-  final _argumentFields = <ClassElement, HirField>{};
+  final levels = LevelTable();
+  final _classes = <Level, HirClass>{};
+  final _fields = <(Level, FieldElement), FieldPlace>{};
+  final _argumentFields = <Level, HirField>{};
 
-  HirClass classOf(ClassElement element) =>
-      _classes[element] ??= _class(element);
+  HirClass classOf(ClassElement element) => atLevel(levels.of(element));
 
-  /// A field of a class that objects are created of, or of its superclass.
-  HirField fieldOf(FieldElement element) => _fields[element.baseElement]!;
+  /// The class whose objects have the members of [level] and before.
+  HirClass atLevel(Level level) => _classes[level] ??= _class(level);
 
-  HirClass _class(ClassElement element) {
+  /// A field of [level], of which objects are created.
+  FieldPlace fieldOf(Level level, FieldElement element) {
+    atLevel(level);
+    return _fields[(level, element.baseElement)]!;
+  }
+
+  HirClass _class(Level level) {
+    final Level(:element, :class_, :superLevel) = level;
     CompileFailure unsupported(String what) =>
-        _declarations.unsupported(element, what);
-    if (element.library.isInSdk) {
-      // A number, an error thrown by the program itself, or a stack trace.
-      return HirClass(element.displayName, null, switch (element.name) {
+        _declarations.unsupported(class_, what);
+    if (element.library.isInSdk) return _sdkClass(element);
+    if (element is ClassElement && element.primaryConstructor != null) {
+      throw unsupported('primary constructors');
+    }
+    final below = superLevel!.element;
+    final isBase = below.library.isDartCore && below.name == 'Error';
+    final isObject = below is ClassElement && below.isDartCoreObject;
+    if (below.library.isInSdk && !isObject && !isBase) {
+      throw unsupported('extending ${below.name} of the SDK');
+    }
+    return HirClass(
+      level.isMixin
+          ? '${class_.displayName} with ${element.displayName}'
+          : element.displayName,
+      below.library.isInSdk ? null : atLevel(superLevel),
+      [
+        ?_arguments(level),
+        for (final field in instanceFields(element)) ..._field(level, field),
+      ],
+    );
+  }
+
+  /// A number, an error thrown by the program itself, or a stack trace.
+  static HirClass _sdkClass(InterfaceElement element) =>
+      HirClass(element.displayName, null, switch (element.name) {
         'StackTrace' => const [],
         'int' => [HirField('value', .integer)],
         'double' => [HirField('value', .float)],
@@ -107,52 +146,36 @@ final class ClassTable(final Declarations _declarations) {
         ],
         _ => [HirField('number', .integer)],
       });
-    }
-    if (element.mixins.isNotEmpty) throw unsupported('mixins');
-    if (element.primaryConstructor != null) {
-      throw unsupported('primary constructors');
-    }
-    final superclass = element.supertype!.element as ClassElement;
-    final isBase = superclass.library.isDartCore && superclass.name == 'Error';
-    if (superclass.library.isInSdk && !superclass.isDartCoreObject && !isBase) {
-      throw unsupported('extending ${superclass.name} of the SDK');
-    }
-    return HirClass(
-      element.displayName,
-      superclass.library.isInSdk ? null : classOf(superclass),
-      [
-        ?_arguments(element),
-        for (final field in instanceFields(element)) _field(field),
-      ],
-    );
+
+  /// Where objects keep the type arguments of [level], if it has any.
+  HirField? argumentsOf(Level level) {
+    atLevel(level);
+    return _argumentFields[level];
   }
 
-  /// Where objects keep the type arguments of [element], if it is generic.
-  HirField? argumentsOf(ClassElement element) {
-    classOf(element);
-    return _argumentFields[element];
-  }
-
-  HirField? _arguments(ClassElement element) {
-    if (element.typeParameters.isEmpty) return null;
-    return _argumentFields[element] = HirField(
-      '${element.displayName} types',
+  HirField? _arguments(Level level) {
+    if (level.element.typeParameters.isEmpty) return null;
+    return _argumentFields[level] = HirField(
+      '${level.element.displayName} types',
       .reference,
     );
   }
 
-  HirField _field(FieldElement element) {
+  List<HirField> _field(Level level, FieldElement element) {
     CompileFailure unsupported(String what) =>
         _declarations.unsupported(element, what);
-    if (element.isLate) throw unsupported('late fields');
     final type =
         valueType(element.type) ??
         (throw unsupported('a field of type ${element.type}'));
-    return _fields[element] = HirField(element.displayName, type);
+    final name = element.displayName;
+    final value = HirField(name, type);
+    final isSet = element.isLate ? HirField('$name is set', .boolean) : null;
+    _fields[(level, element)] = (value: value, isSet: isSet);
+    return [value, ?isSet];
   }
 
   /// The fields that [class_] itself adds to objects, in order.
-  static Iterable<FieldElement> instanceFields(ClassElement class_) =>
+  static Iterable<FieldElement> instanceFields(InterfaceElement class_) =>
       class_.fields.where(
         (field) =>
             !field.isStatic &&

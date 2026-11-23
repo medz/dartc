@@ -16,7 +16,7 @@ final class ReportBuilder(
   final ErrorTable _errors,
 
   /// The static classes of the objects that programs throw.
-  final Set<ClassElement> _thrown,
+  final Set<InterfaceElement> _thrown,
 
   /// Writes a number to standard error.
   final HirFunction? _writeNumber,
@@ -188,13 +188,9 @@ final class ReportBuilder(
   void _late(HirBlock start, HirValue exception, ClassElement class_) {
     final number = _field(start, exception, class_);
     var block = start;
-    for (final (i, name) in _errors.lateNames.indexed) {
+    for (final (i, text) in _errors.lateTexts.indexed) {
       block = _caseOf(block, number, i, (yes) {
-        _end(
-          yes,
-          '${BuiltinError.late.text}Field \'$name\' '
-          'has been assigned during initialization.\n',
-        );
+        _end(yes, '${BuiltinError.late.text}$text\n');
       });
     }
     block.end(HirUnreachable());
@@ -204,7 +200,8 @@ final class ReportBuilder(
   String _text(ClassElement class_) {
     final object = class_.library.typeProvider.objectElement;
     final member = object.getMethod('toString')!;
-    final found = implementationIn(class_, member)!;
+    final level = _classes.levels.of(class_);
+    final found = implementationIn(level, member)!.element;
     if (found.library.isInSdk) return "Instance of '${class_.displayName}'";
     return switch (_declarations[found]?.$2) {
           MethodDeclaration(

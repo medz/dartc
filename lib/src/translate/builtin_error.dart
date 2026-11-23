@@ -30,7 +30,7 @@ enum BuiltinError(
   ),
   noInt('UnsupportedError', 'Unsupported operation: Infinity or NaN toInt'),
 
-  /// A final variable got its value while it was set; the number says which.
+  /// A `late` variable has no value, or one already; the number says which.
   late('Error', 'LateInitializationError: ', hasNumber: true),
   stackOverflow('StackOverflowError', 'Stack Overflow', isConstant: true),
   outOfMemory('OutOfMemoryError', 'Out of Memory', isConstant: true);

@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/element/element.dart';
 
+import 'levels.dart';
 import 'types.dart';
 
 /// Whether [element] is a member of objects, rather than of a class or library.
@@ -21,20 +22,18 @@ Element? takesTypes(ExecutableElement element) {
       : null;
 }
 
-/// The implementation that objects of [class_] have for a member like
-/// [member], or null if it is abstract.
-ExecutableElement? implementationIn(
-  ClassElement class_,
-  ExecutableElement member,
-) {
-  InterfaceElement? found = class_;
-  while (found != null) {
-    for (final own in _membersLike(member, found)) {
+/// A member and the level that it is part of.
+typedef Implementation = ({ExecutableElement element, Level level});
+
+/// The implementation of a member like [member] that objects have whose class
+/// is at [level], or null if it is abstract.
+Implementation? implementationIn(Level level, ExecutableElement member) {
+  for (final found in level.chain) {
+    for (final own in _membersLike(member, found.element)) {
       if (_sameName(own, member) && !own.isStatic && !_isAbstract(own)) {
-        return own;
+        return (element: own, level: found);
       }
     }
-    found = found.supertype?.element;
   }
   return null;
 }
@@ -67,7 +66,7 @@ FieldElement? fieldOfAccessor(ExecutableElement member) => switch (member) {
 /// Every member of the superclasses and interfaces of [class_] that a member
 /// like [member] overrides.
 Iterable<ExecutableElement> overriddenBy(
-  ClassElement class_,
+  InterfaceElement class_,
   ExecutableElement member,
 ) sync* {
   for (final type in class_.allSupertypes) {
@@ -79,31 +78,28 @@ Iterable<ExecutableElement> overriddenBy(
   }
 }
 
-/// The instance member of [class_] called [name], which is private to [library]
-/// if that is given, or null if it has none.
-ExecutableElement? memberNamed(
-  ClassElement class_,
+/// The instance member called [name] of objects whose class is at [level], or
+/// null if it has none. It is private to [library] if that is given.
+Implementation? memberNamed(
+  Level level,
   String name,
   LibraryElement? library, {
   bool isGetter = false,
   bool isSetter = false,
 }) {
-  for (
-    InterfaceElement? found = class_;
-    found != null;
-    found = found.supertype?.element
-  ) {
+  for (final found in level.chain) {
+    final InterfaceElement(:setters, :getters, :methods) = found.element;
     final members = isSetter
-        ? found.setters
+        ? setters
         : isGetter
-        ? found.getters
-        : found.methods;
+        ? getters
+        : methods;
     for (final member in members) {
       if (member.lookupName == name &&
           !member.isStatic &&
           !_isAbstract(member) &&
           (library == null || member.library == library)) {
-        return member;
+        return (element: member, level: found);
       }
     }
   }
@@ -116,7 +112,7 @@ bool isUnchecked(FormalParameterElement parameter) {
   final method = parameter.enclosingElement;
   final owner = method?.enclosingElement;
   if (parameter.isCovariant || mentions(parameter.type, owner)) return true;
-  if (method is! MethodElement || owner is! ClassElement) return false;
+  if (method is! MethodElement || owner is! InterfaceElement) return false;
   final place = method.formalParameters.indexOf(parameter);
   return overriddenBy(owner, method).any((other) {
     final declared = parameter.isNamed
@@ -124,4 +120,21 @@ bool isUnchecked(FormalParameterElement parameter) {
         : other.formalParameters.skip(place).take(1);
     return declared.any((p) => mentions(p.type, other.enclosingElement));
   });
+}
+
+/// The constructor that [element] redirects to, if it is a factory that does.
+ConstructorElement? redirectionOf(ConstructorElement element) =>
+    element.isFactory ? element.redirectedConstructor : null;
+
+/// The parameter that a value given to [parameter] is passed on to, if it is
+/// one of a redirecting factory.
+FormalParameterElement? redirectedParameter(FormalParameterElement parameter) {
+  final factory = parameter.enclosingElement;
+  if (factory is! ConstructorElement) return null;
+  final target = redirectionOf(factory)?.baseElement;
+  if (target == null) return null;
+  final parameters = target.formalParameters;
+  return parameter.isNamed
+      ? parameters.firstWhere((p) => p.isNamed && p.name == parameter.name)
+      : parameters[factory.formalParameters.indexOf(parameter)];
 }

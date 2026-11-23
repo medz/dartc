@@ -138,11 +138,12 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     if (class_.library.isInSdk && _declares(class_, shape)) {
       shape.reject('calling ${shape.name} of the SDK');
     }
+    final own = _scope.levelOf(class_);
     final method = shape.use == .set
         ? null
-        : memberNamed(class_, shape.name, shape.library);
+        : memberNamed(own, shape.name, shape.library);
     final accessor = memberNamed(
-      class_,
+      own,
       shape.use == .set ? '${shape.name}=' : shape.name,
       shape.library,
       isSetter: shape.use == .set,
@@ -153,7 +154,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       _rejectHandler(class_, shape);
       return _missing(selector, shape);
     }
-    if (found.library.isInSdk) {
+    if (found.element.library.isInSdk) {
       shape.reject('calling ${shape.name} of the SDK');
     }
     if (method == null) {
@@ -166,19 +167,20 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         return _scope.tearOff(builder, method, builder.inputs.first);
       });
     }
-    if (!accepts(method.formalParameters, shape.positional, shape.named)) {
+    final (:element, :level) = method;
+    if (!accepts(element.formalParameters, shape.positional, shape.named)) {
       _rejectHandler(class_, shape);
       return _missing(selector, shape);
     }
     return _make(selector.name, selector, (builder, conversions) {
       final receiver = builder.inputs.first;
-      builder.setReceiver(receiver);
-      final types = _typeArguments(builder, method, shape);
+      builder.setReceiver(receiver, level);
+      final types = _typeArguments(builder, element, shape);
       return builder.call(
-        HirCall(_scope.memberOf(method), [
+        HirCall(_scope.memberOf(level, element), [
           receiver,
           ?types,
-          ..._arguments(builder, conversions, method.formalParameters, shape),
+          ..._arguments(builder, conversions, element.formalParameters, shape),
         ]),
       );
     });
@@ -194,8 +196,9 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       );
 
   void _rejectHandler(ClassElement class_, DynamicShape shape) {
-    final handler = memberNamed(class_, 'noSuchMethod', null);
-    if (handler != null && !handler.library.isInSdk) {
+    final level = _scope.levelOf(class_);
+    final handler = memberNamed(level, 'noSuchMethod', null);
+    if (handler != null && !handler.element.library.isInSdk) {
       shape.reject('noSuchMethod');
     }
   }
@@ -219,12 +222,13 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
   HirValue? _useAccessor(
     FunctionBuilder builder,
     Conversions conversions,
-    ExecutableElement accessor,
+    Implementation found,
     DynamicShape shape,
   ) {
+    final (element: accessor, :level) = found;
     final receiver = builder.inputs.first;
     final field = fieldOfAccessor(accessor);
-    builder.setReceiver(receiver);
+    builder.setReceiver(receiver, level);
     if (shape.use == .set) {
       final value = _checked(
         conversions,
@@ -233,15 +237,17 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         shape,
       );
       if (field != null) {
-        builder.add(HirStore(_scope.fieldOf(field), receiver, value));
+        _scope.storeField(builder, level, field, receiver, value);
       } else {
-        builder.call(HirCall(_scope.memberOf(accessor), [receiver, value]));
+        builder.call(
+          HirCall(_scope.memberOf(level, accessor), [receiver, value]),
+        );
       }
       return builder.inputs[1];
     }
     final value = field != null
-        ? builder.add(HirLoad(_scope.fieldOf(field), receiver))
-        : builder.call(HirCall(_scope.memberOf(accessor), [receiver]));
+        ? _scope.loadField(builder, level, field, receiver)
+        : builder.call(HirCall(_scope.memberOf(level, accessor), [receiver]));
     if (shape.use == .get || value == null) return value;
     // A property that is called.
     return dynamicUse(

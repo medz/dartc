@@ -267,8 +267,9 @@ final class TypeTable(
     };
     var list = builder.typesOf(owner);
     final receiver = builder.receiver;
-    if (list == null && owner is ClassElement && receiver != null) {
-      final field = _classes.argumentsOf(owner);
+    final level = builder.level;
+    if (list == null && receiver != null && owner == level?.element) {
+      final field = _classes.argumentsOf(level!);
       list = field == null ? null : builder.add(HirLoad(field, receiver));
     }
     if (list == null) return null;

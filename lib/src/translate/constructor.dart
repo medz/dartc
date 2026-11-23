@@ -5,6 +5,7 @@ import 'package:dartc/hir.dart';
 import 'builder.dart';
 import 'classes.dart';
 import 'conversions.dart';
+import 'levels.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'statement.dart';
@@ -38,11 +39,13 @@ final class ConstructorTranslator(
       _run(redirect.element!, redirect.argumentList, element);
       return;
     }
-    if (_scope.argumentsOf(class_) case final field?) {
+    final level = _builder.level!;
+    if (_scope.argumentsOf(level) case final field?) {
       final list = _builder.typesOf(class_)!;
       _builder.add(HirStore(field, _builder.receiver!, list));
     }
-    _setFields(class_);
+    _setMixinTypes(level);
+    _setFields(level);
     for (final parameter in element.formalParameters) {
       if (parameter case FieldFormalParameterElement(:final field?)) {
         _store(field, _builder.read(parameter));
@@ -68,16 +71,44 @@ final class ConstructorTranslator(
     }
     final parent = explicit?.element ?? element.superConstructor;
     if (parent != null && !parent.library.isInSdk) {
-      _run(parent, explicit?.argumentList, element);
+      _run(
+        parent,
+        explicit?.argumentList,
+        element,
+        before: () => _setMixinFields(level),
+      );
+    } else {
+      _setMixinFields(level);
     }
     if (node != null && node.body is! EmptyFunctionBody) {
       _statements.body(node.body);
     }
   }
 
-  /// Evaluates the initializers that fields are declared with.
-  void _setFields(ClassElement class_) {
-    for (final field in ClassTable.instanceFields(class_)) {
+  /// Keeps the type arguments of the mixins of [level].
+  void _setMixinTypes(Level level) {
+    for (final below in level.chain.skip(1).takeWhile((l) => l.isMixin)) {
+      final field = _scope.argumentsOf(below);
+      if (field == null) continue;
+      final list = _scope.typeList(_builder, below.type.typeArguments)!;
+      _builder.add(HirStore(field, _builder.receiver!, list));
+    }
+  }
+
+  void _setMixinFields(Level level) {
+    for (final below in level.chain.skip(1).takeWhile((l) => l.isMixin)) {
+      _builder.at(below, () => _setFields(below));
+    }
+  }
+
+  /// Evaluates the initializers that the fields of [level] are declared with.
+  void _setFields(Level level) {
+    for (final field in ClassTable.instanceFields(level.element)) {
+      if (_scope.fieldOf(level, field).isSet case final isSet?) {
+        final no = _builder.add(HirConst(false));
+        _builder.add(HirStore(isSet, _builder.receiver!, no));
+        continue;
+      }
       final declaration = _declarations[field]!.$2 as VariableDeclaration;
       final initializer = declaration.initializer;
       if (initializer == null) continue;
@@ -86,9 +117,12 @@ final class ConstructorTranslator(
   }
 
   void _store(FieldElement field, HirValue value) {
-    final found = _scope.fieldOf(field);
-    final given = Conversions(_scope, _builder).coerce(value, found.type);
-    _builder.add(HirStore(found, _builder.receiver!, given));
+    final (value: place, :isSet) = _scope.fieldOf(_builder.level!, field);
+    final given = Conversions(_scope, _builder).coerce(value, place.type);
+    final object = _builder.receiver!;
+    _builder.add(HirStore(place, object, given));
+    if (isSet == null) return;
+    _builder.add(HirStore(isSet, object, _builder.add(HirConst(true))));
   }
 
   /// The type arguments that [target] takes from [element].
@@ -101,15 +135,25 @@ final class ConstructorTranslator(
   }
 
   /// Runs constructor [target] on the same object, passing on the super
-  /// parameters of [element].
+  /// parameters of [element]. Does [before] after evaluating arguments.
   void _run(
     ConstructorElement target,
     ArgumentList? arguments,
-    ConstructorElement element,
-  ) {
+    ConstructorElement element, {
+    void Function()? before,
+  }) {
     final supplied = arguments == null
         ? <FormalParameterElement, HirValue>{}
         : _statements.expressions.calls.supplied(arguments);
+    final class_ = element.enclosingElement as ClassElement;
+    if (class_.isMixinApplication) {
+      // Its constructors take what those of its superclass do.
+      for (final (i, parameter) in element.formalParameters.indexed) {
+        supplied[target.baseElement.formalParameters[i]] = _builder.read(
+          parameter,
+        );
+      }
+    }
     for (final parameter in element.formalParameters) {
       if (parameter case SuperFormalParameterElement(
         :final superConstructorParameter?,
@@ -128,6 +172,7 @@ final class ConstructorTranslator(
       ?_types(target, element),
       ..._statements.expressions.calls.ordered(target.baseElement, supplied),
     ];
+    before?.call();
     final conversions = Conversions(_scope, _builder);
     _builder.call(
       HirCall(function, [

@@ -9,7 +9,7 @@ import 'captures.dart';
 import 'classes.dart';
 import 'constant.dart';
 import 'constant_table.dart';
-import 'expression.dart';
+import 'late.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -31,7 +31,7 @@ final class GlobalTable(
     ],
   ];
 
-  /// The functions that set variables before their first use.
+  /// The functions that read variables that may not be set yet.
   Iterable<HirFunction> get getters =>
       _variables.values.map((variable) => variable.getter).nonNulls;
 
@@ -44,7 +44,6 @@ final class GlobalTable(
     if (declared == null) return null;
     CompileFailure unsupported(String what) =>
         _declarations.unsupported(element, what);
-    if (element.isLate) throw unsupported('late variables');
     final isExternal = switch (element) {
       FieldElement() => element.isExternal,
       TopLevelVariableElement() => element.isExternal,
@@ -57,7 +56,9 @@ final class GlobalTable(
     final (unit, node) = declared;
     final initializer = (node as VariableDeclaration).initializer;
     final name = element.displayName;
-    final initial = _initial(type, initializer);
+    final initial = element.isLate && initializer == null
+        ? null
+        : _initial(type, initializer);
     if (initial != null) {
       final global = HirGlobal(name, type, initial.value);
       return _variables[element] = GlobalVariable(global);
@@ -73,7 +74,7 @@ final class GlobalTable(
       HirFunction(name, const [], type),
     );
     _variables[element] = variable;
-    _schedule(() => _defineGetter(variable, unit, initializer!, element));
+    _schedule(() => _defineGetter(variable, unit, node, element));
     return variable;
   }
 
@@ -103,47 +104,29 @@ final class GlobalTable(
     return _constants.of(type, value.computeConstantValue()?.value);
   }
 
-  /// Evaluates [initializer] unless the variable is set already.
+  /// Reads [variable], evaluating its initializer if nothing set it.
   void _defineGetter(
     GlobalVariable variable,
     SourceUnit unit,
-    Expression initializer,
+    VariableDeclaration node,
     PropertyInducingElement element,
   ) {
-    final type = element.type, isFinal = element.isFinal;
     final GlobalVariable(:global, :isSet!, :getter!) = variable;
     final builder = FunctionBuilder(
       unit,
       getter,
       const [],
       returnType: element.type,
-      captures: _scope.capturesOf(declarationOf(initializer)),
+      captures: _scope.capturesOf(declarationOf(node)),
       cellClass: _scope.cellClass,
     );
-    final exit = builder.join(initializer);
-    builder.branch(
-      builder.add(HirLoadGlobal(isSet)),
-      () => builder.jump(exit),
-      () {
-        final expressions = ExpressionTranslator(_scope, builder);
-        final value = expressions.valueTo(initializer, type);
-        if (isFinal) {
-          // Evaluating it may have set it already.
-          final number = _scope.lateNumber(global.name);
-          builder.throwIf(
-            builder.add(HirLoadGlobal(isSet)),
-            _scope.throwerOf(.late),
-            [builder.add(HirConst(number))],
-          );
-        }
-        builder
-          ..add(HirStoreGlobal(global, value))
-          ..add(HirStoreGlobal(isSet, builder.add(HirConst(true))))
-          ..jump(exit);
-      },
-    );
-    builder.enter(exit);
-    builder.end(HirReturn(builder.add(HirLoadGlobal(global))));
+    final storage = GlobalStorage(global, isSet);
+    final access = LateAccess(_scope, builder, element, storage);
+    if (node.initializer case final initializer?) {
+      access.returnValue((type) => _scope.evaluate(builder, initializer, type));
+    } else {
+      builder.end(HirReturn(access.read()));
+    }
     builder.finish();
   }
 }

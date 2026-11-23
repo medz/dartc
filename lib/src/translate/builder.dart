@@ -7,6 +7,7 @@ import 'package:dartc/source.dart';
 
 import 'assigned.dart';
 import 'captures.dart';
+import 'levels.dart';
 
 extension Unsupported on SourceUnit {
   /// The failure to translate [node].
@@ -23,17 +24,30 @@ final class Join._(
   final List<Element> _variables,
 );
 
+/// A `late` variable, whose cell has a [value] if [isSet].
+///
+/// [getter] gives it one before, if it has an initializer.
+final class LateLocal(
+  final HirField value,
+  final HirField isSet,
+  final HirFunction? getter,
+);
+
+/// The local functions and `late` variables of one function and the closures
+/// inside.
+final class Locals() {
+  final functions = <Element, HirFunction>{};
+  final lates = <Element, LateLocal>{};
+}
+
 /// Builds the blocks of one function and tracks its variables' values.
 final class FunctionBuilder(
   final SourceUnit unit,
   final HirFunction function,
   List<FormalParameterElement> parameters, {
 
-  /// The class of the object that the function's first parameter is.
-  final ClassElement? receiverClass,
-
-  /// Where the function's object, a closure, keeps the object that `this` is.
-  final HirField? receiverField,
+  /// What the function is a member of, whose object it takes first.
+  final Level? ownLevel,
 
   /// Whether the function first takes its own closure.
   final bool isClosure = false,
@@ -49,7 +63,11 @@ final class FunctionBuilder(
 
   /// The class of the cells for values of a type.
   final HirClass Function(HirType type)? cellClass,
+
+  /// What is known of those around.
+  Locals? locals,
 }) {
+  final Locals locals = locals ?? Locals();
   final _entry = HirBlock(function.parameters);
   late HirBlock _block = _entry;
   final _types = <Element, HirType>{};
@@ -58,12 +76,11 @@ final class FunctionBuilder(
   final _values = <Element, HirValue>{};
 
   this {
-    if (receiverField case final field?) {
-      _receiver = add(HirLoad(field, _entry.parameters.first));
-    } else if (!isClosure && receiverClass != null) {
+    if (!isClosure && ownLevel != null) {
       _receiver = _entry.parameters.first;
     }
-    final hasObject = isClosure || receiverClass != null;
+    _level = ownLevel;
+    final hasObject = isClosure || ownLevel != null;
     var given = _entry.parameters.skip(hasObject ? 1 : 0);
     if (typeOwner case final owner?) {
       bindTypes(owner, given.first);
@@ -89,8 +106,25 @@ final class FunctionBuilder(
   HirValue? get receiver => _receiver;
   HirValue? _receiver;
 
-  /// Lets [value] be the object that `this` is.
-  void setReceiver(HirValue value) => _receiver = value;
+  /// What `this` is an object of.
+  Level? get level => _level;
+  Level? _level;
+  InterfaceElement? get receiverClass => _level?.element;
+
+  /// Lets [value] be the object that `this` is, where [level] is translated.
+  void setReceiver(HirValue value, Level level) {
+    _receiver = value;
+    _level = level;
+  }
+
+  /// Does [work] as part of [level].
+  T at<T>(Level level, T Function() work) {
+    final before = _level;
+    _level = level;
+    final result = work();
+    _level = before;
+    return result;
+  }
 
   /// The lists of type arguments known here, by what they are for.
   final typeLists = <Element, HirValue>{};
@@ -220,11 +254,13 @@ final class FunctionBuilder(
 
   /// The type of the value of [variable] or of the cell holding it.
   HirType? rawTypeOf(Element variable) =>
-      _isCell(variable) ? .reference : _types[variable];
+      _isCell(variable) || locals.lates.containsKey(variable)
+      ? .reference
+      : _types[variable];
 
   /// The value of [variable] or the cell holding it.
   HirValue raw(Element variable) =>
-      _values[variable] ?? placeholder(_types[variable]!);
+      _values[variable] ?? placeholder(rawTypeOf(variable)!);
 
   /// Gives [variable] a cell of its own, with the same value.
   void renew(Element variable) {
