@@ -1,0 +1,167 @@
+import 'dart:typed_data';
+
+import 'package:dartc/src/emit/arm64/assembler.dart';
+import 'package:test/test.dart';
+
+/// Words produced by the system assembler for the same instructions.
+void _encodes(int word, void Function(Arm64Assembler assembler) emit) {
+  final assembler = Arm64Assembler();
+  emit(assembler);
+  expect(_words(assembler).map((w) => w.toRadixString(16)), [
+    word.toRadixString(16),
+  ]);
+}
+
+List<int> _words(Arm64Assembler assembler) {
+  final data = ByteData.sublistView(assembler.finish());
+  return [
+    for (var i = 0; i < data.lengthInBytes; i += 4) data.getUint32(i, .little),
+  ];
+}
+
+/// The value the emitted constant sequence leaves in its register.
+int _run(Arm64Assembler assembler) {
+  var value = 0;
+  for (final word in _words(assembler)) {
+    final half = (word >> 21 & 3) * 16, bits = word >> 5 & 0xffff;
+    switch (word & 0xff800000) {
+      case 0xd2800000:
+        value = bits << half;
+      case 0x92800000:
+        value = ~(bits << half);
+      case 0xf2800000:
+        value = value & ~(0xffff << half) | bits << half;
+      default:
+        fail('Unexpected word ${word.toRadixString(16)}');
+    }
+  }
+  return value;
+}
+
+void main() {
+  test('moves and arithmetic', () {
+    _encodes(0xd2d579a3, (a) => a.movz(3, 0xabcd, 2));
+    _encodes(0x92a24684, (a) => a.movn(4, 0x1234, 1));
+    _encodes(0xf2ffffe5, (a) => a.movk(5, 0xffff, 3));
+    _encodes(0xaa1b03e6, (a) => a.mov(6, 27));
+    _encodes(0x8b030041, (a) => a.add(1, 2, 3));
+    _encodes(0xcb030041, (a) => a.sub(1, 2, 3));
+    _encodes(0x8a030041, (a) => a.and(1, 2, 3));
+    _encodes(0xaa030041, (a) => a.orr(1, 2, 3));
+    _encodes(0xca030041, (a) => a.eor(1, 2, 3));
+    _encodes(0x9b037c41, (a) => a.mul(1, 2, 3));
+    _encodes(0x9ac30c41, (a) => a.sdiv(1, 2, 3));
+    _encodes(0x9b039041, (a) => a.msub(1, 2, 3, 4));
+    _encodes(0x9ac32041, (a) => a.lsl(1, 2, 3));
+    _encodes(0x9ac32441, (a) => a.lsr(1, 2, 3));
+    _encodes(0x9ac32841, (a) => a.asr(1, 2, 3));
+  });
+
+  test('comparisons', () {
+    _encodes(0xeb0a013f, (a) => a.cmp(9, 10));
+    const words = {
+      Condition.eq: 0x9a9f17eb,
+      Condition.ne: 0x9a9f07eb,
+      Condition.lt: 0x9a9fa7eb,
+      Condition.le: 0x9a9fc7eb,
+      Condition.gt: 0x9a9fd7eb,
+      Condition.ge: 0x9a9fb7eb,
+      Condition.lo: 0x9a9f27eb,
+      Condition.ls: 0x9a9f87eb,
+      Condition.hi: 0x9a9f97eb,
+      Condition.hs: 0x9a9f37eb,
+    };
+    expect(words.keys.toSet(), Condition.values.toSet());
+    words.forEach((condition, word) {
+      _encodes(word, (a) => a.cset(11, condition));
+    });
+  });
+
+  test('memory, frames and calls', () {
+    _encodes(0x913fc3e7, (a) => a.addImmediate(7, 31, 0xff0));
+    _encodes(0xf97fffe7, (a) => a.load(7, 31, 32760));
+    _encodes(0xf9000ba7, (a) => a.store(7, 29, 16));
+    _encodes(0xf8716be7, (a) => a.loadIndexed(7, 31, 17));
+    _encodes(0xf8316ba7, (a) => a.storeIndexed(7, 29, 17));
+    _encodes(0xa9bf7bfd, (a) => a.pushFrame());
+    _encodes(0xa8c17bfd, (a) => a.popFrame());
+    _encodes(0x910003fd, (a) => a.addImmediate(29, 31, 0));
+    _encodes(0x910003bf, (a) => a.addImmediate(31, 29, 0));
+    _encodes(0xcb3063ff, (a) => a.subStack(16));
+    _encodes(0xd63f0100, (a) => a.callRegister(8));
+    _encodes(0xd65f03c0, (a) => a.ret());
+    _encodes(0xd4200020, (a) => a.breakpoint());
+  });
+
+  test('branches backward and forward', () {
+    final assembler = Arm64Assembler();
+    final back = Label(), ahead = Label();
+    assembler
+      ..bind(back)
+      ..jumpIfZero(12, back)
+      ..jump(back)
+      ..jumpIfZero(12, ahead)
+      ..jump(ahead)
+      ..bind(ahead);
+    expect(_words(assembler), [0xb400000c, 0x17ffffff, 0xb400004c, 0x14000001]);
+    expect(() => assembler.bind(ahead), throwsStateError);
+  });
+
+  test('constants', () {
+    for (final value in [
+      0,
+      1,
+      -1,
+      0xffff,
+      0x10000,
+      -0x10000,
+      0x123456789abcdef0,
+      -0x123456789abcdef,
+      0x7fffffffffffffff,
+      -0x8000000000000000,
+      0xffff0000ffff,
+      0x0000ffff0000,
+    ]) {
+      final assembler = Arm64Assembler()..constant(9, value);
+      expect(_run(assembler), value);
+    }
+    expect(_words(Arm64Assembler()..constant(0, 0)).length, 1);
+    expect(_words(Arm64Assembler()..constant(0, -1)).length, 1);
+    expect(_words(Arm64Assembler()..constant(0, 0x123456789abcdef0)).length, 4);
+  });
+
+  test('out-of-range fields are rejected', () {
+    final assembler = Arm64Assembler();
+    expect(() => assembler.load(0, 31, 32768), throwsRangeError);
+    expect(() => assembler.load(0, 31, 4), throwsRangeError);
+    expect(() => assembler.store(0, 31, -8), throwsRangeError);
+    expect(() => assembler.addImmediate(0, 0, 4096), throwsRangeError);
+    expect(() => assembler.movz(0, 0x10000, 0), throwsRangeError);
+  });
+
+  test('conditional branches reach 2^18 words either way', () {
+    const reach = 1 << 18;
+    for (final (words, matcher) in [
+      (reach - 1, returnsNormally),
+      (reach, throwsRangeError),
+    ]) {
+      final ahead = Label();
+      final assembler = Arm64Assembler()..jumpIfZero(0, ahead);
+      for (var i = 1; i < words; i++) {
+        assembler.ret();
+      }
+      expect(() => assembler.bind(ahead), matcher);
+    }
+    for (final (words, matcher) in [
+      (reach, returnsNormally),
+      (reach + 1, throwsRangeError),
+    ]) {
+      final back = Label();
+      final assembler = Arm64Assembler()..bind(back);
+      for (var i = 0; i < words; i++) {
+        assembler.ret();
+      }
+      expect(() => assembler.jumpIfZero(0, back), matcher);
+    }
+  });
+}

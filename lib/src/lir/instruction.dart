@@ -210,12 +210,15 @@ final class Store(
 /// An operation that may run the collector and may throw.
 ///
 /// These, and no others, are safepoints.
-sealed class LirCall() extends LirInstruction;
+sealed class LirCall() extends LirInstruction {
+  /// The types of the call's inputs, excluding a callee address.
+  LirSignature get signature;
+}
 
 /// Calls a function or external function of this module.
 final class Call(
   final String symbol,
-  final LirSignature signature,
+  @override final LirSignature signature,
   Iterable<LirValue> arguments,
 ) extends LirCall {
   final List<LirValue> arguments = .unmodifiable(arguments);
@@ -228,7 +231,7 @@ final class Call(
 /// Calls the function at [address], which must have [signature].
 final class CallIndirect(
   final LirValue address,
-  final LirSignature signature,
+  @override final LirSignature signature,
   Iterable<LirValue> arguments,
 ) extends LirCall {
   final List<LirValue> arguments = .unmodifiable(arguments);
@@ -240,6 +243,8 @@ final class CallIndirect(
 
 /// Allocates a zero-filled object of [size] bytes.
 final class Alloc(final LirValue size) extends LirCall {
+  @override
+  LirSignature get signature => LirSignature([.i64], .ref);
   @override
   LirType get type => .ref;
   @override

@@ -8,6 +8,8 @@ void main() {
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
       'lir': {},
+      'emit': {'lir'},
+      'image': {'emit'},
       'ir': {'interop'},
       'optimizer': {'ir', 'abi', 'interop', 'layout'},
       'target': {},
@@ -94,7 +96,7 @@ void main() {
               const {
                 '_fe_analyzer_shared': {'frontend'},
                 'analyzer': {'frontend'},
-                'crypto': {'linker', 'sdk'},
+                'crypto': {'image', 'linker', 'sdk'},
                 'archive': {'sdk'},
               }[uri.pathSegments.first],
               contains(owner),
