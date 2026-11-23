@@ -13,6 +13,7 @@ final class LoweredRun(
   /// How many of the bytes offered to each write are accepted; a negative
   /// answer fails with that error number.
   final int Function(int count)? accept,
+  int maxSteps = 10000000,
 }) {
   final _written = BytesBuilder();
 
@@ -29,6 +30,7 @@ final class LoweredRun(
     int address(LirMemory memory) => errorAddress ??= memory.map(Uint8List(4));
     final interpreter = LirInterpreter(
       lowerProgram(module),
+      maxSteps: maxSteps,
       externals: {
         'exit': (_, arguments) => throw _Exit(arguments.single as int),
         'fmod': (_, arguments) =>

@@ -1,6 +1,7 @@
 import 'package:dartc/graph.dart';
 
 import 'block.dart';
+import 'class.dart';
 import 'instruction.dart';
 import 'module.dart';
 import 'value.dart';
@@ -19,13 +20,36 @@ void verifyHir(HirModule module) {
   }
   if (!functions.contains(module.main)) throw HirError('main is not listed');
   if (module.main.parameters.isNotEmpty) throw HirError('main has parameters');
+  final classes = module.classes.toSet();
+  if (classes.length != module.classes.length) {
+    throw HirError('a class is listed twice');
+  }
+  module.dispatch.forEach((selector, entries) {
+    entries.forEach((class_, function) {
+      Never fail(String message) =>
+          throw HirError('${selector.name}: $message');
+      if (!classes.contains(class_)) fail('unlisted class ${class_.name}');
+      if (!functions.contains(function)) {
+        fail('unlisted function ${function.name}');
+      }
+      final [receiver, ...parameters] = function.parameters;
+      if (receiver != .reference ||
+          parameters.length != selector.parameters.length ||
+          parameters.indexed.any((e) => e.$2 != selector.parameters[e.$1]) ||
+          function.result != selector.result) {
+        fail('${function.name} has another signature');
+      }
+    });
+  });
   for (final function in module.functions) {
-    _FunctionVerifier(functions, function).run();
+    _FunctionVerifier(module, functions, classes, function).run();
   }
 }
 
 final class _FunctionVerifier(
+  final HirModule module,
   final Set<HirFunction> functions,
+  final Set<HirClass> classes,
   final HirFunction function,
 ) {
   final _blockOf = <HirValue, HirBlock>{};
@@ -114,8 +138,21 @@ final class _FunctionVerifier(
 
   void _checkInstruction(HirInstruction instruction) {
     switch (instruction) {
-      case HirConst() || HirPrint():
+      case HirConst() || HirNull() || HirPrint():
         break;
+      case HirNew(:final target):
+        if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+      case HirLoad(:final object):
+        _expect(object, .reference, 'object');
+      case HirStore(:final field, :final object, :final value):
+        _expect(object, .reference, 'object');
+        _expect(value, field.type, 'field ${field.name}');
+      case HirVirtualCall(:final selector, :final receiver, :final arguments):
+        if (!module.dispatch.containsKey(selector)) {
+          _fail('unlisted selector ${selector.name}');
+        }
+        _expect(receiver, .reference, 'receiver');
+        _checkTypes(selector.parameters, arguments, 'call to ${selector.name}');
       case HirIntBinary(:final operator, :final left, :final right):
         _expect(left, .integer, operator.symbol);
         _expect(right, .integer, operator.symbol);
@@ -130,8 +167,9 @@ final class _FunctionVerifier(
         _expect(operand, operator.operand, operator.name);
       case HirCompare(:final relation, :final left, :final right):
         _expect(right, left.type!, relation.symbol);
-        if (left.type == .boolean && !relation.isEquality) {
-          _fail('bool has no ${relation.symbol}');
+        final ordered = left.type == .integer || left.type == .float;
+        if (!ordered && !relation.isEquality) {
+          _fail('${left.type!.dartName} has no ${relation.symbol}');
         }
       case HirCall(:final target, :final arguments):
         if (!functions.contains(target)) {

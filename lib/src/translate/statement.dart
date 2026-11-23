@@ -2,15 +2,17 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'describe.dart';
 import 'expression.dart';
+import 'scope.dart';
 import 'types.dart';
 
 /// Translates the statements of one function.
 final class StatementTranslator(
-  FunctionLookup functions,
+  ProgramScope scope,
   final FunctionBuilder _builder,
 ) {
-  final _expressions = ExpressionTranslator(functions, _builder);
+  final expressions = ExpressionTranslator(scope, _builder);
 
   /// Where `break` and `continue` statements go, by the statement they name.
   final _breaks = <AstNode, Join>{};
@@ -38,7 +40,7 @@ final class StatementTranslator(
         // Like the official runtime by default, assertions do nothing.
         break;
       case ExpressionStatement(:final expression):
-        _expressions.effect(expression);
+        expressions.effect(expression);
       case VariableDeclarationStatement(:final variables):
         _declare(variables);
       case IfStatement():
@@ -75,10 +77,10 @@ final class StatementTranslator(
   void _return(Expression? expression) {
     final result = _builder.function.result;
     if (result == null) {
-      if (expression != null) _expressions.effect(expression);
+      if (expression != null) expressions.effect(expression);
       _builder.end(HirReturn());
     } else {
-      final value = _expressions.value(expression!, wanted: result);
+      final value = expressions.valueAs(expression!, result);
       _builder.end(HirReturn(value));
     }
   }
@@ -94,7 +96,7 @@ final class StatementTranslator(
       final initializer = declaration.initializer;
       final value = initializer == null
           ? null
-          : _expressions.value(initializer, wanted: type);
+          : expressions.valueAs(initializer, type);
       _builder.declare(variable, type);
       if (value != null) _builder.assign(variable, value);
     }
@@ -104,7 +106,7 @@ final class StatementTranslator(
     if (node.caseClause case final clause?) _unsupported(clause, 'if-case');
     final exit = _builder.join(node);
     _builder.branch(
-      _expressions.condition(node.expression),
+      expressions.condition(node.expression),
       () {
         statement(node.thenStatement);
         _builder.jump(exit);
@@ -123,7 +125,7 @@ final class StatementTranslator(
       ifTrue();
     } else {
       _builder.branch(
-        _expressions.condition(condition),
+        expressions.condition(condition),
         ifTrue,
         () => _builder.jump(exit),
       );
@@ -164,7 +166,7 @@ final class StatementTranslator(
       case ForPartsWithDeclarations(:final variables):
         _declare(variables);
       case ForPartsWithExpression(:final initialization):
-        if (initialization != null) _expressions.effect(initialization);
+        if (initialization != null) expressions.effect(initialization);
       default:
         _unsupported(parts, describe(parts));
     }
@@ -180,13 +182,13 @@ final class StatementTranslator(
       _builder
         ..jump(update)
         ..enter(update);
-      parts.updaters.forEach(_expressions.effect);
+      parts.updaters.forEach(expressions.effect);
       _builder.jump(head);
     });
   }
 
   void _switch(SwitchStatement node) {
-    final value = _expressions.value(node.expression);
+    final value = expressions.value(node.expression);
     final exit = _builder.join(node);
     _breaks[node] = exit;
     _cases(node.members, 0, value, exit);
@@ -246,7 +248,7 @@ final class StatementTranslator(
   HirValue _matches(HirValue value, List<Expression> tests) {
     HirValue? result;
     for (final test in tests) {
-      final constant = _expressions.value(test);
+      final constant = expressions.value(test);
       if (constant.type != value.type) _unsupported(test, 'this kind of case');
       final same = _builder.add(HirCompare(.equal, constant, value));
       result = result == null

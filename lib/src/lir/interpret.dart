@@ -48,6 +48,14 @@ final class LirInterpreter(
       _addresses[name] = address;
       _callables[address] = name;
     }
+    for (final table in module.tables) {
+      final words = ByteData(table.functions.length * 4);
+      final address = memory.map(words.buffer.asUint8List(), writable: false);
+      _addresses[table.name] = address;
+      for (final (i, function) in table.functions.indexed) {
+        words.setInt32(i * 4, _addresses[function]! - address, .little);
+      }
+    }
   }
 
   /// Calls [symbol]; a program throw surfaces as [LirException].

@@ -127,16 +127,20 @@ final class Arm64Function(
   static Move _between(Location source, Location destination, LirType type) =>
       (source: source, destination: destination, bank: .of(type));
 
-  /// The register holding operand [index], loading it if spilled.
-  int _use(LirValue value, int index) {
+  /// The register holding [value], loading it into scratch [slot] if spilled.
+  int _use(LirValue value, int slot) {
     switch (_place(value)) {
       case InRegister(:final number):
         return number;
       case final OnStack word:
         final bank = RegisterBank.of(value.type!);
         final number = switch (bank) {
-          .word => const [leftScratch, rightScratch][index],
-          .float => const [leftFloatScratch, rightFloatScratch][index],
+          .word => const [leftScratch, rightScratch, calleeScratch][slot],
+          .float => const [
+            leftFloatScratch,
+            rightFloatScratch,
+            leftFloatScratch,
+          ][slot],
         };
         _accessStack(InRegister(bank, number), word, store: false);
         return number;
@@ -190,6 +194,12 @@ final class Arm64Function(
           () => _assembler.callRegister(calleeScratch),
           address: address,
         );
+      case Alloc(:final size):
+        _allocate(instruction, size);
+      case Store(:final base, :final index, :final value):
+        final at = _use(base, 0);
+        final by = index == null ? null : _use(index, 1);
+        _operations.store(instruction, at, by, _use(value, 2));
       default:
         final operands = [
           for (final (i, input) in instruction.inputs.indexed) _use(input, i),
@@ -218,6 +228,22 @@ final class Arm64Function(
     if (call.type case final type?) {
       _move([_between(resultLocation(type), _place(call), type)]);
     }
+  }
+
+  /// Allocates zeroed memory, stopping the program if there is none.
+  void _allocate(Alloc allocation, LirValue size) {
+    const result = InRegister(.word, 0), second = InRegister(.word, 1);
+    _move([_between(_place(size), second, .i64)]);
+    final failed = Label(), done = Label();
+    _assembler
+      ..constant(result.number, 1)
+      ..call(allocateSymbol)
+      ..jumpIfZero(result.number, failed)
+      ..jump(done)
+      ..bind(failed)
+      ..breakpoint()
+      ..bind(done);
+    _move([_between(result, _place(allocation), .ref)]);
   }
 
   void _terminator(LirTerminator end) {

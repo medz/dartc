@@ -22,15 +22,14 @@
 ```text
  Dart 源码
    │ 1 source     官方 analyzer：解析、类型、静态错误
-   │ 2 translate  AST → HIR
+   │ 2 translate  AST → HIR，同时由 world 求闭包
    ▼
-  HIR
-   │ 3 world      从入口求闭包，冻结
-   │ 4 lower      每个函数恰好一次 → LIR
+  HIR            此后冻结，不再增加函数和类
+   │ 3 lower      每个函数恰好一次 → LIR
    ▼
   LIR
-   │ 5 emit       选指令、分配寄存器、机器码、栈表
-   │ 6 image      目标文件、可执行文件、库
+   │ 4 emit       选指令、分配寄存器、机器码、栈表
+   │ 5 image      目标文件、可执行文件、库
    ▼
   产物
 ```
@@ -56,9 +55,9 @@
 | `lir` | 机器层 IR：数据、验证、打印、解释 | `graph` |
 | `hir` | Dart 层 IR：数据、验证、打印、解释 | `graph` |
 | `source` | 调用 analyzer | analyzer |
-| `translate` | AST → HIR，按需翻译可达的声明 | `source` `hir` `graph` analyzer |
-| `world` | 全程序闭包 | `hir` |
-| `lower` | HIR → LIR | `hir` `world` `lir` `graph` |
+| `world` | 哪些类和调用会相遇 | 无 |
+| `translate` | AST → HIR，按需翻译可达的声明 | `source` `world` `hir` `graph` analyzer |
+| `lower` | HIR → LIR | `hir` `lir` `graph` |
 | `emit` | LIR → 机器码 | `lir` `graph` |
 | `image` | 机器码 → 文件 | `emit` |
 | `driver` | 把阶段串起来，CLI 和 API 共用 | 全部 |
@@ -82,7 +81,7 @@ LIR 是整个编译器的地基，最先做。它不知道 Dart 类型。
 
 ### 结构
 
-- 模块 = 函数 + 外部函数 + 数据符号。
+- 模块 = 函数 + 外部函数 + 数据 + 函数表。
 - 函数 = 若干基本块，第一个是入口，没有任何块跳到它。
 - SSA 形式；合流用**块参数**，没有 phi。
 - 每个值最多定义一次，定义必须支配使用。没有到不了的块。
@@ -127,9 +126,9 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 问题 | 决定 |
 | --- | --- |
 | `int` `double` `bool` | 静态类型确定时用 `i64`/`f64`；进入 `Object`、`dynamic` 或泛型位置才装箱 |
-| 对象头 | 一个字：类编号和大小信息 |
+| 对象 | 8 字节的头，前 4 字节是类编号；然后每个字段 8 字节，父类的在前 |
 | GC | 精确、不移动的标记清除；根来自栈表 |
-| 虚调用 | 全局分派表，行位移压缩；调用点大小固定 |
+| 虚调用 | 全局分派表，行位移压缩；调用点大小固定。选择子按名字、所给的参数和表示区分；实现与它不同时用适配函数 |
 | dynamic 调用 | 每个选择子和参数形状一个桩函数 |
 | `is` 类 | 类编号按继承树排成区间 |
 | 泛型 | 代码共享，类型参数是隐藏参数 |

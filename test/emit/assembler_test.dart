@@ -140,6 +140,23 @@ void main() {
     }
   });
 
+  test('stores of every width', () {
+    _encodes(0x39001441, (a) => a.storeWidth(.i8, 1, 2, 5));
+    _encodes(0x39001441, (a) => a.storeWidth(.u8, 1, 2, 5));
+    _encodes(0x79000c41, (a) => a.storeWidth(.i16, 1, 2, 6));
+    _encodes(0x79000c41, (a) => a.storeWidth(.u16, 1, 2, 6));
+    _encodes(0xb9000841, (a) => a.storeWidth(.i32, 1, 2, 8));
+    _encodes(0xb9000841, (a) => a.storeWidth(.u32, 1, 2, 8));
+    for (final width in <Width>[.i64, .ref, .ptr]) {
+      _encodes(0xf9000841, (a) => a.storeWidth(width, 1, 2, 16));
+    }
+    _encodes(0xfd000841, (a) => a.storeWidth(.f64, 1, 2, 16));
+    // The value is narrowed in the scratch register, keeping its own.
+    final single = Arm64Assembler()..storeWidth(.f32, 1, 2, 8, scratch: 30);
+    expect(_words(single), [0x1e62403e, 0xbd00085e]);
+    expect(() => Arm64Assembler().storeWidth(.i16, 0, 0, 1), throwsRangeError);
+  });
+
   test('branches backward and forward', () {
     final assembler = Arm64Assembler();
     final back = Label(), ahead = Label();

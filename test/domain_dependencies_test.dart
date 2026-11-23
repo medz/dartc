@@ -8,10 +8,11 @@ void main() {
   test('domains use public entries and have acyclic dependencies', () {
     const dependencies = <String, Set<String>>{
       'graph': {},
+      'world': {},
       'lir': {'graph'},
       'hir': {'graph'},
       'source': {},
-      'translate': {'source', 'hir', 'graph'},
+      'translate': {'source', 'hir', 'graph', 'world'},
       'lower': {'hir', 'lir', 'graph'},
       'emit': {'lir', 'graph'},
       'image': {'emit'},

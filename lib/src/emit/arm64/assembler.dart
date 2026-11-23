@@ -186,7 +186,29 @@ final class Arm64Assembler() {
     if (width == .f32) _three(0x1e22c000, t, t, 0);
   }
 
-  /// Whether a load of [width] can encode [offset].
+  /// Stores the low bytes of [t], narrowing a double in register [scratch].
+  ///
+  /// [offset] must satisfy [reaches].
+  void storeWidth(Width width, int t, int n, int offset, {int scratch = 0}) {
+    final word = switch (width) {
+      .i8 || .u8 => 0x39000000,
+      .i16 || .u16 => 0x79000000,
+      .i32 || .u32 => 0xb9000000,
+      .i64 || .ref || .ptr => 0xf9000000,
+      .f32 => 0xbd000000,
+      .f64 => 0xfd000000,
+    };
+    if (!reaches(width, offset)) {
+      throw RangeError('Offset out of reach: $offset');
+    }
+    if (width == .f32) {
+      _three(0x1e624000, scratch, t, 0);
+      t = scratch;
+    }
+    _emit(word | offset ~/ width.bytes << 10 | n << 5 | t);
+  }
+
+  /// Whether a load or store of [width] can encode [offset].
   static bool reaches(Width width, int offset) =>
       offset >= 0 && offset % width.bytes == 0 && offset ~/ width.bytes < 4096;
 

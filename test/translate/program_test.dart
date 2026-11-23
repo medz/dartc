@@ -506,7 +506,7 @@ b0():
       '2:15: $what operator == on these types.',
     );
     reports('void main() { 1!; }', '2:15: $what operator !.');
-    reports('void main() { 1 ?? 2; }', '2:15: $what operator ??.');
+    reports('void main() { 1 ?? 2; }', '2:15: $what using int as an object.');
     reports(
       'void f(int x) { x ??= 1; }\nvoid main() { f(1); }',
       '2:17: $what operator ??=.',

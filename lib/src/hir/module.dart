@@ -1,4 +1,5 @@
 import 'block.dart';
+import 'class.dart';
 import 'value.dart';
 
 /// A function, which may be called before its body is known.
@@ -25,7 +26,20 @@ final class HirFunction(
 
 /// A whole program, started by [main], which takes no arguments.
 ///
-/// [functions] includes [main] and everything it can call.
-final class HirModule(final HirFunction main, Iterable<HirFunction> functions) {
+/// [functions] includes [main] and everything it can call, and [classes] every
+/// class it creates objects of. [dispatch] gives the function for a selector
+/// and a class whose objects can receive it; its first parameter is the
+/// receiver.
+final class HirModule(
+  final HirFunction main,
+  Iterable<HirFunction> functions, {
+  Iterable<HirClass> classes = const [],
+  Map<HirSelector, Map<HirClass, HirFunction>> dispatch = const {},
+}) {
+  final List<HirClass> classes = .unmodifiable(classes);
+  final Map<HirSelector, Map<HirClass, HirFunction>> dispatch = .unmodifiable({
+    for (final MapEntry(:key, :value) in dispatch.entries)
+      key: Map<HirClass, HirFunction>.unmodifiable(value),
+  });
   final List<HirFunction> functions = .unmodifiable(functions);
 }

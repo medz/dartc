@@ -31,6 +31,23 @@ void relocate(
   }
 }
 
+/// Writes the distance from table [name] to each function, at [offset].
+void fillTable(
+  Uint8List bytes,
+  int offset,
+  String name,
+  List<String> functions,
+  Map<String, int> symbols,
+) {
+  final words = ByteData.sublistView(bytes);
+  for (final (i, function) in functions.indexed) {
+    final target =
+        symbols[function] ?? (throw ImageError('No symbol $function.'));
+    final distance = _signed(target - symbols[name]!, 32, function);
+    words.setUint32(offset + i * 4, distance, .little);
+  }
+}
+
 /// The `adrp` immediate reaching [target]'s page from an instruction at [at].
 int pageField(int at, int target, String symbol) {
   final field = _signed((target >> 12) - (at >> 12), 21, symbol);

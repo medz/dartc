@@ -25,12 +25,20 @@ final class LirData(
   final Uint8List bytes = Uint8List.fromList(bytes).asUnmodifiableView();
 }
 
+/// Constant 32-bit words, each the distance from the table to a function.
+final class LirTable(final String name, Iterable<String> functions) {
+  /// The functions' symbols, in order.
+  final List<String> functions = .unmodifiable(functions);
+}
+
 /// A closed set of functions, external functions and data.
 final class LirModule({
   Iterable<LirFunction> functions = const [],
   Iterable<LirExternal> externals = const [],
   Iterable<LirData> data = const [],
+  Iterable<LirTable> tables = const [],
 }) {
+  final List<LirTable> tables = .unmodifiable(tables);
   final List<LirFunction> functions = .unmodifiable(functions);
   final List<LirExternal> externals = .unmodifiable(externals);
   final List<LirData> data = .unmodifiable(data);

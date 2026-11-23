@@ -1,13 +1,30 @@
 import 'dart:convert';
 
 import 'block.dart';
+import 'class.dart';
 import 'instruction.dart';
 import 'module.dart';
 import 'value.dart';
 
 /// Readable text for a program, stable across runs.
-String printHir(HirModule module) =>
-    module.functions.map((function) => _Printer(function).run()).join('\n');
+String printHir(HirModule module) => [
+  for (final class_ in module.classes) _class(class_),
+  for (final MapEntry(key: selector, value: entries) in module.dispatch.entries)
+    'dispatch ${selector.name}: ${entries.entries.map(_entry).join(', ')}',
+  for (final function in module.functions) _Printer(function).run(),
+].join('\n');
+
+String _class(HirClass class_) {
+  final superclass = class_.superclass;
+  final parent = superclass == null ? '' : ' extends ${superclass.name}';
+  final fields = class_.ownFields.map(
+    (field) => '${field.type.dartName} ${field.name}; ',
+  );
+  return 'class ${class_.name}$parent { ${fields.join()}}';
+}
+
+String _entry(MapEntry<HirClass, HirFunction> entry) =>
+    '${entry.key.name} => ${entry.value.name}';
 
 final class _Printer(final HirFunction function) {
   final _names = <HirValue, String>{};
@@ -68,6 +85,13 @@ final class _Printer(final HirFunction function) {
     ),
     HirUnary(:final operator, :final operand) =>
       '${operator.symbol}${_name(operand)}',
+    HirNull() => 'null',
+    HirNew(:final target) => 'new ${target.name}',
+    HirLoad(:final field, :final object) => '${_name(object)}.${field.name}',
+    HirStore(:final field, :final object, :final value) =>
+      '${_name(object)}.${field.name} = ${_name(value)}',
+    HirVirtualCall(:final selector, :final receiver, :final arguments) =>
+      '${_name(receiver)}->${selector.name}(${_list(arguments)})',
     HirPrint(:final text) => 'print ${jsonEncode(text)}',
     HirCall(:final target, :final arguments) =>
       '${target.name}(${_list(arguments)})',

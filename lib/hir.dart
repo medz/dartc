@@ -2,6 +2,7 @@
 library;
 
 export 'src/hir/block.dart';
+export 'src/hir/class.dart';
 export 'src/hir/instruction.dart';
 export 'src/hir/interpret.dart' show HirInterpreter;
 export 'src/hir/module.dart';

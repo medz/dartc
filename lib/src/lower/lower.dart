@@ -1,6 +1,7 @@
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'dispatch.dart';
 import 'function.dart';
 import 'output.dart';
 import 'system.dart';
@@ -17,9 +18,10 @@ LirModule lowerProgram(HirModule module) {
       function: 'dart.$i.${function.name}',
   };
   final output = OutputData();
+  final layout = ObjectLayout(module, symbols);
   final bodies = [
     for (final function in module.functions)
-      FunctionLowering(function, symbols, output).lower(),
+      FunctionLowering(function, symbols, output, layout).lower(),
   ];
   final start = LirBlock();
   if (output.isUsed) ignoreBrokenPipes(start);
@@ -27,6 +29,7 @@ LirModule lowerProgram(HirModule module) {
   start.end(Return(start.add(ConstInt(0))));
   final functions = [
     ...bodies,
+    ...layout.functions,
     if (output.isUsed) writeFunction(),
     LirFunction(entrySymbol, LirSignature([], .i64), [start]),
   ];
@@ -43,5 +46,6 @@ LirModule lowerProgram(HirModule module) {
         if (called.contains(name)) LirExternal(name, signature),
     ],
     data: output.data,
+    tables: layout.tables,
   );
 }

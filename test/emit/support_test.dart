@@ -14,31 +14,11 @@ void main() {
     );
   });
 
-  LirModule body(
-    List<LirType> parameters,
-    void Function(LirBlock block, List<LirParameter> p) build,
-  ) => LirModule(
-    functions: [
-      function('f', parameters, null, (block, p) {
-        build(block, p);
-        return null;
-      }),
-    ],
-  );
-
   rejects(
     'e: LirType.ref',
     LirModule(externals: [LirExternal('e', LirSignature([], .ref))]),
   );
   rejects('writable data', LirModule(data: [LirData('d', [], writable: true)]));
-  rejects('ref', body([.ref], (_, _) {}));
-  rejects(
-    'Store',
-    body([.ptr, .i64], (block, p) {
-      block.add(Store(.i64, p[0], p[1]));
-    }),
-  );
-  rejects('ref', body([.i64], (block, p) => block.add(Alloc(p[0]))));
 
   LirModule ending(
     LirTerminator Function(LirBlock entry) end, [

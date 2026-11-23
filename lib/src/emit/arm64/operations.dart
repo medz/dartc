@@ -41,25 +41,51 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
         _assembler.add(d, operands[0], operands[1]);
       case Load():
         _load(instruction, d, operands);
-      case ConstNull() || Store() || LirCall():
+      case ConstNull():
+        _assembler.constant(d, 0);
+      case Store() || LirCall():
         throw StateError('Unchecked instruction: $instruction');
     }
   }
 
   void _load(Load load, int d, List<int> operands) {
-    var base = operands[0], offset = load.offset;
-    if (load.index != null) {
-      _assembler.add(farScratch, base, operands[1]);
-      base = farScratch;
-    }
-    if (!Arm64Assembler.reaches(load.width, offset)) {
-      _assembler
-        ..constant(calleeScratch, offset)
-        ..add(farScratch, base, calleeScratch);
-      base = farScratch;
-      offset = 0;
-    }
+    final index = load.index == null ? null : operands[1];
+    final (base, offset) = _address(
+      load.width,
+      operands[0],
+      index,
+      load.offset,
+    );
     _assembler.loadWidth(load.width, d, base, offset);
+  }
+
+  /// Stores register [value] at [base] plus the register [index], if any.
+  ///
+  /// [value] is neither of the scratch registers used for addresses.
+  void store(Store store, int base, int? index, int value) {
+    final (at, offset) = _address(store.width, base, index, store.offset);
+    _assembler.storeWidth(
+      store.width,
+      value,
+      at,
+      offset,
+      scratch: rightFloatScratch,
+    );
+  }
+
+  /// A base register and offset that one instruction can encode.
+  ///
+  /// Only the second word scratch and the far scratch are changed.
+  (int, int) _address(Width width, int base, int? index, int offset) {
+    if (index != null) {
+      _assembler.add(farScratch, base, index);
+      base = farScratch;
+    }
+    if (Arm64Assembler.reaches(width, offset)) return (base, offset);
+    _assembler
+      ..constant(rightScratch, offset)
+      ..add(farScratch, base, rightScratch);
+    return (farScratch, 0);
   }
 
   void _integer(IntOp op, int d, int l, int r) {

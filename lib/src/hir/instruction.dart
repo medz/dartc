@@ -1,3 +1,4 @@
+import 'class.dart';
 import 'value.dart';
 
 /// An operation executed in order inside a block.
@@ -17,6 +18,56 @@ final class HirConst(final Object value) extends HirInstruction {
   };
   @override
   List<HirValue> get inputs => const [];
+}
+
+/// The null reference.
+final class HirNull() extends HirInstruction {
+  @override
+  HirType get type => .reference;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
+/// An object of [target] whose references are null and numbers are unset.
+final class HirNew(final HirClass target) extends HirInstruction {
+  @override
+  HirType get type => .reference;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
+/// Reads [field] of [object], which is never null.
+final class HirLoad(final HirField field, final HirValue object)
+    extends HirInstruction {
+  @override
+  HirType get type => field.type;
+  @override
+  List<HirValue> get inputs => [object];
+}
+
+/// Writes [value] to [field] of [object], which is never null.
+final class HirStore(
+  final HirField field,
+  final HirValue object,
+  final HirValue value,
+) extends HirInstruction {
+  @override
+  HirType? get type => null;
+  @override
+  List<HirValue> get inputs => [object, value];
+}
+
+/// Calls what the class of [receiver], which is never null, has for [selector].
+final class HirVirtualCall(
+  final HirSelector selector,
+  final HirValue receiver,
+  Iterable<HirValue> arguments,
+) extends HirInstruction {
+  final List<HirValue> arguments = .unmodifiable(arguments);
+  @override
+  HirType? get type => selector.result;
+  @override
+  List<HirValue> get inputs => [receiver, ...arguments];
 }
 
 /// The `int` operators.
@@ -113,7 +164,8 @@ final class HirUnary(final HirUnaryOperator operator, final HirValue operand)
   List<HirValue> get inputs => [operand];
 }
 
-/// The comparisons; `bool` operands admit only the first two.
+/// The comparisons; `bool` operands and references, which are compared by
+/// identity, admit only the first two.
 enum HirRelation(final String symbol) {
   equal('=='),
   notEqual('!='),

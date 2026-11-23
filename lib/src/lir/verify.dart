@@ -18,8 +18,15 @@ void verifyModule(LirModule module) {
     ...module.functions.map((function) => function.name),
     ...module.externals.map((external) => external.name),
     ...module.data.map((data) => data.name),
+    ...module.tables.map((table) => table.name),
   ]) {
     if (!names.add(name)) throw LirError('Duplicate symbol: $name');
+  }
+  for (final table in module.tables) {
+    for (final function in table.functions) {
+      if (module.signatures.containsKey(function)) continue;
+      throw LirError('${table.name}: unknown function $function');
+    }
   }
   for (final function in module.functions) {
     _FunctionVerifier(module, names, function).run();

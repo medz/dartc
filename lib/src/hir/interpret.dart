@@ -1,4 +1,5 @@
 import 'block.dart';
+import 'class.dart';
 import 'instruction.dart';
 import 'module.dart';
 import 'value.dart';
@@ -99,12 +100,37 @@ final class HirInterpreter(
         };
       case HirCompare(:final relation):
         return _compare(relation, inputs[0], inputs[1]);
+      case HirNull():
+        return _null;
+      case HirNew(:final target):
+        return _Object(target);
+      case HirLoad(:final field):
+        return _object(inputs[0], field).fields[field] ??
+            (throw StateError('${field.name} is not set.'));
+      case HirStore(:final field):
+        _object(inputs[0], field).fields[field] = inputs[1];
+        return null;
+      case HirVirtualCall(:final selector):
+        return _call(_implementation(selector, inputs[0]), inputs);
       case HirPrint(:final text):
         _output.writeln(text);
         return null;
       case HirCall(:final target):
         return _call(target as HirFunction, inputs);
     }
+  }
+
+  /// The object [value], which must have [field].
+  _Object _object(Object value, HirField field) {
+    if (value is _Object && value.target.fields.contains(field)) return value;
+    throw StateError('No field ${field.name} in $value.');
+  }
+
+  HirFunction _implementation(HirSelector selector, Object receiver) {
+    final function = receiver is _Object
+        ? module.dispatch[selector]![receiver.target]
+        : null;
+    return function ?? (throw StateError('No ${selector.name} in $receiver.'));
   }
 
   int _int(HirIntOperator operator, int left, int right) => switch (operator) {
@@ -141,6 +167,26 @@ final class HirInterpreter(
       _ => a >= b,
     };
   }
+}
+
+const _null = _Null();
+
+final class const _Null() {
+  @override
+  String toString() => 'null';
+}
+
+final class _Object(final HirClass target) {
+  final fields = <HirField, Object>{};
+
+  this {
+    for (final field in target.fields) {
+      if (field.type == .reference) fields[field] = _null;
+    }
+  }
+
+  @override
+  String toString() => target.name;
 }
 
 final class _Exit(final int code) implements Exception;

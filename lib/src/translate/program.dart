@@ -4,6 +4,10 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'builder.dart';
+import 'classes.dart';
+import 'constructor.dart';
+import 'dispatch.dart';
+import 'scope.dart';
 import 'statement.dart';
 import 'types.dart';
 
@@ -14,24 +18,17 @@ HirModule translateProgram(SourceProgram program) =>
     ProgramTranslator(program).translate();
 
 /// Finds the functions a program needs and translates each once.
-final class ProgramTranslator(final SourceProgram program) {
-  final _declarations =
-      <TopLevelFunctionElement, (SourceUnit, FunctionDeclaration)>{};
-  final _functions = <TopLevelFunctionElement, HirFunction>{};
-  final _pending = <TopLevelFunctionElement>[];
+///
+/// Functions, classes and selectors only grow and are bounded by the source.
+final class ProgramTranslator(final SourceProgram program)
+    implements ProgramScope {
+  late final _declarations = Declarations(program);
+  late final _classes = ClassTable(_declarations);
+  late final _dispatch = DispatchBuilder(_declarations, memberOf, fieldOf);
+  final _functions = <ExecutableElement, HirFunction>{};
+  final _pending = <ExecutableElement>[];
 
   HirModule translate() {
-    for (final library in program.libraries) {
-      for (final unit in library.units) {
-        for (final declaration in unit.ast.declarations) {
-          if (declaration is! FunctionDeclaration) continue;
-          final element = declaration.declaredFragment?.element;
-          if (element is TopLevelFunctionElement) {
-            _declarations[element] = (unit, declaration);
-          }
-        }
-      }
-    }
     final start = program.main.units.first;
     final entry = program.main.element.entryPoint;
     if (entry == null) {
@@ -40,64 +37,131 @@ final class ProgramTranslator(final SourceProgram program) {
       ]);
     }
     if (entry.formalParameters.isNotEmpty) {
-      throw _unsupported(entry, 'parameters of main');
+      throw _declarations.unsupported(entry, 'parameters of main');
     }
     final main = HirFunction(entry.displayName, const []);
     _functions[entry] = main;
     _pending.add(entry);
-    while (_pending.isNotEmpty) {
-      _translate(_pending.removeLast());
-    }
-    return HirModule(main, _functions.values);
+    do {
+      while (_pending.isNotEmpty) {
+        _translate(_pending.removeLast());
+      }
+    } while (_dispatch.update() || _pending.isNotEmpty);
+    return HirModule(
+      main,
+      [..._functions.values, ..._dispatch.made],
+      classes: _dispatch.classes.map(_classes.classOf),
+      dispatch: _dispatch.result(_classes.classOf),
+    );
   }
 
-  /// The function of [element], or null if it is not part of the program.
-  HirFunction? _functionFor(TopLevelFunctionElement element) {
-    if (!_declarations.containsKey(element)) return null;
-    return _functions.putIfAbsent(element, () {
-      _pending.add(element);
-      final result = element.returnType;
-      return HirFunction(
-        element.displayName,
-        [
-          for (final parameter in element.formalParameters)
-            valueType(parameter.type) ??
-                (throw _unsupported(
-                  element,
-                  'a parameter of type ${parameter.type}',
-                )),
-        ],
-        hasNoResult(result)
-            ? null
-            : valueType(result) ??
-                  (throw _unsupported(element, 'a result of type $result')),
-      );
-    });
+  @override
+  HirFunction? functionOf(ExecutableElement element) =>
+      _declarations[element] == null ? null : _declare(element);
+
+  @override
+  HirFunction memberOf(ExecutableElement element) => _declare(element);
+
+  @override
+  HirFunction initializerOf(ConstructorElement element) => _declare(element);
+
+  @override
+  HirFunction factoryOf(ConstructorElement element) {
+    if (element.redirectedConstructor != null) {
+      throw _declarations.unsupported(element, 'redirecting factories');
+    }
+    return _declare(element);
   }
 
-  CompileFailure _unsupported(TopLevelFunctionElement element, String what) {
-    final (unit, declaration) = _declarations[element]!;
-    return CompileFailure([
-      unit.problemAt(declaration.name.offset, 'Not supported yet: $what.'),
-    ]);
+  @override
+  HirClass createdClass(ClassElement element) {
+    final class_ = _classes.classOf(element);
+    _dispatch.instantiate(element);
+    return class_;
   }
 
-  void _translate(TopLevelFunctionElement element) {
-    final (unit, declaration) = _declarations[element]!;
-    final expression = declaration.functionExpression;
-    if (expression.typeParameters case final parameters?) {
-      throw unit.unsupported(parameters, 'type parameters');
-    }
-    final body = expression.body;
-    if (body.isAsynchronous || body.isGenerator) {
-      throw unit.unsupported(body, 'async and generator functions');
-    }
+  @override
+  HirField fieldOf(FieldElement element) => _classes.fieldOf(element);
+
+  @override
+  HirSelector selectorOf(
+    ExecutableElement member,
+    ClassElement receiver,
+    int positional,
+    List<String> named,
+    Reject reject,
+  ) => _dispatch.selectorOf(member, receiver, positional, named, reject);
+
+  HirFunction _declare(ExecutableElement element) =>
+      _functions.putIfAbsent(element, () {
+        _pending.add(element);
+        final owner = element.enclosingElement;
+        final result = element.returnType;
+        final isInitializer = isInitializerElement(element);
+        return HirFunction(
+          owner is InstanceElement
+              ? '${owner.displayName}.${element.lookupName}'
+              : element.displayName,
+          [
+            if (hasReceiver(element)) .reference,
+            for (final parameter in element.formalParameters)
+              valueType(parameter.type) ??
+                  (throw _declarations.unsupported(
+                    element,
+                    'a parameter of type ${parameter.type}',
+                  )),
+          ],
+          isInitializer || hasNoResult(result)
+              ? null
+              : valueType(result) ??
+                    (throw _declarations.unsupported(
+                      element,
+                      'a result of type $result',
+                    )),
+        );
+      });
+
+  void _translate(ExecutableElement element) {
+    final declared = _declarations[element];
+    final owner = element.enclosingElement;
+    final (unit, node) = declared ?? _declarations[owner as ClassElement]!;
     final builder = FunctionBuilder(
       unit,
       _functions[element]!,
       element.formalParameters,
+      receiverClass: hasReceiver(element) ? owner as ClassElement : null,
     );
-    StatementTranslator(_functionFor, builder).body(body);
+    final statements = StatementTranslator(this, builder);
+    if (isInitializerElement(element)) {
+      ConstructorTranslator(
+        this,
+        _declarations,
+        builder,
+        statements,
+      ).initializer(element as ConstructorElement);
+    } else {
+      final (parameters, body) = switch (node) {
+        FunctionDeclaration(
+          functionExpression: FunctionExpression(
+            :final typeParameters,
+            :final body,
+          ),
+        ) ||
+        MethodDeclaration(
+          :final typeParameters,
+          :final body,
+        ) => (typeParameters, body),
+        ConstructorDeclaration(:final body) => (null, body),
+        _ => throw StateError('Unexpected declaration $node.'),
+      };
+      if (parameters != null) {
+        throw unit.unsupported(parameters, 'type parameters');
+      }
+      if (body.isAsynchronous || body.isGenerator) {
+        throw unit.unsupported(body, 'async and generator functions');
+      }
+      statements.body(body);
+    }
     builder.finish();
   }
 }

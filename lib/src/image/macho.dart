@@ -39,7 +39,11 @@ Uint8List linkMacho(
   final entryOffset =
       code.functions[entry] ?? (throw ImageError('No entry function $entry.'));
   final externals = code.externals;
-  final (bytes: constants, offsets: constantOffsets) = _pack(code.data);
+  final (bytes: constants, offsets: constantOffsets) = _pack({
+    ...code.data,
+    for (final MapEntry(key: name, value: entries) in code.tables.entries)
+      name: Uint8List(entries.length * 4),
+  });
   final hasData = constants.isNotEmpty;
   final textOffset = _align16(
     commandsEnd(imports: externals.isNotEmpty, constants: hasData),
@@ -52,13 +56,17 @@ Uint8List linkMacho(
   final slots = importSlots(externals.length, pageBytes);
 
   final text = Uint8List.fromList(code.text);
-  relocate(text, _base + textOffset, code.relocations, {
+  final symbols = {
     for (final (i, name) in externals.indexed)
       name: _base + stubsOffset + i * stubBytes,
     for (final MapEntry(:key, :value) in code.functions.entries)
       key: _base + textOffset + value,
     for (final MapEntry(:key, :value) in constantOffsets.entries)
       key: _base + constantsOffset + value,
+  };
+  relocate(text, _base + textOffset, code.relocations, symbols);
+  code.tables.forEach((name, entries) {
+    fillTable(constants, constantOffsets[name]!, name, entries, symbols);
   });
   final stubs = importStubs(
     externals,

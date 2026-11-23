@@ -26,6 +26,9 @@ const calleeScratch = 8, leftScratch = 15, rightScratch = 16, farScratch = 17;
 /// The double registers that hold a value only within one operation.
 const leftFloatScratch = 29, rightFloatScratch = 30;
 
+/// The system function that allocates: calloc(count, size).
+const allocateSymbol = 'calloc';
+
 const _argumentRegisters = 8;
 
 /// Where a call's arguments are passed, in order.

@@ -7,94 +7,28 @@ import 'package:test/test.dart';
 
 import '../emit/random_lir.dart';
 import '../lir/support.dart';
+import 'agree.dart';
 import 'support.dart';
 
-typedef _Case = ({String function, List<Object> arguments});
-
 const _min = -0x8000000000000000, _max = 0x7fffffffffffffff;
-const _limit = 250;
-
-/// A program returning the 1-based number of the first case that differs from
-/// [expected], or 0.
-LirModule _program(
-  List<LirFunction> functions,
-  List<_Case> cases,
-  List<int> expected, [
-  List<LirData> data = const [],
-]) {
-  final signatures = {for (final f in functions) f.name: f.signature};
-  var block = LirBlock();
-  final blocks = [block];
-  for (final (i, (:function, :arguments)) in cases.indexed) {
-    final call = block.add(
-      Call(function, signatures[function]!, [
-        for (final value in arguments)
-          value is double
-              ? block.add(ConstFloat(value))
-              : block.add(ConstInt(value as int)),
-      ]),
-    );
-    final same = block.add(
-      Compare(.eq, call, block.add(ConstInt(expected[i]))),
-    );
-    final next = LirBlock(), failed = LirBlock();
-    block.end(Branch(same, LirEdge(next), LirEdge(failed)));
-    failed.end(Return(failed.add(ConstInt(i + 1))));
-    blocks.addAll([failed, next]);
-    block = next;
-  }
-  block.end(Return(block.add(ConstInt(0))));
-  return LirModule(
-    functions: [
-      ...functions,
-      LirFunction('main', LirSignature([], .i64), blocks),
-    ],
-    data: data,
-  );
-}
-
-/// Checks that machine code agrees with the interpreter on every case.
-Future<void> _agree(
-  List<LirFunction> functions,
-  List<_Case> cases, [
-  List<LirData> data = const [],
-]) async {
-  for (var at = 0; at < cases.length; at += _limit) {
-    final part = cases.skip(at).take(_limit).toList();
-    final interpreter = LirInterpreter(
-      LirModule(functions: functions, data: data),
-    );
-    final expected = [
-      for (final (:function, :arguments) in part)
-        interpreter.call(function, arguments) as int,
-    ];
-    final code = await execute(_program(functions, part, expected, data));
-    expect(
-      code,
-      0,
-      reason: code > 0 ? 'differs: ${part[code - 1]}' : 'signal ${-code}',
-    );
-  }
-}
-
 void main() {
   test('a wrong result is reported with its case number', () async {
     final identity = function('id', [.i64], .i64, (_, p) => p[0]);
     final cases = [
       for (var i = 0; i < 5; i++) (function: 'id', arguments: [i]),
     ];
-    expect(await execute(_program([identity], cases, [0, 1, 2, 3, 4])), 0);
+    expect(await execute(program([identity], cases, [0, 1, 2, 3, 4])), 0);
     for (var wrong = 0; wrong < 5; wrong++) {
       final expected = [0, 1, 2, 3, 4];
       // Only the top bit differs, so all 64 bits must be compared.
       expected[wrong] ^= _min;
-      expect(await execute(_program([identity], cases, expected)), wrong + 1);
+      expect(await execute(program([identity], cases, expected)), wrong + 1);
     }
   }, skip: skipExecution);
 
   test('every integer operation and comparison', () async {
     const values = [0, 1, -1, 2, 7, -7, 63, _max, _min, 0x123456789];
-    final functions = <LirFunction>[], cases = <_Case>[];
+    final functions = <LirFunction>[], cases = <Case>[];
     void operation(
       String name,
       LirInstruction Function(LirValue a, LirValue b) build,
@@ -139,7 +73,7 @@ void main() {
       cases.add((function: 'address', arguments: [a, 5]));
       cases.add((function: 'address', arguments: [a, 0]));
     }
-    await _agree(functions, cases);
+    await agree(functions, cases);
   }, skip: skipExecution);
 
   test('every floating-point operation', () async {
@@ -156,7 +90,7 @@ void main() {
       double.negativeInfinity,
       double.nan,
     ];
-    final functions = <LirFunction>[], cases = <_Case>[];
+    final functions = <LirFunction>[], cases = <Case>[];
     // Results are compared by their bits, except that all NaNs are equal.
     LirValue bits(LirBlock block, LirValue value) {
       final word = block.add(Convert(.floatBitsToInt, value));
@@ -216,7 +150,7 @@ void main() {
     for (final value in [0.0, -0.9, 1.9, -2.5, 1e18, -9223372036854775808.0]) {
       cases.add((function: 'to', arguments: [value]));
     }
-    await _agree(functions, cases);
+    await agree(functions, cases);
   }, skip: skipExecution);
 
   test('floating-point arguments and results of every kind', () async {
@@ -257,7 +191,7 @@ void main() {
       }
       return bits;
     });
-    await _agree(
+    await agree(
       [mixed, forward],
       [
         (
@@ -291,7 +225,7 @@ void main() {
           for (final middle in [0, 0xffff0000, 0x1234ffff0000, 0xffffffff0000])
             high << 48 | middle | low,
     ];
-    await _agree(
+    await agree(
       [
         for (final (i, value) in values.indexed)
           function('c$i', [], .i64, (block, _) => block.add(ConstInt(value))),
@@ -323,7 +257,7 @@ void main() {
       return LirFunction(name, unary, [entry, base, more]);
     }
 
-    await _agree(
+    await agree(
       [recursive('f', 'g', true), recursive('g', 'f', false)],
       [
         for (final n in [0, 1, 2, 10, 20]) (function: 'f', arguments: [n]),
@@ -348,7 +282,7 @@ void main() {
       return block.add(CallIndirect(address, weigh.signature, p.reversed));
     });
     final arguments = [for (var i = 0; i < 13; i++) i * i - 5];
-    await _agree(
+    await agree(
       [weigh, reverse],
       [
         (function: 'weigh', arguments: arguments),
@@ -397,7 +331,7 @@ void main() {
         }),
       );
     });
-    await _agree(functions, [
+    await agree(functions, [
       for (final name in operations.keys)
         for (final a in [0, 7, -7, _max, _min])
           (function: name, arguments: [a, 0x7654321 - a]),
@@ -412,7 +346,7 @@ void main() {
       LirData('empty', []),
       LirData('big', bytes),
     ];
-    final functions = <LirFunction>[], cases = <_Case>[];
+    final functions = <LirFunction>[], cases = <Case>[];
     // Near and far, aligned and not, forward and backward.
     for (final offset in [0, 1, 8, 32760, 32761, 65536, -16]) {
       for (final width in Width.values) {
@@ -463,7 +397,7 @@ void main() {
       }),
     );
     cases.add((function: 'first', arguments: []));
-    await _agree(functions, cases, data);
+    await agree(functions, cases, data: data);
   }, skip: skipExecution);
 
   test('frames beyond the reach of load and store offsets', () async {
@@ -484,7 +418,7 @@ void main() {
       }
       return sum;
     });
-    await _agree(
+    await agree(
       [
         wide,
         function('id', [.i64], .i64, (_, p) => p[0]),
@@ -500,7 +434,7 @@ void main() {
 
   for (var group = 0; group < 8; group++) {
     test('random programs, group $group', () async {
-      final functions = <LirFunction>[], cases = <_Case>[];
+      final functions = <LirFunction>[], cases = <Case>[];
       for (var seed = group * 25; seed < (group + 1) * 25; seed++) {
         final random = RandomLir(seed, prefix: 'r');
         for (final made in random.functions()) {
@@ -514,7 +448,7 @@ void main() {
           }
         }
       }
-      await _agree(functions, cases);
+      await agree(functions, cases);
     }, skip: skipExecution);
   }
 }

@@ -5,6 +5,8 @@ import 'value.dart';
 
 /// Readable text for a whole module.
 String printModule(LirModule module) => [
+  for (final table in module.tables)
+    'table ${table.name}: ${table.functions.join(', ')}',
   for (final data in module.data)
     'data ${data.name}: ${data.bytes.length} bytes'
         '${data.writable ? ', writable' : ''}',

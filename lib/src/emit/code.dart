@@ -39,7 +39,11 @@ final class EmittedCode(
 
   /// Constant bytes, each aligned to 16.
   Map<String, Uint8List> data = const {},
+
+  /// Tables of 32-bit distances from the table to each function.
+  Map<String, List<String>> tables = const {},
 }) {
+  final Map<String, List<String>> tables = .unmodifiable(tables);
   final Map<String, Uint8List> data = .unmodifiable(data);
   final List<String> externals = .unmodifiable(externals);
   final Map<String, int> functions = .unmodifiable(functions);

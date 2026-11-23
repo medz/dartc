@@ -78,11 +78,13 @@ Future<void> _compareRandom(int seed) async {
   final checked = await Process.run('$hostSdk/bin/dart', ['run', path]);
   expect(checked.exitCode, 100, reason: reason(checked.exitCode));
   final module = await translate(source);
-  final interpreter = HirInterpreter(module);
+  // The official runtime has shown that the program ends.
+  const steps = 1 << 32;
+  final interpreter = HirInterpreter(module, maxSteps: steps);
   final dartLevel = interpreter.run();
   expect(dartLevel, 100, reason: reason(dartLevel));
   expect(interpreter.output, checked.stdout, reason: 'seed $seed');
-  final machineLevel = LoweredRun(module);
+  final machineLevel = LoweredRun(module, maxSteps: steps);
   expect(machineLevel.code, 100, reason: reason(machineLevel.code));
   expect(machineLevel.output, checked.stdout, reason: 'seed $seed');
   final program = '${directory.path}/program';

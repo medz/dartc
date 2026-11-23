@@ -4,7 +4,15 @@ enum Kind(final String name) {
   integer('int'),
   float('double'),
   boolean('bool'),
+
+  /// Any object of the generated classes.
+  object('C0');
+
+  /// The kinds that the official runtime can print.
+  static const List<Kind> plain = [integer, float, boolean];
 }
+
+typedef _Method = ({String name, Kind result, List<Kind> parameters});
 
 /// Reproducible random functions in the Dart that is supported.
 ///
@@ -18,20 +26,146 @@ final class RandomDart(int seed) {
       <({String name, Kind result, List<(String?, Kind)> parameters})>[];
   final _scopes = <List<(String, Kind)>>[];
   final _loops = <String?>[];
+  final _methods = <_Method>[];
   late Kind _result;
   int _names = 0, _depth = 0;
+
+  /// Bodies call only methods numbered below this, so that calls end.
+  int _methodLimit = 0;
 
   /// Expressions calling each generated function, with their types.
   List<(String, Kind)> get calls => [
     for (final function in _functions)
-      (_callOf(function, (kind) => _literal(kind)), function.result),
+      if (function.result != .object)
+        (_callOf(function, (kind) => _literal(kind)), function.result),
   ];
 
   String generate(int count) {
+    _classes();
+    _methodLimit = _methods.length;
     for (var i = 0; i < count; i++) {
       _function('f$i');
     }
     return _lines.join('\n');
+  }
+
+  static const _fields = [
+    ('i0', Kind.integer),
+    ('d0', Kind.float),
+    ('b0', Kind.boolean),
+  ];
+  static const _classCount = 8;
+
+  /// A class C0 and others that extend or implement it.
+  void _classes() {
+    for (var i = 0; i < 6; i++) {
+      _methods.add((
+        name: 'm$i',
+        result: _any(Kind.values),
+        parameters: [
+          for (var j = _random.nextInt(4); j > 0; j--) _any(Kind.values),
+        ],
+      ));
+    }
+    for (var i = 0; i < _classCount; i++) {
+      final isAlone = i > 0 && _chance(5);
+      final parent = i == 0 ? null : _random.nextInt(i);
+      final relation = i == 0
+          ? ''
+          : isAlone
+          ? ' implements C0'
+          : ' extends C$parent';
+      _class('C$i', relation, isWhole: i == 0 || isAlone);
+    }
+  }
+
+  void _class(String name, String relation, {required bool isWhole}) {
+    _block('class $name$relation', () {
+      if (isWhole) {
+        for (final (field, kind) in _fields) {
+          _line('${kind.name} $field;');
+        }
+        _line('C0? o0;');
+        _line('$name(this.i0, this.d0, [this.b0 = ${_literal(.boolean)}]);');
+        _line('C0 operator +(C0 other) => b0 ? this : other;');
+        _line('int operator [](int at) => i0 + at;');
+        _line('void operator []=(int at, int value) => i0 = at ^ value;');
+      } else {
+        switch (_random.nextInt(3)) {
+          case 0:
+            _line('$name(super.i0, super.d0, [super.b0]);');
+          case 1:
+            _line(
+              '$name(int i, double d, [bool b = true]) : super(i + 1, d, b) '
+              "{ print('$name'); i0 *= 2; }",
+            );
+          default:
+            _line('int extra = ${_literal(.integer)};');
+            _line(
+              '$name(int i, double d, [bool b = false]) : super(i, d / 2, b) '
+              '{ i0 += extra; }',
+            );
+        }
+        if (_chance(4)) {
+          _line('@override int get i0 => super.i0 + 1;');
+        }
+        if (_chance(4)) {
+          _line('@override set d0(double value) => super.d0 = value * 2;');
+        }
+        if (_chance(4)) {
+          _line(
+            '@override bool operator ==(Object other) '
+            '=> b0 || super == other;',
+          );
+        }
+        if (_chance(4)) {
+          _line('@override int operator [](int at) => super[at] * 3;');
+        }
+      }
+      for (final (i, method) in _methods.indexed) {
+        if (isWhole || _chance(2)) {
+          _method(method, i, isWhole: isWhole, isRoot: relation.isEmpty);
+        }
+      }
+    });
+  }
+
+  void _method(
+    _Method method,
+    int number, {
+    required bool isWhole,
+    required bool isRoot,
+  }) {
+    _result = method.result;
+    _methodLimit = number;
+    final names = [for (final _ in method.parameters) 'p${_names++}'];
+    final texts = [
+      for (final (i, kind) in method.parameters.indexed)
+        '${kind.name} ${names[i]}',
+      // Subclasses take more than C0, each with its own default.
+      if (!isRoot && number.isEven) '[int q = ${_random.nextInt(9)}]',
+    ];
+    _scopes.add([
+      ..._fields,
+      for (final (i, kind) in method.parameters.indexed) (names[i], kind),
+      if (!isRoot && number.isEven) ('q', .integer),
+    ]);
+    _block('${_result.name} ${method.name}(${texts.join(', ')})', () {
+      _line('C0 self${_names++} = this;');
+      _scopes.last.add(('self${_names - 1}', .object));
+      _statements(1 + _random.nextInt(3), 1);
+      if (!isWhole && _random.nextBool()) {
+        final arguments = method.parameters.map((kind) => _expression(kind, 1));
+        final name = 'v${_names++}';
+        _line(
+          '${_result.name} $name = '
+          'super.${method.name}(${arguments.join(', ')});',
+        );
+        _scopes.last.add((name, _result));
+      }
+      _line('return ${_expression(_result, 2)};');
+    });
+    _scopes.removeLast();
   }
 
   T _any<T>(List<T> values) => values[_random.nextInt(values.length)];
@@ -55,7 +189,7 @@ final class RandomDart(int seed) {
       for (var i = _random.nextInt(5); i > 0; i--) _any(Kind.values),
     ];
     final optional = [
-      for (var i = _random.nextInt(3); i > 0; i--) _any(Kind.values),
+      for (var i = _random.nextInt(3); i > 0; i--) _any(Kind.plain),
     ];
     final isNamed = _random.nextBool();
     final parameters = <(String?, Kind)>[], texts = <String>[];
@@ -88,7 +222,14 @@ final class RandomDart(int seed) {
     _functions.add((name: name, result: _result, parameters: parameters));
   }
 
+  String _creation(String Function(Kind kind) argument) {
+    final rest = _random.nextBool() ? ', ${argument(.boolean)}' : '';
+    final class_ = 'C${_random.nextInt(_classCount)}';
+    return '$class_(${argument(.integer)}, ${argument(.float)}$rest)';
+  }
+
   String _literal(Kind kind) => switch (kind) {
+    .object => _creation(_literal),
     .boolean => '${_random.nextBool()}',
     .integer => switch (_random.nextInt(4)) {
       0 => _any([
@@ -121,13 +262,17 @@ final class RandomDart(int seed) {
   List<String> _variables(Kind kind) => [
     for (final scope in _scopes)
       for (final (name, type) in scope)
-        if (type == kind) name,
+        if (type == kind)
+          name
+        else if (type == .object)
+          for (final (field, fieldKind) in _fields)
+            if (fieldKind == kind) '$name.$field',
   ];
 
   void _declare(Kind kind) {
     final name = 'v${_names++}';
     final value = _expression(kind, 2);
-    final head = _chance(3) ? 'var' : kind.name;
+    final head = kind != .object && _chance(3) ? 'var' : kind.name;
     // A bare int literal would make `var` an int.
     final isSafe = head == kind.name || kind != .float;
     _line('${isSafe ? head : kind.name} $name = $value;');
@@ -171,7 +316,7 @@ final class RandomDart(int seed) {
           _statements(2, depth - 1);
         });
       case 17:
-        final name = 'c${_names++}', kind = _any(Kind.values);
+        final name = 'c${_names++}', kind = _any(Kind.plain);
         _line('const ${kind.name} $name = ${_literal(kind)};');
         _line('${_any(_variables(kind))} = $name;');
       case 8:
@@ -276,6 +421,7 @@ final class RandomDart(int seed) {
         _expression(_any([.integer, .float]), depth),
       ),
       .boolean => (_any(['&', '|', '^']), _expression(.boolean, depth)),
+      .object => ('+', _expression(.object, depth)),
     };
     return '$variable $operator= $right';
   }
@@ -288,7 +434,22 @@ final class RandomDart(int seed) {
           : _any(variables);
     }
     String inner(Kind kind) => _expression(kind, depth - 1);
-    switch (_random.nextInt(9)) {
+    switch (_random.nextInt(11)) {
+      // Methods call less, or the work would grow with every level.
+      case 9 || 10
+          when _loops.isEmpty &&
+              _variables(.object).isNotEmpty &&
+              (_methodLimit == _methods.length || _chance(5)):
+        final callable = [
+          for (final method in _methods.take(_methodLimit))
+            if (method.result == kind) method,
+        ];
+        if (callable.isNotEmpty) {
+          final method = _any(callable);
+          final arguments = method.parameters.map((k) => _expression(k, 1));
+          return '${_any(_variables(.object))}'
+              '.${method.name}(${arguments.join(', ')})';
+        }
       case 0:
         return '(${inner(.boolean)} ? ${inner(kind)} : ${inner(kind)})';
       case 1 when _variables(kind).isNotEmpty:
@@ -304,11 +465,31 @@ final class RandomDart(int seed) {
       .integer => _integer(inner),
       .float => _float(inner),
       .boolean => _boolean(inner),
+      .object => _object(inner),
+    };
+  }
+
+  String _object(String Function(Kind) inner) {
+    final variables = _variables(.object);
+    if (variables.isEmpty || _chance(3)) return _creation(inner);
+    final variable = _any(variables);
+    return switch (_random.nextInt(4)) {
+      0 => '(${inner(.object)} + ${inner(.object)})',
+      1 => '($variable.o0 ?? ${inner(.object)})',
+      2 => '($variable.o0 ??= ${inner(.object)})',
+      _ => variable,
     };
   }
 
   String _integer(String Function(Kind) inner) {
-    switch (_random.nextInt(8)) {
+    switch (_random.nextInt(9)) {
+      case 8 when _variables(.object).isNotEmpty:
+        final variable = _any(_variables(.object));
+        return _any([
+          '$variable[${inner(.integer)}]',
+          '($variable[${inner(.integer)}] = ${inner(.integer)})',
+          '($variable[${inner(.integer)}] += ${inner(.integer)})',
+        ]);
       case 0:
         return '(${_any(['-', '~'])}(${inner(.integer)}))';
       case 1:
@@ -349,7 +530,16 @@ final class RandomDart(int seed) {
   }
 
   String _boolean(String Function(Kind) inner) {
-    switch (_random.nextInt(6)) {
+    switch (_random.nextInt(8)) {
+      case 6 when _variables(.object).isNotEmpty:
+        final variable = _any(_variables(.object));
+        return _any([
+          '($variable == ${inner(.object)})',
+          '(${inner(.object)} != $variable)',
+          'identical($variable, ${inner(.object)})',
+          '($variable.o0 == null)',
+          '($variable.o0 != ${inner(.object)})',
+        ]);
       case 0:
         return '(!${inner(.boolean)})';
       case 1 || 2:

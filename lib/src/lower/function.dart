@@ -2,6 +2,7 @@ import 'package:dartc/graph.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'dispatch.dart';
 import 'operators.dart';
 import 'output.dart';
 import 'system.dart';
@@ -9,6 +10,7 @@ import 'system.dart';
 LirType _typeOf(HirType type) => switch (type) {
   .integer || .boolean => .i64,
   .float => .f64,
+  .reference => .ref,
 };
 
 /// The machine-level signature of [function].
@@ -17,11 +19,17 @@ LirSignature signatureOf(HirCallable function) => LirSignature(
   function.result == null ? null : _typeOf(function.result!),
 );
 
+LirSignature _selectorSignature(HirSelector selector) => LirSignature([
+  .ref,
+  ...selector.parameters.map(_typeOf),
+], selector.result == null ? null : _typeOf(selector.result!));
+
 /// Lowers one function, block by block.
 final class FunctionLowering(
   final HirFunction function,
   final Map<HirCallable, String> symbols,
   final OutputData output,
+  final ObjectLayout layout,
 ) {
   final _values = <HirValue, LirValue>{};
   final _blocks = <HirBlock, LirBlock>{};
@@ -81,6 +89,24 @@ final class FunctionLowering(
         return operators.unary(operator, _value(operand));
       case HirCompare(:final relation, :final left, :final right):
         return operators.compare(relation, _value(left), _value(right));
+      case HirNull():
+        return block.add(ConstNull());
+      case HirNew(:final target):
+        return layout.allocate(block, target);
+      case HirLoad(:final field, :final object):
+        return layout.load(block, field, _value(object));
+      case HirStore(:final field, :final object, :final value):
+        layout.store(block, field, _value(object), _value(value));
+        return null;
+      case HirVirtualCall(:final selector, :final receiver, :final arguments):
+        final object = _value(receiver);
+        return block.add(
+          CallIndirect(
+            layout.lookUp(block, selector, object),
+            _selectorSignature(selector),
+            [object, ...arguments.map(_value)],
+          ),
+        );
       case HirPrint(:final text):
         output.print(block, text);
         return null;

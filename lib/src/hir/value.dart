@@ -3,6 +3,9 @@ enum HirType(final String dartName) {
   integer('int'),
   float('double'),
   boolean('bool'),
+
+  /// An object or null.
+  reference('reference'),
 }
 
 /// Something usable as an operand, defined exactly once.

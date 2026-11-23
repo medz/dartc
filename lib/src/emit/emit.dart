@@ -1,6 +1,7 @@
 import 'package:dartc/lir.dart';
 
 import 'arm64/assembler.dart';
+import 'arm64/convention.dart';
 import 'arm64/function.dart';
 import 'code.dart';
 import 'support.dart';
@@ -22,7 +23,17 @@ EmittedCode emitArm64(LirModule module) {
     assembler.finish(),
     functions,
     assembler.relocations,
-    externals: module.externals.map((external) => external.name),
+    externals: {
+      ...module.externals.map((external) => external.name),
+      if (_allocates(module)) allocateSymbol,
+    },
     data: {for (final data in module.data) data.name: data.bytes},
+    tables: {for (final table in module.tables) table.name: table.functions},
   );
 }
+
+bool _allocates(LirModule module) => module.functions.any(
+  (function) => function.blocks.any(
+    (block) => block.instructions.any((instruction) => instruction is Alloc),
+  ),
+);
