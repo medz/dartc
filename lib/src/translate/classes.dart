@@ -82,12 +82,13 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
 final class ClassTable(final Declarations _declarations) {
   final _classes = <ClassElement, HirClass>{};
   final _fields = <FieldElement, HirField>{};
+  final _argumentFields = <ClassElement, HirField>{};
 
   HirClass classOf(ClassElement element) =>
       _classes[element] ??= _class(element);
 
   /// A field of a class that objects are created of, or of its superclass.
-  HirField fieldOf(FieldElement element) => _fields[element]!;
+  HirField fieldOf(FieldElement element) => _fields[element.baseElement]!;
 
   HirClass _class(ClassElement element) {
     CompileFailure unsupported(String what) =>
@@ -102,6 +103,7 @@ final class ClassTable(final Declarations _declarations) {
         'TypeError' => [
           HirField('number', .integer),
           HirField('object', .reference),
+          HirField('type', .reference),
         ],
         _ => [HirField('number', .integer)],
       });
@@ -110,7 +112,6 @@ final class ClassTable(final Declarations _declarations) {
     if (element.primaryConstructor != null) {
       throw unsupported('primary constructors');
     }
-    if (element.typeParameters.isNotEmpty) throw unsupported('generic classes');
     final superclass = element.supertype!.element as ClassElement;
     final isBase = superclass.library.isDartCore && superclass.name == 'Error';
     if (superclass.library.isInSdk && !superclass.isDartCoreObject && !isBase) {
@@ -119,7 +120,24 @@ final class ClassTable(final Declarations _declarations) {
     return HirClass(
       element.displayName,
       superclass.library.isInSdk ? null : classOf(superclass),
-      [for (final field in instanceFields(element)) _field(field)],
+      [
+        ?_arguments(element),
+        for (final field in instanceFields(element)) _field(field),
+      ],
+    );
+  }
+
+  /// Where objects keep the type arguments of [element], if it is generic.
+  HirField? argumentsOf(ClassElement element) {
+    classOf(element);
+    return _argumentFields[element];
+  }
+
+  HirField? _arguments(ClassElement element) {
+    if (element.typeParameters.isEmpty) return null;
+    return _argumentFields[element] = HirField(
+      '${element.displayName} types',
+      .reference,
     );
   }
 

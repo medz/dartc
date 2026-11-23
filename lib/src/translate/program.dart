@@ -16,9 +16,12 @@ import 'constructor.dart';
 import 'dispatch.dart';
 import 'error_table.dart';
 import 'global_table.dart';
+import 'members.dart';
 import 'report.dart';
 import 'scope.dart';
 import 'statement.dart';
+import 'type_functions.dart';
+import 'type_table.dart';
 import 'types.dart';
 
 /// Translates everything the program's `main` can reach.
@@ -45,13 +48,16 @@ final class ProgramTranslator(
   ]);
   late final _classes = ClassTable(_declarations);
   late final _dispatch = DispatchBuilder(this, _declarations, _unit);
-  late final _constants = ConstantTable(
+  late final ConstantTable _constants = ConstantTable(
     _declarations,
     _classes,
     _core,
-    functionObject,
+    _functionConstant,
+    (types) => _types.list(types),
     _dispatch.instantiate,
   );
+  late final TypeTable _types = TypeTable(this, _classes, _constants);
+  late final _typeFunctions = TypeFunctions(this, _unit, _classes, _types);
   late final _closures = ClosureTable(this, _unit, _creatorOf);
   late final _errors = ErrorTable(_classes, _core, _dispatch.instantiate);
   late final _globals = GlobalTable(
@@ -68,6 +74,10 @@ final class ProgramTranslator(
   /// The functions of closures.
   final _bodies = <HirFunction>[];
   final _creators = <ConstructorElement, HirFunction>{};
+  final _locals = <Element, HirFunction>{};
+
+  /// The classes of local functions that are no values.
+  final _localClasses = <HirClass>[];
   final _thrown = <ClassElement>{};
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _writeNumber;
 
@@ -90,10 +100,15 @@ final class ProgramTranslator(
         _pending.removeLast()();
       }
       _addRuntime();
-    } while (_dispatch.update() || _closures.update() || _pending.isNotEmpty);
+    } while (_dispatch.update() ||
+        _closures.update() ||
+        _typeFunctions.update(_dispatch.classes, _closures.closures) ||
+        _pending.isNotEmpty);
+    _typeFunctions.finish();
     final dispatch = {
       ..._dispatch.result(_classes.classOf, _closures),
       ..._closures.dispatch,
+      if (_typeFunctions.isUsed) _typeFunctions.typeOf: _typeFunctions.entries,
     };
     final report = ReportBuilder(
       _declarations,
@@ -101,16 +116,16 @@ final class ProgramTranslator(
       _errors,
       _thrown,
       _writeNumber,
+      runtime,
     );
-    final uncaught = _canThrow
-        ? report.build(_dispatch.classes, _closures.closures)
-        : null;
+    final uncaught = _canThrow ? report.build(_dispatch.classes) : null;
     return HirModule(
       main,
-      [..._allFunctions, ?uncaught, ?report.describe],
+      [..._allFunctions, ?uncaught],
       classes: [
         ..._dispatch.classes.map(_classes.classOf),
         for (final closure in _closures.closures) closure.class_,
+        ..._localClasses,
         ..._cells.values,
       ],
       dispatch: dispatch,
@@ -136,6 +151,7 @@ final class ProgramTranslator(
     ..._closures.made,
     ..._bodies,
     ..._creators.values,
+    ..._typeFunctions.functions,
     ..._errors.functions,
   ];
 
@@ -159,6 +175,12 @@ final class ProgramTranslator(
     final throwsInts =
         _dispatch.classes.contains(int) &&
         _thrown.any((class_) => isSubclass(int, class_));
+    final throwsGenerics = _dispatch.classes.any(
+      (class_) =>
+          class_.typeParameters.isNotEmpty &&
+          _thrown.any((thrown) => isSubclass(class_, thrown)),
+    );
+    if (throwsGenerics) runtime('writeObjectType');
     if (throwsInts || _errors.throwerIfMade(.negativeShift) != null) {
       _writeNumber ??= _runtimeFunction('writeNumber');
     }
@@ -196,26 +218,120 @@ final class ProgramTranslator(
   }
 
   @override
-  void addClosure(Closure closure) {
-    _bodies.add(closure.target());
-    _closures.add(closure);
+  void addClosure(
+    Closure closure,
+    HirFunction function, {
+    required bool isValue,
+  }) {
+    _bodies.add(function);
+    isValue ? _closures.add(closure) : _localClasses.add(closure.class_);
     _addAllocation();
   }
+
+  @override
+  HirFunction localFunction(Element element) => _locals[element]!;
+
+  @override
+  void setLocalFunction(Element element, HirFunction function) =>
+      _locals[element] = function;
 
   @override
   HirSelector callSelector(int positional, List<String> named) =>
       _closures.selectorOf(positional, named);
 
   @override
-  HirTypeTest functionTest(FunctionType? type) =>
-      type == null ? _closures.anyFunction : _closures.testOf(type);
+  HirTypeTest get functionTest => _closures.anyFunction;
+
+  /// Whether the program declares [element].
+  bool _declares(ExecutableElement element) =>
+      _declarations[element is ConstructorElement
+          ? element.enclosingElement
+          : element] !=
+      null;
 
   @override
-  HirConstObject? functionObject(ExecutableElement element) {
-    final owner = element is ConstructorElement
-        ? element.enclosingElement
-        : element;
-    return _declarations[owner] == null ? null : _closures.static(element);
+  HirConstObject? functionObject(ExecutableElement element) =>
+      _declares(element) ? _closures.constant(element, null) : null;
+
+  /// The function [element] as a constant of [type].
+  HirConstObject? _functionConstant(ExecutableElement element, DartType type) {
+    if (!_declares(element) || type is! FunctionType) return null;
+    if (takesTypes(element) == null) return functionObject(element);
+    final types = _types.list(typeArgumentsOf(element, type));
+    return types == null
+        ? null
+        : _closures.constant(element, types.value as HirConstObject?);
+  }
+
+  @override
+  HirValue? instantiate(
+    FunctionBuilder builder,
+    ExecutableElement element,
+    List<DartType> types,
+  ) {
+    if (!_declares(element)) return null;
+    if (_types.list(types) case final found?) {
+      return builder.add(
+        HirStatic(_closures.constant(element, found.value as HirConstObject?)),
+      );
+    }
+    final list = _types.listValue(builder, types);
+    if (list == null) return null;
+    _addAllocation();
+    final class_ = _closures.static(element).class_;
+    final object = builder.create(class_);
+    builder.add(HirStore(class_.fields.single, object, list));
+    return object;
+  }
+
+  @override
+  InterfaceElement canonicalClass(InterfaceElement class_) {
+    final base = class_.baseElement as InterfaceElement;
+    return base.library.isDartCore ? _core.getClass(base.name!) ?? base : base;
+  }
+
+  @override
+  ClassElement runtimeClass(String name) {
+    for (final library in _runtime?.libraries ?? const <SourceLibrary>[]) {
+      final found = library.element.getClass(name);
+      if (found != null) return found;
+    }
+    throw StateError('No runtime with $name.');
+  }
+
+  @override
+  ClassElement get functionClass => _core.getClass('Function')!;
+
+  @override
+  HirValue? typeValue(FunctionBuilder builder, DartType type) {
+    _prepareTypes();
+    return _types.value(builder, type);
+  }
+
+  @override
+  HirValue? methodType(FunctionBuilder builder, ExecutableElement element) {
+    _prepareTypes();
+    return _types.methodType(builder, element);
+  }
+
+  @override
+  HirValue? typeList(FunctionBuilder builder, List<DartType> types) {
+    _prepareTypes();
+    return _types.listValue(builder, types);
+  }
+
+  @override
+  Constant? constantTypes(List<DartType> types) => _types.list(types);
+
+  @override
+  HirField? argumentsOf(ClassElement class_) => _classes.argumentsOf(class_);
+
+  /// Makes the classes that describe types part of the program.
+  void _prepareTypes() {
+    if (_runtime == null) return;
+    for (final name in const ['BasicType', 'SuperList', 'VariableType']) {
+      createdClass(runtimeClass(name));
+    }
   }
 
   @override
@@ -248,15 +364,14 @@ final class ProgramTranslator(
     if (element.isFactory) return factoryOf(element);
     return _creators[element] ??= () {
       final initializer = initializerOf(element);
+      final class_ = element.enclosingElement as ClassElement;
       final function = HirFunction(
         'create ${initializer.name}',
         initializer.parameters.skip(1),
         .reference,
       );
       final builder = FunctionBuilder(_unit, function, const []);
-      final object = builder.create(
-        createdClass(element.enclosingElement as ClassElement),
-      );
+      final object = builder.create(createdClass(class_));
       builder
         ..call(HirCall(initializer, [object, ...builder.inputs]))
         ..end(HirReturn(object))
@@ -274,7 +389,11 @@ final class ProgramTranslator(
   HirConstObject boxOf(Object value) => _constants.box(value);
 
   @override
-  int castNumber(String text) => _errors.castNumber(text);
+  int castNumber(String? type, String ending) {
+    runtime('writeObjectType');
+    if (type == null) runtime('writeType');
+    return _errors.castNumber(type, ending);
+  }
 
   @override
   HirFunction runtime(String name) =>
@@ -296,8 +415,13 @@ final class ProgramTranslator(
   HirTypeTest testOf(ClassElement class_) => _errors.testOf(class_);
 
   @override
-  HirFunction? functionOf(ExecutableElement element) =>
-      _declarations[element] == null ? null : _declare(element);
+  HirFunction? functionOf(ExecutableElement element) {
+    final library = element.library;
+    if (_isRuntime(library) && library.uri.path.endsWith('/program.dart')) {
+      return _typeFunctions.named(element.displayName);
+    }
+    return _declarations[element] == null ? null : _declare(element);
+  }
 
   @override
   HirMachineOp? machineOpOf(ExecutableElement element) {
@@ -367,6 +491,7 @@ final class ProgramTranslator(
               : element.displayName,
           [
             if (hasReceiver(element)) .reference,
+            if (takesTypes(element) != null) .reference,
             for (final parameter in element.formalParameters)
               valueType(parameter.type) ??
                   (throw _declarations.unsupported(
@@ -395,6 +520,7 @@ final class ProgramTranslator(
       element.formalParameters,
       receiverClass: hasReceiver(element) ? owner as ClassElement : null,
       returnType: element.returnType,
+      typeOwner: takesTypes(element),
       captures: capturesOf(declarationOf(node)),
       cellClass: cellClass,
     );
@@ -407,23 +533,14 @@ final class ProgramTranslator(
         statements,
       ).initializer(element as ConstructorElement);
     } else {
-      final (parameters, body) = switch (node) {
+      final body = switch (node) {
         FunctionDeclaration(
-          functionExpression: FunctionExpression(
-            :final typeParameters,
-            :final body,
-          ),
+          functionExpression: FunctionExpression(:final body),
         ) ||
-        MethodDeclaration(
-          :final typeParameters,
-          :final body,
-        ) => (typeParameters, body),
-        ConstructorDeclaration(:final body) => (null, body),
+        MethodDeclaration(:final body) ||
+        ConstructorDeclaration(:final body) => body,
         _ => throw StateError('Unexpected declaration $node.'),
       };
-      if (parameters != null) {
-        throw unit.unsupported(parameters, 'type parameters');
-      }
       if (body.isAsynchronous || body.isGenerator) {
         throw unit.unsupported(body, 'async and generator functions');
       }

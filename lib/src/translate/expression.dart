@@ -110,19 +110,7 @@ final class ExpressionTranslator(
   HirValue _value(Expression node, HirType placeholder) {
     final inner = node.unParenthesized, type = inner.staticType;
     if (isNever(type)) {
-      switch (inner) {
-        case MethodInvocation():
-          calls.invocation(inner, isUsed: false);
-        case ThrowExpression(:final expression):
-          _throw(expression);
-        case FunctionExpressionInvocation():
-          closures.invocation(inner);
-        case RethrowExpression():
-          final (exception, trace) = _builder.caught.last;
-          _builder.raise(exception, trace);
-        default:
-          _unsupported(inner, describe(inner));
-      }
+      _never(inner);
       return _builder.placeholder(placeholder);
     }
     switch (inner) {
@@ -137,6 +125,75 @@ final class ExpressionTranslator(
         return _builder.receiver ?? _unsupported(inner, 'this here');
       case SimpleIdentifier(:final element):
         return _identifier(inner, element);
+      case PrefixedIdentifier() || PropertyAccess():
+        return _access(inner);
+      case PrefixExpression():
+        return _prefix(inner);
+      case PostfixExpression(:final operator, :final operand):
+        if (operator.lexeme == '!') return _notNull(inner, operand);
+        return _step(inner, operand, operator.lexeme, after: false);
+      case BinaryExpression():
+        return _binary(inner);
+      case ConditionalExpression():
+        return _conditional(inner);
+      case AssignmentExpression():
+        return _assignment(inner);
+      case FunctionExpression():
+        return closures.create(inner);
+      case FunctionExpressionInvocation():
+        return closures.invocation(inner) ??
+            _unsupported(inner, 'using a value of type $type');
+      case FunctionReference():
+        return _reference(inner);
+      case ConstructorReference(:final constructorName):
+        return _constructor(inner, constructorName);
+      case ImplicitCallReference(:final expression, :final element):
+        final class_ = classOf(expression.staticType);
+        if (class_ == null || element == null) {
+          _unsupported(inner, describe(inner));
+        }
+        return calls.tearOff(
+          inner,
+          valueAs(expression, .reference),
+          class_,
+          element,
+        );
+      case IsExpression():
+        return _isExpression(inner);
+      case AsExpression():
+        return _asExpression(inner);
+      case InstanceCreationExpression():
+        return calls.creation(inner);
+      case IndexExpression():
+        return calls.index(inner);
+      case MethodInvocation():
+        return calls.invocation(inner, isUsed: true) ??
+            _unsupported(inner, 'using a value of type $type');
+      default:
+        _unsupported(inner, describe(inner));
+    }
+  }
+
+  /// Evaluates [inner], which gives no value.
+  void _never(Expression inner) {
+    switch (inner) {
+      case MethodInvocation():
+        calls.invocation(inner, isUsed: false);
+      case ThrowExpression(:final expression):
+        _throw(expression);
+      case FunctionExpressionInvocation():
+        closures.invocation(inner);
+      case RethrowExpression():
+        final (exception, trace) = _builder.caught.last;
+        _builder.raise(exception, trace);
+      default:
+        _unsupported(inner, describe(inner));
+    }
+  }
+
+  /// Reads a property, or what a library or class declares.
+  HirValue _access(Expression inner) {
+    switch (inner) {
       case PrefixedIdentifier(:final prefix)
           when prefix.staticType is DynamicType:
         _unsupported(prefix, usingDynamic);
@@ -169,46 +226,6 @@ final class ExpressionTranslator(
         return isInstanceMember(element)
             ? calls.property(inner, realTarget, element!)
             : _statics.read(inner, element);
-      case PrefixExpression():
-        return _prefix(inner);
-      case PostfixExpression(:final operator, :final operand):
-        if (operator.lexeme == '!') return _notNull(inner, operand);
-        return _step(inner, operand, operator.lexeme, after: false);
-      case BinaryExpression():
-        return _binary(inner);
-      case ConditionalExpression():
-        return _conditional(inner);
-      case AssignmentExpression():
-        return _assignment(inner);
-      case FunctionExpression():
-        return closures.create(inner);
-      case FunctionExpressionInvocation():
-        return closures.invocation(inner) ??
-            _unsupported(inner, 'using a value of type $type');
-      case ConstructorReference(:final constructorName):
-        return _constructor(inner, constructorName);
-      case ImplicitCallReference(:final expression, :final element):
-        final class_ = classOf(expression.staticType);
-        if (class_ == null || element == null) {
-          _unsupported(inner, describe(inner));
-        }
-        return calls.tearOff(
-          inner,
-          valueAs(expression, .reference),
-          class_,
-          element,
-        );
-      case IsExpression():
-        return _isExpression(inner);
-      case AsExpression():
-        return _asExpression(inner);
-      case InstanceCreationExpression():
-        return calls.creation(inner);
-      case IndexExpression():
-        return calls.index(inner);
-      case MethodInvocation():
-        return calls.invocation(inner, isUsed: true) ??
-            _unsupported(inner, 'using a value of type $type');
       default:
         _unsupported(inner, describe(inner));
     }
@@ -232,12 +249,46 @@ final class ExpressionTranslator(
   }
 
   HirValue _constructor(Expression node, ConstructorName name) {
-    final element = name.element;
-    final object = element == null ? null : _scope.functionObject(element);
-    if (object == null || classOf(element!.returnType) == null) {
+    final element = name.element?.baseElement, type = node.staticType;
+    if (element == null || classOf(element.returnType) == null) {
       _unsupported(node, describe(node));
     }
-    return _builder.add(HirStatic(object));
+    return _instantiate(node, element, type!);
+  }
+
+  /// A generic function with its type arguments.
+  HirValue _reference(FunctionReference node) {
+    final function = node.function;
+    final element = switch (function) {
+      SimpleIdentifier(:final element) => element,
+      PrefixedIdentifier(identifier: SimpleIdentifier(:final element)) =>
+        element,
+      PropertyAccess(propertyName: SimpleIdentifier(:final element)) => element,
+      ConstructorReference(:final constructorName) => constructorName.element,
+      _ => null,
+    };
+    if (element is! ExecutableElement || _builder.typeOf(element) != null) {
+      _unsupported(node, describe(node));
+    }
+    if (isInstanceMember(element)) {
+      _unsupported(node, 'tear-offs of generic methods');
+    }
+    return _instantiate(node, element.baseElement, node.staticType!);
+  }
+
+  HirValue _instantiate(
+    Expression node,
+    ExecutableElement element,
+    DartType type,
+  ) {
+    if (type is! FunctionType || type.typeParameters.isNotEmpty) {
+      _unsupported(node, 'generic functions as values');
+    }
+    final types = takesTypes(element) == null
+        ? const <DartType>[]
+        : typeArgumentsOf(element, type);
+    return _scope.instantiate(_builder, element, types) ??
+        _unsupported(node, describe(node));
   }
 
   HirValue _isExpression(IsExpression node) {
@@ -273,6 +324,9 @@ final class ExpressionTranslator(
     if (element != null &&
         _builder.typeOf(element) != null &&
         !(element is VariableElement && element.isConst)) {
+      if (element is ExecutableElement && element.typeParameters.isNotEmpty) {
+        _unsupported(node, 'generic functions as values');
+      }
       return _builder.read(element);
     }
     return isInstanceMember(element)

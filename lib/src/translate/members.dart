@@ -1,11 +1,25 @@
 import 'package:analyzer/dart/element/element.dart';
 
+import 'types.dart';
+
 /// Whether [element] is a member of objects, rather than of a class or library.
 bool isInstanceMember(Element? element) =>
     element is ExecutableElement &&
     element is! ConstructorElement &&
     element.enclosingElement is InstanceElement &&
     !element.isStatic;
+
+/// What the type arguments are for that the function of [element] takes, if
+/// it takes any.
+Element? takesTypes(ExecutableElement element) {
+  if (element.typeParameters.isNotEmpty) return element;
+  final owner = element.enclosingElement;
+  return element is ConstructorElement &&
+          owner is ClassElement &&
+          owner.typeParameters.isNotEmpty
+      ? owner
+      : null;
+}
 
 /// The implementation that objects of [class_] have for a member like
 /// [member], or null if it is abstract.
@@ -63,4 +77,20 @@ Iterable<ExecutableElement> overriddenBy(
       }
     }
   }
+}
+
+/// Whether calls may give [parameter] of a method values that are not of its
+/// type.
+bool isUnchecked(FormalParameterElement parameter) {
+  final method = parameter.enclosingElement;
+  final owner = method?.enclosingElement;
+  if (parameter.isCovariant || mentions(parameter.type, owner)) return true;
+  if (method is! MethodElement || owner is! ClassElement) return false;
+  final place = method.formalParameters.indexOf(parameter);
+  return overriddenBy(owner, method).any((other) {
+    final declared = parameter.isNamed
+        ? other.formalParameters.where((p) => p.name == parameter.name)
+        : other.formalParameters.skip(place).take(1);
+    return declared.any((p) => mentions(p.type, other.enclosingElement));
+  });
 }

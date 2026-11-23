@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:dartc/driver.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
@@ -31,6 +32,12 @@ Future<SourceProgram> load(String source) {
 
 Future<HirModule> translate(String source) async =>
     translateProgram(await load(source));
+
+/// Translates [source] together with the runtime.
+Future<HirModule> translateWhole(String source) async => translateProgram(
+  await load(source),
+  runtime: await loadRuntime(sdk: hostSdk),
+);
 
 /// Matches a failure whose problems print as [problems] after their file name.
 Matcher failsWith(List<String> problems) => throwsA(

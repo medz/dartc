@@ -22,7 +22,11 @@ final class ConstantTable(
   final Declarations _declarations,
   final ClassTable _classes,
   final LibraryElement _core,
-  final HirConstObject? Function(ExecutableElement element) _functionObject,
+  final HirConstObject? Function(ExecutableElement element, DartType type)
+  _functionObject,
+
+  /// The object for a list of types.
+  final Constant? Function(List<DartType> types) _listOf,
 
   /// Tells that there are objects of a class.
   final void Function(ClassElement class_) _instantiate,
@@ -70,7 +74,9 @@ final class ConstantTable(
 
   HirConstObject? _function(DartObject object) {
     final element = object.toFunctionValue();
-    return element == null ? null : _functionObject(element);
+    return element == null
+        ? null
+        : _functionObject(element.baseElement, object.type!);
   }
 
   HirConstObject? _number(DartObject object) {
@@ -89,7 +95,7 @@ final class ConstantTable(
     final class_ = _core.getClass(name)!;
     final target = _classes.classOf(class_);
     _instantiate(class_);
-    return _canonical(
+    return canonical(
       class_,
       HirConstObject(target, {target.fields.single: value}),
     );
@@ -103,9 +109,13 @@ final class ConstantTable(
     DartObject? part = object;
     InterfaceType? level = type as InterfaceType;
     while (level != null && !level.isDartCoreObject) {
-      for (final field in ClassTable.instanceFields(
-        level.element as ClassElement,
-      )) {
+      final element = level.element as ClassElement;
+      if (_classes.argumentsOf(element) case final own?) {
+        final list = _listOf(level.typeArguments);
+        if (list == null) return null;
+        fields[own] = list.value;
+      }
+      for (final field in ClassTable.instanceFields(element)) {
         final own = _classes.fieldOf(field);
         final value = of(own.type, part?.getField(field.name!));
         if (value == null) return null;
@@ -115,15 +125,16 @@ final class ConstantTable(
       level = level.superclass;
     }
     _instantiate(class_);
-    return _canonical(class_, HirConstObject(target, fields));
+    return canonical(class_, HirConstObject(target, fields));
   }
 
   /// The object that [found] is the same as.
-  HirConstObject _canonical(ClassElement class_, HirConstObject found) {
+  HirConstObject canonical(ClassElement class_, HirConstObject found) {
     final HirConstObject(:target, :fields) = found;
     final key = [
       class_.library.uri,
       target.name,
+      class_.typeParameters.length,
       for (final field in target.fields) _key(fields[field]),
     ].join(' ');
     return _objects.putIfAbsent(key, () {

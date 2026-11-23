@@ -1,0 +1,185 @@
+import 'dart:math';
+
+import 'package:analyzer/dart/element/element.dart' as analyzer;
+import 'package:analyzer/dart/element/type.dart' as analyzer;
+import 'package:dartc/heap.dart';
+import 'package:test/test.dart';
+
+import '../support/new_compiler.dart';
+
+const _classes = '''
+class A {} class B extends A {} class I {} class C extends B implements I {}
+class G<T> {} class H<T> extends G<T> implements I {}
+class P<X, Y> {} class Q<T> extends P<T, G<T>> {} class R extends Q<A> {}
+class L<T extends Object> implements P<T?, T Function(int)> {}
+class S implements G<S> {}
+void main() {}
+''';
+
+/// Says what the program of [_classes] is.
+final class _Program(final List<analyzer.InterfaceElement> classes)
+    implements Program {
+  @override
+  SuperList? superTypesOf(int number) {
+    SuperList? found;
+    final owner = classes[number];
+    for (final type in owner.allSupertypes) {
+      if (type.isDartCoreObject) continue;
+      found = SuperList(
+        classes.indexOf(type.element),
+        list(type.typeArguments, owner),
+        found,
+      );
+    }
+    return found;
+  }
+
+  @override
+  int get functionNumber =>
+      classes.indexWhere((class_) => class_.name == 'Function');
+
+  TypeList? list(
+    List<analyzer.DartType> types, [
+    analyzer.InterfaceElement? owner,
+  ]) => types.isEmpty
+      ? null
+      : TypeList(of(types.first, owner), list(types.sublist(1), owner));
+
+  /// The runtime's form of [type].
+  RuntimeType of(analyzer.DartType type, [analyzer.InterfaceElement? owner]) {
+    final isNullable = type.nullabilitySuffix == .question;
+    final RuntimeType plain = switch (type) {
+      analyzer.DynamicType() => const BasicType(dynamicKind),
+      analyzer.VoidType() => const BasicType(voidKind),
+      analyzer.NeverType() => const BasicType(neverKind),
+      analyzer.InterfaceType(isDartCoreObject: true) => const BasicType(
+        objectKind,
+      ),
+      analyzer.InterfaceType(isDartCoreNull: true) => const BasicType(nullKind),
+      analyzer.TypeParameterType(:final element) => VariableType(
+        owner!.typeParameters.indexOf(element),
+      ),
+      analyzer.InterfaceType(:final element, :final typeArguments) =>
+        InterfaceType(classes.indexOf(element), list(typeArguments, owner)),
+      analyzer.FunctionType() => _function(type, owner),
+      _ => throw StateError('Unexpected $type.'),
+    };
+    return isNullable ? nullable(plain) : plain;
+  }
+
+  FunctionType _function(
+    analyzer.FunctionType type,
+    analyzer.InterfaceElement? owner,
+  ) {
+    final all = type.formalParameters;
+    final named = all.where((p) => p.isNamed).toList()
+      ..sort((a, b) => a.name!.compareTo(b.name!));
+    NamedList? names;
+    for (final p in named.reversed) {
+      final name = p.name!.codeUnitAt(0);
+      names = NamedList(name, of(p.type, owner), p.isRequiredNamed, names);
+    }
+    return FunctionType(
+      of(type.returnType, owner),
+      list([
+        for (final p in all)
+          if (p.isRequiredPositional) p.type,
+      ], owner),
+      list([
+        for (final p in all)
+          if (p.isOptionalPositional) p.type,
+      ], owner),
+      names,
+    );
+  }
+
+  @override
+  RuntimeType typeOf(Object object) => throw UnimplementedError();
+  @override
+  void writeClassName(int number) => throw UnimplementedError();
+  @override
+  void writeParameterName(int number) => throw UnimplementedError();
+  @override
+  void writeBasicName(int kind) => throw UnimplementedError();
+  @override
+  void writeRequired() => throw UnimplementedError();
+}
+
+/// The text of a random type.
+String _random(Random random, int depth) {
+  String inner() => _random(random, depth - 1);
+  final text = switch (random.nextInt(depth > 0 ? 24 : 11)) {
+    0 => 'dynamic',
+    1 => 'Null',
+    2 => 'Never',
+    3 => 'Object',
+    4 => 'int',
+    5 => 'num',
+    6 => 'A',
+    7 => 'B',
+    8 => 'C',
+    9 => 'I',
+    10 => 'S',
+    11 || 12 => 'G<${inner()}>',
+    13 || 14 => 'H<${inner()}>',
+    15 || 16 => 'P<${inner()}, ${inner()}>',
+    17 => 'Q<${inner()}>',
+    18 => 'R',
+    19 => 'L<Object>',
+    20 => 'Function',
+    _ => _randomFunction(random, inner),
+  };
+  return text != 'dynamic' && random.nextInt(4) == 0 ? '$text?' : text;
+}
+
+String _randomFunction(Random random, String Function() inner) {
+  final required = [for (var i = random.nextInt(3); i > 0; i--) inner()];
+  final optional = random.nextInt(3) == 0
+      ? '[${[for (var i = random.nextInt(2); i >= 0; i--) inner()].join(', ')}]'
+      : random.nextInt(3) == 0
+      ? '{${[
+          for (final name in ['a', 'b'])
+            if (random.nextBool()) '${random.nextInt(3) == 0 ? 'required ' : ''}${inner()} $name',
+        ].join(', ')}}'
+      : '';
+  final result = random.nextInt(5) == 0 ? 'void' : inner();
+  final parameters = [
+    ...required,
+    if (optional.isNotEmpty && optional != '{}') optional,
+  ];
+  return '$result Function(${parameters.join(', ')})';
+}
+
+void main() {
+  test('subtypes are those of the official rules', () async {
+    final random = Random(5);
+    final texts = [for (var i = 0; i < 400; i++) _random(random, 3)];
+    final source = await load(
+      '$_classes\n'
+      '${[for (final (i, text) in texts.indexed) 'typedef T$i = $text;'].join('\n')}',
+    );
+    final library = source.main.element;
+    final types = [for (final alias in library.typeAliases) alias.aliasedType];
+    final program_ = _Program([
+      ...library.classes,
+      for (final name in ['int', 'num', 'double', 'Function', 'Comparable'])
+        library.typeProvider.objectElement.library.getClass(name)!,
+    ]);
+    program = program_;
+    final found = [for (final type in types) program_.of(type)];
+    var positive = 0;
+    for (final (i, a) in types.indexed) {
+      for (final (j, b) in types.indexed) {
+        final expected = library.typeSystem.isSubtypeOf(a, b);
+        if (expected && i != j) positive++;
+        expect(
+          isSubtype(found[i], found[j]),
+          expected,
+          reason: '${texts[i]} <: ${texts[j]}',
+        );
+      }
+    }
+    expect(types, hasLength(400));
+    expect(positive, greaterThan(5000));
+  });
+}

@@ -59,6 +59,7 @@ final class RandomDart(int seed) {
     for (var i = 0; i < 3; i++) {
       _line('int leaf$i(int p) => p * ${i + 2} ^ $i;');
     }
+    _line(_generic);
     _globals();
     _classes();
     _methodLimit = _methods.length;
@@ -67,6 +68,15 @@ final class RandomDart(int seed) {
     }
     return _lines.join('\n');
   }
+
+  static const _generic =
+      'class Box<T> { T t; Box(this.t); T get() => t; '
+      'bool has(Object? o) => o is T; Box<T> of(T v) => Box(v); '
+      'void put(T v) { t = v; } }\n'
+      'class Sub<T> extends Box<T> { Sub(super.t); '
+      '@override T get() => same<T>(super.get()); }\n'
+      'T same<T>(T t) => t;\n'
+      'T put<T>(Box<T> b, T t) { b.put(t); return b.get(); }';
 
   /// A closure that uses the variables around it.
   String _closure() {

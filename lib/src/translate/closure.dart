@@ -16,6 +16,9 @@ final class Closure(
   final List<HirValue> Function(FunctionBuilder builder, HirValue self)
   _leading, {
 
+  /// Gives the type of one of them, as an object of the runtime.
+  required final HirValue Function(FunctionBuilder builder) typeValue,
+
   /// Whether closures of one object's method are equal.
   final bool isTearOff = false,
 }) {

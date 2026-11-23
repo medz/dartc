@@ -368,10 +368,6 @@ A make() => A();''',
 
     const what = 'Not supported yet:';
     reports(
-      'class A<T> {}\nvoid main() { A<int>(); }',
-      '2:15: $what objects of type A<int>.',
-    );
-    reports(
       'class A { late int x; }\nvoid main() { A(); }',
       '1:20: $what late fields.',
     );
@@ -410,10 +406,6 @@ A make() => A();''',
     reports(
       'class A {}\nvoid main() { A().hashCode; }',
       '2:15: $what calling hashCode of the SDK.',
-    );
-    reports(
-      'class A { void f<T>() {} }\nvoid main() { A().f<int>(); }',
-      '2:15: $what generic methods.',
     );
     reports(
       'class A { external void f(); }\nvoid main() { A().f(); }',
@@ -466,10 +458,6 @@ A make() => A();''',
     reports(
       'class A { void f() { super.toString(); } }\nvoid main() { A().f(); }',
       '1:22: $what calling toString of the SDK.',
-    );
-    reports(
-      'class A<T> {}\nclass B extends A<int> {}\nvoid main() { B(); }',
-      '1:7: $what generic classes.',
     );
   });
 }

@@ -409,10 +409,6 @@ b0():
     const what = 'Not supported yet:';
     reports('void main(List<String> a) {}', '2:6: $what parameters of main.');
     reports(
-      'void f<T>() {}\nvoid main() { f<int>(); }',
-      '2:7: $what type parameters.',
-    );
-    reports(
       'Future<void> main() async {}',
       '2:21: $what async and generator functions.',
     );

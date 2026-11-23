@@ -38,6 +38,9 @@ final class FunctionBuilder(
   /// Whether the function first takes its own closure.
   final bool isClosure = false,
 
+  /// What the type arguments that the function takes next are for.
+  final Element? typeOwner,
+
   /// The type of what the function returns.
   final DartType? returnType,
 
@@ -61,7 +64,11 @@ final class FunctionBuilder(
       _receiver = _entry.parameters.first;
     }
     final hasObject = isClosure || receiverClass != null;
-    final given = _entry.parameters.skip(hasObject ? 1 : 0);
+    var given = _entry.parameters.skip(hasObject ? 1 : 0);
+    if (typeOwner case final owner?) {
+      bindTypes(owner, given.first);
+      given = given.skip(1);
+    }
     // Functions made without source have no names for what they are given.
     for (final (i, parameter) in parameters.indexed) {
       final value = given.elementAt(i);
@@ -81,6 +88,16 @@ final class FunctionBuilder(
   /// The object that `this` is, where there is one.
   HirValue? get receiver => _receiver;
   HirValue? _receiver;
+
+  /// Lets [value] be the object that `this` is.
+  void setReceiver(HirValue value) => _receiver = value;
+
+  /// The lists of type arguments known here, by what they are for.
+  final typeLists = <Element, HirValue>{};
+
+  HirValue? typesOf(Element? owner) => typeLists[owner];
+
+  void bindTypes(Element owner, HirValue list) => typeLists[owner] = list;
 
   /// Gives [function] the blocks that can run.
   void finish() {

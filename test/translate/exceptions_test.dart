@@ -423,10 +423,6 @@ void main() {
       '1:25: $what catching String.',
     );
     reports(
-      'class A<T> {}\nvoid main() { try {} on A<int> { } }',
-      '2:25: $what catching A<int>.',
-    );
-    reports(
       'void main() { try {} on Error catch (e) { e.stackTrace; } }',
       '1:43: $what calling stackTrace of the SDK.',
     );

@@ -38,6 +38,10 @@ final class ConstructorTranslator(
       _run(redirect.element!, redirect.argumentList, element);
       return;
     }
+    if (_scope.argumentsOf(class_) case final field?) {
+      final list = _builder.typesOf(class_)!;
+      _builder.add(HirStore(field, _builder.receiver!, list));
+    }
     _setFields(class_);
     for (final parameter in element.formalParameters) {
       if (parameter case FieldFormalParameterElement(:final field?)) {
@@ -87,6 +91,15 @@ final class ConstructorTranslator(
     _builder.add(HirStore(found, _builder.receiver!, given));
   }
 
+  /// The type arguments that [target] takes from [element].
+  HirValue? _types(ConstructorElement target, ConstructorElement element) {
+    final class_ = element.enclosingElement as ClassElement;
+    final owner = takesTypes(target.baseElement);
+    if (owner == null) return null;
+    if (owner == class_) return _builder.typesOf(class_);
+    return _scope.typeList(_builder, class_.supertype!.typeArguments)!;
+  }
+
   /// Runs constructor [target] on the same object, passing on the super
   /// parameters of [element].
   void _run(
@@ -102,17 +115,24 @@ final class ConstructorTranslator(
         :final superConstructorParameter?,
       )) {
         // A parameter passed on may be wider where it takes a number.
-        supplied[superConstructorParameter] = Conversions(_scope, _builder)
-            .coerce(
+        supplied[superConstructorParameter.baseElement] =
+            Conversions(_scope, _builder).coerce(
               _builder.read(parameter),
-              valueType(superConstructorParameter.type)!,
+              valueType(superConstructorParameter.baseElement.type)!,
             );
       }
     }
+    final function = _scope.initializerOf(target.baseElement);
+    final given = [
+      _builder.receiver!,
+      ?_types(target, element),
+      ..._statements.expressions.calls.ordered(target.baseElement, supplied),
+    ];
+    final conversions = Conversions(_scope, _builder);
     _builder.call(
-      HirCall(_scope.initializerOf(target), [
-        _builder.receiver!,
-        ..._statements.expressions.calls.ordered(target, supplied),
+      HirCall(function, [
+        for (final (i, value) in given.indexed)
+          conversions.coerce(value, function.parameters[i]),
       ]),
     );
   }

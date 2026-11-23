@@ -33,8 +33,8 @@ final class CallTranslator(
       return _callFunction(node, target!, isUsed: isUsed);
     }
     if (element is! ExecutableElement) _unsupported(node, describe(node));
-    if (_builder.typeOf(element) != null) {
-      return _closures.call(node, _builder.read(element), node.argumentList);
+    if (_builder.typeOf(element.baseElement) != null) {
+      return _local(node, element.baseElement);
     }
     if (!isInstanceMember(element)) return _static(node, element);
     if (element is! MethodElement) _unsupported(node, describe(node));
@@ -46,21 +46,65 @@ final class CallTranslator(
       return superMember(
         node,
         element,
-        ordered(element, supplied(node.argumentList)),
+        ordered(element.baseElement, supplied(node.argumentList)),
+        types: _typeList(node, node.typeArgumentTypes),
       );
     }
-    HirValue? call(HirValue receiver) => method(
+    HirValue? call(HirValue receiver) => _checked(
       node,
-      receiver,
-      _receiverClass(node, target),
       element,
-      node.argumentList,
+      method(
+        node,
+        receiver,
+        _receiverClass(node, target),
+        element,
+        node.argumentList,
+        types: node.typeArgumentTypes,
+      ),
     );
     if (target == null) return call(_this(node));
     final receiver = object(target, isNullAware: node.isNullAware);
     return node.isNullAware
         ? _unlessNull(node, receiver, () => call(receiver), isUsed: isUsed)
         : call(receiver);
+  }
+
+  /// [result] of [element], checked if it can be of another type than [node],
+  /// as functions taking type arguments of their object can.
+  HirValue? _checked(
+    Expression node,
+    ExecutableElement element,
+    HirValue? result,
+  ) {
+    final base = element.baseElement;
+    if (result == null ||
+        !mentions(base.returnType, base.enclosingElement, isTaken: true)) {
+      return result;
+    }
+    return _conversions.cast(
+          result,
+          _conversions.types.objectQuestionType,
+          element.returnType,
+        ) ??
+        _unsupported(node, 'testing for ${element.returnType}');
+  }
+
+  HirValue? _local(MethodInvocation node, ExecutableElement element) {
+    final self = _builder.read(element);
+    final arguments = ordered(element, supplied(node.argumentList));
+    final types = _typeList(node, node.typeArgumentTypes);
+    return _direct(_scope.localFunction(element), element, [
+      self,
+      ?types,
+      ...arguments,
+    ]);
+  }
+
+  /// The list of [types], if there are any.
+  HirValue? _typeList(AstNode node, List<DartType>? types) {
+    if (types == null || types.isEmpty) return null;
+    return _scope.typeList(_builder, types) ??
+        _unsupported(node, 'these type arguments');
   }
 
   HirValue? _callFunction(
@@ -177,12 +221,14 @@ final class CallTranslator(
     if (_scope.machineOpOf(element) case final op?) {
       return _machine(op, arguments);
     }
-    final function = _scope.functionOf(element);
+    final function = _scope.functionOf(element.baseElement);
     if (function == null) {
       _unsupported(node, 'calling ${element.displayName} of the SDK');
     }
+    final given = ordered(element.baseElement, supplied(node.argumentList));
     return _direct(function, element, [
-      ...ordered(element, supplied(node.argumentList)),
+      ?_typeList(node, node.typeArgumentTypes),
+      ...given,
     ]);
   }
 
@@ -228,7 +274,12 @@ final class CallTranslator(
     ExecutableElement element,
     List<HirValue> arguments,
   ) {
-    final result = _builder.call(HirCall(function, arguments));
+    final result = _builder.call(
+      HirCall(function, [
+        for (final (i, argument) in arguments.indexed)
+          _conversions.coerce(argument, function.parameters[i]),
+      ]),
+    );
     if (isNever(element.returnType)) _builder.end(HirUnreachable());
     return result;
   }
@@ -250,18 +301,20 @@ final class CallTranslator(
             _unsupported(node, 'a constant of type ${node.staticType}'),
       );
     }
+    final base = element.baseElement;
+    final types = (node.staticType as InterfaceType).typeArguments;
     if (element.isFactory) {
-      final factory = _scope.factoryOf(element);
-      return _builder.call(
-        HirCall(factory, ordered(element, supplied(node.argumentList))),
-      )!;
+      final arguments = ordered(base, supplied(node.argumentList));
+      return _direct(_scope.factoryOf(base), element, [
+        ?_typeList(node, types),
+        ...arguments,
+      ])!;
     }
     final created = _scope.createdClass(class_);
-    final arguments = ordered(element, supplied(node.argumentList));
+    final arguments = ordered(base, supplied(node.argumentList));
+    final list = _typeList(node, types);
     final object = _builder.create(created);
-    _builder.call(
-      HirCall(_scope.initializerOf(element), [object, ...arguments]),
-    );
+    _direct(_scope.initializerOf(base), element, [object, ?list, ...arguments]);
     return object;
   }
 
@@ -276,7 +329,7 @@ final class CallTranslator(
           'a parameter of type ${parameter.type}',
         );
       }
-      values[parameter] = _evaluator.valueTo(
+      values[parameter.baseElement] = _evaluator.valueTo(
         argument.argumentExpression,
         parameter.type,
       );
@@ -299,8 +352,9 @@ final class CallTranslator(
     HirValue receiver,
     ClassElement class_,
     MethodElement element,
-    ArgumentList list,
-  ) {
+    ArgumentList list, {
+    List<DartType>? types,
+  }) {
     final given = supplied(list);
     final positional = [
       for (final MapEntry(:key, :value) in given.entries)
@@ -310,7 +364,8 @@ final class CallTranslator(
       for (final MapEntry(:key, :value) in given.entries)
         if (key.isNamed) key.name!: value,
     };
-    return invoke(node, receiver, class_, element, positional, named);
+    final typeList = _typeList(node, types);
+    return invoke(node, receiver, class_, element, positional, named, typeList);
   }
 
   /// Calls the instance member [element] on [receiver].
@@ -321,11 +376,12 @@ final class CallTranslator(
     ExecutableElement element, [
     List<HirValue> positional = const [],
     Map<String, HirValue> named = const {},
+    HirValue? types,
   ]) {
     _checkMember(node, element);
     final names = named.keys.toList()..sort();
     final selector = _scope.selectorOf(
-      element,
+      element.baseElement,
       class_,
       positional.length,
       names,
@@ -333,8 +389,12 @@ final class CallTranslator(
     );
     final result = _builder.call(
       HirVirtualCall(selector, receiver, [
-        ...positional,
-        for (final name in names) named[name]!,
+        for (final (i, value) in [
+          ?types,
+          ...positional,
+          for (final name in names) named[name]!,
+        ].indexed)
+          _conversions.coerce(value, selector.parameters[i]),
       ]),
     );
     if (isNever(element.returnType)) _builder.end(HirUnreachable());
@@ -344,20 +404,19 @@ final class CallTranslator(
   void _checkMember(AstNode node, ExecutableElement element) {
     final owner = element.enclosingElement;
     if (owner is! ClassElement) _unsupported(node, 'extensions and mixins');
-    if (element is MethodElement && element.typeParameters.isNotEmpty) {
-      _unsupported(node, 'generic methods');
-    }
     if (owner.library.isInSdk && element.displayName != '==') {
       _unsupported(node, 'calling ${element.displayName} of the SDK');
     }
   }
 
-  /// Uses the superclass's member [element] on `this`, giving [values].
+  /// Uses the superclass's member [given] on `this`, giving it [values].
   HirValue? superMember(
     AstNode node,
-    ExecutableElement element,
-    List<HirValue> values,
-  ) {
+    ExecutableElement given,
+    List<HirValue> values, {
+    HirValue? types,
+  }) {
+    final element = given.baseElement;
     _checkMember(node, element);
     final parent = _builder.receiverClass!.supertype!.element as ClassElement;
     if (implementationIn(parent, element) != element) {
@@ -369,14 +428,24 @@ final class CallTranslator(
       if (element is GetterElement) {
         return _builder.add(HirLoad(found, receiver));
       }
-      _builder.add(HirStore(found, receiver, values.single));
+      _builder.add(
+        HirStore(
+          found,
+          receiver,
+          _conversions.coerce(values.single, found.type),
+        ),
+      );
       return null;
     }
     if (element.library.isInSdk) {
       // Only the equality of Object, which is identity.
       return _builder.add(HirCompare(.equal, receiver, values.single));
     }
-    return _direct(_scope.memberOf(element), element, [receiver, ...values]);
+    return _direct(_scope.memberOf(element), element, [
+      receiver,
+      ?types,
+      ...values,
+    ]);
   }
 
   /// Gives the method [element] of [receiver].
@@ -387,20 +456,20 @@ final class CallTranslator(
     MethodElement element,
   ) {
     _checkMember(node, element);
+    if (element.typeParameters.isNotEmpty) {
+      _unsupported(node, 'tear-offs of generic methods');
+    }
     return _builder.call(
       HirVirtualCall(
-        _scope.tearOffSelector(element, class_),
+        _scope.tearOffSelector(element.baseElement, class_),
         receiver,
         const [],
       ),
     )!;
   }
 
-  HirValue _methodOf(
-    Expression node,
-    Expression? target,
-    MethodElement method,
-  ) {
+  HirValue _methodOf(Expression node, Expression? target, MethodElement found) {
+    final method = found.baseElement;
     if (target is SuperExpression) {
       _checkMember(node, method);
       final parent = _builder.receiverClass!.supertype!.element as ClassElement;
@@ -429,7 +498,7 @@ final class CallTranslator(
     } else {
       final class_ = _receiverClass(node, target);
       HirValue? read(HirValue receiver) =>
-          invoke(node, receiver, class_, element);
+          _checked(node, element, invoke(node, receiver, class_, element));
       if (target == null) {
         result = read(_this(node));
       } else {

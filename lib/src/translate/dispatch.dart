@@ -47,7 +47,9 @@ final class DispatchBuilder(
     List<String> named,
     Reject reject,
   ) {
+    final isGeneric = member.typeParameters.isNotEmpty;
     final types = [
+      if (isGeneric) HirType.reference,
       for (final parameter in _given(member, positional, named))
         valueType(parameter.type) ??
             reject('a parameter of type ${parameter.type}'),
@@ -65,6 +67,7 @@ final class DispatchBuilder(
       member.lookupName,
       owner,
       named,
+      isGeneric,
       types,
       result,
     ].join('|');
@@ -199,6 +202,10 @@ final class DispatchBuilder(
         }
       }
     }
+    // Objects with other type arguments may be used as having these.
+    for (final (i, parameter) in parameters.indexed) {
+      if (mentions(parameter.type, found.enclosingElement)) checked.add(i);
+    }
     return checked.toList()..sort();
   }
 
@@ -211,6 +218,7 @@ final class DispatchBuilder(
     List<int> checked,
   ) {
     final field = fieldOfAccessor(found);
+    final isGeneric = found.typeParameters.isNotEmpty;
     final given = _given(found, shape.positional, shape.named);
     final parameters = found.formalParameters;
     HirValue argument(
@@ -220,7 +228,8 @@ final class DispatchBuilder(
     ) {
       final at = given.indexOf(parameter);
       if (at < 0) return builder.add(_scope.defaultOf(parameter));
-      final value = builder.inputs[at + 1], type = parameter.type;
+      final value = builder.inputs[at + (isGeneric ? 2 : 1)];
+      final type = parameter.type;
       if (!checked.contains(parameters.indexOf(parameter))) {
         return conversions.coerce(value, valueType(type)!);
       }
@@ -251,14 +260,18 @@ final class DispatchBuilder(
         given.length == parameters.length &&
         given.indexed.every((e) => e.$2 == parameters[e.$1]) &&
         given.indexed.every(
-          (e) => valueType(e.$2.type) == selector.parameters[e.$1],
+          (e) =>
+              valueType(e.$2.type) ==
+              selector.parameters[e.$1 + (isGeneric ? 1 : 0)],
         ) &&
         target.result == selector.result;
     if (isSame) return target;
     return _make('adapt ${target.name}', selector, (builder, conversions) {
+      if (isGeneric) builder.bindTypes(found, builder.inputs[1]);
       return builder.call(
         HirCall(target, [
           builder.inputs.first,
+          if (isGeneric) builder.inputs[1],
           for (final parameter in parameters)
             argument(builder, conversions, parameter),
         ]),
@@ -278,6 +291,7 @@ final class DispatchBuilder(
     ], selector.result);
     final builder = FunctionBuilder(_unit, function, const []);
     final conversions = Conversions(_scope, builder);
+    builder.setReceiver(builder.inputs.first);
     final value = build(builder, conversions);
     final result = selector.result;
     if (result != null) {

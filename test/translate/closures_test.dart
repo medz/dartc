@@ -185,21 +185,16 @@ void main() {
 
   group('not supported yet:', () {
     void reports(String source, String problem) => test(problem, () async {
-      await expectLater(translate(source), failsWith(['main.dart:$problem']));
+      await expectLater(
+        translateWhole(source),
+        failsWith(['main.dart:$problem']),
+      );
     });
 
     const what = 'Not supported yet:';
     reports(
       'void f(Function g) { g(); }\nvoid main() { f(main); }',
       '1:22: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { f<T>(T t) {} f(1); }',
-      '1:16: $what type parameters.',
-    );
-    reports(
-      'T f<T>(T t) => t;\nvoid main() { int Function(int) g = f; }',
-      '2:37: $what function reference.',
     );
     reports(
       'void main() { final f = () async {}; f(); }',

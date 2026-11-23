@@ -43,7 +43,15 @@ extension on RandomDart {
           : _any(variables);
     }
     String inner(Kind kind) => _expression(kind, depth - 1);
-    switch (_random.nextInt(11)) {
+    switch (_random.nextInt(13)) {
+      case 12 when _chance(2):
+        final type = kind.name, class_ = _any(['Box', 'Sub']);
+        return switch (_random.nextInt(4)) {
+          0 => 'same<$type>(${inner(kind)})',
+          1 => '$class_<$type>(${inner(kind)}).get()',
+          2 => 'put<$type>($class_(${inner(kind)}), ${inner(kind)})',
+          _ => '$class_<$type>(${inner(kind)}).of(${inner(kind)}).t',
+        };
       // Methods call less, or the work would grow with every level.
       case 9 || 10
           when !_isLeaf &&
@@ -127,8 +135,15 @@ extension on RandomDart {
     return '($name is $type ? $name as $type : null)';
   }
 
-  String _anything(String Function(Kind) inner) =>
-      inner(_any(Kind.values.where((kind) => kind != .any).toList()));
+  String _anything(String Function(Kind) inner) {
+    final kind = _any(Kind.values.where((kind) => kind != .any).toList());
+    final value = inner(kind);
+    return switch (_random.nextInt(5)) {
+      0 => 'Box<${kind.name}>($value)',
+      1 => 'Sub<${kind.name}>($value)',
+      _ => value,
+    };
+  }
 
   String _object(String Function(Kind) inner) {
     final variables = _variables(.object);
@@ -206,6 +221,9 @@ extension on RandomDart {
 
   String _boolean(String Function(Kind) inner) {
     switch (_random.nextInt(11)) {
+      case 7 when _chance(2):
+        final box = _any(Kind.values);
+        return 'Box<${box.name}>(${inner(box)}).has(${inner(.any)})';
       case 8:
         return '(${inner(.any)} ${_any(['==', '!='])} ${inner(_any(Kind.values))})';
       case 9:
@@ -221,6 +239,12 @@ extension on RandomDart {
           'int?',
           'C3?',
           'Function',
+          'Box',
+          'Box<int>',
+          'Box<num>',
+          'Sub<C0>',
+          'Box<Object>',
+          'Box<int Function(int)>?',
           'int Function(int)',
         ]);
         return '(${inner(.any)} ${_any(['is', 'is!'])} $type)';

@@ -327,7 +327,10 @@ void main() {
 
   group('not supported yet:', () {
     void reports(String source, String problem) => test(problem, () async {
-      await expectLater(translate(source), failsWith(['main.dart:$problem']));
+      await expectLater(
+        translateWhole(source),
+        failsWith(['main.dart:$problem']),
+      );
     });
 
     const what = 'Not supported yet:';
@@ -370,10 +373,6 @@ void main() {
     reports(
       'void main() { Object o = 1; o as String; }',
       '1:34: $what testing for String.',
-    );
-    reports(
-      'class A<T> {}\nvoid main() { Object o = 1; o is A<int>; }',
-      '2:34: $what testing for A<int>.',
     );
     reports(
       'void main() { 5.toString(); }',

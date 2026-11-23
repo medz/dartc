@@ -7,5 +7,8 @@ library;
 export 'src/heap/collector.dart' show allocate, collect, heap;
 export 'src/heap/machine.dart' show Machine, machine;
 export 'src/heap/numbers.dart';
+export 'src/heap/program.dart' show Program, program;
 export 'src/heap/report.dart' show writeNumber;
+export 'src/heap/type_objects.dart';
+export 'src/heap/types.dart';
 export 'src/heap/unwind.dart' show raise;

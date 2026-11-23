@@ -3,8 +3,8 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'conversions.dart';
 import 'scope.dart';
-import 'types.dart';
 
 /// Ways to leave a `try` that its `finally` block comes before.
 final class _Finally(final Join join) {
@@ -124,13 +124,9 @@ final class TryTranslator(
         _builder.jump(after);
       }
 
-      final test = _test(clause_);
+      final test = _test(clause_, exception);
       if (test == null) return body();
-      _builder.branch(
-        _builder.add(HirIsInstance(test, exception)),
-        body,
-        () => clause(index + 1),
-      );
+      _builder.branch(test, body, () => clause(index + 1));
     }
 
     clause(0);
@@ -138,13 +134,12 @@ final class TryTranslator(
   }
 
   /// What [clause] tests, or null if it catches everything.
-  HirTypeTest? _test(CatchClause clause) {
+  HirValue? _test(CatchClause clause, HirValue exception) {
     final annotation = clause.exceptionType, type = annotation?.type;
     if (annotation == null || type is DynamicType) return null;
-    final class_ =
-        classOf(type) ??
+    if (type!.isDartCoreObject) return null;
+    return Conversions(_scope, _builder).isInstance(exception, type) ??
         (throw _builder.unit.unsupported(annotation, 'catching $type'));
-    return class_.isDartCoreObject ? null : _scope.testOf(class_);
   }
 
   void _catch(CatchClause clause, HirValue exception, HirValue trace) {

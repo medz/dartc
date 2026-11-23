@@ -8,6 +8,7 @@ import 'builder.dart';
 import 'builtin_error.dart';
 import 'captures.dart';
 import 'closure.dart';
+import 'constant_table.dart';
 
 /// Reports that something is not supported yet.
 typedef Reject = Never Function(String what);
@@ -49,13 +50,22 @@ abstract interface class ProgramScope() {
   /// The class of the cells that closures share variables of [type] through.
   HirClass cellClass(HirType type);
 
-  void addClosure(Closure closure);
+  /// Adds what calls [function], which can be a value itself.
+  void addClosure(
+    Closure closure,
+    HirFunction function, {
+    required bool isValue,
+  });
+
+  /// The function of the local function [element].
+  HirFunction localFunction(Element element);
+  void setLocalFunction(Element element, HirFunction function);
 
   /// The selector of calls of functions that are values.
   HirSelector callSelector(int positional, List<String> named);
 
-  /// Whether objects are functions of [type], or functions at all.
-  HirTypeTest functionTest(FunctionType? type);
+  /// Whether objects are functions.
+  HirTypeTest get functionTest;
 
   /// The object that [element] is, if the program declares it.
   HirConstObject? functionObject(ExecutableElement element);
@@ -73,6 +83,37 @@ abstract interface class ProgramScope() {
   /// Translates [body] as that of the function of [builder], later.
   void translateBody(FunctionBuilder builder, FunctionBody body);
 
+  /// The program's own element for [class_], which may be one of the SDK.
+  InterfaceElement canonicalClass(InterfaceElement class_);
+
+  /// A class of the runtime.
+  ClassElement runtimeClass(String name);
+
+  /// The class `Function`.
+  ClassElement get functionClass;
+
+  /// The object for [type], or null if it is generic.
+  HirValue? typeValue(FunctionBuilder builder, DartType type);
+
+  /// The type of the method [element] as a function, or null if it is generic.
+  HirValue? methodType(FunctionBuilder builder, ExecutableElement element);
+
+  /// The list of [types], or null if one of them is generic.
+  HirValue? typeList(FunctionBuilder builder, List<DartType> types);
+
+  /// The object for [types] if they are closed.
+  Constant? constantTypes(List<DartType> types);
+
+  /// Where objects keep the type arguments of [class_], if it is generic.
+  HirField? argumentsOf(ClassElement class_);
+
+  /// The function [element] with [types], or null if they are generic.
+  HirValue? instantiate(
+    FunctionBuilder builder,
+    ExecutableElement element,
+    List<DartType> types,
+  );
+
   /// Has [work] done later.
   void schedule(void Function() work);
 
@@ -82,8 +123,9 @@ abstract interface class ProgramScope() {
   /// The object that the constant [value] is.
   HirConstObject boxOf(Object value);
 
-  /// A number for the end of what is said about a value of a wrong type.
-  int castNumber(String text);
+  /// A number for what is said about a value that is not of [type], which is
+  /// null where it is known only when the program runs.
+  int castNumber(String? type, String ending);
 
   /// The function called [name] in the runtime.
   HirFunction runtime(String name);

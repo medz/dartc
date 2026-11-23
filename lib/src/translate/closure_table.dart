@@ -6,6 +6,7 @@ import 'package:dartc/source.dart';
 import 'builder.dart';
 import 'closure.dart';
 import 'conversions.dart';
+import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -26,9 +27,8 @@ final class ClosureTable(
   final _shapes = <HirSelector, _Shape>{};
   final _selectors = <String, HirSelector>{};
   final _entries = <HirSelector, Map<HirClass, HirFunction>>{};
-  final _static = <ExecutableElement, HirConstObject>{};
+  final _static = <ExecutableElement, Closure>{};
   final _tearOffs = <ExecutableElement, Closure>{};
-  final _tests = <FunctionType, HirTypeTest>{};
 
   /// Functions made here.
   final List<HirFunction> made = [];
@@ -41,18 +41,7 @@ final class ClosureTable(
   /// The classes that pass each test.
   Map<HirTypeTest, Set<HirClass>> get tests => {
     ?_anyFunction: {for (final closure in closures) closure.class_},
-    for (final MapEntry(key: type, value: test) in _tests.entries)
-      test: {
-        for (final closure in closures)
-          if (_unit.ast.declaredFragment!.element.library.typeSystem
-              .isSubtypeOf(closure.type, type))
-            closure.class_,
-      },
   };
-
-  /// Whether objects are functions of [type].
-  HirTypeTest testOf(FunctionType type) =>
-      _tests[type] ??= HirTypeTest(type.getDisplayString());
 
   void add(Closure closure) => closures.add(closure);
 
@@ -117,18 +106,26 @@ final class ClosureTable(
       final isGiven = parameter.isNamed
           ? at >= shape.positional
           : at < shape.positional;
-      return isGiven
-          ? conversions.coerce(
-              builder.inputs[at + 1],
-              valueType(parameter.type)!,
-            )
-          : builder.add(_scope.defaultOf(parameter));
+      if (!isGiven) return builder.add(_scope.defaultOf(parameter));
+      final value = builder.inputs[at + 1], type = parameter.type;
+      if (!closure.isTearOff || !isUnchecked(parameter)) {
+        return conversions.coerce(value, valueType(type)!);
+      }
+      return conversions.cast(
+            value,
+            conversions.types.objectQuestionType,
+            type,
+            ending: " of '${parameter.name}'",
+          ) ??
+          (throw StateError('No test for $type.'));
     }
 
     final target = closure.target();
+    final leading = closure.leading(builder, builder.inputs.first);
+    if (closure.isTearOff) builder.setReceiver(leading.first);
     final result = builder.call(
       HirCall(target, [
-        ...closure.leading(builder, builder.inputs.first),
+        ...leading,
         for (final parameter in closure.parameters) argument(parameter),
       ]),
     );
@@ -140,23 +137,54 @@ final class ClosureTable(
     return function;
   }
 
-  /// The object that the function or constructor [element], which needs no
-  /// other object, is.
-  HirConstObject static(ExecutableElement element) => _static[element] ??= () {
-    final class_ = HirClass(element.displayName, null, const []);
-    add(
-      Closure(
-        class_,
-        element.type,
-        element.formalParameters,
-        () => element is ConstructorElement
-            ? _creatorOf(element)
-            : _scope.functionOf(element)!,
-        (_, _) => const [],
-      ),
+  /// The class of the function or constructor [element], which needs no other
+  /// object, as a value.
+  ///
+  /// One that is generic has a field for its type arguments.
+  Closure static(ExecutableElement element) => _static[element] ??= () {
+    final owner = takesTypes(element);
+    final types = owner == null ? null : HirField('types', .reference);
+    final made = Closure(
+      HirClass(element.displayName, null, [?types]),
+      element.type,
+      element.formalParameters,
+      () => element is ConstructorElement
+          ? _creatorOf(element)
+          : _scope.functionOf(element)!,
+      (builder, self) => [if (types != null) builder.add(HirLoad(types, self))],
+      typeValue: (builder) {
+        if (owner != null) {
+          builder.bindTypes(
+            owner,
+            builder.add(HirLoad(types!, builder.inputs.single)),
+          );
+        }
+        return _scope.typeValue(builder, _withoutParameters(element.type))!;
+      },
     );
-    return HirConstObject(class_, const {});
+    add(made);
+    return made;
   }();
+
+  /// The object that [element] is with the type arguments [types].
+  HirConstObject constant(ExecutableElement element, HirConstObject? types) {
+    final class_ = static(element).class_;
+    return _constants['${class_.hashCode} ${types.hashCode}'] ??=
+        HirConstObject(class_, {
+          for (final field in class_.fields) field: types,
+        });
+  }
+
+  final _constants = <String, HirConstObject>{};
+
+  /// [type] with the parameters it takes itself left free.
+  static FunctionType _withoutParameters(FunctionType type) =>
+      type.typeParameters.isEmpty
+      ? type
+      : type.instantiate([
+          for (final parameter in type.typeParameters)
+            parameter.instantiate(nullabilitySuffix: .none),
+        ]);
 
   /// Gives the method [element] of [receiver], however it is overridden.
   HirValue tearOff(
@@ -172,6 +200,12 @@ final class ClosureTable(
         element.formalParameters,
         () => _scope.memberOf(element),
         (builder, self) => [builder.add(HirLoad(field, self))],
+        typeValue: (builder) {
+          builder.setReceiver(
+            builder.add(HirLoad(field, builder.inputs.single)),
+          );
+          return _scope.methodType(builder, element)!;
+        },
         isTearOff: true,
       );
       add(made);

@@ -19,8 +19,8 @@ final class ErrorTable(
   /// The names of the variables that [BuiltinError.late] can be about.
   final List<String> lateNames = [];
 
-  /// What is said after the class of a value of a wrong type.
-  final List<String> castTexts = [];
+  /// The types that values are not of, and what is said after them.
+  final List<(String?, String)> castTexts = [];
 
   /// The functions that throw errors.
   Iterable<HirFunction> get functions => _throwers.values;
@@ -59,10 +59,11 @@ final class ErrorTable(
   /// A number for the variable called [name].
   int lateNumber(String name) => _numberIn(lateNames, name);
 
-  /// A number for [text], which is not 0.
-  int castNumber(String text) => _numberIn(castTexts, text) + 1;
+  /// A number for [type] and [ending], which is not 0.
+  int castNumber(String? type, String ending) =>
+      _numberIn(castTexts, (type, ending)) + 1;
 
-  static int _numberIn(List<String> texts, String text) {
+  static int _numberIn<T>(List<T> texts, T text) {
     if (!texts.contains(text)) texts.add(text);
     return texts.indexOf(text);
   }
@@ -77,7 +78,7 @@ final class ErrorTable(
     final class_ = _created(_class(error.className));
     final number = class_.fields.first;
     final parameters = [
-      if (error.hasObject) HirType.reference,
+      if (error.hasObject) ...[HirType.reference, HirType.reference],
       if (error.hasNumber) HirType.integer,
     ];
     final block = HirBlock(parameters);
@@ -91,7 +92,9 @@ final class ErrorTable(
           : block.add(HirConst(0));
       block.add(HirStore(number, object, value));
       if (error.hasObject) {
-        block.add(HirStore(class_.fields.last, object, block.parameters.first));
+        for (final (i, field) in class_.fields.skip(1).indexed) {
+          block.add(HirStore(field, object, block.parameters[i]));
+        }
       }
     }
     final HirValue stack = error.isExhaustion

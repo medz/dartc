@@ -1,0 +1,7 @@
+# The compiler does not support primary constructors yet.
+include: ../../../analysis_options.yaml
+
+linter:
+  rules:
+    unnecessary_type_name_in_constructor: false
+    use_primary_constructors: false

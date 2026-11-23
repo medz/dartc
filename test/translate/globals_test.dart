@@ -351,10 +351,6 @@ int get get => x;''',
       '1:24: $what a field of type String.',
     );
     reports(
-      'class A<T> { const A(); }\nvoid main() { const A<int>(); }',
-      '2:15: $what objects of type A<int>.',
-    );
-    reports(
       'class A { const A(); }\nvoid f(A a) { switch (a) { case const A(): } }\nvoid main() { f(A()); }',
       '2:39: $what this kind of case.',
     );

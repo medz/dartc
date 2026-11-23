@@ -59,6 +59,7 @@ final class Conversions(
         .float => types.doubleType,
         _ => types.boolType,
       };
+      if (isOpen(type)) return isInstance(coerce(value, .reference), type);
       return constant(_builder.library.typeSystem.isSubtypeOf(exact, type));
     }
     if (type is NeverType) {
@@ -68,17 +69,19 @@ final class Conversions(
     }
     if (type.isDartCoreNull) return isNull(value);
     final HirTypeTest test;
-    if (type is FunctionType) {
-      test = _scope.functionTest(type);
-    } else if (type.isDartCoreFunction) {
-      test = _scope.functionTest(null);
-    } else {
-      final class_ = classOf(type);
-      if (class_ == null) return null;
-      if (type.isDartCoreObject && type.nullabilitySuffix == .none) {
-        return _not(isNull(value));
-      }
+    if (type.isDartCoreFunction) {
+      test = _scope.functionTest;
+    } else if (_isPlain(type)) {
+      final class_ = classOf(type)!;
+      if (type.isDartCoreObject) return _not(isNull(value));
       test = _scope.testOf(class_);
+    } else {
+      if (valueType(type) == null) return null;
+      final wanted = _scope.typeValue(_builder, type);
+      if (wanted == null) return null;
+      return _builder.call(
+        HirCall(_scope.runtime('isInstance'), [value, wanted]),
+      );
     }
     return _builder.choose(
       isNull(value),
@@ -87,6 +90,12 @@ final class Conversions(
       () => _builder.add(HirIsInstance(test, value)),
     );
   }
+
+  /// Whether the class of an object tells if it is of [type].
+  static bool _isPlain(DartType type) =>
+      type is InterfaceType &&
+      classOf(type) != null &&
+      type.typeArguments.every(isTop);
 
   /// [value], of type [from], as one of type [to], or null if that cannot be
   /// tested yet.
@@ -106,14 +115,18 @@ final class Conversions(
     }
     final fits = isInstance(value, to);
     if (fits == null) return null;
+    // The name of an open type is known only when the program runs.
     final number = _scope.castNumber(
-      "' is not a subtype of type '${describeType(to)}'$ending",
+      isOpen(to) ? null : describeType(to),
+      ending,
     );
     _builder.unless(fits, () {
-      final object = coerce(value, .reference);
       _builder.call(
         HirCall(_scope.throwerOf(.wrongType), [
-          object,
+          coerce(value, .reference),
+          isOpen(to)
+              ? _scope.typeValue(_builder, to)!
+              : _builder.add(HirNull()),
           _builder.add(HirConst(number)),
         ]),
       );

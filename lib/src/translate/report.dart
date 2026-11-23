@@ -4,7 +4,6 @@ import 'package:dartc/hir.dart';
 
 import 'builtin_error.dart';
 import 'classes.dart';
-import 'closure.dart';
 import 'constant.dart';
 import 'error_table.dart';
 import 'members.dart';
@@ -21,25 +20,19 @@ final class ReportBuilder(
 
   /// Writes a number to standard error.
   final HirFunction? _writeNumber,
+
+  /// A function of the runtime.
+  final HirFunction Function(String name) _runtime,
 ) {
   final _tests = <HirTypeTest, Set<HirClass>>{};
   final _exact = <ClassElement, HirTypeTest>{};
-
-  /// Writes the name of the class of an object, if needed.
-  HirFunction? describe;
   final _blocks = <HirBlock>[];
 
   /// The classes that pass the tests made here.
   Map<HirTypeTest, Set<HirClass>> get tests => _tests;
 
   /// A function reporting objects of any of [classes] that can be thrown.
-  HirFunction build(
-    Iterable<ClassElement> classes,
-    Iterable<Closure> closures,
-  ) {
-    if (_errors.castTexts.isNotEmpty) {
-      describe = _makeDescribe(classes, closures);
-    }
+  HirFunction build(Iterable<ClassElement> classes) {
     var block = HirBlock([.reference]);
     final exception = block.parameters.single;
     _blocks.add(block);
@@ -52,6 +45,8 @@ final class ReportBuilder(
       switch (error) {
         case null when class_.library.isInSdk:
           _plain(yes, exception, class_);
+        case null when class_.typeParameters.isNotEmpty:
+          _generic(yes, exception, class_);
         case null:
           _end(yes, '${_text(class_)}\n');
         case .nullCheck || .wrongType:
@@ -87,6 +82,20 @@ final class ReportBuilder(
     block.end(HirReturn());
   }
 
+  /// An object whose class has type parameters.
+  void _generic(HirBlock block, HirValue exception, ClassElement class_) {
+    final text = _text(class_);
+    final instance = "Instance of '${class_.displayName}'";
+    if (text != instance) return _end(block, '$text\n');
+    _write(block, "Instance of '");
+    _call(block, 'writeObjectType', exception);
+    _end(block, "'\n");
+  }
+
+  /// Calls the function [name] of the runtime.
+  void _call(HirBlock block, String name, HirValue argument) =>
+      block.add(HirCall(_runtime(name), [argument]));
+
   HirValue _field(HirBlock block, HirValue object, ClassElement class_) =>
       block.add(HirLoad(_classes.classOf(class_).fields.first, object));
 
@@ -115,12 +124,18 @@ final class ReportBuilder(
     var block = _caseOf(start, number, 0, (yes) {
       _end(yes, '${BuiltinError.nullCheck.text}\n');
     });
-    for (final (i, text) in _errors.castTexts.indexed) {
+    final [_, object, type] = _classes.classOf(class_).fields;
+    for (final (i, (name, ending)) in _errors.castTexts.indexed) {
       block = _caseOf(block, number, i + 1, (yes) {
-        final field = _classes.classOf(class_).fields.last;
         _write(yes, BuiltinError.wrongType.text);
-        yes.add(HirCall(describe!, [yes.add(HirLoad(field, exception))]));
-        _end(yes, '$text\n');
+        _call(yes, 'writeObjectType', yes.add(HirLoad(object, exception)));
+        _write(yes, "' is not a subtype of type '");
+        if (name == null) {
+          _call(yes, 'writeType', yes.add(HirLoad(type, exception)));
+        } else {
+          _write(yes, name);
+        }
+        _end(yes, "'$ending\n");
       });
     }
     block.end(HirUnreachable());
@@ -139,39 +154,6 @@ final class ReportBuilder(
     final (yes, no) = _branch(block, same);
     work(yes);
     return no;
-  }
-
-  /// Makes a function that writes the name of the class of an object.
-  HirFunction _makeDescribe(
-    Iterable<ClassElement> classes,
-    Iterable<Closure> closures,
-  ) {
-    var block = HirBlock([.reference]);
-    final object = block.parameters.single;
-    final start = _blocks.length;
-    _blocks.add(block);
-    final isNull = block.add(HirCompare(.equal, object, block.add(HirNull())));
-    final (none, some) = _branch(block, isNull);
-    _end(none, 'Null');
-    block = some;
-    for (final class_ in classes) {
-      final test = _exactly(class_);
-      final (yes, no) = _branch(block, block.add(HirIsInstance(test, object)));
-      _end(yes, class_.displayName);
-      block = no;
-    }
-    for (final Closure(:class_, :type) in closures) {
-      final test = HirTypeTest(class_.name);
-      _tests[test] = {class_};
-      final (yes, no) = _branch(block, block.add(HirIsInstance(test, object)));
-      _end(yes, describeType(type));
-      block = no;
-    }
-    block.end(HirUnreachable());
-    final function = HirFunction('describe', [.reference], null, false)
-      ..define(_blocks.skip(start));
-    _blocks.removeRange(start, _blocks.length);
-    return function;
   }
 
   /// A test for objects of [class_] itself.

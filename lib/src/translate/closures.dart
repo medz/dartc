@@ -51,8 +51,9 @@ final class ClosureTranslator(
     ExecutableElement element,
     Element? name,
   ) {
-    if (node.typeParameters case final parameters?) {
-      _unsupported(parameters, 'type parameters');
+    final isGeneric = element.typeParameters.isNotEmpty;
+    if (isGeneric && name == null) {
+      _unsupported(node, 'generic functions as values');
     }
     if (node.body.isAsynchronous || node.body.isGenerator) {
       _unsupported(node.body, 'async and generator functions');
@@ -65,14 +66,25 @@ final class ClosureTranslator(
     final receiver = _builder.receiver;
     final fields = [for (final used in used) _field(used)];
     final self = HirField('this', .reference);
+    final lists = {
+      for (final owner in _builder.typeLists.keys)
+        owner: HirField('types', .reference),
+    };
+    // An open type is found where the closure is created.
+    final type = isOpen(element.type) && !isGeneric
+        ? HirField('type', .reference)
+        : null;
     final class_ = HirClass(_describe(element), null, [
       if (receiver != null) self,
       ...fields,
+      ...lists.values,
+      ?type,
     ]);
     final function = HirFunction(
       '${_builder.function.name}.${name?.displayName ?? 'closure'}',
       [
         .reference,
+        if (isGeneric) .reference,
         for (final parameter in element.formalParameters)
           valueType(parameter.type) ??
               _unsupported(node, 'a parameter of type ${parameter.type}'),
@@ -82,15 +94,18 @@ final class ClosureTranslator(
           : valueType(element.returnType) ??
                 _unsupported(node, 'a result of type ${element.returnType}'),
     );
-    _scope.addClosure(
-      Closure(
-        class_,
-        element.type,
-        element.formalParameters,
-        () => function,
-        (_, self) => [self],
-      ),
+    final closure = Closure(
+      class_,
+      element.type,
+      element.formalParameters,
+      () => function,
+      (_, self) => [self],
+      typeValue: (builder) => type == null
+          ? _scope.typeValue(builder, element.type)!
+          : builder.add(HirLoad(type, builder.inputs.first)),
     );
+    _scope.addClosure(closure, function, isValue: !isGeneric);
+    if (name != null) _scope.setLocalFunction(name, function);
     final outer = _builder;
     _scope.schedule(() {
       final builder = FunctionBuilder(
@@ -100,10 +115,17 @@ final class ClosureTranslator(
         receiverClass: outer.receiverClass,
         receiverField: receiver == null ? null : self,
         isClosure: true,
+        typeOwner: isGeneric ? element : null,
         returnType: element.returnType,
         captures: captures,
         cellClass: _scope.cellClass,
       );
+      lists.forEach((owner, field) {
+        builder.bindTypes(
+          owner,
+          builder.add(HirLoad(field, builder.inputs.first)),
+        );
+      });
       for (final (i, used) in used.indexed) {
         builder.bind(
           used,
@@ -122,6 +144,15 @@ final class ClosureTranslator(
     }
     for (final (i, used) in used.indexed) {
       _builder.add(HirStore(fields[i], object, _builder.raw(used)));
+    }
+    lists.forEach((owner, field) {
+      _builder.add(HirStore(field, object, _builder.typeLists[owner]!));
+    });
+    if (type != null) {
+      final value =
+          _scope.typeValue(_builder, element.type) ??
+          _unsupported(node, 'a function of type ${element.type}');
+      _builder.add(HirStore(type, object, value));
     }
     return object;
   }
