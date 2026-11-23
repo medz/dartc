@@ -79,6 +79,37 @@ Iterable<ExecutableElement> overriddenBy(
   }
 }
 
+/// The instance member of [class_] called [name], which is private to [library]
+/// if that is given, or null if it has none.
+ExecutableElement? memberNamed(
+  ClassElement class_,
+  String name,
+  LibraryElement? library, {
+  bool isGetter = false,
+  bool isSetter = false,
+}) {
+  for (
+    InterfaceElement? found = class_;
+    found != null;
+    found = found.supertype?.element
+  ) {
+    final members = isSetter
+        ? found.setters
+        : isGetter
+        ? found.getters
+        : found.methods;
+    for (final member in members) {
+      if (member.lookupName == name &&
+          !member.isStatic &&
+          !_isAbstract(member) &&
+          (library == null || member.library == library)) {
+        return member;
+      }
+    }
+  }
+  return null;
+}
+
 /// Whether calls may give [parameter] of a method values that are not of its
 /// type.
 bool isUnchecked(FormalParameterElement parameter) {

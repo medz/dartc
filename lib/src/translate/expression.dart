@@ -10,6 +10,7 @@ import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'describe.dart';
+import 'dynamics.dart';
 import 'members.dart';
 import 'operators.dart';
 import 'places.dart';
@@ -35,7 +36,13 @@ final class ExpressionTranslator(
     (node, receiver, class_, element, list) =>
         calls.method(node, receiver, class_, element, list),
   );
-  late final _operators = OperatorTranslator(_scope, _builder, calls);
+  late final _operators = OperatorTranslator(
+    _scope,
+    _builder,
+    calls,
+    _dynamics,
+  );
+  late final _dynamics = DynamicTranslator(_scope, _builder, this);
   late final _statics = StaticTranslator(_scope, _builder);
   late final _conversions = Conversions(_scope, _builder);
   late final _places = PlaceTranslator(
@@ -44,6 +51,7 @@ final class ExpressionTranslator(
     calls,
     _statics,
     _conversions,
+    _dynamics,
   );
 
   Never _unsupported(AstNode node, String what) =>
@@ -194,12 +202,18 @@ final class ExpressionTranslator(
   /// Reads a property, or what a library or class declares.
   HirValue _access(Expression inner) {
     switch (inner) {
-      case PrefixedIdentifier(:final prefix)
+      case PrefixedIdentifier(:final prefix, :final identifier)
           when prefix.staticType is DynamicType:
-        _unsupported(prefix, usingDynamic);
-      case PropertyAccess(:final realTarget)
+        return _dynamics.get(inner, value(prefix), identifier.name);
+      case PropertyAccess(
+            :final realTarget,
+            :final propertyName,
+            :final isNullAware,
+          )
           when realTarget.staticType is DynamicType:
-        _unsupported(realTarget, usingDynamic);
+        final object = value(realTarget);
+        HirValue read() => _dynamics.get(inner, object, propertyName.name);
+        return isNullAware ? calls.unlessNull(inner, object, read)! : read();
       case PrefixedIdentifier(
             prefix: Expression(staticType: FunctionType()) &&
                 final Expression function,
@@ -339,6 +353,8 @@ final class ExpressionTranslator(
     switch (operator) {
       case '++' || '--':
         return _step(node, operand, operator, after: true);
+      case '!':
+        return _operators.unary(node, operator, condition(operand));
       case '-' when operand is IntegerLiteral:
         return _integer(operand, isNegated: true);
       default:

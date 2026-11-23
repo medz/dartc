@@ -100,7 +100,7 @@ final class ClassTable(final Declarations _declarations) {
         'int' => [HirField('value', .integer)],
         'double' => [HirField('value', .float)],
         'bool' => [HirField('value', .boolean)],
-        'TypeError' => [
+        'TypeError' || 'NoSuchMethodError' => [
           HirField('number', .integer),
           HirField('object', .reference),
           HirField('type', .reference),

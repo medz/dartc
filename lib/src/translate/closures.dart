@@ -7,6 +7,7 @@ import 'builder.dart';
 import 'captures.dart';
 import 'closure.dart';
 import 'conversions.dart';
+import 'dynamics.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -27,6 +28,7 @@ final class ClosureTranslator(
   callMethod,
 ) {
   late final _conversions = Conversions(_scope, _builder);
+  late final _dynamics = DynamicTranslator(_scope, _builder, _evaluator);
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -100,6 +102,14 @@ final class ClosureTranslator(
       element.formalParameters,
       () => function,
       (_, self) => [self],
+      bind: (builder, object) {
+        if (receiver != null) {
+          builder.setReceiver(builder.add(HirLoad(self, object)));
+        }
+        lists.forEach((owner, field) {
+          builder.bindTypes(owner, builder.add(HirLoad(field, object)));
+        });
+      },
       typeValue: (builder) => type == null
           ? _scope.typeValue(builder, element.type)!
           : builder.add(HirLoad(type, builder.inputs.first)),
@@ -181,7 +191,13 @@ final class ClosureTranslator(
         node.argumentList,
       );
     }
-    _unsupported(function, 'using a dynamic value');
+    return _dynamics.call(
+      node,
+      _evaluator.value(function, placeholder: .reference),
+      'call',
+      node.argumentList,
+      types: node.typeArguments,
+    );
   }
 
   /// Calls the function [value].

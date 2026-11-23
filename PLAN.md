@@ -14,8 +14,8 @@
 | 6 | 对象、字段、方法、继承、分派表 | 完成 |
 | 7 | GC 和栈表 | 完成 |
 | 8 | 异常 | 完成 |
-| 9 | 闭包、泛型、类型检查 | 下一步 |
-| 10 | 官方 `dart:core`：字符串、集合、`print` | |
+| 9 | 闭包、泛型、类型检查 | 完成 |
+| 10 | 官方 `dart:core`：字符串、集合、`print` | 下一步 |
 | 11 | 记录、模式、枚举、扩展、mixin、生成器、async | |
 | 12 | FFI、导出函数、库和目标文件 | |
 | 13 | Linux，x64 | |
@@ -54,7 +54,7 @@ void main() { exit(1 + 2 * 3); }
 - 9c：泛型类和泛型函数，运行时类型，泛型的协变检查。
 - 9d：`dynamic` 调用。`noSuchMethod` 需要 `Symbol` 和 `List`，移到第 10 步。
 
-**10 标准库。** `hello`、`print_integers`、`map_sum`、`persistent_cell` 四个程序通过。取消第 8 步的限制：SDK 的异常对象还不能由程序创建，也不能读它们的成员；抛出的对象如果有自己的 `toString`，只支持常量文字；堆栈的文字不打印。
+**10 标准库。** `hello`、`print_integers`、`map_sum`、`persistent_cell` 四个程序通过。加入 `noSuchMethod`。取消第 8、9 步的限制：SDK 的异常对象还不能由程序创建，也不能读它们的成员；抛出的对象如果有自己的 `toString`，只支持常量文字；堆栈的文字不打印；没有成员时只打印第一行；抛出的 `double` 没有文字；`Type` 的值、泛型函数本身当作值、提取泛型方法还不支持。
 
 **11 的补充。** 还有主构造函数、级联、`late`、`?.` 后接其他访问、重定向工厂。
 
@@ -91,8 +91,8 @@ void main() { exit(1 + 2 * 3); }
 | 本机 Dart SDK 的库声明，用来做类型分析 | `source` | 第 10 步，改用 `sdk/std` |
 | 按名字识别 `dart:io` 的 `exit`，直接调用系统的 `exit` | `translate` `lower` | 编译官方 `dart:io` 源码时 |
 | 按名字识别 `dart:core` 的 `print`，只接受常量字符串 | `translate` `lower` | 第 10 步 |
-| 按名字识别 `dart:core` 的 `identical`，只接受对象 | `translate` | 第 10 步 |
-| 按名字识别 `dart:core` 的错误类和 `toInt`，错误对象没有官方的字段 | `translate` | 第 10 步 |
+| 按名字识别 `dart:core` 的 `identical` | `translate` | 第 10 步 |
+| 按名字识别 `dart:core` 的错误类、数字类、`toInt`、`toDouble`，错误对象没有官方的字段 | `translate` | 第 10 步 |
 | 运行时的源码从 `package:dartc` 的路径读取，编译器自己必须用源码运行 | `driver` | 第 10 步，和标准库源码一起处理 |
 
 ## 保存的旧内容

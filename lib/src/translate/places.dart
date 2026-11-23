@@ -7,6 +7,7 @@ import 'builder.dart';
 import 'calls.dart';
 import 'conversions.dart';
 import 'describe.dart';
+import 'dynamics.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'statics.dart';
@@ -31,6 +32,16 @@ final class const _Static(
   @override final DartType type,
 ) extends Place;
 
+/// A property called [name] of an object that can be anything, or an element
+/// at [index].
+final class const _Dynamic(
+  final AstNode node,
+  final HirValue object,
+  final String name,
+  final HirValue? index,
+  @override final DartType type,
+) extends Place;
+
 /// A property or element of [receiver], or of the superclass's part of `this`
 /// where [class_] is null.
 final class const _Member(
@@ -50,6 +61,7 @@ final class PlaceTranslator(
   final CallTranslator _calls,
   final StaticTranslator _statics,
   final Conversions _conversions,
+  final DynamicTranslator _dynamics,
 ) {
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -77,7 +89,9 @@ final class PlaceTranslator(
       IndexExpression(:final realTarget) => realTarget,
       _ => null,
     };
-    if (owner?.staticType is DynamicType) _unsupported(owner!, usingDynamic);
+    if (owner != null && owner.staticType is DynamicType) {
+      return _dynamicPlace(to, owner);
+    }
     if (writer is! ExecutableElement || !isInstanceMember(writer)) reject();
     final Expression? target;
     switch (to) {
@@ -116,7 +130,37 @@ final class PlaceTranslator(
     );
   }
 
+  Place _dynamicPlace(Expression to, Expression owner) {
+    final isNullAware = switch (to) {
+      PropertyAccess(:final isNullAware) ||
+      IndexExpression(:final isNullAware) => isNullAware,
+      _ => false,
+    };
+    if (isNullAware) _unsupported(to, 'null-aware assignments');
+    return _Dynamic(
+      to,
+      _evaluator.value(owner),
+      switch (to) {
+        PrefixedIdentifier(:final identifier) => identifier.name,
+        PropertyAccess(:final propertyName) => propertyName.name,
+        _ => '',
+      },
+      to is IndexExpression
+          ? _evaluator.value(to.index, placeholder: .reference)
+          : null,
+      owner.staticType!,
+    );
+  }
+
   HirValue read(Place place) => switch (place) {
+    _Dynamic(:final node, :final object, :final name, index: null) =>
+      _dynamics.get(node, object, name),
+    _Dynamic(:final node, :final object, :final index?) => _dynamics.operate(
+      node,
+      object,
+      '[]',
+      [index],
+    ),
     _Local(:final variable) => _builder.read(variable),
     _Static(:final node, :final reader) => _statics.read(node, reader),
     _Member(:final reader?, :final positions) => _use(
@@ -133,6 +177,10 @@ final class PlaceTranslator(
     switch (place) {
       case _Local(:final variable):
         _builder.assign(variable, value);
+      case _Dynamic(:final node, :final object, :final name, index: null):
+        _dynamics.set(node, object, name, value);
+      case _Dynamic(:final node, :final object, :final index?):
+        _dynamics.operate(node, object, '[]=', [index, value]);
       case _Static(:final writer):
         _statics.write(writer, value);
       case _Member(:final writer, :final positions):

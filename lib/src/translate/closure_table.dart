@@ -6,6 +6,7 @@ import 'package:dartc/source.dart';
 import 'builder.dart';
 import 'closure.dart';
 import 'conversions.dart';
+import 'dynamic_table.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -68,27 +69,15 @@ final class ClosureTable(
     for (final MapEntry(key: selector, value: shape)
         in _shapes.entries.toList()) {
       for (final closure in closures.toList()) {
-        if (!_accepts(closure, shape)) continue;
+        if (!accepts(closure.parameters, shape.positional, shape.named)) {
+          continue;
+        }
         if (_entries[selector]!.containsKey(closure.class_)) continue;
         _entries[selector]![closure.class_] = _entry(closure, selector, shape);
         found = true;
       }
     }
     return found;
-  }
-
-  static bool _accepts(Closure closure, _Shape shape) {
-    final positional = closure.parameters.where((p) => p.isPositional);
-    final named = {
-      for (final parameter in closure.parameters)
-        if (parameter.isNamed) parameter.name,
-    };
-    return shape.positional <= positional.length &&
-        shape.positional >= positional.where((p) => p.isRequired).length &&
-        named.containsAll(shape.named) &&
-        closure.parameters.every(
-          (p) => !p.isRequiredNamed || shape.named.contains(p.name),
-        );
   }
 
   HirFunction _entry(Closure closure, HirSelector selector, _Shape shape) {
@@ -152,6 +141,11 @@ final class ClosureTable(
           ? _creatorOf(element)
           : _scope.functionOf(element)!,
       (builder, self) => [if (types != null) builder.add(HirLoad(types, self))],
+      bind: (builder, self) {
+        if (owner != null) {
+          builder.bindTypes(owner, builder.add(HirLoad(types!, self)));
+        }
+      },
       typeValue: (builder) {
         if (owner != null) {
           builder.bindTypes(
@@ -200,6 +194,9 @@ final class ClosureTable(
         element.formalParameters,
         () => _scope.memberOf(element),
         (builder, self) => [builder.add(HirLoad(field, self))],
+        bind: (builder, self) {
+          builder.setReceiver(builder.add(HirLoad(field, self)));
+        },
         typeValue: (builder) {
           builder.setReceiver(
             builder.add(HirLoad(field, builder.inputs.single)),

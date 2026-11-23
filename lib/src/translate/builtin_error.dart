@@ -22,6 +22,12 @@ enum BuiltinError(
 
   /// A value is not of the type needed; the number says which.
   wrongType('TypeError', "type '", hasNumber: true, hasObject: true),
+  missingMember(
+    'NoSuchMethodError',
+    'NoSuchMethodError: ',
+    hasNumber: true,
+    hasObject: true,
+  ),
   noInt('UnsupportedError', 'Unsupported operation: Infinity or NaN toInt'),
 
   /// A final variable got its value while it was set; the number says which.

@@ -9,6 +9,7 @@ import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'describe.dart';
+import 'dynamics.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -21,6 +22,7 @@ final class CallTranslator(
   final ClosureTranslator _closures,
 ) {
   late final _conversions = Conversions(_scope, _builder);
+  late final _dynamics = DynamicTranslator(_scope, _builder, _evaluator);
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -28,9 +30,16 @@ final class CallTranslator(
   /// The result of [node], if it has one and [isUsed].
   HirValue? invocation(MethodInvocation node, {required bool isUsed}) {
     final element = node.methodName.element, target = node.realTarget;
-    if (target?.staticType is DynamicType) _unsupported(target!, usingDynamic);
+    if (target != null && target.staticType is DynamicType) {
+      return _dynamicCall(node, target, isUsed: isUsed);
+    }
     if (target?.staticType is FunctionType) {
       return _callFunction(node, target!, isUsed: isUsed);
+    }
+    if (target != null &&
+        (target.staticType?.isDartCoreFunction ?? false) &&
+        node.methodName.name == 'call') {
+      return _dynamicCall(node, target, isUsed: isUsed);
     }
     if (element is! ExecutableElement) _unsupported(node, describe(node));
     if (_builder.typeOf(element.baseElement) != null) {
@@ -65,7 +74,7 @@ final class CallTranslator(
     if (target == null) return call(_this(node));
     final receiver = object(target, isNullAware: node.isNullAware);
     return node.isNullAware
-        ? _unlessNull(node, receiver, () => call(receiver), isUsed: isUsed)
+        ? unlessNull(node, receiver, () => call(receiver), isUsed: isUsed)
         : call(receiver);
   }
 
@@ -107,6 +116,24 @@ final class CallTranslator(
         _unsupported(node, 'these type arguments');
   }
 
+  HirValue? _dynamicCall(
+    MethodInvocation node,
+    Expression target, {
+    required bool isUsed,
+  }) {
+    final object = _evaluator.value(target);
+    HirValue? call() => _dynamics.call(
+      node,
+      object,
+      node.methodName.name,
+      node.argumentList,
+      types: node.typeArguments,
+    );
+    return node.isNullAware
+        ? unlessNull(node, object, call, isUsed: isUsed)
+        : call();
+  }
+
   HirValue? _callFunction(
     MethodInvocation node,
     Expression target, {
@@ -119,7 +146,7 @@ final class CallTranslator(
     final function = _evaluator.value(target);
     HirValue? call() => _closures.call(node, function, node.argumentList);
     return node.isNullAware
-        ? _unlessNull(node, function, call, isUsed: isUsed)
+        ? unlessNull(node, function, call, isUsed: isUsed)
         : call();
   }
 
@@ -151,7 +178,6 @@ final class CallTranslator(
     if (hasNullAware(target) && !isNullAware) {
       _unsupported(target.parent!, 'null-aware chains');
     }
-    if (target.staticType is DynamicType) _unsupported(target, usingDynamic);
     if (classOf(target.staticType) == null) {
       _unsupported(target.parent!, describe(target.parent!));
     }
@@ -170,11 +196,11 @@ final class CallTranslator(
       _unsupported(node, describe(node));
 
   /// Runs [call] unless [receiver] is null, which is then the result.
-  HirValue? _unlessNull(
+  HirValue? unlessNull(
     Expression node,
     HirValue receiver,
     HirValue? Function() call, {
-    required bool isUsed,
+    bool isUsed = true,
   }) {
     final type = valueType(node.staticType!);
     if (isUsed && type == null) {
@@ -484,7 +510,7 @@ final class CallTranslator(
     final receiver = object(target, isNullAware: isNullAware);
     HirValue read() => tearOff(node, receiver, class_, method);
     return isNullAware
-        ? _unlessNull(node, receiver, read, isUsed: true)!
+        ? unlessNull(node, receiver, read, isUsed: true)!
         : read();
   }
 
@@ -505,7 +531,7 @@ final class CallTranslator(
         final isNullAware = node is PropertyAccess && node.isNullAware;
         final receiver = object(target, isNullAware: isNullAware);
         result = isNullAware
-            ? _unlessNull(node, receiver, () => read(receiver), isUsed: true)
+            ? unlessNull(node, receiver, () => read(receiver), isUsed: true)
             : read(receiver);
       }
     }
@@ -515,7 +541,12 @@ final class CallTranslator(
   /// Reads `target[index]`.
   HirValue index(IndexExpression node) {
     final element = node.element, target = node.realTarget;
-    if (target.staticType is DynamicType) _unsupported(target, usingDynamic);
+    if (target.staticType is DynamicType && !node.isNullAware) {
+      final object = _evaluator.value(target);
+      return _dynamics.operate(node, object, '[]', [
+        _evaluator.value(node.index, placeholder: .reference),
+      ]);
+    }
     if (element == null || node.isNullAware) {
       _unsupported(node, describe(node));
     }

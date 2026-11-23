@@ -335,34 +335,6 @@ void main() {
 
     const what = 'Not supported yet:';
     reports(
-      'void main() { dynamic d = 1; d.foo; }',
-      '1:30: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { dynamic d = 1; d.foo(); }',
-      '1:30: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { dynamic d = 1; d + 1; }',
-      '1:30: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { dynamic d = 1; d[0]; }',
-      '1:30: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { dynamic d = 1; -d; }',
-      '1:31: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { dynamic d = 1; d.x = 2; }',
-      '1:30: $what using a dynamic value.',
-    );
-    reports(
-      'void main() { dynamic d = 1; d(); }',
-      '1:30: $what using a dynamic value.',
-    );
-    reports(
       'void main() { Object o = "a"; }',
       '1:26: $what simple string literal.',
     );

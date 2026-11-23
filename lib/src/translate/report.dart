@@ -51,6 +51,8 @@ final class ReportBuilder(
           _end(yes, '${_text(class_)}\n');
         case .nullCheck || .wrongType:
           _typeError(yes, exception, class_);
+        case .missingMember:
+          _missing(yes, exception, class_);
         case .late:
           _late(yes, exception, class_);
         case .negativeShift:
@@ -136,6 +138,26 @@ final class ReportBuilder(
           _write(yes, name);
         }
         _end(yes, "'$ending\n");
+      });
+    }
+    block.end(HirUnreachable());
+  }
+
+  /// A member that an object has not. Its arguments have no text yet.
+  void _missing(HirBlock start, HirValue exception, ClassElement class_) {
+    final [number, object, _] = _classes.classOf(class_).fields;
+    final which = start.add(HirLoad(number, exception));
+    final value = start.add(HirLoad(object, exception));
+    _write(start, BuiltinError.missingMember.text);
+    var block = start;
+    for (final (i, (kind, name)) in _errors.missing.indexed) {
+      block = _caseOf(block, which, i, (yes) {
+        final isNull = yes.add(HirCompare(.equal, value, yes.add(HirNull())));
+        final (none, some) = _branch(yes, isNull);
+        _end(none, "The $kind '$name' was called on null.\n");
+        _write(some, "Class '");
+        _call(some, 'writeObjectType', value);
+        _end(some, "' has no instance $kind '$name'.\n");
       });
     }
     block.end(HirUnreachable());

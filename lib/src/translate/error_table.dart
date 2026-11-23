@@ -56,6 +56,12 @@ final class ErrorTable(
       },
   };
 
+  /// What objects have not, as kinds and names.
+  final List<(String, String)> missing = [];
+
+  int missingNumber(String kind, String name) =>
+      _numberIn(missing, (kind, name));
+
   /// A number for the variable called [name].
   int lateNumber(String name) => _numberIn(lateNames, name);
 

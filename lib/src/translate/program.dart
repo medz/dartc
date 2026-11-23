@@ -14,6 +14,8 @@ import 'closure_table.dart';
 import 'constant_table.dart';
 import 'constructor.dart';
 import 'dispatch.dart';
+import 'dynamic_shape.dart';
+import 'dynamic_table.dart';
 import 'error_table.dart';
 import 'global_table.dart';
 import 'members.dart';
@@ -59,6 +61,7 @@ final class ProgramTranslator(
   late final TypeTable _types = TypeTable(this, _classes, _constants);
   late final _typeFunctions = TypeFunctions(this, _unit, _classes, _types);
   late final _closures = ClosureTable(this, _unit, _creatorOf);
+  late final _dynamics = DynamicTable(this, _unit);
   late final _errors = ErrorTable(_classes, _core, _dispatch.instantiate);
   late final _globals = GlobalTable(
     this,
@@ -102,12 +105,18 @@ final class ProgramTranslator(
       _addRuntime();
     } while (_dispatch.update() ||
         _closures.update() ||
+        _dynamics.update(
+          _dispatch.classes.where((class_) => !_isRuntime(class_.library)),
+          _classes.classOf,
+          _closures.closures,
+        ) ||
         _typeFunctions.update(_dispatch.classes, _closures.closures) ||
         _pending.isNotEmpty);
     _typeFunctions.finish();
     final dispatch = {
       ..._dispatch.result(_classes.classOf, _closures),
       ..._closures.dispatch,
+      ..._dynamics.dispatch,
       if (_typeFunctions.isUsed) _typeFunctions.typeOf: _typeFunctions.entries,
     };
     final report = ReportBuilder(
@@ -149,6 +158,7 @@ final class ProgramTranslator(
     ..._globals.getters,
     ..._dispatch.made,
     ..._closures.made,
+    ..._dynamics.made,
     ..._bodies,
     ..._creators.values,
     ..._typeFunctions.functions,
@@ -354,6 +364,16 @@ final class ProgramTranslator(
   void translateBody(FunctionBuilder builder, FunctionBody body) {
     StatementTranslator(this, builder).body(body);
     builder.finish();
+  }
+
+  @override
+  HirSelector dynamicSelector(DynamicShape shape) =>
+      _dynamics.selectorOf(shape);
+
+  @override
+  int missingNumber(String kind, String name) {
+    runtime('writeObjectType');
+    return _errors.missingNumber(kind, name);
   }
 
   @override

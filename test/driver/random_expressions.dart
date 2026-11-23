@@ -43,7 +43,11 @@ extension on RandomDart {
           : _any(variables);
     }
     String inner(Kind kind) => _expression(kind, depth - 1);
-    switch (_random.nextInt(13)) {
+    switch (_random.nextInt(14)) {
+      case 13 when _chance(2):
+        if (_dynamic(kind, inner) case final text?) {
+          return '($text as ${kind.name})';
+        }
       case 12 when _chance(2):
         final type = kind.name, class_ = _any(['Box', 'Sub']);
         return switch (_random.nextInt(4)) {
@@ -100,6 +104,53 @@ extension on RandomDart {
       return _any(objects.map((name) => '$name.leaf').toList());
     }
     return '(${_literal(.function)})';
+  }
+
+  /// A use of something that can be anything, giving a value of [kind].
+  String? _dynamic(Kind kind, String Function(Kind) inner) {
+    String any(Kind kind) => '(${inner(kind)} as dynamic)';
+    final objects = _variables(.object);
+    final object = objects.isEmpty ? null : '(${_any(objects)} as dynamic)';
+    if (_mayThrow) {
+      final other = inner(_any([.integer, .any, .object, .number]));
+      return _any([
+        '(${any(.any)} ${_any(['+', '-', '*', '<', '&', '|', '>='])} $other)',
+        '${any(.any)}.${_any(['i0', 'o0', 'leaf(3)', 't', 'n0', 'none'])}',
+        if (!_isLeaf) '${any(.any)}($other)',
+        '${any(.any)}[$other]',
+      ]);
+    }
+    switch (kind) {
+      case .integer:
+        return _any([
+          '(${any(.integer)} ${_any(['+', '-', '*', '&', '^'])} '
+              '${inner(.integer)})',
+          if (object != null) '$object.i0',
+          if (object != null) '$object[${inner(.integer)}]',
+          if (object != null) '$object.leaf(${inner(.integer)})',
+          if (object != null) '($object.i0 = ${inner(.integer)})',
+          if (!_isLeaf) '${any(.function)}(${inner(.integer)})',
+        ]);
+      case .float:
+        return _any([
+          '(${any(.float)} ${_any(['+', '-', '*', '/'])} ${inner(.number)})',
+          if (object != null) '($object.d0 = ${inner(.float)})',
+        ]);
+      case .boolean:
+        return _any([
+          '(${any(.number)} ${_any(['<', '<=', '>'])} ${inner(.number)})',
+          '(${any(.any)} == ${inner(.any)})',
+          if (object != null) '$object.b0',
+        ]);
+      case .object:
+        return object == null ? null : '($object + ${inner(.object)})';
+      case .any:
+        return object == null ? null : '$object.${_any(['o0', 'a0'])}';
+      case .function:
+        return object == null ? null : '$object.leaf';
+      case .number || .maybe:
+        return null;
+    }
   }
 
   String _number(String Function(Kind) inner) {

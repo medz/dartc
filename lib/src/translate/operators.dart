@@ -6,7 +6,8 @@ import 'builder.dart';
 import 'calls.dart';
 import 'checks.dart';
 import 'conversions.dart';
-import 'describe.dart';
+import 'dynamic_table.dart';
+import 'dynamics.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -15,6 +16,7 @@ final class OperatorTranslator(
   final ProgramScope _scope,
   final FunctionBuilder _builder,
   final CallTranslator _calls,
+  final DynamicTranslator _dynamics,
 ) {
   late final _checked = CheckedOperations(_scope, _builder);
   late final _conversions = Conversions(_scope, _builder);
@@ -25,7 +27,10 @@ final class OperatorTranslator(
   HirValue unary(PrefixExpression node, String operator, HirValue operand) {
     if (operand.type == .reference) {
       final element = node.element, type = node.operand.staticType!;
-      if (type is DynamicType) _unsupported(node.operand, usingDynamic);
+      if (type is DynamicType) {
+        final name = operator == '-' ? 'unary-' : operator;
+        return _dynamics.operate(node, operand, name, const []);
+      }
       if (operator == '-' && isNumber(type)) {
         return _number('numNegate', [operand]);
       }
@@ -60,7 +65,9 @@ final class OperatorTranslator(
       final equal = _equal(node, leftOperand, rightOperand);
       return operator == '==' ? equal : _builder.add(HirUnary(.not, equal));
     }
-    if (leftType is DynamicType) _unsupported(node, usingDynamic);
+    if (leftType is DynamicType) {
+      return _dynamics.operate(node, left, operator, [right]);
+    }
     if (isNumber(leftType)) {
       if (left.type == .reference || right.type == .reference) {
         return _numbers(node, operator, left, right);
@@ -112,19 +119,14 @@ final class OperatorTranslator(
     String operator,
     HirValue left,
     HirValue right,
-  ) => switch (operator) {
-    '+' => _number('numAdd', [left, right]),
-    '-' => _number('numSubtract', [left, right]),
-    '*' => _number('numMultiply', [left, right]),
-    '/' => _number('numDivide', [left, right]),
-    '~/' => _number('numTruncate', [left, right]),
-    '%' => _number('numModulo', [left, right]),
-    '<' => _number('numLess', [left, right]),
-    '<=' => _number('numLessOrEqual', [left, right]),
-    '>' => _number('numLess', [right, left]),
-    '>=' => _number('numLessOrEqual', [right, left]),
-    _ => _unsupported(node, 'operator $operator on num'),
-  };
+  ) {
+    final helper = numberHelpers[operator];
+    if (helper == null) _unsupported(node, 'operator $operator on num');
+    return _number(
+      helper.name,
+      helper.isSwapped ? [right, left] : [left, right],
+    );
+  }
 
   HirValue _number(String name, List<HirValue> operands) => _builder.call(
     HirCall(_scope.runtime(name), [

@@ -193,10 +193,6 @@ void main() {
 
     const what = 'Not supported yet:';
     reports(
-      'void f(Function g) { g(); }\nvoid main() { f(main); }',
-      '1:22: $what using a dynamic value.',
-    );
-    reports(
       'void main() { final f = () async {}; f(); }',
       '1:28: $what async and generator functions.',
     );

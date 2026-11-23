@@ -9,6 +9,7 @@ import 'builtin_error.dart';
 import 'captures.dart';
 import 'closure.dart';
 import 'constant_table.dart';
+import 'dynamic_shape.dart';
 
 /// Reports that something is not supported yet.
 typedef Reject = Never Function(String what);
@@ -113,6 +114,12 @@ abstract interface class ProgramScope() {
     ExecutableElement element,
     List<DartType> types,
   );
+
+  /// How to use members of objects of any class.
+  HirSelector dynamicSelector(DynamicShape shape);
+
+  /// A number for a member that is missing.
+  int missingNumber(String kind, String name);
 
   /// Has [work] done later.
   void schedule(void Function() work);
