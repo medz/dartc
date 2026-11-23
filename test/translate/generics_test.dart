@@ -136,6 +136,11 @@ void main() {
       class E<T> implements Exception { final T t; E(this.t); } void thrower<T>(T t) => throw E<T>(t); void tryIt<T>(void Function() f) { try { f(); } on E<T> catch (e) { print('T'); show(e.t); } on E<num> { print('num'); } on E catch (e) { print('E'); show(e.t); } }
       void main() { tryIt<int>(() => thrower(1)); tryIt<int>(() => thrower(1.5)); tryIt<int>(() => thrower(A(2))); tryIt<Object>(() => thrower(A(2))); tryIt<double>(() => thrower<num>(1.5)); }
     ''');
+    shows('know functions', '''
+      bool one<T>() => 1 is T; bool yes() => one<int>(); void named({int? a}) {} void other({int? b}) {} class L<T> { List2<T> all() => List2<T>(); } class List2<T> extends Pair<T?, T Function(int)> { List2() : super(null, (t) => throw t); }
+      void main() { truth(one<int>()); truth(one<num>()); truth(one<double>()); Object a = yes(), b = yes(); truth(identical(a, b)); truth(a == b);
+        Object o = Box<void Function()>(() {}); truth(o is Box<Function>); truth(o is Box<int Function()>); truth(o is Box<void Function([int])>); Object n = named; truth(n is void Function({int a})); truth(n is void Function({int b})); truth(n is void Function()); n = other; truth(n is void Function({int b})); Object p = L<int>().all(); truth(p is Pair<num?, num Function(int)>); truth(p is Pair<int?, int Function(int)>); truth(p is Pair<int, int Function(int)>); }
+    ''');
     shows('promote', '''
       num add<T>(T t) { if (t is int) return t + 1; if (t is num) return t * 2; return -1; } T inc<T extends num>(T t) { if (t is int) { final int k = t; number(k + 1); } return t; } int len<T>(T? t) { if (t == null) return 0; if (t is A) return t.n; return 1; }
       void main() { show(add(1)); show(add(1.5)); show(add(A(1))); number(inc(4)); show(inc(1.5)); number(len<A>(null)); number(len(B(6))); number(len(1)); }
@@ -154,6 +159,23 @@ void main() {
     ('a function', 'Object o = same<int>; o as int Function(num);'),
     ('an object', 'throw Pair<int, Box<A?>>(1, Box(null));'),
     ('a nullable type', 'Box<int?>(1).cast(2.5);'),
+    (
+      'optional parameters',
+      'Object o = (int a, [bool? b, A? c]) => 1; o as Box<int>;',
+    ),
+    (
+      'named parameters',
+      'Object o = ({required int b, A? a}) {}; o as Box<int>;',
+    ),
+    (
+      'both kinds',
+      'Object o = (int a, {bool? b}) => a; o as int Function({int b});',
+    ),
+    (
+      'a nullable function',
+      'Object o = Box<void Function(int)?>(null); o as Box<dynamic Function()>;',
+    ),
+    ('void and dynamic', 'Object o = Pair<dynamic, void>(1, 2); o as int;'),
   ]) {
     shows('end the program: $name', "void main() { print('a'); $body }");
   }

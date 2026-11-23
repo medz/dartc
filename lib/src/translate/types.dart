@@ -115,6 +115,11 @@ bool _isFailure(InterfaceElement class_) =>
 
 /// [type] as the official runtime calls it.
 String describeType(DartType type) {
+  final suffix = type.nullabilitySuffix == .question ? '?' : '';
+  if (type is InterfaceType && type.typeArguments.isNotEmpty) {
+    final arguments = type.typeArguments.map(describeType).join(', ');
+    return '${type.element.displayName}<$arguments>$suffix';
+  }
   if (type is! FunctionType) return type.getDisplayString();
   String list(Iterable<FormalParameterElement> parameters) =>
       parameters.map((p) => describeType(p.type)).join(', ');
@@ -134,7 +139,7 @@ String describeType(DartType type) {
     if (named.isNotEmpty) '{${named.join(', ')}}',
   ];
   final text = '(${parameters.join(', ')}) => ${describeType(type.returnType)}';
-  return type.nullabilitySuffix == .question ? '($text)?' : text;
+  return suffix.isEmpty ? text : '($text)$suffix';
 }
 
 /// Whether a function returning [type] gives its caller nothing to use.

@@ -15,7 +15,7 @@ final class Captures._(
     final used = {for (final elements in visitor.captured.values) ...elements};
     return Captures._(
       visitor.captured,
-      used.intersection({...assignedIn(declaration), ...visitor.unset}),
+      used.intersection(assignedIn(declaration)),
     );
   }
 
@@ -28,9 +28,6 @@ final class Captures._(
 
 final class _Captures() extends RecursiveAstVisitor<void> {
   final captured = <FunctionExpression, Set<Element>>{};
-
-  /// The variables declared without a value.
-  final unset = <Element>{};
 
   /// The closures around, and where each element is declared among them.
   final _closures = <FunctionExpression>[];
@@ -73,9 +70,7 @@ final class _Captures() extends RecursiveAstVisitor<void> {
 
   @override
   void visitVariableDeclaration(VariableDeclaration node) {
-    final element = node.declaredFragment?.element;
-    _declare(element);
-    if (element != null && node.initializer == null) unset.add(element);
+    _declare(node.declaredFragment?.element);
     super.visitVariableDeclaration(node);
   }
 

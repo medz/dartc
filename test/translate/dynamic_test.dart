@@ -69,6 +69,10 @@ void main() {
   '''
         .replaceAll('dynamic s = <T>(T t) => 1;', ''),
   );
+  shows('generic functions are checked', '''
+    T same<T>(T t) => t; dynamic make<T>() => (T t) => t; dynamic local<T>() { T go(T t, {T? u}) => u ?? t; return go; }
+    void main() { dynamic f = same<int>; go(() => show(f(1))); go(() => show(f(1.5))); dynamic g = make<num>(); go(() => show(g(2.5))); go(() => show(g(true))); dynamic h = local<A>(); go(() => show(h(B(4)))); go(() => show(h(1))); go(() => show(h(A(1), u: A(2)))); go(() => show(h(A(1), u: 2))); dynamic k = G<int>.new; go(() => k().put(1)); go(() => k().put(true)); }
+  ''');
   shows('null has nothing', '''
     void main() { dynamic d; go(() => show(d.n)); go(() => d.n = 1); go(() => d.f()); go(() => d()); go(() => show(d + 1)); go(() => show(d[0])); go(() => show(-d)); go(() => show(d?.n)); go(() => show(d?.add(1))); d = A(4); go(() => show(d?.n)); go(() => show(d?.add(1))); Function? f; go(() => show(f?.call(1))); go(() { if (d == null) print('no'); }); }
   ''');

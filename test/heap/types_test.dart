@@ -105,6 +105,35 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   void writeRequired() => throw UnimplementedError();
 }
 
+/// Types that differ little.
+const _functions = [
+  'int Function()',
+  'int Function([int])',
+  'int Function([num])',
+  'int Function([int, int])',
+  'int Function(int)',
+  'int Function(num)',
+  'int Function(int, int)',
+  'num Function(int, [int])',
+  'int Function(int, [num])',
+  'int Function(num, [num, num])',
+  'int Function({int a})',
+  'int Function({num a})',
+  'int Function({required int a})',
+  'int Function({required num a, int b})',
+  'num Function({int a, required int b})',
+  'void Function(int, {int a})',
+  'void Function(num, {num a, num b})',
+  'P<Object?, Object Function(int)>',
+  'P<num?, num Function(int)>',
+  'P<int?, int Function(int)>',
+  'L<int>',
+  'L<num>',
+  'Function',
+  'G<Function>',
+  'G<int Function()>',
+];
+
 /// The text of a random type.
 String _random(Random random, int depth) {
   String inner() => _random(random, depth - 1);
@@ -153,7 +182,10 @@ String _randomFunction(Random random, String Function() inner) {
 void main() {
   test('subtypes are those of the official rules', () async {
     final random = Random(5);
-    final texts = [for (var i = 0; i < 400; i++) _random(random, 3)];
+    final texts = [
+      ..._functions,
+      for (var i = 0; i < 400; i++) _random(random, 3),
+    ];
     final source = await load(
       '$_classes\n'
       '${[for (final (i, text) in texts.indexed) 'typedef T$i = $text;'].join('\n')}',
@@ -179,7 +211,7 @@ void main() {
         );
       }
     }
-    expect(types, hasLength(400));
+    expect(types, hasLength(400 + _functions.length));
     expect(positive, greaterThan(5000));
   });
 }
