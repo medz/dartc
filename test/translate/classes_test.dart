@@ -376,10 +376,6 @@ A make() => A();''',
       '1:20: $what late fields.',
     );
     reports(
-      'class A { int? x; }\nvoid main() { A(); }',
-      '1:16: $what a field of type int?.',
-    );
-    reports(
       'mixin M {}\nclass A with M {}\nvoid main() { A(); }',
       '2:7: $what mixins.',
     );
@@ -408,32 +404,12 @@ A make() => A();''',
       '1:34: $what method tear-offs.',
     );
     reports(
-      'class A { int n = 1; }\nvoid f(A? a) { a?.n; }\nvoid main() { f(null); }',
-      '2:16: $what a value of type int?.',
-    );
-    reports(
       'class A { A? n; A get m => this; }\nvoid f(A? a) { a?.n?.n; a?.m.m; }\nvoid main() { f(null); }',
       '2:25: $what null-aware chains.',
     );
     reports(
       'class A { A? n; }\nvoid f(A? a) { a?.n = a; }\nvoid main() { f(null); }',
       '2:16: $what null-aware assignments.',
-    );
-    reports(
-      'class A { void f(Object o) {} }\nvoid main() { A().f(1); }',
-      '2:21: $what using int as an object.',
-    );
-    reports(
-      'void main() { Object o = 1; }',
-      '1:26: $what using int as an object.',
-    );
-    reports(
-      'class A { Object f() => A(); }\nclass B extends A { @override int f() => 1; }\nvoid use(A a) { a.f(); }\nvoid main() { use(B()); }',
-      '2:35: $what overriding f with other types.',
-    );
-    reports(
-      'class A { void f(A a) {} }\nclass B extends A { @override void f(covariant B b) {} }\nvoid use(A a) { a.f(a); }\nvoid main() { use(B()); }',
-      '2:36: $what covariant parameters.',
     );
     reports(
       'class A {}\nvoid main() { A().toString(); }',
@@ -450,10 +426,6 @@ A make() => A();''',
     reports(
       'class A { external void f(); }\nvoid main() { A().f(); }',
       '1:28: $what a function without a body.',
-    );
-    reports(
-      'class A {}\nvoid main() { A() == 1; }',
-      '2:15: $what operator == on these types.',
     );
     reports(
       'class A { A get a => this; void f() {} }\nvoid main() { A()..f()..f(); }',
@@ -485,7 +457,7 @@ A make() => A();''',
     );
     reports(
       'class A { int f() => 1; }\nvoid main() { A().f().toString(); }',
-      '2:15: $what method invocation.',
+      '2:15: $what calling toString of the SDK.',
     );
     reports(
       'class A { String toString() => "a"; }\nvoid main() { A().toString(); }',
@@ -514,34 +486,6 @@ A make() => A();''',
     reports(
       'class A<T> {}\nclass B extends A<int> {}\nvoid main() { B(); }',
       '1:7: $what generic classes.',
-    );
-    reports(
-      'class A { void f({A? a}) {} }\nclass B extends A { @override void f({covariant B? a}) {} }\nvoid use(A a) { a.f(); }\nvoid main() { use(B()); }',
-      '2:36: $what covariant parameters.',
-    );
-    reports(
-      'class A { void f(int a) {} }\nclass B extends A { @override void f(Object a) {} }\nvoid use(A a) { a.f(1); }\nvoid main() { use(B()); }',
-      '2:36: $what overriding f with other types.',
-    );
-    reports(
-      'abstract class A { Object get x; }\nclass B implements A { @override int x = 1; }\nvoid use(A a) { a.x; }\nvoid main() { use(B()); }',
-      '2:38: $what overriding x with other types.',
-    );
-    reports(
-      'class A { A operator +(Object o) => this; }\nvoid main() { A() + 1; }',
-      '2:21: $what using int as an object.',
-    );
-    reports(
-      'class A { A operator +(Object o) => this; }\nvoid main() { var a = A(); a += 1; }',
-      '2:33: $what using int as an object.',
-    );
-    reports(
-      'class A { int operator [](Object o) => 1; }\nvoid main() { A()[1]; }',
-      '2:19: $what using int as an object.',
-    );
-    reports(
-      'class A { void f({int x = 1, A? a}) {} }\nclass B extends A { @override void f({int x = 1, covariant B? a}) {} }\nvoid use(A a) { a.f(); }\nvoid main() { use(B()); }',
-      '2:36: $what covariant parameters.',
     );
   });
 }

@@ -30,29 +30,24 @@ HirModule translateProgram(SourceProgram program, {SourceProgram? runtime}) =>
 /// Functions, classes and selectors only grow and are bounded by the source.
 final class ProgramTranslator(
   final SourceProgram program,
-  final SourceProgram? runtime,
+  final SourceProgram? _runtime,
 ) implements ProgramScope {
+  SourceUnit get _unit => program.main.units.first;
+  LibraryElement get _core =>
+      program.main.element.typeProvider.objectElement.library;
   late final _declarations = Declarations([
     ...program.libraries,
-    ...?runtime?.libraries,
+    ...?_runtime?.libraries,
   ]);
   late final _classes = ClassTable(_declarations);
-  late final _dispatch = DispatchBuilder(
-    _declarations,
-    memberOf,
-    fieldOf,
-    defaultOf,
-  );
+  late final _dispatch = DispatchBuilder(this, _declarations, _unit);
   late final _constants = ConstantTable(
     _declarations,
     _classes,
+    _core,
     _dispatch.instantiate,
   );
-  late final _errors = ErrorTable(
-    _classes,
-    program.main.element.typeProvider.objectElement.library,
-    _dispatch.instantiate,
-  );
+  late final _errors = ErrorTable(_classes, _core, _dispatch.instantiate);
   late final _globals = GlobalTable(
     this,
     _declarations,
@@ -94,7 +89,7 @@ final class ProgramTranslator(
     final uncaught = _canThrow ? report.build(_dispatch.classes) : null;
     return HirModule(
       main,
-      [..._allFunctions, ?uncaught],
+      [..._allFunctions, ?uncaught, ?report.describe],
       classes: _dispatch.classes.map(_classes.classOf),
       dispatch: _dispatch.result(_classes.classOf),
       globals: _globals.globals,
@@ -130,14 +125,18 @@ final class ProgramTranslator(
     _stackOverflow ??= _errors.throwerOf(.stackOverflow);
     _raise ??= _runtimeFunction('raise');
     if (_allocate != null) _outOfMemory ??= _errors.throwerOf(.outOfMemory);
-    if (_errors.throwerIfMade(.negativeShift) != null) {
+    final int = _core.getClass('int')!;
+    final throwsInts =
+        _dispatch.classes.contains(int) &&
+        _thrown.any((class_) => isSubclass(int, class_));
+    if (throwsInts || _errors.throwerIfMade(.negativeShift) != null) {
       _writeNumber ??= _runtimeFunction('writeNumber');
     }
   }
 
   /// The function called [name] in the runtime, if there is one.
   HirFunction? _runtimeFunction(String name) {
-    for (final library in runtime?.libraries ?? const <SourceLibrary>[]) {
+    for (final library in _runtime?.libraries ?? const <SourceLibrary>[]) {
       final found = library.element.getTopLevelFunction(name);
       if (found != null) return _declare(found);
     }
@@ -145,7 +144,7 @@ final class ProgramTranslator(
   }
 
   bool _isRuntime(LibraryElement library) =>
-      runtime?.libraries.any((own) => own.element == library) ?? false;
+      _runtime?.libraries.any((own) => own.element == library) ?? false;
 
   @override
   HirFunction throwerOf(BuiltinError error) {
@@ -155,10 +154,28 @@ final class ProgramTranslator(
   }
 
   @override
+  HirClass boxClass(HirType type) => createdClass(
+    _core.getClass(type.dartName) ?? (throw StateError('No box of $type.')),
+  );
+
+  @override
+  HirConstObject boxOf(Object value) => _constants.box(value);
+
+  @override
+  int castNumber(String text) => _errors.castNumber(text);
+
+  @override
+  HirFunction runtime(String name) =>
+      _runtimeFunction(name) ?? (throw StateError('No runtime with $name.'));
+
+  @override
   int lateNumber(String name) => _errors.lateNumber(name);
 
   @override
-  HirClass get traceClass => _errors.trace;
+  HirClass get traceClass {
+    _addAllocation();
+    return _errors.trace;
+  }
 
   @override
   void addThrown(ClassElement class_) => _thrown.add(class_);
@@ -265,6 +282,7 @@ final class ProgramTranslator(
       _functions[element]!,
       element.formalParameters,
       receiverClass: hasReceiver(element) ? owner as ClassElement : null,
+      returnType: element.returnType,
     );
     final statements = StatementTranslator(this, builder);
     if (isInitializerElement(element)) {

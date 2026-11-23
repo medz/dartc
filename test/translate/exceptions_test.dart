@@ -413,15 +413,10 @@ void main() {
     });
 
     const what = 'Not supported yet:';
-    reports('void main() { throw 1; }', '1:21: $what using int as an object.');
     reports('void main() { throw "a"; }', '1:21: $what simple string literal.');
     reports(
       'void main() { throw Exception("a"); }',
       '1:21: $what calling Exception of the SDK.',
-    );
-    reports(
-      'void main() { try {} on int catch (e) { } }',
-      '1:25: $what catching int.',
     );
     reports(
       'void main() { try {} on String { } }',
@@ -455,7 +450,10 @@ void main() {
       'class A { A? b; }\nvoid f(A? a) { a?.b!; }\nvoid main() { f(null); }',
       '2:16: $what null-aware chains.',
     );
-    reports('void main() { 1.5.round(); }', '1:15: $what method invocation.');
+    reports(
+      'void main() { 1.5.round(); }',
+      '1:15: $what calling round of the SDK.',
+    );
   });
 
   test('objects that are never thrown may have any toString', () async {

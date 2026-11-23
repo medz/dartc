@@ -4,18 +4,40 @@ import 'package:dartc/hir.dart';
 
 /// The representation of values of [type], or null if not supported yet.
 HirType? valueType(DartType type) {
-  if (type.isDartCoreNull || classOf(type) != null) return .reference;
-  if (type.nullabilitySuffix != .none) return null;
-  if (type.isDartCoreInt) return .integer;
-  if (type.isDartCoreDouble) return .float;
-  if (type.isDartCoreBool) return .boolean;
-  return null;
+  if (type.nullabilitySuffix == .none) {
+    if (type.isDartCoreInt) return .integer;
+    if (type.isDartCoreDouble) return .float;
+    if (type.isDartCoreBool) return .boolean;
+  }
+  return isTop(type) || type.isDartCoreNull || classOf(type) != null
+      ? .reference
+      : null;
 }
+
+/// Whether every value is of [type].
+bool isTop(DartType type) =>
+    type is DynamicType ||
+    type is VoidType ||
+    type.isDartCoreObject && type.nullabilitySuffix == .question;
+
+/// Whether a value of [type] can be a number.
+bool canBeNumber(DartType type) =>
+    isTop(type) ||
+    type.isDartCoreObject ||
+    type.isDartCoreNum ||
+    type.isDartCoreInt ||
+    type.isDartCoreDouble;
+
+/// Whether [type] is that of numbers, without null.
+bool isNumber(DartType? type) =>
+    type != null &&
+    type.nullabilitySuffix == .none &&
+    (type.isDartCoreNum || type.isDartCoreInt || type.isDartCoreDouble);
 
 /// The class whose objects, or null, are the values of [type].
 ///
-/// Of the SDK's classes only `Object`, errors, exceptions and stack traces are
-/// supported yet.
+/// Of the SDK's classes only `Object`, numbers, `bool`, errors, exceptions and
+/// stack traces are supported yet.
 ClassElement? classOf(DartType? type) {
   if (type is! InterfaceType || type.typeArguments.isNotEmpty) return null;
   final element = type.element;
@@ -26,6 +48,7 @@ ClassElement? classOf(DartType? type) {
 bool _isKnown(ClassElement class_) =>
     class_.library.isDartCore &&
     (class_.isDartCoreObject ||
+        const {'num', 'int', 'double', 'bool'}.contains(class_.name) ||
         class_.name == 'StackTrace' ||
         _isFailure(class_) ||
         class_.allSupertypes.any((type) => _isFailure(type.element)));
@@ -35,10 +58,17 @@ bool _isFailure(InterfaceElement class_) =>
     (class_.name == 'Error' || class_.name == 'Exception');
 
 /// Whether a function returning [type] gives its caller nothing to use.
-bool hasNoResult(DartType type) =>
-    type is VoidType || type is DynamicType || type is NeverType;
+bool hasNoResult(DartType type) => type is VoidType || type is NeverType;
 
 /// Whether objects of [sub] are objects of [superclass] too.
 bool isSubclass(ClassElement sub, ClassElement superclass) =>
-    sub == superclass ||
-    sub.allSupertypes.any((type) => type.element == superclass);
+    _isSameClass(sub, superclass) ||
+    sub.allSupertypes.any((type) => _isSameClass(type.element, superclass));
+
+/// The program and the runtime have each their own elements for the SDK.
+bool _isSameClass(InterfaceElement a, InterfaceElement b) =>
+    a == b ||
+    a.library.isInSdk &&
+        b.library.isInSdk &&
+        a.name == b.name &&
+        a.library.uri == b.library.uri;

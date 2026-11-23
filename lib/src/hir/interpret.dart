@@ -165,6 +165,8 @@ final class HirInterpreter(
       case HirStoreGlobal(:final global):
         _globals[global] = inputs.single;
         return null;
+      case HirMachine(op: .isSame):
+        return identical(inputs[0], inputs[1]);
       case HirMachine(op: .writeError):
         _errors.writeCharCode(inputs.single as int);
         return null;

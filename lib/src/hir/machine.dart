@@ -22,4 +22,5 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   globalRoots([], .integer),
   globalRootCount([], .integer),
   collectsAlways([], .boolean),
+  isSame([.reference, .reference], .boolean),
 }

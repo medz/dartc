@@ -8,6 +8,9 @@ enum BuiltinError(
 
   /// Whether the text ends with a number, or depends on one.
   final bool hasNumber = false,
+
+  /// Whether the text depends on an object.
+  final bool hasObject = false,
 }) {
   divisionByZero(
     'IntegerDivisionByZeroException',
@@ -16,6 +19,9 @@ enum BuiltinError(
   ),
   negativeShift('ArgumentError', 'Invalid argument(s): ', hasNumber: true),
   nullCheck('TypeError', 'Null check operator used on a null value'),
+
+  /// A value is not of the type needed; the number says which.
+  wrongType('TypeError', "type '", hasNumber: true, hasObject: true),
   noInt('UnsupportedError', 'Unsupported operation: Infinity or NaN toInt'),
 
   /// A final variable got its value while it was set; the number says which.

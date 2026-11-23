@@ -72,9 +72,7 @@ final class GlobalTable(
       HirFunction(name, const [], type),
     );
     _variables[element] = variable;
-    _schedule(
-      () => _defineGetter(variable, unit, initializer!, element.isFinal),
-    );
+    _schedule(() => _defineGetter(variable, unit, initializer!, element));
     return variable;
   }
 
@@ -109,8 +107,9 @@ final class GlobalTable(
     GlobalVariable variable,
     SourceUnit unit,
     Expression initializer,
-    bool isFinal,
+    PropertyInducingElement element,
   ) {
+    final type = element.type, isFinal = element.isFinal;
     final GlobalVariable(:global, :isSet!, :getter!) = variable;
     final builder = FunctionBuilder(unit, getter, const []);
     final exit = builder.join(initializer);
@@ -119,7 +118,7 @@ final class GlobalTable(
       () => builder.jump(exit),
       () {
         final expressions = ExpressionTranslator(_scope, builder);
-        final value = expressions.valueAs(initializer, global.type);
+        final value = expressions.valueTo(initializer, type);
         if (isFinal) {
           // Evaluating it may have set it already.
           final number = _scope.lateNumber(global.name);

@@ -47,7 +47,12 @@ void main() { exit(1 + 2 * 3); }
 
 **8 异常。** 补上会抛异常的运算：`x!`、除数、移位位数不是常量的情况，`toInt()` 和 double 的 `~/`。`throw`、`try`、`catch`、`finally`、重新抛出、未捕获退出码。栈溢出、内存不够、`final` 变量在自己的初始化中又被赋值，都变成异常。
 
-**9 闭包、泛型、类型检查。** 含装箱（数字当作 `Object`、可空数字、用数字覆盖 `Object`）、方法提取、协变检查、`is`、`as`、`dynamic` 调用、`noSuchMethod`。
+**9 闭包、泛型、类型检查。** 分四小步，每小步单独完成和提交：
+
+- 9a：装箱（数字当作 `Object`、可空数字、`num`、用数字覆盖 `Object`）、`is`、`as`、`dynamic` 的值、`covariant` 参数的检查。
+- 9b：闭包、函数类型、方法提取。
+- 9c：泛型类和泛型函数，运行时类型，泛型的协变检查。
+- 9d：`dynamic` 调用。`noSuchMethod` 需要 `Symbol` 和 `List`，移到第 10 步。
 
 **10 标准库。** `hello`、`print_integers`、`map_sum`、`persistent_cell` 四个程序通过。取消第 8 步的限制：SDK 的异常对象还不能由程序创建，也不能读它们的成员；抛出的对象如果有自己的 `toString`，只支持常量文字；堆栈的文字不打印。
 

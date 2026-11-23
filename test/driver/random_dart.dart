@@ -8,7 +8,12 @@ enum Kind(final String name) {
   boolean('bool'),
 
   /// Any object of the generated classes.
-  object('C0');
+  object('C0'),
+
+  /// A number of either kind, a number or null, and anything.
+  number('num'),
+  maybe('int?'),
+  any('Object?');
 
   /// The kinds that the official runtime can print.
   static const List<Kind> plain = [integer, float, boolean];
@@ -41,7 +46,7 @@ final class RandomDart(int seed) {
   /// Expressions calling each generated function, with their types.
   List<(String, Kind)> get calls => [
     for (final function in _functions)
-      if (function.result != .object)
+      if (Kind.plain.contains(function.result))
         (_callOf(function, (kind) => _literal(kind)), function.result),
   ];
 
@@ -60,7 +65,12 @@ final class RandomDart(int seed) {
     ('i0', Kind.integer),
     ('d0', Kind.float),
     ('b0', Kind.boolean),
+    ('n0', Kind.number),
+    ('a0', Kind.any),
   ];
+
+  /// The fields that constructors take.
+  static final _given = _fields.take(3).toList();
   static const _classCount = 8;
 
   /// Variables of the library and of a class, with and without constants to
@@ -91,7 +101,7 @@ final class RandomDart(int seed) {
       _line('final K? k;');
       _line('C0? get o0 => k;');
       _line('set o0(C0? value) { }');
-      _line('const K(this.i0, this.d0, this.b0, [this.k]);');
+      _line('const K(this.i0, this.d0, this.b0, [this.k]) : n0 = d0, a0 = k;');
       _line('C0 operator +(C0 other) => b0 ? other : this;');
       _line('int operator [](int at) => i0 - at;');
       _line('void operator []=(int at, int value) {}');
@@ -132,7 +142,10 @@ final class RandomDart(int seed) {
           _line('${kind.name} $field;');
         }
         _line('C0? o0;');
-        _line('$name(this.i0, this.d0, [this.b0 = ${_literal(.boolean)}]);');
+        _line(
+          '$name(this.i0, this.d0, [this.b0 = ${_literal(.boolean)}]) '
+          ': n0 = i0, a0 = d0;',
+        );
         _line('C0 operator +(C0 other) => b0 ? this : other;');
         _line('int operator [](int at) => i0 + at;');
         _line('void operator []=(int at, int value) => i0 = at ^ value;');
@@ -166,6 +179,9 @@ final class RandomDart(int seed) {
         }
         if (_chance(4)) {
           _line('@override int operator [](int at) => super[at] * 3;');
+        }
+        if (_chance(4)) {
+          _line('@override int get n0 => i0;');
         }
       }
       for (final (i, method) in _methods.indexed) {
@@ -275,18 +291,27 @@ final class RandomDart(int seed) {
   }
 
   /// An expression that is constant.
-  String _constant(Kind kind) =>
-      kind == .object ? 'const ${_constantObject()}' : _literal(kind);
+  String _constant(Kind kind) => switch (kind) {
+    .object => 'const ${_constantObject()}',
+    .any => _constant(_any(Kind.values.take(5).toList())),
+    _ => _literal(kind),
+  };
 
   String _constantObject() {
     final rest = _random.nextBool() ? ', ${_constantObject()}' : '';
-    final values = [for (final (_, kind) in _fields) _literal(kind)];
+    final values = [for (final (_, kind) in _given) _literal(kind)];
     return 'K(${values.join(', ')}$rest)';
   }
 
   String _literal(Kind kind) => switch (kind) {
     .object => _chance(3) ? _constant(kind) : _creation(_literal),
     .boolean => '${_random.nextBool()}',
+    .number => _literal(_any([.integer, .float])),
+    .maybe => _chance(3) ? '(null as int?)' : _literal(.integer),
+    .any =>
+      _chance(6)
+          ? '(null as Object?)'
+          : _literal(_any(Kind.values.take(6).toList())),
     .integer => switch (_random.nextInt(4)) {
       0 => _any([
         '0',
@@ -334,10 +359,10 @@ final class RandomDart(int seed) {
   void _declare(Kind kind) {
     final name = 'v${_names++}';
     final value = _expression(kind, 2);
-    final head = kind != .object && _chance(3) ? 'var' : kind.name;
-    // A bare int literal would make `var` an int.
-    final isSafe = head == kind.name || kind != .float;
-    _line('${isSafe ? head : kind.name} $name = $value;');
+    // Elsewhere, the type of the value may be another one.
+    final isSafe = kind != .integer && kind != .boolean || !_chance(3);
+    final head = isSafe ? kind.name : 'var';
+    _line('$head $name = $value;');
     _scopes.last.add((name, kind));
   }
 

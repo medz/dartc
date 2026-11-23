@@ -21,6 +21,7 @@ final class Constant(final Object? value) {
 final class ConstantTable(
   final Declarations _declarations,
   final ClassTable _classes,
+  final LibraryElement _core,
 
   /// Tells that there are objects of a class.
   final void Function(ClassElement class_) _instantiate,
@@ -34,7 +35,7 @@ final class ConstantTable(
       .integer => object?.toIntValue(),
       .float => object?.toDoubleValue(),
       .boolean => object?.toBoolValue(),
-      .reference => object == null ? null : _object(object),
+      .reference => object == null ? null : _number(object) ?? _object(object),
       null => null,
     };
     if (value != null) return Constant(value);
@@ -63,6 +64,28 @@ final class ConstantTable(
     );
   }
 
+  HirConstObject? _number(DartObject object) {
+    final value =
+        object.toIntValue() ?? object.toDoubleValue() ?? object.toBoolValue();
+    return value == null ? null : box(value);
+  }
+
+  /// The object that [value], an `int`, `double` or `bool`, is.
+  HirConstObject box(Object value) {
+    final name = switch (value) {
+      int() => 'int',
+      double() => 'double',
+      _ => 'bool',
+    };
+    final class_ = _core.getClass(name)!;
+    final target = _classes.classOf(class_);
+    _instantiate(class_);
+    return _canonical(
+      class_,
+      HirConstObject(target, {target.fields.single: value}),
+    );
+  }
+
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
     if (class_ == null || class_.library.isInSdk) return null;
@@ -83,7 +106,12 @@ final class ConstantTable(
       level = level.superclass;
     }
     _instantiate(class_);
-    final found = HirConstObject(target, fields);
+    return _canonical(class_, HirConstObject(target, fields));
+  }
+
+  /// The object that [found] is the same as.
+  HirConstObject _canonical(ClassElement class_, HirConstObject found) {
+    final HirConstObject(:target, :fields) = found;
     final key = [
       class_.library.uri,
       target.name,

@@ -19,6 +19,9 @@ final class ErrorTable(
   /// The names of the variables that [BuiltinError.late] can be about.
   final List<String> lateNames = [];
 
+  /// What is said after the class of a value of a wrong type.
+  final List<String> castTexts = [];
+
   /// The functions that throw errors.
   Iterable<HirFunction> get functions => _throwers.values;
 
@@ -54,9 +57,14 @@ final class ErrorTable(
   };
 
   /// A number for the variable called [name].
-  int lateNumber(String name) {
-    if (!lateNames.contains(name)) lateNames.add(name);
-    return lateNames.indexOf(name);
+  int lateNumber(String name) => _numberIn(lateNames, name);
+
+  /// A number for [text], which is not 0.
+  int castNumber(String text) => _numberIn(castTexts, text) + 1;
+
+  static int _numberIn(List<String> texts, String text) {
+    if (!texts.contains(text)) texts.add(text);
+    return texts.indexOf(text);
   }
 
   HirFunction? throwerIfMade(BuiltinError error) => _throwers[error];
@@ -67,8 +75,11 @@ final class ErrorTable(
 
   HirFunction _makeThrower(BuiltinError error) {
     final class_ = _created(_class(error.className));
-    final number = class_.fields.single;
-    final parameters = [if (error.hasNumber) HirType.integer];
+    final number = class_.fields.first;
+    final parameters = [
+      if (error.hasObject) HirType.reference,
+      if (error.hasNumber) HirType.integer,
+    ];
     final block = HirBlock(parameters);
     final HirValue object;
     if (error.isConstant) {
@@ -76,9 +87,12 @@ final class ErrorTable(
     } else {
       object = block.add(HirNew(class_));
       final HirValue value = error.hasNumber
-          ? block.parameters.single
+          ? block.parameters.last
           : block.add(HirConst(0));
       block.add(HirStore(number, object, value));
+      if (error.hasObject) {
+        block.add(HirStore(class_.fields.last, object, block.parameters.first));
+      }
     }
     final HirValue stack = error.isExhaustion
         ? block.add(HirStatic(HirConstObject(trace, const {})))

@@ -24,6 +24,12 @@ extension on RandomDart {
       ),
       .boolean => (_any(['&', '|', '^']), _expression(.boolean, depth)),
       .object => ('+', _expression(.object, depth)),
+      .number => (
+        _any(['+', '-', '*']),
+        _expression(_any([.integer, .float, .number]), depth),
+      ),
+      .maybe => ('??', _expression(.maybe, depth)),
+      .any => ('??', _expression(.any, depth)),
     };
     return '$variable $operator= $right';
   }
@@ -70,8 +76,47 @@ extension on RandomDart {
       .float => _float(inner),
       .boolean => _boolean(inner),
       .object => _object(inner),
+      .number => _number(inner),
+      .maybe => _maybe(inner),
+      .any => _anything(inner),
     };
   }
+
+  String _number(String Function(Kind) inner) {
+    final kinds = <Kind>[.integer, .float, .number];
+    return switch (_random.nextInt(6)) {
+      0 => '(-(${inner(.number)}))',
+      1 => inner(_any(kinds)),
+      2 => '(${inner(_any(kinds))} / ${inner(.number)})',
+      3 when _mayThrow =>
+        '(${inner(.number)} ${_any(['~/', '%'])} ${inner(.number)})',
+      _ => '(${inner(.number)} ${_any(['+', '-', '*'])} ${inner(_any(kinds))})',
+    };
+  }
+
+  String _maybe(String Function(Kind) inner) => switch (_random.nextInt(4)) {
+    0 => '(null as int?)',
+    1 => inner(.integer),
+    2 => '(${inner(.boolean)} ? ${inner(.integer)} : null)',
+    _ => _narrowed('int', inner) ?? inner(.integer),
+  };
+
+  /// A value of [type] from an object that may be one, or null, if any can be.
+  String? _narrowed(String type, String Function(Kind) inner) {
+    final names = [
+      for (final kind in const <Kind>[.any, .number])
+        for (final name in _variables(kind))
+          if (!name.contains('.')) name,
+    ];
+    if (names.isEmpty) return null;
+    final name = _any(names);
+    if (_mayThrow) return '($name as $type?)';
+    // Variables of libraries and classes are not narrowed.
+    return '($name is $type ? $name as $type : null)';
+  }
+
+  String _anything(String Function(Kind) inner) =>
+      inner(_any(Kind.values.where((kind) => kind != .any).toList()));
 
   String _object(String Function(Kind) inner) {
     final variables = _variables(.object);
@@ -87,7 +132,12 @@ extension on RandomDart {
   }
 
   String _integer(String Function(Kind) inner) {
-    switch (_random.nextInt(9)) {
+    switch (_random.nextInt(11)) {
+      case 10:
+        return '(${inner(.maybe)} ?? ${inner(.integer)})';
+      case 9 when _mayThrow:
+        return '((${inner(.maybe)})!)';
+
       case 8 when _variables(.object).isNotEmpty:
         final variable = _any(_variables(.object));
         return _any([
@@ -141,7 +191,25 @@ extension on RandomDart {
   }
 
   String _boolean(String Function(Kind) inner) {
-    switch (_random.nextInt(8)) {
+    switch (_random.nextInt(11)) {
+      case 8:
+        return '(${inner(.any)} ${_any(['==', '!='])} ${inner(_any(Kind.values))})';
+      case 9:
+        final type = _any([
+          'int',
+          'num',
+          'double',
+          'bool',
+          'C0',
+          'C1',
+          'K',
+          'Object',
+          'int?',
+          'C3?',
+        ]);
+        return '(${inner(.any)} ${_any(['is', 'is!'])} $type)';
+      case 10:
+        return '(${inner(.number)} ${_any(['<', '<=', '>', '>=', '==', '!='])} ${inner(_any([.integer, .number, .float]))})';
       case 6 when _variables(.object).isNotEmpty:
         final variable = _any(_variables(.object));
         return _any([

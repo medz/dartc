@@ -88,10 +88,18 @@ final class ClassTable(final Declarations _declarations) {
     CompileFailure unsupported(String what) =>
         _declarations.unsupported(element, what);
     if (element.library.isInSdk) {
-      // An error thrown by the program itself, or a stack trace.
-      return HirClass(element.displayName, null, [
-        if (element.name != 'StackTrace') HirField('number', .integer),
-      ]);
+      // A number, an error thrown by the program itself, or a stack trace.
+      return HirClass(element.displayName, null, switch (element.name) {
+        'StackTrace' => const [],
+        'int' => [HirField('value', .integer)],
+        'double' => [HirField('value', .float)],
+        'bool' => [HirField('value', .boolean)],
+        'TypeError' => [
+          HirField('number', .integer),
+          HirField('object', .reference),
+        ],
+        _ => [HirField('number', .integer)],
+      });
     }
     if (element.mixins.isNotEmpty) throw unsupported('mixins');
     if (element.primaryConstructor != null) {

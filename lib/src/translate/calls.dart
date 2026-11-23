@@ -6,6 +6,7 @@ import 'package:dartc/hir.dart';
 import 'builder.dart';
 import 'checks.dart';
 import 'constant.dart';
+import 'conversions.dart';
 import 'describe.dart';
 import 'members.dart';
 import 'scope.dart';
@@ -17,20 +18,21 @@ final class CallTranslator(
   final FunctionBuilder _builder,
   final Evaluator _evaluator,
 ) {
+  late final _conversions = Conversions(_scope, _builder);
+
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
   /// The result of [node], if it has one and [isUsed].
   HirValue? invocation(MethodInvocation node, {required bool isUsed}) {
     final element = node.methodName.element, target = node.realTarget;
+    if (target?.staticType is DynamicType) _unsupported(target!, usingDynamic);
     if (element is! ExecutableElement) _unsupported(node, describe(node));
     if (!isInstanceMember(element)) return _static(node, element);
     if (element is! MethodElement) _unsupported(node, describe(node));
-    if (target != null && _isToInt(element, target) && !node.isNullAware) {
-      return CheckedOperations(
-        _scope,
-        _builder,
-      ).toInt(_evaluator.value(target));
+    if (target != null && isNumber(target.staticType)) {
+      final result = _numberMember(element, target);
+      if (result != null) return result;
     }
     if (target is SuperExpression) {
       return superMember(
@@ -53,12 +55,21 @@ final class CallTranslator(
         : call(receiver);
   }
 
-  static bool _isToInt(MethodElement element, Expression target) {
-    final type = target.staticType;
-    return element.displayName == 'toInt' &&
-        type != null &&
-        (type.isDartCoreInt || type.isDartCoreDouble) &&
-        type.nullabilitySuffix == .none;
+  /// The result of a conversion of the number [target], if it is one.
+  HirValue? _numberMember(MethodElement element, Expression target) {
+    final name = element.displayName;
+    if (name != 'toInt' && name != 'toDouble') return null;
+    final value = _evaluator.value(target);
+    if (value.type == .reference) {
+      final helper = name == 'toInt' ? 'numToInt' : 'numToDouble';
+      return _builder.call(HirCall(_scope.runtime(helper), [value]));
+    }
+    if (name == 'toInt') {
+      return CheckedOperations(_scope, _builder).toInt(value);
+    }
+    return value.type == .float
+        ? value
+        : _builder.add(HirUnary(.intToFloat, value));
   }
 
   HirValue _this(AstNode node) =>
@@ -72,6 +83,7 @@ final class CallTranslator(
     if (hasNullAware(target) && !isNullAware) {
       _unsupported(target.parent!, 'null-aware chains');
     }
+    if (target.staticType is DynamicType) _unsupported(target, usingDynamic);
     if (classOf(target.staticType) == null) {
       _unsupported(target.parent!, describe(target.parent!));
     }
@@ -109,7 +121,10 @@ final class CallTranslator(
       () => _builder.jump(exit, isUsed ? _builder.add(HirNull()) : null),
       () {
         final result = call();
-        _builder.jump(exit, isUsed ? result : null);
+        _builder.jump(
+          exit,
+          isUsed ? _conversions.coerce(result!, type!) : null,
+        );
       },
     );
     return _builder.enter(exit);
@@ -123,17 +138,17 @@ final class CallTranslator(
     switch (_coreName(element)) {
       case 'dart:io exit':
         final code = arguments.single.argumentExpression;
-        _builder.end(HirExit(_evaluator.valueAs(code, .integer)));
+        final type = _conversions.types.intType;
+        _builder.end(HirExit(_evaluator.valueTo(code, type)));
         return null;
       case 'dart:core print':
         _print(arguments.single.argumentExpression);
         return null;
       case 'dart:core identical':
         final [left, right] = [
-          for (final argument in arguments)
-            _evaluator.valueAs(argument.argumentExpression, .reference),
+          for (final argument in arguments) argument.argumentExpression,
         ];
-        return _builder.add(HirCompare(.equal, left, right));
+        return _identical(left, right);
     }
     if (_scope.machineOpOf(element) case final op?) {
       return _machine(op, arguments);
@@ -145,6 +160,19 @@ final class CallTranslator(
     return _direct(function, element, [
       ...ordered(element, supplied(node.argumentList)),
     ]);
+  }
+
+  HirValue _identical(Expression left, Expression right) {
+    final a = _evaluator.value(left), b = _evaluator.value(right);
+    if (a.type == b.type && a.type != .float && a.type != .reference) {
+      return _builder.add(HirCompare(.equal, a, b));
+    }
+    final objects = [
+      for (final value in [a, b]) _conversions.coerce(value, .reference),
+    ];
+    return canBeNumber(left.staticType!) && canBeNumber(right.staticType!)
+        ? _builder.call(HirCall(_scope.runtime('sameObjects'), objects))!
+        : _builder.add(HirCompare(.equal, objects[0], objects[1]));
   }
 
   HirValue? _machine(HirMachineOp op, List<Argument> arguments) {
@@ -218,13 +246,16 @@ final class CallTranslator(
     final values = <FormalParameterElement, HirValue>{};
     for (final argument in list.arguments) {
       final parameter = argument.correspondingParameter!;
-      final type =
-          valueType(parameter.type) ??
-          _unsupported(
-            argument.argumentExpression,
-            'a parameter of type ${parameter.type}',
-          );
-      values[parameter] = _evaluator.valueAs(argument.argumentExpression, type);
+      if (valueType(parameter.type) == null) {
+        _unsupported(
+          argument.argumentExpression,
+          'a parameter of type ${parameter.type}',
+        );
+      }
+      values[parameter] = _evaluator.valueTo(
+        argument.argumentExpression,
+        parameter.type,
+      );
     }
     return values;
   }
@@ -350,15 +381,15 @@ final class CallTranslator(
   /// Reads `target[index]`.
   HirValue index(IndexExpression node) {
     final element = node.element, target = node.realTarget;
+    if (target.staticType is DynamicType) _unsupported(target, usingDynamic);
     if (element == null || node.isNullAware) {
       _unsupported(node, describe(node));
     }
-    final type =
-        valueType(element.formalParameters.first.type) ??
-        _unsupported(node, describe(node));
+    final type = element.formalParameters.first.type;
+    if (valueType(type) == null) _unsupported(node, describe(node));
     final isSuper = target is SuperExpression;
     final receiver = isSuper ? _this(node) : object(target);
-    final position = _evaluator.valueAs(node.index, type);
+    final position = _evaluator.valueTo(node.index, type);
     final result = isSuper
         ? superMember(node, element, [position])
         : invoke(node, receiver, _receiverClass(node, target), element, [

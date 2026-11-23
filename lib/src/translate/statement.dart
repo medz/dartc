@@ -88,7 +88,9 @@ final class StatementTranslator(
       if (expression != null) expressions.effect(expression);
       _tries.leave(0, (_) => _builder.end(HirReturn()));
     } else {
-      final value = expressions.valueAs(expression!, result);
+      final value = expression == null
+          ? _builder.add(HirNull())
+          : expressions.valueTo(expression, _builder.returnType!);
       _tries.leave(0, (kept) => _builder.end(HirReturn(kept)), value);
     }
   }
@@ -104,7 +106,7 @@ final class StatementTranslator(
       final initializer = declaration.initializer;
       final value = initializer == null
           ? null
-          : expressions.valueAs(initializer, type);
+          : expressions.valueTo(initializer, variable.type);
       _builder.declare(variable, type);
       if (value != null) _builder.assign(variable, value);
     }

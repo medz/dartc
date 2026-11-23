@@ -1,6 +1,7 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builtin_error.dart';
@@ -38,6 +39,18 @@ abstract interface class ProgramScope() {
 
   /// What gives the value that [parameter] has where a call leaves it out.
   HirInstruction defaultOf(FormalParameterElement parameter);
+
+  /// The class of the objects holding values of [type].
+  HirClass boxClass(HirType type);
+
+  /// The object that the constant [value] is.
+  HirConstObject boxOf(Object value);
+
+  /// A number for the end of what is said about a value of a wrong type.
+  int castNumber(String text);
+
+  /// The function called [name] in the runtime.
+  HirFunction runtime(String name);
 
   /// A function that throws [error], given its number if it has one.
   HirFunction throwerOf(BuiltinError error);
@@ -86,6 +99,9 @@ abstract interface class Evaluator() {
   /// An expression that never completes stands for a value of type
   /// [placeholder].
   HirValue value(Expression node, {HirType placeholder});
+
+  /// The value of [node] as one of [type], which is checked if it is dynamic.
+  HirValue valueTo(Expression node, DartType type);
 
   /// The value of [node], which must be represented as [type].
   HirValue valueAs(Expression node, HirType type);

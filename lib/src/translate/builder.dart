@@ -1,5 +1,6 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/graph.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
@@ -29,6 +30,9 @@ final class FunctionBuilder(
 
   /// The class of the object that the function's first parameter is.
   final ClassElement? receiverClass,
+
+  /// The type of what the function returns.
+  final DartType? returnType,
 }) {
   final _entry = HirBlock(function.parameters);
   late HirBlock _block = _entry;
@@ -37,11 +41,19 @@ final class FunctionBuilder(
 
   this {
     final given = _entry.parameters.skip(receiverClass == null ? 0 : 1);
-    for (final (i, value) in given.indexed) {
-      declare(parameters[i], value.type);
-      assign(parameters[i], value);
+    // Functions made without source have no names for what they are given.
+    for (final (i, parameter) in parameters.indexed) {
+      final value = given.elementAt(i);
+      declare(parameter, value.type);
+      assign(parameter, value);
     }
   }
+
+  /// The library of the source translated.
+  LibraryElement get library => unit.ast.declaredFragment!.element;
+
+  /// The values that the function is given.
+  List<HirValue> get inputs => _entry.parameters;
 
   /// The object that `this` is, where there is one.
   HirValue? get receiver =>
@@ -49,7 +61,12 @@ final class FunctionBuilder(
 
   /// Gives [function] the blocks that can run.
   void finish() {
-    end(function.result == null ? HirReturn() : HirUnreachable());
+    // Only values that may be null may be left out.
+    end(switch (function.result) {
+      null => HirReturn(),
+      .reference => HirReturn(add(HirNull())),
+      _ => HirUnreachable(),
+    });
     function.define(
       reversePostorder(
         _entry,
@@ -96,6 +113,28 @@ final class FunctionBuilder(
     _handlers.add(handler);
     body();
     _handlers.removeLast();
+  }
+
+  /// What one of two parts gives, depending on [condition].
+  HirValue choose(
+    HirValue condition,
+    HirType type,
+    HirValue Function() ifTrue,
+    HirValue Function() ifFalse,
+  ) {
+    final exit = Join._(HirBlock([type]), 1, const []);
+    branch(condition, () => jump(exit, ifTrue()), () => jump(exit, ifFalse()));
+    return enter(exit)!;
+  }
+
+  /// Does [work], which throws, unless [condition] holds.
+  void unless(HirValue condition, void Function() work) {
+    final exit = Join._(HirBlock(), 0, const []);
+    branch(condition, () => jump(exit), () {
+      work();
+      end(HirUnreachable());
+    });
+    enter(exit);
   }
 
   /// Calls [thrower], which throws, if [failed] holds.

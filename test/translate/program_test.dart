@@ -418,19 +418,6 @@ b0():
     );
     reports('external void main();', '2:21: $what a function without a body.');
     reports(
-      'void f(num x) {}\nvoid main() { f(1); }',
-      '2:6: $what a parameter of type num.',
-    );
-    reports(
-      'int? f() => 1;\nvoid main() { f(); }',
-      '2:6: $what a result of type int?.',
-    );
-    reports(
-      'void main() { num x = 1; }',
-      '2:19: $what a variable of type num.',
-    );
-    reports('void main() { int? x; }', '2:20: $what a variable of type int?.');
-    reports(
       'void main() { late int x; x = 1; }',
       '2:15: $what late variables.',
     );
@@ -452,23 +439,15 @@ b0():
       'void main() { void f() {} }',
       '2:15: $what function declaration statement.',
     );
-    reports(
-      'void main() { 1 == true; }',
-      '2:15: $what operator == on these types.',
-    );
-    reports(
-      'void main() { 1 < 2 ? 1 : 2.5; }',
-      '2:15: $what a value of type num.',
-    );
     reports('void main() { "a"; }', '2:15: $what simple string literal.');
-    reports('void main() { 1.abs(); }', '2:15: $what method invocation.');
+    reports('void main() { 1.abs(); }', '2:15: $what calling abs of the SDK.');
     reports(
       'void main() { exit(main.hashCode); }',
       '2:20: $what prefixed identifier.',
     );
     reports(
       'void main() { exit(1.hashCode); }',
-      '2:20: $what property access.',
+      '2:20: $what calling hashCode of the SDK.',
     );
     reports(
       "import 'dart:math';\nvoid main() { max(1, 2); }",
@@ -477,15 +456,6 @@ b0():
     reports(
       'const s = "a";\nvoid main() { s; }',
       '3:15: $what a constant of type String.',
-    );
-    reports(
-      'void main() { true == 1; }',
-      '2:15: $what operator == on these types.',
-    );
-    reports('void main() { 1 ?? 2; }', '2:15: $what using int as an object.');
-    reports(
-      'void f(int x) { x ??= 1; }\nvoid main() { f(1); }',
-      '2:17: $what operator ??=.',
     );
     reports(
       'void main() { for (var (a, b) = (1, 2); a < b; a++) {} }',

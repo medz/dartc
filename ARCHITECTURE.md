@@ -58,7 +58,7 @@
 | `world` | 哪些类和调用会相遇 | 无 |
 | `translate` | AST → HIR，按需翻译可达的声明 | `source` `world` `hir` `graph` analyzer |
 | `lower` | HIR → LIR | `hir` `lir` `graph` |
-| `heap` | 运行时的 Dart 源码：回收器、异常展开，随程序一起编译 | 无 |
+| `heap` | 运行时的 Dart 源码：回收器、异常展开、数字，随程序一起编译 | 无 |
 | `emit` | LIR → 机器码 | `lir` `graph` |
 | `image` | 机器码 → 文件 | `emit` |
 | `driver` | 把阶段串起来，CLI 和 API 共用 | 全部 |
@@ -133,7 +133,9 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 
 | 问题 | 决定 |
 | --- | --- |
-| `int` `double` `bool` | 静态类型确定时用 `i64`/`f64`；进入 `Object`、`dynamic` 或泛型位置才装箱 |
+| `int` `double` `bool` | 静态类型确定时用 `i64`/`f64`；进入 `Object`、`num`、可空、`dynamic` 或泛型位置才装箱。`bool` 的盒子只有两个。`num` 的运算在 `heap/numbers.dart` |
+| 值的表示 | 表达式的值总是按它的静态类型表示；`Conversions` 负责转换和检查。覆盖成员表示不同时，适配函数转换 |
+| 隐式检查 | `dynamic` 的值进入有类型的位置时检查；`covariant` 参数由适配函数检查 |
 | 对象 | 8 字节的头：4 字节类编号，4 字节标志；然后每个字段 8 字节，父类的在前 |
 | GC | 精确、不移动的标记清除；根来自栈表和全局变量。不创建对象的程序没有回收器 |
 | 分配 | 调用模块里的函数 `.allocate`，它来自 `heap` 的 `allocate`；内存不够时抛异常 |

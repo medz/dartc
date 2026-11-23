@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:dartc/driver.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
+import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
 
 import '../image/support.dart' show skipExecution;
@@ -97,7 +98,10 @@ Future<void> _compareRandom(int seed) async {
   File(path).writeAsStringSync(source);
   final checked = await Process.run('$hostSdk/bin/dart', ['run', path]);
   expect(checked.exitCode, 100, reason: reason(checked.exitCode));
-  final module = await translate(source);
+  final module = translateProgram(
+    await loadProgram(path, sdk: hostSdk),
+    runtime: await loadRuntime(sdk: hostSdk),
+  );
   // The official runtime has shown that the program ends.
   const steps = 1 << 32;
   final interpreter = HirInterpreter(module, maxSteps: steps);

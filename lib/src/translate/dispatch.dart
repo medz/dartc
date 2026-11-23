@@ -1,8 +1,11 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
+import 'package:dartc/source.dart';
 import 'package:dartc/world.dart';
 
+import 'builder.dart';
 import 'classes.dart';
+import 'conversions.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -16,16 +19,15 @@ typedef _Shape = ({
 
 /// Finds which functions calls on objects can reach.
 final class DispatchBuilder(
+  final ProgramScope _scope,
   final Declarations _declarations,
-  final HirFunction Function(ExecutableElement member) _memberOf,
-  final HirField Function(FieldElement field) _fieldOf,
-  final HirInstruction Function(FormalParameterElement parameter) _defaultOf,
+  final SourceUnit _unit,
 ) {
   final _world = World<ClassElement, HirSelector>(isSubclass);
   final _selectors = <String, HirSelector>{};
   final _shapes = <HirSelector, _Shape>{};
   final _entries = <HirSelector, Map<ClassElement, HirFunction>>{};
-  final _adapters = <(ExecutableElement, HirSelector), HirFunction>{};
+  final _adapters = <(ExecutableElement, HirSelector, String), HirFunction>{};
 
   /// Functions made here rather than declared by the program.
   final List<HirFunction> made = [];
@@ -120,15 +122,38 @@ final class DispatchBuilder(
     final found =
         implementationIn(class_, shape.member) ??
         (throw _declarations.unsupported(class_, 'noSuchMethod'));
-    if (found.library.isInSdk) return _objectEquals;
-    _checkCovariance(class_, found);
-    return _adapters[(found, selector)] ??= _adapt(found, selector, shape);
+    if (found.library.isInSdk) {
+      return _numberEquals(class_, selector) ?? _objectEquals;
+    }
+    final checked = _checkedParameters(class_, found);
+    return _adapters[(found, selector, '$checked')] ??= _adapt(
+      found,
+      selector,
+      shape,
+      checked,
+    );
   }
 
-  /// Calls rely on the parameters that overridden members declare.
-  void _checkCovariance(ClassElement class_, ExecutableElement found) {
+  /// How a number compares itself, if [class_] is one of numbers.
+  HirFunction? _numberEquals(ClassElement class_, HirSelector selector) {
+    final isInt = class_.name == 'int';
+    if (!class_.library.isInSdk || !isInt && class_.name != 'double') {
+      return null;
+    }
+    return _make('$class_ ==', selector, (builder, conversions) {
+      final [self, other] = builder.inputs;
+      final value = conversions.coerce(self, isInt ? .integer : .float);
+      final helper = _scope.runtime(isInt ? 'intEquals' : 'doubleEquals');
+      return builder.call(HirCall(helper, [value, other]));
+    });
+  }
+
+  /// The places of parameters that calls may give values of other types, as
+  /// they rely on the types that overridden members declare.
+  List<int> _checkedParameters(ClassElement class_, ExecutableElement found) {
     final system = found.library.typeSystem;
     final parameters = found.formalParameters;
+    final checked = <int>{};
     for (final other in overriddenBy(class_, found)) {
       // Of the SDK's members only those of Object can be called yet.
       final owner = other.enclosingElement;
@@ -137,91 +162,100 @@ final class DispatchBuilder(
         continue;
       }
       for (final declared in other.formalParameters) {
-        final own = declared.isNamed
-            ? parameters.firstWhere((p) => p.isNamed && p.name == declared.name)
-            : parameters
-                  .where((p) => p.isPositional)
-                  .elementAt(other.formalParameters.indexOf(declared));
-        if (!system.isSubtypeOf(declared.type, own.type)) {
-          throw _declarations.unsupported(
-            fieldOfAccessor(found) ?? found,
-            'covariant parameters',
-          );
+        final place = declared.isNamed
+            ? parameters.indexWhere((p) => p.isNamed && p.name == declared.name)
+            : other.formalParameters.indexOf(declared);
+        if (!system.isSubtypeOf(declared.type, parameters[place].type)) {
+          checked.add(place);
         }
       }
     }
+    return checked.toList()..sort();
   }
 
-  /// A function called as [selector] says that does the work of [found].
+  /// A function called as [selector] says that does the work of [found], after
+  /// checking some parameters.
   HirFunction _adapt(
     ExecutableElement found,
     HirSelector selector,
     _Shape shape,
+    List<int> checked,
   ) {
-    if (fieldOfAccessor(found) case final field?) {
-      return _accessor(found, _fieldOf(field), selector);
-    }
-    final target = _memberOf(found);
+    final field = fieldOfAccessor(found);
     final given = _given(found, shape.positional, shape.named);
+    final parameters = found.formalParameters;
+    HirValue argument(
+      FunctionBuilder builder,
+      Conversions conversions,
+      FormalParameterElement parameter,
+    ) {
+      final at = given.indexOf(parameter);
+      if (at < 0) return builder.add(_scope.defaultOf(parameter));
+      final value = builder.inputs[at + 1], type = parameter.type;
+      if (!checked.contains(parameters.indexOf(parameter))) {
+        return conversions.coerce(value, valueType(type)!);
+      }
+      return conversions.cast(
+            value,
+            conversions.types.objectQuestionType,
+            type,
+            ending: " of '${parameter.name}'",
+          ) ??
+          (throw _declarations.unsupported(found, 'testing for $type'));
+    }
+
+    if (field != null) {
+      final place = _scope.fieldOf(field);
+      return _make(selector.name, selector, (builder, conversions) {
+        final receiver = builder.inputs.first;
+        if (found is GetterElement) {
+          return builder.add(HirLoad(place, receiver));
+        }
+        final value = argument(builder, conversions, parameters.single);
+        builder.add(HirStore(place, receiver, value));
+        return null;
+      });
+    }
+    final target = _scope.memberOf(found);
     final isSame =
-        given.length == found.formalParameters.length &&
-        given.indexed.every((e) => e.$2 == found.formalParameters[e.$1]) &&
+        checked.isEmpty &&
+        given.length == parameters.length &&
+        given.indexed.every((e) => e.$2 == parameters[e.$1]) &&
+        given.indexed.every(
+          (e) => valueType(e.$2.type) == selector.parameters[e.$1],
+        ) &&
         target.result == selector.result;
-    Never mismatch() => throw _declarations.unsupported(
-      found,
-      'overriding ${found.displayName} with other types',
-    );
-    for (final (i, parameter) in given.indexed) {
-      if (valueType(parameter.type) != selector.parameters[i]) mismatch();
-    }
-    if (selector.result != null && target.result != selector.result) mismatch();
     if (isSame) return target;
-    final block = HirBlock([.reference, ...selector.parameters]);
-    final supplied = {
-      for (final (i, parameter) in given.indexed)
-        parameter: block.parameters[i + 1],
-    };
-    final call = block.add(
-      HirCall(target, [
-        block.parameters.first,
-        for (final parameter in found.formalParameters)
-          supplied[parameter] ?? block.add(_defaultOf(parameter)),
-      ]),
-    );
-    block.end(HirReturn(selector.result == null ? null : call));
-    return _make('adapt ${target.name}', selector, block);
-  }
-
-  HirFunction _accessor(
-    ExecutableElement found,
-    HirField field,
-    HirSelector selector,
-  ) {
-    final isGetter = found is GetterElement;
-    final type = isGetter ? selector.result : selector.parameters.single;
-    if (field.type != type) {
-      throw _declarations.unsupported(
-        fieldOfAccessor(found)!,
-        'overriding ${field.name} with other types',
+    return _make('adapt ${target.name}', selector, (builder, conversions) {
+      return builder.call(
+        HirCall(target, [
+          builder.inputs.first,
+          for (final parameter in parameters)
+            argument(builder, conversions, parameter),
+        ]),
       );
-    }
-    final block = HirBlock([.reference, ...selector.parameters]);
-    final receiver = block.parameters.first;
-    if (isGetter) {
-      block.end(HirReturn(block.add(HirLoad(field, receiver))));
-    } else {
-      block
-        ..add(HirStore(field, receiver, block.parameters[1]))
-        ..end(HirReturn());
-    }
-    return _make(selector.name, selector, block);
+    });
   }
 
-  HirFunction _make(String name, HirSelector selector, HirBlock block) {
+  /// A function for [selector] giving what [build] does, if it gives anything.
+  HirFunction _make(
+    String name,
+    HirSelector selector,
+    HirValue? Function(FunctionBuilder builder, Conversions conversions) build,
+  ) {
     final function = HirFunction(name, [
       .reference,
       ...selector.parameters,
-    ], selector.result)..define([block]);
+    ], selector.result);
+    final builder = FunctionBuilder(_unit, function, const []);
+    final conversions = Conversions(_scope, builder);
+    final value = build(builder, conversions);
+    final result = selector.result;
+    if (result != null) {
+      final given = value ?? builder.add(HirNull());
+      builder.end(HirReturn(conversions.coerce(given, result)));
+    }
+    builder.finish();
     made.add(function);
     return function;
   }

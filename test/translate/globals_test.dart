@@ -327,14 +327,6 @@ int get get => x;''',
       '1:27: $what late variables.',
     );
     reports(
-      'num x = 1;\nvoid main() { x; }',
-      '1:5: $what a variable of type num.',
-    );
-    reports(
-      'int? x;\nvoid main() { x; }',
-      '1:6: $what a variable of type int?.',
-    );
-    reports(
       'external int x;\nvoid main() { x; }',
       '1:14: $what external variables.',
     );
@@ -367,32 +359,12 @@ int get get => x;''',
       '2:15: $what objects of type A<int>.',
     );
     reports(
-      'const Object o = 1;\nvoid main() { o; }',
-      '2:15: $what a constant of type Object.',
-    );
-    reports(
-      'class A { final Object o; const A(this.o); }\nvoid main() { const A(1); }',
-      '2:15: $what a constant of type A.',
-    );
-    reports(
-      'void f([Object o = 1]) {}\nvoid main() { f(); }',
-      '1:6: $what a default of type Object.',
-    );
-    reports(
       'class A { const A(); }\nvoid f(A a) { switch (a) { case const A(): } }\nvoid main() { f(A()); }',
       '2:39: $what this kind of case.',
     );
     reports(
       'class A { const A(); static const k = A(); }\nvoid f(A a) { switch (a) { case A.k: } }\nvoid main() { f(A()); }',
       '2:33: $what this kind of case.',
-    );
-    reports(
-      'dynamic get x => 1;\nvoid main() { if (x == 0) print("a"); }',
-      '2:19: $what simple identifier.',
-    );
-    reports(
-      'class A { dynamic get d => 5; }\nvoid main() { if (A().d == 0) print("a"); }',
-      '2:19: $what property access.',
     );
   });
 }

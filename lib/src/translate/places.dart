@@ -1,9 +1,11 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'calls.dart';
+import 'conversions.dart';
 import 'describe.dart';
 import 'members.dart';
 import 'scope.dart';
@@ -13,12 +15,12 @@ import 'types.dart';
 /// Something that can be assigned, whose parts are evaluated already.
 sealed class const Place() {
   /// The type of the values assigned.
-  HirType get type;
+  DartType get type;
 }
 
 final class const _Local(
   final VariableElement variable,
-  @override final HirType type,
+  @override final DartType type,
 ) extends Place;
 
 /// A variable or setter of a library or class.
@@ -26,7 +28,7 @@ final class const _Static(
   final AstNode node,
   final Element? reader,
   final SetterElement writer,
-  @override final HirType type,
+  @override final DartType type,
 ) extends Place;
 
 /// A property or element of [receiver], or of the superclass's part of `this`
@@ -38,7 +40,7 @@ final class const _Member(
   final ExecutableElement? reader,
   final ExecutableElement writer,
   final List<HirValue> positions,
-  @override final HirType type,
+  @override final DartType type,
 ) extends Place;
 
 /// Translates what assignments read and write.
@@ -47,6 +49,7 @@ final class PlaceTranslator(
   final Evaluator _evaluator,
   final CallTranslator _calls,
   final StaticTranslator _statics,
+  final Conversions _conversions,
 ) {
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -55,18 +58,26 @@ final class PlaceTranslator(
   Place place(CompoundAssignmentExpression node, Expression to) {
     final writer = node.writeElement;
     if (writer is VariableElement && _builder.typeOf(writer) != null) {
-      return _Local(writer, _builder.typeOf(writer)!);
+      return _Local(writer, writer.type);
     }
     Never reject() => _unsupported(to, 'assignment to ${describe(to)}');
-    HirType typeOf(FormalParameterElement parameter) =>
-        valueType(parameter.type) ??
-        _unsupported(to, 'a value of type ${parameter.type}');
+    DartType typeOf(FormalParameterElement parameter) =>
+        valueType(parameter.type) != null
+        ? parameter.type
+        : _unsupported(to, 'a value of type ${parameter.type}');
     if (writer is SetterElement &&
         writer.isStatic &&
         _statics.declares(writer)) {
       final type = typeOf(writer.formalParameters.single);
       return _Static(node, node.readElement, writer, type);
     }
+    final owner = switch (to) {
+      PrefixedIdentifier(:final prefix) => prefix,
+      PropertyAccess(:final realTarget) ||
+      IndexExpression(:final realTarget) => realTarget,
+      _ => null,
+    };
+    if (owner?.staticType is DynamicType) _unsupported(owner!, usingDynamic);
     if (writer is! ExecutableElement || !isInstanceMember(writer)) reject();
     final Expression? target;
     switch (to) {
@@ -99,7 +110,7 @@ final class PlaceTranslator(
       writer,
       [
         if (to is IndexExpression)
-          _evaluator.valueAs(to.index, typeOf(parameters.first)),
+          _evaluator.valueTo(to.index, typeOf(parameters.first)),
       ],
       typeOf(parameters.last),
     );
@@ -116,7 +127,9 @@ final class PlaceTranslator(
     _Member(:final node) => _unsupported(node, describe(node)),
   };
 
-  void write(Place place, HirValue value) {
+  /// Assigns [given], which is of the type of [place].
+  void write(Place place, HirValue given) {
+    final value = _conversions.coerce(given, valueType(place.type)!);
     switch (place) {
       case _Local(:final variable):
         _builder.assign(variable, value);

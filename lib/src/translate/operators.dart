@@ -1,10 +1,12 @@
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'calls.dart';
 import 'checks.dart';
+import 'conversions.dart';
+import 'describe.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -15,13 +17,19 @@ final class OperatorTranslator(
   final CallTranslator _calls,
 ) {
   late final _checked = CheckedOperations(_scope, _builder);
+  late final _conversions = Conversions(_scope, _builder);
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
   HirValue unary(PrefixExpression node, String operator, HirValue operand) {
     if (operand.type == .reference) {
-      final element = node.element, class_ = classOf(node.operand.staticType);
+      final element = node.element, type = node.operand.staticType!;
+      if (type is DynamicType) _unsupported(node.operand, usingDynamic);
+      if (operator == '-' && isNumber(type)) {
+        return _number('numNegate', [operand]);
+      }
+      final class_ = classOf(type);
       if (element == null || class_ == null) {
         _unsupported(node, 'this operator');
       }
@@ -38,19 +46,53 @@ final class OperatorTranslator(
     return _builder.add(HirUnary(found, operand));
   }
 
-  /// Applies a binary operator, other than `&&`, `||` and `??`.
+  /// Applies a binary operator, other than `&&`, `||` and `??`, to operands
+  /// and their types.
   HirValue binary(
+    AstNode node,
+    String operator,
+    (HirValue, DartType) leftOperand,
+    (HirValue, DartType) rightOperand,
+  ) {
+    final (left, leftType) = leftOperand;
+    final (right, rightType) = rightOperand;
+    if (operator == '==' || operator == '!=') {
+      final equal = _equal(node, leftOperand, rightOperand);
+      return operator == '==' ? equal : _builder.add(HirUnary(.not, equal));
+    }
+    if (leftType is DynamicType) _unsupported(node, usingDynamic);
+    if (isNumber(leftType)) {
+      if (left.type == .reference || right.type == .reference) {
+        return _numbers(node, operator, left, right);
+      }
+      return _arithmetic(node, operator, left, right);
+    }
+    if (left.type == .boolean && right.type == .boolean) {
+      return _boolean(node, operator, left, right);
+    }
+    final element = switch (node) {
+      BinaryExpression(:final element) ||
+      AssignmentExpression(:final element) ||
+      PrefixExpression(:final element) ||
+      PostfixExpression(:final element) => element,
+      _ => null,
+    };
+    final class_ = classOf(leftType);
+    if (left.type != .reference || element == null || class_ == null) {
+      _unsupported(node, 'operator $operator on these types');
+    }
+    final declared = element.formalParameters.single.type;
+    final given = _conversions.coerce(right, valueType(declared)!);
+    return _calls.invoke(node, left, class_, element, [given]) ??
+        _unsupported(node, 'operator $operator without a result');
+  }
+
+  HirValue _arithmetic(
     AstNode node,
     String operator,
     HirValue left,
     HirValue right,
   ) {
-    if (left.type == .reference || right.type == .reference) {
-      return _object(node, operator, left, right);
-    }
-    if (left.type == .boolean && right.type == .boolean) {
-      return _boolean(node, operator, left, right);
-    }
     if (left.type == .boolean || right.type == .boolean) {
       _unsupported(node, 'operator $operator on these types');
     }
@@ -64,64 +106,74 @@ final class OperatorTranslator(
     return _compare(operator, a, b) ?? _float(node, operator, a, b);
   }
 
-  /// Applies an operator with an object or null on a side.
-  HirValue _object(
+  /// Applies an operator to numbers of which one can be of any kind.
+  HirValue _numbers(
     AstNode node,
     String operator,
     HirValue left,
     HirValue right,
-  ) {
-    final (element, type) = switch (node) {
-      BinaryExpression(:final element, :final leftOperand) => (
-        element,
-        leftOperand.staticType,
-      ),
-      AssignmentExpression(:final element, :final readType) => (
-        element,
-        readType,
-      ),
-      PrefixExpression(:final element, :final readType) ||
-      PostfixExpression(:final element, :final readType) => (element, readType),
-      _ => (null, null),
-    };
-    if (operator == '==' || operator == '!=') {
-      if (left.type != right.type) {
-        _unsupported(node, 'operator $operator on these types');
-      }
-      final equal = _equal(node, element, classOf(type), left, right);
-      return operator == '==' ? equal : _builder.add(HirUnary(.not, equal));
-    }
-    final class_ = classOf(type);
-    if (left.type != .reference || element == null || class_ == null) {
-      _unsupported(node, 'operator $operator on these types');
-    }
-    return _calls.invoke(node, left, class_, element, [right]) ??
-        _unsupported(node, 'operator $operator without a result');
-  }
+  ) => switch (operator) {
+    '+' => _number('numAdd', [left, right]),
+    '-' => _number('numSubtract', [left, right]),
+    '*' => _number('numMultiply', [left, right]),
+    '/' => _number('numDivide', [left, right]),
+    '~/' => _number('numTruncate', [left, right]),
+    '%' => _number('numModulo', [left, right]),
+    '<' => _number('numLess', [left, right]),
+    '<=' => _number('numLessOrEqual', [left, right]),
+    '>' => _number('numLess', [right, left]),
+    '>=' => _number('numLessOrEqual', [right, left]),
+    _ => _unsupported(node, 'operator $operator on num'),
+  };
+
+  HirValue _number(String name, List<HirValue> operands) => _builder.call(
+    HirCall(_scope.runtime(name), [
+      for (final operand in operands) _conversions.coerce(operand, .reference),
+    ]),
+  )!;
 
   /// Null equals only null; otherwise the object on the left decides.
   HirValue _equal(
     AstNode node,
-    MethodElement? element,
-    ClassElement? class_,
-    HirValue left,
-    HirValue right,
+    (HirValue, DartType) leftOperand,
+    (HirValue, DartType) rightOperand,
   ) {
+    final (given, type) = leftOperand;
+    final (other, _) = rightOperand;
+    if (given.type != .reference && other.type != .reference) {
+      return _equalPlain(given, other);
+    }
+    final left = _conversions.coerce(given, .reference);
+    final right = _conversions.coerce(other, .reference);
     HirValue identical() => _builder.add(HirCompare(.equal, left, right));
     // Where one side is the literal null, or has its type.
     if (left is HirNull || right is HirNull) return identical();
-    if (element == null || class_ == null) return identical();
-    final exit = _builder.join(node, .boolean);
-    HirValue isNull(HirValue value) =>
-        _builder.add(HirCompare(.equal, value, _builder.add(HirNull())));
-    final either = _builder.add(
-      HirBoolBinary(.or, isNull(left), isNull(right)),
+    final element = node is BinaryExpression ? node.element : null;
+    final object = _conversions.types.objectElement;
+    final class_ = classOf(type) ?? object;
+    final method = element ?? object.getMethod('==')!;
+    return _builder.choose(
+      _builder.add(
+        HirBoolBinary(
+          .or,
+          _conversions.isNull(left),
+          _conversions.isNull(right),
+        ),
+      ),
+      .boolean,
+      identical,
+      () => _calls.invoke(node, left, class_, method, [right])!,
     );
-    _builder.branch(either, () => _builder.jump(exit, identical()), () {
-      final result = _calls.invoke(node, left, class_, element, [right]);
-      _builder.jump(exit, result);
-    });
-    return _builder.enter(exit)!;
+  }
+
+  HirValue _equalPlain(HirValue left, HirValue right) {
+    if (left.type == right.type) {
+      return _builder.add(HirCompare(.equal, left, right));
+    }
+    if (left.type == .boolean || right.type == .boolean) {
+      return _builder.add(HirConst(false));
+    }
+    return _builder.add(HirCompare(.equal, _toFloat(left), _toFloat(right)));
   }
 
   HirValue _toFloat(HirValue value) =>

@@ -45,6 +45,8 @@ final class MachineLowering(
         return null;
       case .handlers:
         return symbol(handlerSymbol);
+      case .isSame:
+        return block.add(Compare(.eq, arguments[0], arguments[1]));
       case .trap:
         // Code never continues after it.
         return null;

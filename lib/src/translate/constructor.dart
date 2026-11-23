@@ -4,9 +4,11 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'classes.dart';
+import 'conversions.dart';
 import 'members.dart';
 import 'scope.dart';
 import 'statement.dart';
+import 'types.dart';
 
 /// Whether [element] is a constructor that works on an object created before.
 bool isInitializerElement(ExecutableElement element) =>
@@ -48,10 +50,9 @@ final class ConstructorTranslator(
         case ConstructorFieldInitializer(
           fieldName: SimpleIdentifier(element: final FieldElement field),
         ):
-          final type = _scope.fieldOf(field).type;
           _store(
             field,
-            _statements.expressions.valueAs(initializer.expression, type),
+            _statements.expressions.valueTo(initializer.expression, field.type),
           );
         case SuperConstructorInvocation():
           explicit = initializer;
@@ -76,13 +77,15 @@ final class ConstructorTranslator(
       final declaration = _declarations[field]!.$2 as VariableDeclaration;
       final initializer = declaration.initializer;
       if (initializer == null) continue;
-      final type = _scope.fieldOf(field).type;
-      _store(field, _statements.expressions.valueAs(initializer, type));
+      _store(field, _statements.expressions.valueTo(initializer, field.type));
     }
   }
 
-  void _store(FieldElement field, HirValue value) =>
-      _builder.add(HirStore(_scope.fieldOf(field), _builder.receiver!, value));
+  void _store(FieldElement field, HirValue value) {
+    final found = _scope.fieldOf(field);
+    final given = Conversions(_scope, _builder).coerce(value, found.type);
+    _builder.add(HirStore(found, _builder.receiver!, given));
+  }
 
   /// Runs constructor [target] on the same object, passing on the super
   /// parameters of [element].
@@ -98,7 +101,12 @@ final class ConstructorTranslator(
       if (parameter case SuperFormalParameterElement(
         :final superConstructorParameter?,
       )) {
-        supplied[superConstructorParameter] = _builder.read(parameter);
+        // A parameter passed on may be wider where it takes a number.
+        supplied[superConstructorParameter] = Conversions(_scope, _builder)
+            .coerce(
+              _builder.read(parameter),
+              valueType(superConstructorParameter.type)!,
+            );
       }
     }
     _builder.call(

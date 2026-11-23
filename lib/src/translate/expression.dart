@@ -7,6 +7,7 @@ import 'builder.dart';
 import 'calls.dart';
 import 'checks.dart';
 import 'constant.dart';
+import 'conversions.dart';
 import 'describe.dart';
 import 'members.dart';
 import 'operators.dart';
@@ -23,7 +24,14 @@ final class ExpressionTranslator(
   late final calls = CallTranslator(_scope, _builder, this);
   late final _operators = OperatorTranslator(_scope, _builder, calls);
   late final _statics = StaticTranslator(_scope, _builder);
-  late final _places = PlaceTranslator(_builder, this, calls, _statics);
+  late final _conversions = Conversions(_scope, _builder);
+  late final _places = PlaceTranslator(
+    _builder,
+    this,
+    calls,
+    _statics,
+    _conversions,
+  );
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -53,20 +61,38 @@ final class ExpressionTranslator(
     }
   }
 
-  HirValue condition(Expression node) => valueAs(node, .boolean);
+  HirValue condition(Expression node) =>
+      valueTo(node, _conversions.types.boolType);
 
   @override
-  HirValue valueAs(Expression node, HirType type) {
-    final result = value(node, placeholder: type);
-    if (result.type == type) return result;
-    if (type != .reference) {
-      _unsupported(node, 'using ${node.staticType} as ${type.dartName}');
+  HirValue valueTo(Expression node, DartType type) {
+    final representation = valueType(type);
+    if (representation == null) _unsupported(node, 'a value of type $type');
+    final result = value(node, placeholder: representation);
+    final from = node.staticType!;
+    if (from is! DynamicType) {
+      return _conversions.coerce(result, representation);
     }
-    _unsupported(node, 'using ${result.type!.dartName} as an object');
+    return _conversions.cast(result, from, type) ??
+        _unsupported(node, 'testing for $type');
   }
 
   @override
+  HirValue valueAs(Expression node, HirType type) =>
+      _conversions.coerce(value(node, placeholder: type), type);
+
+  @override
   HirValue value(Expression node, {HirType placeholder = .integer}) {
+    final result = _value(node, placeholder);
+    final type = node.staticType;
+    if (type == null || type is NeverType) return result;
+    final representation = valueType(type);
+    return representation == null
+        ? result
+        : _conversions.coerce(result, representation);
+  }
+
+  HirValue _value(Expression node, HirType placeholder) {
     final inner = node.unParenthesized, type = inner.staticType;
     if (type is NeverType) {
       switch (inner) {
@@ -94,6 +120,12 @@ final class ExpressionTranslator(
         return _builder.receiver ?? _unsupported(inner, 'this here');
       case SimpleIdentifier(:final element):
         return _identifier(inner, element);
+      case PrefixedIdentifier(:final prefix)
+          when prefix.staticType is DynamicType:
+        _unsupported(prefix, usingDynamic);
+      case PropertyAccess(:final realTarget)
+          when realTarget.staticType is DynamicType:
+        _unsupported(realTarget, usingDynamic);
       case PrefixedIdentifier(
         :final prefix,
         identifier: SimpleIdentifier(:final element),
@@ -119,6 +151,10 @@ final class ExpressionTranslator(
         return _conditional(inner);
       case AssignmentExpression():
         return _assignment(inner);
+      case IsExpression():
+        return _isExpression(inner);
+      case AsExpression():
+        return _asExpression(inner);
       case InstanceCreationExpression():
         return calls.creation(inner);
       case IndexExpression():
@@ -146,6 +182,27 @@ final class ExpressionTranslator(
       _unsupported(node, 'null-aware chains');
     }
     return CheckedOperations(_scope, _builder).notNull(value(operand));
+  }
+
+  HirValue _isExpression(IsExpression node) {
+    final type = node.type.type!;
+    final result =
+        _conversions.isInstance(value(node.expression), type) ??
+        _unsupported(node.type, 'testing for $type');
+    return node.notOperator == null
+        ? result
+        : _builder.add(HirUnary(.not, result));
+  }
+
+  HirValue _asExpression(AsExpression node) {
+    final type = node.type.type!, from = node.expression.staticType!;
+    return _conversions.cast(
+          value(node.expression, placeholder: .reference),
+          from,
+          type,
+          ending: ' in type cast',
+        ) ??
+        _unsupported(node.type, 'testing for $type');
   }
 
   HirValue _integer(IntegerLiteral node, {required bool isNegated}) =>
@@ -189,15 +246,14 @@ final class ExpressionTranslator(
     final place = _places.place(node, operand);
     final old = _places.read(place);
     final one = _builder.add(HirConst(1));
-    final stepped = _operators.binary(node, operator[0], old, one);
-    _checkType(node, stepped, place);
+    final stepped = _operators.binary(
+      node,
+      operator[0],
+      (old, node.readType!),
+      (one, _conversions.types.intType),
+    );
     _places.write(place, stepped);
     return after ? stepped : old;
-  }
-
-  void _checkType(Expression node, HirValue value, Place place) {
-    if (value.type == place.type) return;
-    _unsupported(node, 'assigning a value of another type');
   }
 
   HirValue _binary(BinaryExpression node) {
@@ -206,51 +262,74 @@ final class ExpressionTranslator(
       case '&&' || '||':
         return _shortCircuit(node, isAnd: operator == '&&');
       case '??':
+        final type = _resultType(node);
         return _ifNull(
           node,
-          valueAs(node.leftOperand, .reference),
-          () => valueAs(node.rightOperand, .reference),
+          value(node.leftOperand),
+          () => valueTo(node.rightOperand, type),
         );
     }
     final target = node.leftOperand;
     if (target is SuperExpression) {
       final element = node.element ?? _unsupported(node, describe(node));
-      final type = valueType(element.formalParameters.single.type);
-      final right = valueAs(
-        node.rightOperand,
-        type ?? _unsupported(node, describe(node)),
-      );
+      final type = element.formalParameters.single.type;
+      final right = valueTo(node.rightOperand, type);
       final result = calls.superMember(node, element, [right])!;
       return operator == '!=' ? _builder.add(HirUnary(.not, result)) : result;
     }
     final left = value(target);
-    final right = _rightOperand(node, left);
-    return _operators.binary(node, operator, left, right);
+    final (right, rightType) = _rightOperand(node, left);
+    return _operators.binary(
+      node,
+      operator,
+      (left, target.staticType!),
+      (right, rightType),
+    );
   }
 
   /// Operators of classes convert their operand as calls do.
-  HirValue _rightOperand(BinaryExpression node, HirValue left) {
-    final element = node.element;
-    if (left.type == .reference &&
-        element != null &&
-        node.operator.lexeme != '==' &&
-        node.operator.lexeme != '!=') {
-      final type = valueType(element.formalParameters.single.type);
-      if (type != null) return valueAs(node.rightOperand, type);
+  (HirValue, DartType) _rightOperand(BinaryExpression node, HirValue left) {
+    final right = node.rightOperand, operator = node.operator.lexeme;
+    final isEquality = operator == '==' || operator == '!=';
+    return _operand(
+      right,
+      left,
+      isEquality ? null : node.element,
+      node.leftOperand.staticType!,
+    );
+  }
+
+  /// The operand [right] of the operator [element] of [leftType].
+  (HirValue, DartType) _operand(
+    Expression right,
+    HirValue left,
+    MethodElement? element,
+    DartType leftType,
+  ) {
+    final type = right.staticType!;
+    if (element == null || isNumber(leftType) && type is! DynamicType) {
+      return (value(right, placeholder: left.type!), type);
     }
-    return value(node.rightOperand, placeholder: left.type!);
+    final declared = element.formalParameters.single.type;
+    return (valueTo(right, declared), declared);
+  }
+
+  DartType _resultType(Expression node) {
+    final type = node.staticType!;
+    return valueType(type) != null
+        ? type
+        : _unsupported(node, 'a value of type $type');
   }
 
   /// [left], or what [right] gives if that is null.
   HirValue _ifNull(Expression node, HirValue left, HirValue Function() right) {
-    final exit = _builder.join(node, .reference);
-    final isNull = _builder.add(
-      HirCompare(.equal, left, _builder.add(HirNull())),
-    );
+    final type = valueType(_resultType(node))!;
+    if (left.type != .reference) return _conversions.coerce(left, type);
+    final exit = _builder.join(node, type);
     _builder.branch(
-      isNull,
+      _conversions.isNull(left),
       () => _builder.jump(exit, right()),
-      () => _builder.jump(exit, left),
+      () => _builder.jump(exit, _conversions.coerce(left, type)),
     );
     return _builder.enter(exit)!;
   }
@@ -268,14 +347,12 @@ final class ExpressionTranslator(
   }
 
   HirValue _conditional(ConditionalExpression node) {
-    final type =
-        valueType(node.staticType!) ??
-        _unsupported(node, 'a value of type ${node.staticType}');
-    final exit = _builder.join(node, type);
+    final type = _resultType(node);
+    final exit = _builder.join(node, valueType(type));
     _builder.branch(
       condition(node.condition),
-      () => _builder.jump(exit, valueAs(node.thenExpression, type)),
-      () => _builder.jump(exit, valueAs(node.elseExpression, type)),
+      () => _builder.jump(exit, valueTo(node.thenExpression, type)),
+      () => _builder.jump(exit, valueTo(node.elseExpression, type)),
     );
     return _builder.enter(exit)!;
   }
@@ -284,30 +361,44 @@ final class ExpressionTranslator(
     final place = _places.place(node, node.leftHandSide);
     final operator = node.operator.lexeme;
     if (operator == '=') {
-      final result = valueAs(node.rightHandSide, place.type);
-      _places.write(place, result);
-      return result;
+      return _assign(place, node.rightHandSide);
     }
     final old = _places.read(place);
     if (operator == '??=') {
-      if (old.type != .reference) _unsupported(node, 'operator ??=');
       return _ifNull(node, old, () {
-        final result = valueAs(node.rightHandSide, .reference);
-        _places.write(place, result);
-        return result;
+        final result = _assign(place, node.rightHandSide);
+        return _conversions.coerce(result, valueType(_resultType(node))!);
       });
     }
-    final element = node.element;
-    final declared = old.type == .reference && element != null
-        ? valueType(element.formalParameters.single.type)
-        : null;
-    final right = declared == null
-        ? value(node.rightHandSide, placeholder: old.type!)
-        : valueAs(node.rightHandSide, declared);
-    final name = operator.substring(0, operator.length - 1);
-    final result = _operators.binary(node, name, old, right);
-    _checkType(node, result, place);
+    final readType = node.readType!;
+    final (right, rightType) = _operand(
+      node.rightHandSide,
+      old,
+      node.element,
+      readType,
+    );
+    final result = _operators.binary(
+      node,
+      operator.substring(0, operator.length - 1),
+      (old, readType),
+      (right, rightType),
+    );
     _places.write(place, result);
     return result;
+  }
+
+  /// Assigns [node], whose own value is the result.
+  HirValue _assign(Place place, Expression node) {
+    final type = node.staticType!;
+    final result = value(node, placeholder: valueType(place.type)!);
+    if (type is! DynamicType) {
+      _places.write(place, result);
+      return result;
+    }
+    final checked =
+        _conversions.cast(result, type, place.type) ??
+        _unsupported(node, 'testing for ${place.type}');
+    _places.write(place, checked);
+    return checked;
   }
 }

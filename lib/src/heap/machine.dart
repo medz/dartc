@@ -67,3 +67,6 @@ int classTable() => machine.classTable;
 int globalRoots() => machine.globalRoots;
 int globalRootCount() => machine.globalRootCount;
 bool collectsAlways() => machine.collectsAlways;
+
+/// Whether [a] and [b] are at the same place.
+bool isSame(Object? a, Object? b) => identical(a, b);
