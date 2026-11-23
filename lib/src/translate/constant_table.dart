@@ -26,8 +26,8 @@ final class ConstantTable(
   final LibraryElement _core,
   final ClassElement Function(HirType type) _boxElement,
 
-  /// The library of maps and sets.
-  final LibraryElement Function() _hashLibrary,
+  /// A library of the SDK.
+  final LibraryElement Function(String uri) _library,
   final HirConstObject? Function(ExecutableElement element, DartType type)
   _functionObject,
 
@@ -56,6 +56,7 @@ final class ConstantTable(
             : _number(object) ??
                   _text(object) ??
                   _type(object) ??
+                  _symbol(object) ??
                   _function(object) ??
                   _list(object) ??
                   _map(object) ??
@@ -129,6 +130,18 @@ final class ConstantTable(
     );
   }
 
+  HirConstObject? _symbol(DartObject object) {
+    final name = object.toSymbolValue();
+    if (name == null) return null;
+    final class_ = _library('dart:_internal').getClass('Symbol')!;
+    final target = _classes.classOf(class_);
+    _instantiate(class_);
+    return canonical(
+      class_,
+      HirConstObject(target, {target.fields.single: text(name)}),
+    );
+  }
+
   HirConstObject? _type(DartObject object) {
     final type = object.toTypeValue();
     return type == null ? null : _typeObject(type);
@@ -178,7 +191,7 @@ final class ConstantTable(
     String name,
     List<DartObject?> values,
   ) {
-    final class_ = _hashLibrary().getClass(name)!;
+    final class_ = _library('dart:_compact_hash').getClass(name)!;
     final type = object.type as InterfaceType;
     final types = _listOf(type.typeArguments);
     final elements = [for (final value in values) of(.reference, value)];

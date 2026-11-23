@@ -8,7 +8,7 @@ HirType? valueType(DartType type) {
     if (plainType(type.element) case final plain?) return plain;
   }
   return isTop(type) ||
-          type is FunctionType && type.typeParameters.isEmpty ||
+          type is FunctionType ||
           type is TypeParameterType ||
           type.isDartCoreNull ||
           type is NeverType && !isNever(type) ||
@@ -86,10 +86,27 @@ bool mentions(DartType type, Element? owner, {bool isTaken = false}) =>
       _ => false,
     };
 
+/// Whether [type] is made of other type parameters than [bound].
+bool _hasFree(DartType type, Set<TypeParameterElement> bound) => switch (type) {
+  TypeParameterType(:final element) => !bound.contains(element),
+  InterfaceType(:final typeArguments) => typeArguments.any(
+    (argument) => _hasFree(argument, bound),
+  ),
+  FunctionType(:final typeParameters) => () {
+    final inner = {...bound, ...typeParameters};
+    bool isFree(DartType type) => _hasFree(type, inner);
+    return isFree(type.returnType) ||
+        type.formalParameters.any((p) => isFree(p.type)) ||
+        typeParameters.any((p) => p.bound != null && isFree(p.bound!));
+  }(),
+  _ => false,
+};
+
 /// Whether [type] is made of type parameters.
 bool isOpen(DartType type) => switch (type) {
   TypeParameterType() => true,
   InterfaceType(:final typeArguments) => typeArguments.any(isOpen),
+  FunctionType(typeParameters: [_, ...]) => _hasFree(type, const {}),
   FunctionType(:final returnType, :final formalParameters) =>
     isOpen(returnType) || formalParameters.any((p) => isOpen(p.type)),
   _ => false,
@@ -104,15 +121,41 @@ InterfaceElement? classOf(DartType? declared) {
 }
 
 /// [type] as the official runtime calls it.
-String describeType(DartType type) {
+///
+/// Type parameters have the names that [names] gives.
+String describeType(
+  DartType type, [
+  Map<TypeParameterElement, String> names = const {},
+]) {
+  if (type is TypeParameterType) {
+    final name = names[type.element];
+    if (name != null) {
+      return type.nullabilitySuffix == .question ? '$name?' : name;
+    }
+  }
   final suffix = type.nullabilitySuffix == .question ? '?' : '';
   if (type is InterfaceType && type.typeArguments.isNotEmpty) {
-    final arguments = type.typeArguments.map(describeType).join(', ');
+    final arguments = type.typeArguments
+        .map((argument) => describeType(argument, names))
+        .join(', ');
     return '${type.element.displayName}<$arguments>$suffix';
   }
   if (type is! FunctionType) return type.getDisplayString();
+  final text = _describeFunction(type, names);
+  return suffix.isEmpty ? text : '($text)$suffix';
+}
+
+String _describeFunction(
+  FunctionType type,
+  Map<TypeParameterElement, String> outer,
+) {
+  final names = {...outer};
+  for (final parameter in type.typeParameters) {
+    names[parameter] = 'Y${names.length}';
+  }
+  String describe(DartType type) => describeType(type, names);
   String list(Iterable<FormalParameterElement> parameters) =>
-      parameters.map((p) => describeType(p.type)).join(', ');
+      parameters.map((p) => describe(p.type)).join(', ');
   final all = type.formalParameters;
   final optional = all.where((p) => p.isOptionalPositional);
   final named = all
@@ -120,7 +163,7 @@ String describeType(DartType type) {
       .map(
         (p) =>
             '${p.isRequiredNamed ? 'required ' : ''}'
-            '${describeType(p.type)} ${p.name}',
+            '${describe(p.type)} ${p.name}',
       );
   final parameters = [
     if (all.any((p) => p.isRequiredPositional))
@@ -128,8 +171,15 @@ String describeType(DartType type) {
     if (optional.isNotEmpty) '[${list(optional)}]',
     if (named.isNotEmpty) '{${named.join(', ')}}',
   ];
-  final text = '(${parameters.join(', ')}) => ${describeType(type.returnType)}';
-  return suffix.isEmpty ? text : '($text)$suffix';
+  final own = [
+    for (final parameter in type.typeParameters)
+      if (parameter.bound case final bound? when !isTop(bound))
+        '${names[parameter]} extends ${describe(bound)}'
+      else
+        names[parameter]!,
+  ];
+  final generic = own.isEmpty ? '' : '<${own.join(', ')}>';
+  return '$generic(${parameters.join(', ')}) => ${describe(type.returnType)}';
 }
 
 /// Whether a function returning [type] gives its caller nothing to use.

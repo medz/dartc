@@ -4,6 +4,7 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'assignments.dart';
 import 'calls.dart';
 import 'chains.dart';
 import 'checks.dart';
@@ -17,6 +18,7 @@ import 'literals.dart';
 import 'loops.dart';
 import 'members.dart';
 import 'operators.dart';
+import 'patterns.dart';
 import 'places.dart';
 import 'references.dart';
 import 'scope.dart';
@@ -53,10 +55,24 @@ final class ExpressionTranslator(
     _builder,
     calls,
     _dynamics,
+    this,
   );
   late final _dynamics = DynamicTranslator(_scope, _builder, this);
   late final _statics = StaticTranslator(_scope, _builder);
   late final _conversions = Conversions(_scope, _builder);
+  late final PatternTranslator patterns = PatternTranslator(
+    _scope,
+    _builder,
+    this,
+    _operators,
+  );
+  late final _assignments = AssignmentTranslator(
+    _builder,
+    this,
+    _places,
+    _operators,
+    _conversions,
+  );
   late final _references = ReferenceTranslator(_scope, _builder);
   late final _texts = TextTranslator(_scope, _builder, this);
   late final LoopTranslator loops = LoopTranslator(
@@ -180,20 +196,20 @@ final class ExpressionTranslator(
         return _prefix(inner);
       case PostfixExpression(:final operator, :final operand):
         if (operator.lexeme == '!') return _notNull(operand);
-        return _step(inner, operand, operator.lexeme, after: false);
+        return _assignments.step(inner, operand, operator.lexeme, after: false);
       case BinaryExpression():
         return _binary(inner);
       case ConditionalExpression():
         return _conditional(inner);
       case AssignmentExpression():
-        return _assignment(inner);
+        return _assignments.assign(inner);
       case FunctionExpression():
         return closures.create(inner);
       case FunctionExpressionInvocation():
         return closures.invocation(inner) ??
             _unsupported(inner, 'using a value of type $type');
       case FunctionReference():
-        return _references.function(inner);
+        return _references.function(inner, value);
       case ConstructorReference(:final constructorName):
         return _references.constructor(inner, constructorName);
       case ImplicitCallReference(:final expression, :final element):
@@ -221,6 +237,8 @@ final class ExpressionTranslator(
             _unsupported(inner, 'using a value of type $type');
       case CascadeExpression():
         return _cascade(inner);
+      case SwitchExpression():
+        return patterns.switchExpression(inner, _resultType(inner));
       default:
         _unsupported(inner, describe(inner));
     }
@@ -237,6 +255,12 @@ final class ExpressionTranslator(
         return _builder.add(HirNull());
       case StringLiteral():
         return _texts.string(inner);
+      case SymbolLiteral():
+        final value = inner.computeConstantValue()?.value;
+        return _builder.add(
+          _scope.constantOf(.reference, value) ??
+              _unsupported(inner, describe(inner)),
+        );
       case TypedLiteral(isConst: true):
         final found = _scope.constantOf(
           .reference,
@@ -347,6 +371,7 @@ final class ExpressionTranslator(
 
   void _throw(Expression expression) {
     final value = valueAs(expression, .reference);
+    _builder.call(HirCall(_scope.runtime('markThrown'), [value]));
     _builder.raise(value, _builder.add(_scope.trace));
   }
 
@@ -389,9 +414,6 @@ final class ExpressionTranslator(
     if (element != null &&
         _builder.typeOf(element) != null &&
         !(element is VariableElement && element.isConst)) {
-      if (element is ExecutableElement && element.typeParameters.isNotEmpty) {
-        _unsupported(node, 'generic functions as values');
-      }
       return lates.read(element) ?? _builder.read(element);
     }
     return isInstanceMember(element)
@@ -403,7 +425,7 @@ final class ExpressionTranslator(
     final operator = node.operator.lexeme, operand = node.operand;
     switch (operator) {
       case '++' || '--':
-        return _step(node, operand, operator, after: true);
+        return _assignments.step(node, operand, operator, after: true);
       case '!':
         return _operators.unary(node, operator, condition(operand));
       case '-' when operand is IntegerLiteral:
@@ -413,26 +435,6 @@ final class ExpressionTranslator(
     }
   }
 
-  /// Adds or subtracts 1, giving the value before or after.
-  HirValue _step(
-    CompoundAssignmentExpression node,
-    Expression operand,
-    String operator, {
-    required bool after,
-  }) {
-    final place = _places.place(node, operand);
-    final old = _places.read(place);
-    final one = _builder.add(HirConst(1));
-    final stepped = _operators.binary(
-      node,
-      operator[0],
-      (old, node.readType!),
-      (one, _conversions.types.intType),
-    );
-    _places.write(place, stepped);
-    return after ? stepped : old;
-  }
-
   HirValue _binary(BinaryExpression node) {
     final operator = node.operator.lexeme;
     switch (operator) {
@@ -440,8 +442,9 @@ final class ExpressionTranslator(
         return _shortCircuit(node, isAnd: operator == '&&');
       case '??':
         final type = _resultType(node);
-        return _ifNull(
+        return _conversions.ifNull(
           node,
+          valueType(type)!,
           value(node.leftOperand),
           () => valueTo(node.rightOperand, type),
         );
@@ -468,27 +471,12 @@ final class ExpressionTranslator(
   (HirValue, DartType) _rightOperand(BinaryExpression node, HirValue left) {
     final right = node.rightOperand, operator = node.operator.lexeme;
     final isEquality = operator == '==' || operator == '!=';
-    return _operand(
+    return _operators.operand(
       right,
       left,
       isEquality ? null : node.element,
       node.leftOperand.staticType!,
     );
-  }
-
-  /// The operand [right] of the operator [element] of [leftType].
-  (HirValue, DartType) _operand(
-    Expression right,
-    HirValue left,
-    MethodElement? element,
-    DartType leftType,
-  ) {
-    final type = right.staticType!;
-    if (element == null || isNumber(leftType) && type is! DynamicType) {
-      return (value(right, placeholder: left.type!), type);
-    }
-    final declared = element.formalParameters.single.type;
-    return (valueTo(right, declared), declared);
   }
 
   /// Whether the constant [node] equals [value].
@@ -500,19 +488,6 @@ final class ExpressionTranslator(
     return valueType(type) != null
         ? type
         : _unsupported(node, 'a value of type $type');
-  }
-
-  /// [left], or what [right] gives if that is null.
-  HirValue _ifNull(Expression node, HirValue left, HirValue Function() right) {
-    final type = valueType(_resultType(node))!;
-    if (left.type != .reference) return _conversions.coerce(left, type);
-    final exit = _builder.join(node, type);
-    _builder.branch(
-      _conversions.isNull(left),
-      () => _builder.jump(exit, right()),
-      () => _builder.jump(exit, _conversions.coerce(left, type)),
-    );
-    return _builder.enter(exit)!;
   }
 
   HirValue _shortCircuit(BinaryExpression node, {required bool isAnd}) {
@@ -536,50 +511,5 @@ final class ExpressionTranslator(
       () => _builder.jump(exit, valueTo(node.elseExpression, type)),
     );
     return _builder.enter(exit)!;
-  }
-
-  HirValue _assignment(AssignmentExpression node) {
-    final place = _places.place(node, node.leftHandSide);
-    final operator = node.operator.lexeme;
-    if (operator == '=') {
-      return _assign(place, node.rightHandSide);
-    }
-    final old = _places.read(place);
-    if (operator == '??=') {
-      return _ifNull(node, old, () {
-        final result = _assign(place, node.rightHandSide);
-        return _conversions.coerce(result, valueType(_resultType(node))!);
-      });
-    }
-    final readType = node.readType!;
-    final (right, rightType) = _operand(
-      node.rightHandSide,
-      old,
-      node.element,
-      readType,
-    );
-    final result = _operators.binary(
-      node,
-      operator.substring(0, operator.length - 1),
-      (old, readType),
-      (right, rightType),
-    );
-    _places.write(place, result);
-    return result;
-  }
-
-  /// Assigns [node], whose own value is the result.
-  HirValue _assign(Place place, Expression node) {
-    final type = node.staticType!;
-    final result = value(node, placeholder: valueType(place.type)!);
-    if (type is! DynamicType) {
-      _places.write(place, result);
-      return result;
-    }
-    final checked =
-        _conversions.cast(result, type, place.type) ??
-        _unsupported(node, 'testing for ${place.type}');
-    _places.write(place, checked);
-    return checked;
   }
 }

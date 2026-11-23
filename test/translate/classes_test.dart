@@ -379,10 +379,6 @@ A make() => A();''',
       '1:28: $what a function without a body.',
     );
     reports(
-      'class A { noSuchMethod(i) => 1; int f(); }\nvoid main() { A().f(); }',
-      '1:7: $what noSuchMethod.',
-    );
-    reports(
       'class A { external A(); }\nvoid main() { A(); }',
       '1:11: $what external constructors.',
     );

@@ -33,9 +33,6 @@ final class StaticTranslator(
     if (element is ExecutableElement &&
         (element is TopLevelFunctionElement || element is MethodElement) &&
         !isInstanceMember(element)) {
-      if (element.typeParameters.isNotEmpty) {
-        throw _builder.unit.unsupported(node, 'generic functions as values');
-      }
       final object = _scope.functionObject(element) ?? _unsupported(node);
       return _builder.add(HirStatic(object));
     }

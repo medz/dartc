@@ -11,7 +11,7 @@ import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
 
-typedef _Shape = ({int positional, List<String> named});
+typedef _Shape = ({int types, int positional, List<String> named});
 
 /// All functions that are values, and the calls of such.
 ///
@@ -37,15 +37,15 @@ final class ClosureTable(
   void add(Closure closure) => closures.add(closure);
 
   /// The selector of calls with arguments of a shape; names are sorted.
-  HirSelector selectorOf(int positional, List<String> named) {
-    final name = 'call $positional ${named.join(' ')}'.trimRight();
+  HirSelector selectorOf(int types, int positional, List<String> named) {
+    final generic = types == 0 ? '' : '<$types> ';
+    final name = 'call $generic$positional ${named.join(' ')}'.trimRight();
     return _selectors[name] ??= () {
-      final made = HirSelector(
-        name,
-        List.filled(positional + named.length, .reference),
-        .reference,
-      );
-      _shapes[made] = (positional: positional, named: named);
+      final made = HirSelector(name, [
+        if (types > 0) HirType.reference,
+        for (var i = positional + named.length; i > 0; i--) HirType.reference,
+      ], .reference);
+      _shapes[made] = (types: types, positional: positional, named: named);
       _entries[made] = {};
       return made;
     }();
@@ -59,7 +59,8 @@ final class ClosureTable(
     for (final MapEntry(key: selector, value: shape)
         in _shapes.entries.toList()) {
       for (final closure in closures.toList()) {
-        if (!accepts(closure.parameters, shape.positional, shape.named)) {
+        if (closure.typeParameters.length != shape.types ||
+            !accepts(closure.parameters, shape.positional, shape.named)) {
           continue;
         }
         if (_entries[selector]!.containsKey(closure.class_)) continue;
@@ -77,6 +78,16 @@ final class ClosureTable(
     ], selector.result);
     final builder = FunctionBuilder(_unit, function, const []);
     final conversions = Conversions(_scope, builder);
+    final [self, ...given] = builder.inputs;
+    final types = shape.types > 0 ? given.removeAt(0) : null;
+    if (closure.forward case final forward?) {
+      builder.end(
+        HirReturn(forward(builder, self, given, shape.positional, shape.named)),
+      );
+      builder.finish();
+      made.add(function);
+      return function;
+    }
     var position = 0;
     HirValue argument(FormalParameterElement parameter) {
       final at = parameter.isNamed
@@ -86,7 +97,7 @@ final class ClosureTable(
           ? at >= shape.positional
           : at < shape.positional;
       if (!isGiven) return builder.add(_scope.defaultOf(parameter));
-      final value = builder.inputs[at + 1], type = parameter.type;
+      final value = given[at], type = parameter.type;
       if (!closure.isTearOff || !isUnchecked(parameter)) {
         return conversions.coerce(value, valueType(type)!);
       }
@@ -100,17 +111,21 @@ final class ClosureTable(
     }
 
     final target = closure.target();
-    final leading = closure.leading(builder, builder.inputs.first);
-    if (closure.isTearOff) closure.bindTypes(builder, builder.inputs.first);
+    final leading = closure.leading(builder, self);
+    if (closure.isTearOff) closure.bindTypes(builder, self);
+    if (types != null) {
+      builder.bindTypes(closure.typeParameters.first.enclosingElement!, types);
+    }
     final result = builder.call(
       HirCall(target, [
         ...leading,
+        ?types,
         for (final parameter in closure.parameters) argument(parameter),
       ]),
     );
-    final given = result ?? builder.add(HirNull());
+    final value = result ?? builder.add(HirNull());
     builder
-      ..end(HirReturn(conversions.coerce(given, .reference)))
+      ..end(HirReturn(conversions.coerce(value, .reference)))
       ..finish();
     made.add(function);
     return function;
@@ -145,6 +160,7 @@ final class ClosureTable(
         }
         return _scope.typeValue(builder, _withoutParameters(element.type))!;
       },
+      name: _qualified(element),
       text: " from Function '${_nameOf(element)}': static.",
     );
     add(made);
@@ -158,6 +174,81 @@ final class ClosureTable(
         HirConstObject(class_, {
           for (final field in class_.fields) field: types,
         });
+  }
+
+  /// The object that the generic function [element] is.
+  HirConstObject generic(ExecutableElement element) =>
+      _constants['generic ${element.hashCode}'] ??= () {
+        final made = Closure(
+          HirClass(element.displayName, null, []),
+          element.type,
+          element.formalParameters,
+          () => _scope.functionOf(element)!,
+          (_, _) => const [],
+          typeParameters: element.typeParameters,
+          typeValue: (builder) => _scope.typeValue(builder, element.type)!,
+          name: _qualified(element),
+          text: " from Function '${_nameOf(element)}': static.",
+        );
+        add(made);
+        return HirConstObject(made.class_, const {});
+      }();
+
+  final _partials = <String, Closure>{};
+
+  /// The generic [function] with a list of types and their number, which then
+  /// is of [type].
+  HirValue partial(
+    FunctionBuilder builder,
+    HirValue function,
+    (HirValue, int) types,
+    FunctionType type,
+  ) {
+    final (typeList, count) = types;
+    final key = '$count ${describeType(type)}';
+    final closure = _partials[key] ??= _partial(type, count);
+    final [inner, list, own] = closure.class_.fields;
+    final object = builder.create(closure.class_);
+    final value = _scope.typeValue(builder, type)!;
+    builder
+      ..add(HirStore(inner, object, function))
+      ..add(HirStore(list, object, typeList))
+      ..add(HirStore(own, object, value));
+    return object;
+  }
+
+  Closure _partial(FunctionType type, int count) {
+    final inner = HirField('function', .reference);
+    final list = HirField('types', .reference);
+    final own = HirField('type', .reference);
+    final made = Closure(
+      HirClass('part of ${describeType(type)}', null, [inner, list, own]),
+      type,
+      type.formalParameters,
+      () => throw StateError('It has no target.'),
+      (_, _) => const [],
+      forward: (builder, self, arguments, positional, named) => builder.call(
+        HirVirtualCall(
+          _scope.callSelector(count, positional, named),
+          builder.add(HirLoad(inner, self)),
+          [builder.add(HirLoad(list, self)), ...arguments],
+        ),
+      )!,
+      typeValue: (builder) => builder.add(HirLoad(own, builder.inputs.single)),
+    );
+    add(made);
+    return made;
+  }
+
+  static String _qualified(ExecutableElement element) {
+    if (element is ConstructorElement) {
+      final class_ = element.enclosingElement.displayName;
+      return element.name == 'new' ? '$class_.$class_' : _nameOf(element);
+    }
+    final owner = element.enclosingElement;
+    return owner is InstanceElement
+        ? '${owner.displayName}.${element.displayName}'
+        : element.displayName;
   }
 
   static String _nameOf(ExecutableElement element) {
@@ -181,8 +272,9 @@ final class ClosureTable(
   HirValue tearOff(
     FunctionBuilder builder,
     Implementation found,
-    HirValue receiver,
-  ) {
+    HirValue receiver, {
+    required bool isForwarder,
+  }) {
     final (:element, :level) = found;
     final closure = _tearOffs[found] ??= () {
       final field = HirField('receiver', .reference);
@@ -190,7 +282,9 @@ final class ClosureTable(
         HirClass('tear-off ${element.displayName}', null, [field]),
         element.type,
         element.formalParameters,
-        () => _scope.memberOf(level, element),
+        () => isForwarder
+            ? _scope.forwarderOf(level, element)
+            : _scope.memberOf(level, element),
         (builder, self) => [builder.add(HirLoad(field, self))],
         bind: (builder, self) {
           builder.setReceiver(builder.add(HirLoad(field, self)), level);
@@ -202,6 +296,8 @@ final class ClosureTable(
           );
           return _scope.methodType(builder, element)!;
         },
+        typeParameters: element.typeParameters,
+        name: _qualified(element),
         text: " from Function '${element.displayName}':.",
         isTearOff: true,
       );

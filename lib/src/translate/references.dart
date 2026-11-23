@@ -25,8 +25,12 @@ final class ReferenceTranslator(
     return _instantiate(node, element, type!);
   }
 
-  /// A generic function with its type arguments.
-  HirValue function(FunctionReference node) {
+  /// A generic function with its type arguments, where [valueOf] evaluates
+  /// the function if it is not known.
+  HirValue function(
+    FunctionReference node,
+    HirValue Function(Expression node) valueOf,
+  ) {
     final name = node.function;
     final element = switch (name) {
       SimpleIdentifier(:final element) => element,
@@ -36,13 +40,24 @@ final class ReferenceTranslator(
       ConstructorReference(:final constructorName) => constructorName.element,
       _ => null,
     };
-    if (element is! ExecutableElement || _builder.typeOf(element) != null) {
+    final isKnown =
+        element is ConstructorElement ||
+        element is ExecutableElement &&
+            element is! PropertyAccessorElement &&
+            _builder.typeOf(element) == null &&
+            !isInstanceMember(element);
+    if (isKnown) {
+      element as ExecutableElement;
+      return _instantiate(node, element.baseElement, node.staticType!);
+    }
+    final types = node.typeArgumentTypes ?? const [];
+    final type = node.staticType;
+    final list = _scope.typeList(_builder, types);
+    if (types.isEmpty || type is! FunctionType || list == null) {
       _unsupported(node, describe(node));
     }
-    if (isInstanceMember(element)) {
-      _unsupported(node, 'tear-offs of generic methods');
-    }
-    return _instantiate(node, element.baseElement, node.staticType!);
+    final function = valueOf(name);
+    return _scope.partial(_builder, function, (list, types.length), type);
   }
 
   HirValue _instantiate(

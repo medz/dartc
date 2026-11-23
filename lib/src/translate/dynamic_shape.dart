@@ -18,5 +18,8 @@ final class DynamicShape(
   final LibraryElement? library,
   final int positional,
   final List<String> named,
-  final Never Function(String what) reject,
-);
+  final Never Function(String what) reject, {
+
+  /// The type arguments given first.
+  final int types = 0,
+});

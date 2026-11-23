@@ -3,12 +3,10 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
-import 'conversions.dart';
 import 'describe.dart';
 import 'expression.dart';
 import 'scope.dart';
 import 'try_statement.dart';
-import 'types.dart';
 
 /// Translates the statements of one function.
 final class StatementTranslator(
@@ -107,50 +105,33 @@ final class StatementTranslator(
   }
 
   void _if(IfStatement node) {
-    final exit = _builder.join(node);
-    final HirValue condition;
-    void Function()? bind;
+    final exit = _builder.join(node), other = _builder.join(node);
+    final expression = node.expression;
     if (node.caseClause case final clause?) {
-      (condition, bind) = _caseOf(node.expression, clause);
+      expressions.patterns.match(
+        clause.guardedPattern,
+        expressions.value(expression),
+        expression.staticType!,
+        other,
+      );
+      _then(node, exit);
     } else {
-      condition = expressions.condition(node.expression);
+      _builder.branch(
+        expressions.condition(expression),
+        () => _then(node, exit),
+        () => _builder.jump(other),
+      );
     }
-    _builder.branch(
-      condition,
-      () {
-        bind?.call();
-        statement(node.thenStatement);
-        _builder.jump(exit);
-      },
-      () {
-        if (node.elseStatement case final other?) statement(other);
-        _builder.jump(exit);
-      },
-    );
-    _builder.enter(exit);
+    _builder.enter(other);
+    if (node.elseStatement case final statement_?) statement(statement_);
+    _builder
+      ..jump(exit)
+      ..enter(exit);
   }
 
-  /// Whether what [node] gives matches [clause], and what then declares the
-  /// variables.
-  (HirValue, void Function()) _caseOf(Expression node, CaseClause clause) {
-    final GuardedPattern(:pattern, :whenClause) = clause.guardedPattern;
-    if (whenClause != null || pattern is! DeclaredVariablePattern) {
-      _unsupported(clause, 'this pattern');
-    }
-    final variable = pattern.declaredFragment!.element, type = variable.type;
-    final value = expressions.valueAs(node, .reference);
-    final conversions = Conversions(_scope, _builder);
-    final matches = conversions.isInstance(value, type);
-    if (matches == null) _unsupported(clause, 'testing for $type');
-    return (
-      matches,
-      () {
-        final representation = valueType(type)!;
-        _builder
-          ..declare(variable, representation)
-          ..assign(variable, conversions.coerce(value, representation));
-      },
-    );
+  void _then(IfStatement node, Join exit) {
+    statement(node.thenStatement);
+    _builder.jump(exit);
   }
 
   /// Runs [ifTrue] or leaves for [exit], depending on [condition].
@@ -218,6 +199,7 @@ final class StatementTranslator(
       return;
     }
     final tests = <Expression>[];
+    GuardedPattern? pattern;
     var isDefault = false;
     var last = index;
     while (true) {
@@ -233,6 +215,9 @@ final class StatementTranslator(
           ),
         ):
           tests.add(expression);
+        case SwitchPatternCase(:final guardedPattern):
+          pattern = guardedPattern;
+          if (last != index) _unsupported(member, 'this kind of case');
         default:
           _unsupported(member, 'this kind of case');
       }
@@ -247,6 +232,14 @@ final class StatementTranslator(
     if (isDefault) {
       body();
       return;
+    }
+    if (pattern != null) {
+      if (last != index) _unsupported(pattern, 'this kind of case');
+      final next = _builder.join(members.first.parent!);
+      expressions.patterns.match(pattern, value.$1, value.$2, next);
+      body();
+      _builder.enter(next);
+      return _cases(members, last + 1, value, exit);
     }
     _builder.branch(
       _matches(value, tests),

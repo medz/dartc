@@ -5,23 +5,24 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
+import 'apply_table.dart';
 import 'builder.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'closure.dart';
 import 'closure_table.dart';
 import 'constant_table.dart';
-import 'constructor.dart';
 import 'creators.dart';
 import 'dispatch.dart';
 import 'dynamic_shape.dart';
 import 'dynamic_table.dart';
 import 'expression.dart';
 import 'field_table.dart';
+import 'forwarders.dart';
+import 'function_table.dart';
 import 'global_table.dart';
 import 'levels.dart';
 import 'members.dart';
-import 'origins.dart';
 import 'runtime_links.dart';
 import 'scope.dart';
 import 'statement.dart';
@@ -56,7 +57,7 @@ final class ProgramTranslator(final SourceProgram program)
     _classes,
     _core,
     boxElement,
-    () => _links.library('dart:_compact_hash'),
+    (uri) => _links.library(uri),
     _functionConstant,
     (types) => _types.list(types),
     typeObject,
@@ -72,6 +73,8 @@ final class ProgramTranslator(final SourceProgram program)
   late final _dynamics = DynamicTable(this, _unit);
   late final _fields = FieldTable(this, _declarations, _classes);
   late final _tests = TestTable(_classes);
+  late final _applications = ApplyTable(this, _unit);
+  late final _forwarders = ForwarderTable(this, _declarations, _unit);
   late final _links = RuntimeLinks(program, _core, createdClass, _constants);
   late final _globals = GlobalTable(
     this,
@@ -79,7 +82,7 @@ final class ProgramTranslator(final SourceProgram program)
     _constants,
     _pending.add,
   );
-  final _functions = <(ExecutableElement, Level?), HirFunction>{};
+  late final _functions = FunctionTable(this, _declarations);
   final _pending = <void Function()>[];
   final _captures = <AstNode, Captures>{};
   final _cells = <HirType, HirClass>{};
@@ -103,9 +106,7 @@ final class ProgramTranslator(final SourceProgram program)
     if (entry.formalParameters.isNotEmpty) {
       throw _declarations.unsupported(entry, 'parameters of main');
     }
-    final main = HirFunction(entry.displayName, const []);
-    _functions[(entry, null)] = main;
-    _pending.add(() => _translate(entry, null, null));
+    final main = _functions.main(entry);
     do {
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
@@ -119,7 +120,9 @@ final class ProgramTranslator(final SourceProgram program)
           ),
           _classes.classOf,
           _closures.closures,
+          _functionClass,
         ) ||
+        _applications.update(_closures.closures) ||
         _typeFunctions.update(_dispatch.classes, _closures.closures) ||
         _pending.isNotEmpty);
     _typeFunctions.finish();
@@ -128,6 +131,7 @@ final class ProgramTranslator(final SourceProgram program)
       ..._closures.dispatch,
       ..._dynamics.dispatch,
       ..._typeFunctions.dispatch,
+      ..._applications.dispatch,
     };
     return HirModule(
       main,
@@ -154,7 +158,7 @@ final class ProgramTranslator(final SourceProgram program)
   }
 
   Iterable<HirFunction> get _allFunctions => [
-    ..._functions.values,
+    ..._functions.all,
     ..._globals.getters,
     ..._fields.functions,
     ..._dispatch.made,
@@ -164,6 +168,8 @@ final class ProgramTranslator(final SourceProgram program)
     ..._creators.functions,
     ..._typeFunctions.functions,
     ..._links.functions,
+    ..._applications.functions,
+    ..._forwarders.functions,
   ];
 
   /// Whether the program throws, or calls what may use up the stack.
@@ -188,7 +194,7 @@ final class ProgramTranslator(final SourceProgram program)
   }
 
   @override
-  HirFunction runtime(String name) => _declare(_links.function(name));
+  HirFunction runtime(String name) => _functions.of(_links.function(name));
 
   @override
   Captures capturesOf(AstNode declaration) =>
@@ -218,8 +224,8 @@ final class ProgramTranslator(final SourceProgram program)
   }
 
   @override
-  HirSelector callSelector(int positional, List<String> named) =>
-      _closures.selectorOf(positional, named);
+  HirSelector callSelector(int types, int positional, List<String> named) =>
+      _closures.selectorOf(types, positional, named);
 
   /// Whether the program declares [element].
   bool _declares(ExecutableElement element) =>
@@ -230,12 +236,18 @@ final class ProgramTranslator(final SourceProgram program)
 
   @override
   HirConstObject? functionObject(ExecutableElement element) =>
-      _declares(element) ? _closures.constant(element, null) : null;
+      !_declares(element)
+      ? null
+      : element.typeParameters.isEmpty
+      ? _closures.constant(element, null)
+      : _closures.generic(element);
 
   /// The function [element] as a constant of [type].
   HirConstObject? _functionConstant(ExecutableElement element, DartType type) {
     if (!_declares(element) || type is! FunctionType) return null;
-    if (takesTypes(element) == null) return functionObject(element);
+    if (takesTypes(element) == null || type.typeParameters.isNotEmpty) {
+      return functionObject(element);
+    }
     final types = _types.list(typeArgumentsOf(element, type));
     return types == null
         ? null
@@ -339,11 +351,35 @@ final class ProgramTranslator(final SourceProgram program)
   HirValue tearOff(
     FunctionBuilder builder,
     Implementation found,
-    HirValue receiver,
+    HirValue receiver, {
+    bool isForwarder = false,
+  }) {
+    _addAllocation();
+    return _closures.tearOff(
+      builder,
+      found,
+      receiver,
+      isForwarder: isForwarder,
+    );
+  }
+
+  @override
+  HirSelector get applySelector => _applications.use();
+
+  @override
+  HirValue partial(
+    FunctionBuilder builder,
+    HirValue function,
+    (HirValue, int) types,
+    FunctionType type,
   ) {
     _addAllocation();
-    return _closures.tearOff(builder, found, receiver);
+    return _closures.partial(builder, function, types, type);
   }
+
+  @override
+  HirFunction forwarderOf(Level level, ExecutableElement element) =>
+      _forwarders.of(level, element);
 
   @override
   void translateBody(FunctionBuilder builder, FunctionBody body) {
@@ -386,6 +422,9 @@ final class ProgramTranslator(final SourceProgram program)
   HirInstruction get trace => _links.trace;
 
   @override
+  HirTypeTest get errorTest => _tests.extendsOf(_core.getClass('Error')!);
+
+  @override
   HirTypeTest testOf(InterfaceElement class_) => _tests.testOf(class_);
 
   @override
@@ -394,7 +433,7 @@ final class ProgramTranslator(final SourceProgram program)
     if ('${library.uri}' == 'dart:_heap/program.dart') {
       return _typeFunctions.named(element.displayName);
     }
-    return _declarations[element] == null ? null : _declare(element);
+    return _declarations[element] == null ? null : _functions.of(element);
   }
 
   @override
@@ -426,7 +465,7 @@ final class ProgramTranslator(final SourceProgram program)
 
   @override
   HirFunction memberOf(Level level, ExecutableElement element) =>
-      _declare(element, level);
+      _functions.of(element, level);
 
   @override
   HirFunction? functionAt(
@@ -449,10 +488,11 @@ final class ProgramTranslator(final SourceProgram program)
   Level levelOf(ClassElement class_) => _classes.levels.of(class_);
 
   @override
-  HirFunction initializerOf(ConstructorElement element) => _declare(element);
+  HirFunction initializerOf(ConstructorElement element) =>
+      _functions.of(element);
 
   @override
-  HirFunction factoryOf(ConstructorElement element) => _declare(element);
+  HirFunction factoryOf(ConstructorElement element) => _functions.of(element);
 
   @override
   HirClass createdClass(ClassElement element) {
@@ -493,93 +533,4 @@ final class ProgramTranslator(final SourceProgram program)
     List<String> named,
     Reject reject,
   ) => _dispatch.selectorOf(member, receiver, positional, named, reject);
-
-  /// The function of [element], which can be a member of a level.
-  ///
-  /// Members of a mixin have one for each class that they are mixed in.
-  HirFunction _declare(ExecutableElement element, [Level? given]) {
-    final level = given ?? _ownLevel(element);
-    return _functions.putIfAbsent((element, level), () {
-      final by = _origins.current;
-      _pending.add(() => _translate(element, level, by));
-      final owner = element.enclosingElement;
-      final result = element.returnType;
-      final isInitializer = isInitializerElement(element);
-      return HirFunction(
-        owner is InstanceElement
-            ? '${owner.displayName}.${element.lookupName}'
-            : element.displayName,
-        [
-          if (level != null) plainType(level.element) ?? .reference,
-          if (takesTypes(element) != null) .reference,
-          for (final parameter in element.formalParameters)
-            valueType(parameter.type) ??
-                (throw _declarations.unsupported(
-                  element,
-                  'a parameter of type ${parameter.type}',
-                )),
-        ],
-        isInitializer || hasNoResult(result)
-            ? null
-            : valueType(result) ??
-                  (throw _declarations.unsupported(
-                    element,
-                    'a result of type $result',
-                  )),
-        !RuntimeLinks.isRuntime(element.library),
-      );
-    });
-  }
-
-  /// The level that a function works on objects of, if it is not a mixin's.
-  Level? _ownLevel(ExecutableElement element) => hasReceiver(element)
-      ? levelOf(element.enclosingElement as ClassElement)
-      : null;
-
-  final _origins = Origins();
-
-  void _translate(
-    ExecutableElement element,
-    Level? level,
-    ExecutableElement? by,
-  ) => _origins.within(element, by, () => _translateDeclared(element, level));
-
-  void _translateDeclared(ExecutableElement element, Level? level) {
-    final declared = _declarations[element];
-    final owner = element.enclosingElement;
-    final (unit, node) = declared ?? _declarations[owner as ClassElement]!;
-    final builder = FunctionBuilder(
-      unit,
-      _functions[(element, level)]!,
-      element.formalParameters,
-      ownLevel: level,
-      returnType: element.returnType,
-      typeOwner: takesTypes(element),
-      captures: capturesOf(declarationOf(node)),
-      cellClass: cellClass,
-    );
-    final statements = StatementTranslator(this, builder);
-    if (isInitializerElement(element)) {
-      ConstructorTranslator(
-        this,
-        _declarations,
-        builder,
-        statements,
-      ).initializer(element as ConstructorElement);
-    } else {
-      final body = switch (node) {
-        FunctionDeclaration(
-          functionExpression: FunctionExpression(:final body),
-        ) ||
-        MethodDeclaration(:final body) ||
-        ConstructorDeclaration(:final body) => body,
-        _ => throw StateError('Unexpected declaration $node.'),
-      };
-      if (body.isAsynchronous || body.isGenerator) {
-        throw unit.unsupported(body, 'async and generator functions');
-      }
-      statements.body(body);
-    }
-    builder.finish();
-  }
 }

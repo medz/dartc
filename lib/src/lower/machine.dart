@@ -17,6 +17,28 @@ final class MachineLowering(
   /// Whether it uses the buffer at [bufferSymbol].
   bool usesBuffer = false;
 
+  /// What some give the addresses of.
+  static const _symbols = <HirMachineOp, String>{
+    .handlers: handlerSymbol,
+    .codeStart: textSymbol,
+    .stackMaps: stackMapSymbol,
+    .classTable: classTableSymbol,
+  };
+
+  /// The functions of the C library that do the work of some.
+  static const _functions = <HirMachineOp, String>{
+    .sine: 'sin',
+    .cosine: 'cos',
+    .tangent: 'tan',
+    .arcSine: 'asin',
+    .arcCosine: 'acos',
+    .arcTangent: 'atan',
+    .exponential: 'exp',
+    .logarithm: 'log',
+    .arcTangent2: 'atan2',
+    .power: 'pow',
+  };
+
   /// Adds [op] to [block], returning its result if it has one.
   LirValue? lower(LirBlock block, HirMachineOp op, List<LirValue> arguments) {
     LirValue number(int value) => block.add(ConstInt(value));
@@ -24,6 +46,10 @@ final class MachineLowering(
     LirValue load(Width width) => block.add(Load(width, address()));
     LirValue symbol(String name) =>
         block.add(Convert(.ptrToInt, block.add(SymbolAddress(name))));
+    if (_symbols[op] case final name?) return symbol(name);
+    if (_functions[op] case final name?) {
+      return block.add(callSystem(name, arguments));
+    }
     switch (op) {
       case .load64:
         return load(.i64);
@@ -64,6 +90,8 @@ final class MachineLowering(
       case .parseDouble:
         final none = block.add(Convert(.intToPtr, number(0)));
         return block.add(callSystem('strtod', [address(), none]));
+      case .realTime || .steadyTime || .localTime || .randomBits:
+        return _system(block, op, arguments);
       case .classNumber:
         return block.add(Load(.u32, arguments.single, offset: classOffset));
       case .addressOf:
@@ -72,8 +100,6 @@ final class MachineLowering(
         final [frame, code, exception, trace] = arguments;
         block.add(Resume(frame, code, exception, trace));
         return null;
-      case .handlers:
-        return symbol(handlerSymbol);
       case .isSame:
         return block.add(Compare(.eq, arguments[0], arguments[1]));
       case .trap:
@@ -81,12 +107,6 @@ final class MachineLowering(
         return null;
       case .frameAddress:
         return block.add(FrameAddress());
-      case .codeStart:
-        return symbol(textSymbol);
-      case .stackMaps:
-        return symbol(stackMapSymbol);
-      case .classTable:
-        return symbol(classTableSymbol);
       case .globalRoots:
         return block.add(
           IntBinary(.add, symbol(globalsSymbol), number(firstGlobal)),
@@ -95,6 +115,31 @@ final class MachineLowering(
         return number(_statics.rootCount);
       case .collectsAlways:
         return number(collectsAlways ? 1 : 0);
+      default:
+        throw StateError('No code for ${op.name}.');
+    }
+  }
+
+  /// Asks the system for times and random bits.
+  static LirValue? _system(
+    LirBlock block,
+    HirMachineOp op,
+    List<LirValue> arguments,
+  ) {
+    LirValue number(int value) => block.add(ConstInt(value));
+    switch (op) {
+      case .realTime:
+        return block.add(callSystem('clock_gettime_nsec_np', [number(0)]));
+      case .steadyTime:
+        return block.add(callSystem('clock_gettime_nsec_np', [number(8)]));
+      case .localTime:
+        final from = block.add(Convert(.intToPtr, arguments.single));
+        final to = block.add(PtrAdd(from, number(8)));
+        block.add(callSystem('localtime_r', [from, to]));
+        return null;
+      default:
+        final bits = block.add(callSystem('arc4random', []));
+        return block.add(IntBinary(.and, bits, number(0xffffffff)));
     }
   }
 

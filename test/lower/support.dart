@@ -51,6 +51,34 @@ final class LoweredRun(
         },
         'mmap': (memory, arguments) =>
             memory.map(Uint8List(arguments[1] as int)),
+        for (final MapEntry(key: name, value: function) in const {
+          'sin': sin,
+          'cos': cos,
+          'tan': tan,
+          'asin': asin,
+          'acos': acos,
+          'atan': atan,
+          'exp': exp,
+          'log': log,
+        }.entries)
+          name: (_, arguments) => function(arguments.single as double),
+        'atan2': (_, arguments) =>
+            atan2(arguments[0] as double, arguments[1] as double),
+        'pow': (_, arguments) =>
+            pow(arguments[0] as double, arguments[1] as double).toDouble(),
+        'clock_gettime_nsec_np': (_, _) =>
+            DateTime.now().microsecondsSinceEpoch * 1000,
+        'arc4random': (_, _) => Random().nextInt(1 << 32) | 1 << 40,
+        'localtime_r': (memory, arguments) {
+          final [from as int, to as int] = arguments;
+          final seconds = memory.load(.i64, from, 0) as int;
+          final time = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+          final name = [...ascii.encode(time.timeZoneName), 0];
+          memory
+            ..store(.i64, to, 40, time.timeZoneOffset.inSeconds)
+            ..store(.i64, to, 48, memory.map(Uint8List.fromList(name)));
+          return to;
+        },
         'gcvt': (memory, arguments) {
           final [value as double, digits as int, at as int] = arguments;
           final text = formatExactly(value, digits);

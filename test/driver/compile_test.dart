@@ -108,6 +108,19 @@ void main() {
     }
   }, skip: skipExecution);
 
+  for (final name in [
+    'hello',
+    'print_integers',
+    'map_sum',
+    'persistent_cell',
+  ]) {
+    test('the program $name agrees', () async {
+      final source = File('tool/bench/fixtures/$name.dart').readAsStringSync();
+      final (official, compiled) = await _both(source);
+      expect(compiled, official);
+    }, skip: skipExecution);
+  }
+
   test('a program outlives the reader of its output', () async {
     final directory = writeSources({
       'main.dart':
@@ -181,7 +194,7 @@ void main() {
   test('the command line reports problems and its usage', () async {
     final directory = writeSources({
       'good.dart': "import 'dart:io';\nvoid main() { exit(9); }",
-      'bad.dart': 'void main() {\n  #x;\n}',
+      'bad.dart': 'void main() {\n  (1, 2);\n}',
     });
     Future<ProcessResult> run(List<String> arguments) => Process.run(
       '$hostSdk/bin/dart',
@@ -197,7 +210,7 @@ void main() {
     expect(
       bad.stderr,
       '${directory.path}/bad.dart:2:3: '
-      'Not supported yet: symbol literal.\n',
+      'Not supported yet: record literal.\n',
     );
     expect(File(output).existsSync(), isFalse);
     expect((await run([])).exitCode, 64);

@@ -33,6 +33,13 @@ bool isSubtype(RuntimeType a, RuntimeType b) {
     return b.kind == objectKind || a is BasicType && a.kind == b.kind;
   }
   if (a is InterfaceType && b is InterfaceType) return _isSubclass(a, b);
+  if (a is BoundType) return b is BoundType && a.index == b.index;
+  if (a is GenericType) {
+    if (b is GenericType) {
+      return _areSame(a.bounds, b.bounds) && isSubtype(a.inner, b.inner);
+    }
+    return b is InterfaceType && b.number == functionNumber();
+  }
   if (a is FunctionType) {
     if (b is FunctionType) return _isSubfunction(a, b);
     return b is InterfaceType && b.number == functionNumber();
@@ -117,6 +124,13 @@ RuntimeType _substitute(RuntimeType type, TypeList? own) {
   if (type is InterfaceType) {
     return InterfaceType(type.number, _substituteAll(type.arguments, own));
   }
+  if (type is GenericType) {
+    final inner = _substitute(type.inner, own);
+    final bounds = _substituteAll(type.bounds, own);
+    return inner is FunctionType && bounds != null
+        ? GenericType(bounds, inner)
+        : type;
+  }
   if (type is FunctionType) {
     return FunctionType(
       _substitute(type.result, own),
@@ -141,12 +155,19 @@ NamedList? _substituteNamed(NamedList? list, TypeList? own) => list == null
 bool isSameType(RuntimeType a, RuntimeType b) {
   if (isSame(a, b)) return true;
   if (a is BasicType) return b is BasicType && a.kind == b.kind;
-  if (a is NullableType)
+  if (a is NullableType) {
     return b is NullableType && isSameType(a.inner, b.inner);
+  }
   if (a is InterfaceType) {
     return b is InterfaceType &&
         a.number == b.number &&
         _areSame(a.arguments, b.arguments);
+  }
+  if (a is BoundType) return b is BoundType && a.index == b.index;
+  if (a is GenericType) {
+    return b is GenericType &&
+        _areSame(a.bounds, b.bounds) &&
+        isSameType(a.inner, b.inner);
   }
   return a is FunctionType &&
       b is FunctionType &&
@@ -185,6 +206,11 @@ int hashOfType(RuntimeType type) {
   if (type is InterfaceType) {
     return (_hashOfList(type.arguments) * 31 + type.number) & 0x3fffffff;
   }
+  if (type is BoundType) return type.index + 11;
+  if (type is GenericType) {
+    return (_hashOfList(type.bounds) * 13 + hashOfType(type.inner)) &
+        0x3fffffff;
+  }
   if (type is! FunctionType) return 0;
   var hash = hashOfType(type.result) + _hashOfList(type.required) * 5;
   for (var at = type.named; at != null; at = at.tail) {
@@ -205,18 +231,57 @@ int _hashOfList(TypeList? list) {
 String objectTypeName(Object? object) =>
     object == null ? 'Null' : typeName(typeOf(object));
 
+/// How many type parameters functions around have, and those around them.
+final class _Binders {
+  final int count, before;
+  final _Binders? outer;
+  _Binders(this.count, this.before, this.outer);
+}
+
 /// What [type] is called.
-String typeName(RuntimeType type) {
+String typeName(RuntimeType type) => _typeName(type, null);
+
+String _typeName(RuntimeType type, _Binders? binders) {
   if (type is BasicType) return _basicName(type.kind);
   if (type is InterfaceType) {
     final name = className(type.number), arguments = type.arguments;
-    return arguments == null ? name : '$name<${_listName(arguments)}>';
+    return arguments == null ? name : '$name<${_listName(arguments, binders)}>';
   }
   if (type is NullableType) {
-    final inner = type.inner, name = typeName(inner);
-    return inner is FunctionType ? '($name)?' : '$name?';
+    final inner = type.inner, name = _typeName(inner, binders);
+    final isPlain = inner is! FunctionType && inner is! GenericType;
+    return isPlain ? '$name?' : '($name)?';
   }
-  return type is FunctionType ? _functionName(type) : '';
+  if (type is BoundType) return _boundName(type.index, binders);
+  if (type is GenericType) return _genericName(type, binders);
+  return type is FunctionType ? _functionName(type, binders) : '';
+}
+
+String _boundName(int index, _Binders? binders) {
+  var rest = index;
+  for (var at = binders; at != null; at = at.outer) {
+    if (rest < at.count) return 'Y${at.before + rest}';
+    rest -= at.count;
+  }
+  return 'Y$rest';
+}
+
+String _genericName(GenericType type, _Binders? outer) {
+  var count = 0;
+  for (TypeList? at = type.bounds; at != null; at = at.tail) {
+    count++;
+  }
+  final before = outer == null ? 0 : outer.before + outer.count;
+  final binders = _Binders(count, before, outer);
+  var parameters = '', index = before;
+  for (TypeList? at = type.bounds; at != null; at = at.tail) {
+    final bound = _typeName(at.head, binders);
+    final isTop = bound == 'Object?' || bound == 'dynamic';
+    final comma = index == before ? '' : ', ';
+    parameters = '$parameters${comma}Y$index${isTop ? '' : ' extends $bound'}';
+    index++;
+  }
+  return '<$parameters>${_functionName(type.inner, binders)}';
 }
 
 String _basicName(int kind) {
@@ -227,32 +292,32 @@ String _basicName(int kind) {
   return kind == nullKind ? 'Null' : 'Never';
 }
 
-String _listName(TypeList list) {
-  var name = typeName(list.head);
+String _listName(TypeList list, _Binders? binders) {
+  var name = _typeName(list.head, binders);
   for (var at = list.tail; at != null; at = at.tail) {
-    name = '$name, ${typeName(at.head)}';
+    name = '$name, ${_typeName(at.head, binders)}';
   }
   return name;
 }
 
-String _functionName(FunctionType type) {
+String _functionName(FunctionType type, _Binders? binders) {
   final required = type.required, optional = type.optional, named = type.named;
-  var parameters = required == null ? '' : _listName(required);
+  var parameters = required == null ? '' : _listName(required, binders);
   if (optional != null) {
     if (required != null) parameters = '$parameters, ';
-    parameters = '$parameters[${_listName(optional)}]';
+    parameters = '$parameters[${_listName(optional, binders)}]';
   }
   if (named != null) {
     if (required != null) parameters = '$parameters, ';
-    parameters = '$parameters{${_namedName(named)}}';
+    parameters = '$parameters{${_namedName(named, binders)}}';
   }
-  return '($parameters) => ${typeName(type.result)}';
+  return '($parameters) => ${_typeName(type.result, binders)}';
 }
 
-String _namedName(NamedList list) {
+String _namedName(NamedList list, _Binders? binders) {
   var name = '';
   for (NamedList? at = list; at != null; at = at.tail) {
-    final own = '${typeName(at.type)} ${parameterName(at.name)}';
+    final own = '${_typeName(at.type, binders)} ${parameterName(at.name)}';
     name = '$name${at.isRequired ? 'required ' : ''}$own';
     if (at.tail != null) name = '$name, ';
   }

@@ -1,6 +1,3 @@
-import 'package:test/test.dart';
-
-import '../support/new_compiler.dart';
 import 'support.dart';
 
 const _tools = r'''
@@ -92,19 +89,22 @@ void main() {
     void main() { dynamic e = E(); try { e.f(); } on A catch (a) { number(a.n); } try { e.g; } on A catch (a) { number(a.n); } try { e.h; } on Error { print('E'); } dynamic r = (int n) => throw A(n); try { r(7); } on A catch (a) { number(a.n); } }
   ''');
 
-  group('not supported yet:', () {
-    void reports(String source, String problem) => test(problem, () async {
-      await expectLater(translate(source), failsWith(['main.dart:$problem']));
-    });
+  agrees('noSuchMethod is called', r'''
+    class A { noSuchMethod(Invocation i) { print('${i.memberName} ${i.positionalArguments} ${i.namedArguments} ${i.isMethod} ${i.isGetter} ${i.isSetter} ${i.typeArguments}'); return 5; } }
+    class B implements Comparable<B> { noSuchMethod(Invocation i) => super.noSuchMethod(i); }
+    abstract class I { int f(int a, {String b}); int get g; set s(int v); T h<T>(T t); }
+    class C implements I { noSuchMethod(i) { print(i.memberName); return 7; } }
+    void main() { dynamic a = A(); print(a.foo(1, x: 2)); print(a.bar); a.baz = 3; print(a + 1); print(a[0]); print(a()); I c = C(); print(c.f(1, b: 'x')); print(c.g); c.s = 4; print(c.h<int>(1)); dynamic b = B(); try { b.compareTo(b); } on NoSuchMethodError catch (e) { print(e); } dynamic n; try { n.foo(1, y: 2); } on NoSuchMethodError catch (e) { print(e); } dynamic i = 5; try { i.foo; } on NoSuchMethodError catch (e) { print(e); } try { i.foo = 1; } on NoSuchMethodError catch (e) { print(e); } try { i.abs(1, 2); } on NoSuchMethodError catch (e) { print(e); } try { i(); } on NoSuchMethodError catch (e) { print(e); } dynamic f = (int x) => x; try { f(); } on NoSuchMethodError catch (e) { print(e); } print(#foo); print(#foo == Symbol('foo')); print(const Symbol('a.b')); print(#[]); print(#+); try { n[1]; } on NoSuchMethodError catch (e) { print(e); } try { n + 1; } on NoSuchMethodError catch (e) { print(e); } try { i.toString(1); } on NoSuchMethodError catch (e) { print(e); } }
+  ''');
 
-    const what = 'Not supported yet:';
-    reports(
-      'class A { f() => 1; noSuchMethod(i) => 2; }\nvoid main() { dynamic d = A(); d.g(); }',
-      '2:32: $what noSuchMethod.',
-    );
-    reports(
-      'class A { void f<T>() {} }\nvoid main() { dynamic d = A(); d.f<int>(); }',
-      '2:32: $what type arguments of a dynamic call.',
-    );
-  });
+  agrees('what is missing is told', r'''
+    abstract class I { int f(int a, [int b = 7, int? c]); void g({int x = 3, String? y}); List<T> h<T extends num>(T t); int get p; set p(int v); int operator +(int o); }
+    class C implements I { noSuchMethod(Invocation i) { print('${i.memberName} ${i.positionalArguments} ${i.namedArguments} ${i.typeArguments}'); return i.memberName == #h ? <int>[] : 1; } }
+    class D extends C { int f(int a, [int b = 9, int? c]); }
+    class E implements I { noSuchMethod(i) => 'wrong'; }
+    int top(int a, {int b = 1}) => a; class K { int m(int a) => a; int get gt => 1; final fi = 2; static int st() => 1; }
+    void go(Function() f) { try { print(f()); } catch (e) { print(e); } }
+    void main() { final I c = C(); c.f(1); c.f(1, 2, 3); c.g(); c.g(y: 'q'); c.h(5); c.h<num>(5); c.p; c.p = 4; c + 2; I d = D(); d.f(8); go(() => (E() as I).f(1)); final t = c.f; t(5); print(t);
+     dynamic k = K(); go(() => k.m()); go(() => k.m(1, 2)); go(() => k.m(a: 1)); go(() => k.gt = 1); go(() => k.fi = 1); go(() => k.gt(3)); go(() => k.zz(1, q: 2)); go(() => k.zz); go(() => k.zz = 5); go(() => k[1]); go(() => k + 1); go(() => -k); go(() => k()); go(() => k < 1); go(() => k[1] = 2); dynamic f = top; go(() => f()); go(() => f(1, 2)); go(() => f(1, c: 2)); dynamic m = K().m; go(() => m()); dynamic n; go(() => n()); go(() => n.x = 1); go(() => n[0] = 1); go(() => n.toString(1)); go(() => f.foo); dynamic s = 'x'; go(() => s.length(1)); go(() => s.foo()); dynamic l = [1]; go(() => l.foo); dynamic ty = int; go(() => ty()); dynamic ctor = K.new; go(() => ctor(1)); Function ff = top; go(() => ff()); go(() => k.hashCode = 1); go(() => k._priv); dynamic lf = (int a) { return a; }; go(() => lf()); int loc(String z) => 1; dynamic ll = loc; go(() => ll(1, 2)); }
+  ''');
 }

@@ -1,6 +1,5 @@
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
 import 'support.dart';
 
 const _tools = r'''
@@ -179,24 +178,4 @@ void main() {
   ]) {
     shows('end the program: $name', "void main() { print('a'); $body }");
   }
-
-  group('not supported yet:', () {
-    void reports(String source, String problem) => test(problem, () async {
-      await expectLater(translate(source), failsWith(['main.dart:$problem']));
-    });
-
-    const what = 'Not supported yet:';
-    reports(
-      'T f<T>(T t) => t;\nvoid main() { final g = f; }',
-      '2:21: $what a variable of type T Function<T>(T).',
-    );
-    reports(
-      'void main() { final g = <T>(T t) => t; }',
-      '1:21: $what a variable of type T Function<T>(T).',
-    );
-    reports(
-      'class A { S f<S>(S s) => s; }\nvoid main() { int Function(int) g = A().f; }',
-      '2:37: $what tear-offs of generic methods.',
-    );
-  });
 }

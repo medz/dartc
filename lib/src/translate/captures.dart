@@ -87,6 +87,18 @@ final class _Captures() extends RecursiveAstVisitor<void> {
   }
 
   @override
+  void visitDeclaredVariablePattern(DeclaredVariablePattern node) {
+    _declare(node.declaredFragment?.element);
+    super.visitDeclaredVariablePattern(node);
+  }
+
+  @override
+  void visitDeclaredIdentifier(DeclaredIdentifier node) {
+    _declare(node.declaredFragment?.element);
+    super.visitDeclaredIdentifier(node);
+  }
+
+  @override
   void visitCatchClauseParameter(CatchClauseParameter node) {
     _declare(node.declaredFragment?.element);
     super.visitCatchClauseParameter(node);

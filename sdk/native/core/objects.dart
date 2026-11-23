@@ -25,6 +25,7 @@ class Object {
     if (obj is _List) return '_List len:${obj.length}';
     if (obj is _ImmutableList) return '_ImmutableList len:${obj.length}';
     if (obj is LinkedHashMap) return '_Map len:${obj.length}';
+    if (obj is Type) return obj.toString();
     if (obj is Function) {
       return 'Closure: ${objectTypeName(obj)}${functionName(obj)}';
     }

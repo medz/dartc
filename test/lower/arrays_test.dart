@@ -1,3 +1,6 @@
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:dartc/hir.dart';
 import 'package:test/test.dart';
 
@@ -125,6 +128,56 @@ void main() {
         return block.add(HirUnary(.floatBits, root));
       }),
       0x4008000000000000,
+    );
+  });
+
+  test('the system has functions of doubles', () {
+    for (final (op, inputs, result) in [
+      (HirMachineOp.sine, [1.0], sin(1.0)),
+      (HirMachineOp.cosine, [1.0], cos(1.0)),
+      (HirMachineOp.tangent, [1.0], tan(1.0)),
+      (HirMachineOp.arcSine, [0.5], asin(0.5)),
+      (HirMachineOp.arcCosine, [0.5], acos(0.5)),
+      (HirMachineOp.arcTangent, [0.5], atan(0.5)),
+      (HirMachineOp.exponential, [1.5], exp(1.5)),
+      (HirMachineOp.logarithm, [1.5], log(1.5)),
+      (HirMachineOp.arcTangent2, [1.0, 2.0], atan2(1.0, 2.0)),
+      (HirMachineOp.power, [2.5, 3.5], pow(2.5, 3.5)),
+    ]) {
+      final bits = ByteData(8)..setFloat64(0, result.toDouble());
+      expect(
+        _run((block) {
+          final found = block.add(
+            HirMachine(op, [
+              for (final input in inputs) block.add(HirConst(input)),
+            ]),
+          );
+          return block.add(HirUnary(.floatBits, found));
+        }),
+        bits.getInt64(0),
+        reason: op.name,
+      );
+    }
+  });
+
+  test('the system has times, zones and random bits', () {
+    for (final op in [HirMachineOp.realTime, HirMachineOp.steadyTime]) {
+      expect(_run((block) => block.add(HirMachine(op, const []))), isPositive);
+    }
+    expect(
+      _run((block) => block.add(HirMachine(.randomBits, const []))),
+      inInclusiveRange(0, 0xffffffff),
+    );
+    expect(
+      _run((block) {
+        final at = block.add(HirMachine(.outputBuffer, const []));
+        block
+          ..add(HirMachine(.store64, [at, _number(block, 1000000)]))
+          ..add(HirMachine(.localTime, [at]));
+        final zone = block.add(HirIntBinary(.add, at, _number(block, 48)));
+        return block.add(HirMachine(.load64, [zone]));
+      }),
+      DateTime.fromMillisecondsSinceEpoch(1000000000).timeZoneOffset.inSeconds,
     );
   });
 

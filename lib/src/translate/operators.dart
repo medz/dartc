@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
@@ -17,12 +18,28 @@ final class OperatorTranslator(
   final FunctionBuilder _builder,
   final CallTranslator _calls,
   final DynamicTranslator _dynamics,
+  final Evaluator _evaluator,
 ) {
   late final _checked = CheckedOperations(_scope, _builder);
   late final _conversions = Conversions(_scope, _builder);
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
+
+  /// The operand [right] of the operator [element] of [leftType].
+  (HirValue, DartType) operand(
+    Expression right,
+    HirValue left,
+    MethodElement? element,
+    DartType leftType,
+  ) {
+    final type = right.staticType!;
+    if (element == null || isNumber(leftType) && type is! DynamicType) {
+      return (_evaluator.value(right, placeholder: left.type!), type);
+    }
+    final declared = element.formalParameters.single.type;
+    return (_evaluator.valueTo(right, declared), declared);
+  }
 
   HirValue unary(PrefixExpression node, String operator, HirValue operand) {
     if (operand.type == .reference) {

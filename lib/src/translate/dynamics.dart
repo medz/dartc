@@ -25,6 +25,7 @@ final class DynamicTranslator(
     String name, [
     List<HirValue> positional = const [],
     Map<String, HirValue> named = const {},
+    (HirValue, int)? types,
   ]) {
     final names = named.keys.toList()..sort();
     return dynamicUse(
@@ -38,8 +39,10 @@ final class DynamicTranslator(
         positional.length,
         names,
         (what) => _unsupported(node, what),
+        types: types?.$2 ?? 0,
       ),
       [
+        ?types?.$1,
         for (final value in positional) _conversions.coerce(value, .reference),
         for (final name in names) _conversions.coerce(named[name]!, .reference),
       ],
@@ -68,8 +71,13 @@ final class DynamicTranslator(
     ArgumentList list, {
     TypeArgumentList? types,
   }) {
-    if (types != null) {
-      _unsupported(node, 'type arguments of a dynamic call');
+    final given = [
+      for (final type in types?.arguments ?? const <TypeAnnotation>[])
+        type.type!,
+    ];
+    final typeList = given.isEmpty ? null : _scope.typeList(_builder, given);
+    if (given.isNotEmpty && typeList == null) {
+      _unsupported(node, 'these type arguments');
     }
     final positional = <HirValue>[], named = <String, HirValue>{};
     for (final argument in list.arguments) {
@@ -83,6 +91,14 @@ final class DynamicTranslator(
         positional.add(value);
       }
     }
-    return _use(node, object, .call, name, positional, named);
+    return _use(
+      node,
+      object,
+      .call,
+      name,
+      positional,
+      named,
+      typeList == null ? null : (typeList, given.length),
+    );
   }
 }

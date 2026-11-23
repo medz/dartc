@@ -70,7 +70,21 @@ abstract interface class ProgramScope() {
   void addLocalClass(HirClass class_);
 
   /// The selector of calls of functions that are values.
-  HirSelector callSelector(int positional, List<String> named);
+  ///
+  /// They give [types] type arguments first, if there are any.
+  HirSelector callSelector(int types, int positional, List<String> named);
+
+  /// How functions are called with a list of arguments and one of names.
+  HirSelector get applySelector;
+
+  /// The generic [function] with a list of type arguments and their number,
+  /// which then is of [type].
+  HirValue partial(
+    FunctionBuilder builder,
+    HirValue function,
+    (HirValue, int) types,
+    FunctionType type,
+  );
 
   /// The object that [element] is, if the program declares it.
   HirConstObject? functionObject(ExecutableElement element);
@@ -81,12 +95,14 @@ abstract interface class ProgramScope() {
     InterfaceElement receiver,
   );
 
-  /// Gives the method [found] of [receiver] itself.
+  /// Gives the method [found] of [receiver] itself, which may only be forwarded
+  /// to its `noSuchMethod`.
   HirValue tearOff(
     FunctionBuilder builder,
     Implementation found,
-    HirValue receiver,
-  );
+    HirValue receiver, {
+    bool isForwarder = false,
+  });
 
   /// Translates [body] as that of the function of [builder], later.
   void translateBody(FunctionBuilder builder, FunctionBody body);
@@ -155,8 +171,14 @@ abstract interface class ProgramScope() {
   /// Whether objects are of [class_].
   HirTypeTest testOf(InterfaceElement class_);
 
+  /// Whether objects are of classes that extend `Error`.
+  HirTypeTest get errorTest;
+
   /// An instance member's own body at [level], taking the receiver first.
   HirFunction memberOf(Level level, ExecutableElement element);
+
+  /// Calls the `noSuchMethod` of objects of [level] for [element].
+  HirFunction forwarderOf(Level level, ExecutableElement element);
 
   /// What [level] has for a member, called like a selector of
   /// [selectorOf]. Null if it is abstract there.

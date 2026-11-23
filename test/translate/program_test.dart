@@ -414,14 +414,13 @@ b0():
       '2:21: $what async and generator functions.',
     );
     reports('external void main();', '2:21: $what a function without a body.');
-    reports('void main() { if (1 case 1) {} }', '2:21: $what this pattern.');
     reports(
-      'void main() { switch (1) { case < 2: } }',
-      '2:28: $what this kind of case.',
+      'void main() { if (main case Object(hashCode: 1)) {} }',
+      '2:29: $what object pattern.',
     );
     reports(
-      'void main() { switch (1) { case 1 when 1 < 2: } }',
-      '2:28: $what this kind of case.',
+      'void main() { switch ([1]) { case [1]: } }',
+      '2:35: $what list pattern.',
     );
     reports(
       'void main() { switch (1) { a: case 1: continue a; } }',

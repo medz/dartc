@@ -175,13 +175,30 @@ final class DispatchBuilder(
 
   HirFunction _entry(ClassElement class_, HirSelector selector) {
     final level = _scope.levelOf(class_);
-    final found =
-        implementationIn(level, _shapes[selector]!.member) ??
-        (throw _declarations.unsupported(class_, 'noSuchMethod'));
+    final shape = _shapes[selector]!;
+    final own = implementationIn(level, shape.member);
+    // Members that are not there are forwarded.
+    final found = own ?? (element: shape.member, level: level);
     if (_tearOffs.contains(selector)) {
       return _make(selector.name, selector, found.level, (builder, _) {
-        return _scope.tearOff(builder, found, builder.inputs.first);
+        final receiver = builder.inputs.first;
+        return _scope.tearOff(
+          builder,
+          found,
+          receiver,
+          isForwarder: own == null,
+        );
       });
+    }
+    if (own == null) {
+      return _adapt(
+        found,
+        selector,
+        shape,
+        _checkedParameters(class_, shape.member),
+        isUnboxed: false,
+        isForwarder: true,
+      );
     }
     return _function(level, found, selector);
   }
@@ -236,9 +253,10 @@ final class DispatchBuilder(
     _Shape shape,
     List<int> checked, {
     required bool isUnboxed,
+    bool isForwarder = false,
   }) {
     final (element: found, :level) = implementation;
-    final field = fieldOfAccessor(found);
+    final field = isForwarder ? null : fieldOfAccessor(found);
     final isGeneric = found.typeParameters.isNotEmpty;
     final given = _given(found, shape.positional, shape.named);
     final parameters = found.formalParameters;
@@ -274,7 +292,9 @@ final class DispatchBuilder(
         return null;
       });
     }
-    final target = _scope.memberOf(level, found);
+    final target = isForwarder
+        ? _scope.forwarderOf(level, found)
+        : _scope.memberOf(level, found);
     final isSame =
         checked.isEmpty &&
         (isUnboxed || target.parameters.first == .reference) &&

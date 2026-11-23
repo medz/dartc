@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'class.dart';
@@ -111,6 +112,14 @@ final class HirMachineState(final HirModule _module) {
       case .store8:
         _memory[number(0)] = number(1) & 0xff;
         return null;
+      case .load64:
+        return ByteData.sublistView(_read(number(0), 8)).getInt64(0, .little);
+      case .store64:
+        final bytes = ByteData(8)..setInt64(0, number(1), .little);
+        for (var i = 0; i < 8; i++) {
+          _memory[number(0) + i] = bytes.getUint8(i);
+        }
+        return null;
       case .write:
         (number(0) == 1 ? _output : _errors).add(_read(number(1), number(2)));
         return null;
@@ -126,8 +135,52 @@ final class HirMachineState(final HirModule _module) {
           count++;
         }
         return double.parse(ascii.decode(_read(number(0), count)));
+      case .realTime:
+        return DateTime.now().microsecondsSinceEpoch * 1000;
+      case .steadyTime:
+        return _watch.elapsedMicroseconds * 1000;
+      case .randomBits:
+        return Random().nextInt(1 << 32);
+      case .localTime:
+        _localTime(number(0));
+        return null;
       default:
-        throw StateError('${op.name} is not simulated.');
+        return _function(op, [
+          for (final input in inputs)
+            if (input is double) input,
+        ]);
+    }
+  }
+
+  final _watch = Stopwatch()..start();
+
+  double _function(HirMachineOp op, List<double> inputs) => switch (op) {
+    .sine => sin(inputs[0]),
+    .cosine => cos(inputs[0]),
+    .tangent => tan(inputs[0]),
+    .arcSine => asin(inputs[0]),
+    .arcCosine => acos(inputs[0]),
+    .arcTangent => atan(inputs[0]),
+    .exponential => exp(inputs[0]),
+    .logarithm => log(inputs[0]),
+    .arcTangent2 => atan2(inputs[0], inputs[1]),
+    .power => pow(inputs[0], inputs[1]).toDouble(),
+    _ => throw StateError('${op.name} is not simulated.'),
+  };
+
+  /// Of what the system tells about a time, only its zone.
+  void _localTime(int address) {
+    final seconds = ByteData.sublistView(_read(address, 8)).getInt64(0, .little);
+    final time = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+    final name = address + 200;
+    final zone = ByteData(16)
+      ..setInt64(0, time.timeZoneOffset.inSeconds, .little)
+      ..setInt64(8, name, .little);
+    for (var i = 0; i < 16; i++) {
+      _memory[address + 48 + i] = zone.getUint8(i);
+    }
+    for (final (i, byte) in [...ascii.encode(time.timeZoneName), 0].indexed) {
+      _memory[name + i] = byte;
     }
   }
 

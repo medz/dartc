@@ -14,6 +14,29 @@ final systemFunctions = {
   /// strtod(address, end).
   'strtod': LirSignature([.ptr, .ptr], .f64),
 
+  for (final name in const [
+    'sin',
+    'cos',
+    'tan',
+    'asin',
+    'acos',
+    'atan',
+    'exp',
+    'log',
+  ])
+    name: LirSignature([.f64], .f64),
+  'atan2': LirSignature([.f64, .f64], .f64),
+  'pow': LirSignature([.f64, .f64], .f64),
+
+  /// clock_gettime_nsec_np(clock), nanoseconds.
+  'clock_gettime_nsec_np': LirSignature([.i64], .i64),
+
+  /// localtime_r(seconds, result), the result.
+  'localtime_r': LirSignature([.ptr, .ptr], .ptr),
+
+  /// 32 random bits; others are unknown.
+  'arc4random': LirSignature([], .i64),
+
   /// The address of the 32-bit error number.
   '__error': LirSignature([], .ptr),
 

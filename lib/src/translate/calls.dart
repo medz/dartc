@@ -132,7 +132,12 @@ final class CallTranslator(
     }
     final function = _evaluator.value(target);
     _chains.check(node, function);
-    return _closures.call(node, function, node.argumentList);
+    return _closures.call(
+      node,
+      function,
+      node.argumentList,
+      node.typeArgumentTypes,
+    );
   }
 
   HirValue _this(AstNode node) =>
@@ -448,9 +453,7 @@ final class CallTranslator(
     MethodElement element,
   ) {
     _checkMember(node, element);
-    if (element.typeParameters.isNotEmpty) {
-      _unsupported(node, 'tear-offs of generic methods');
-    }
+
     return _builder.call(
       HirVirtualCall(
         _scope.tearOffSelector(element.baseElement, class_),

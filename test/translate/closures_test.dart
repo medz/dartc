@@ -194,4 +194,13 @@ void main() {
       '1:28: $what async and generator functions.',
     );
   });
+
+  agrees('generic functions are values', r'''
+    T id<T>(T t) => t; class A { T m<T>(T t) => t; Type k<T>() => T; static S s<S>(S s) => s; } typedef F = T Function<T>(T);
+    void main() { F f = id; print(f<int>(1)); print(f('x')); final g = A().m; print(g<int>(3)); int Function(int) h = A().m; print(h(4)); F k = A.s; print(k(2.5)); T local<T>(T t) => t; F l = local; print(l(true)); print(f is F); print(f.runtimeType); dynamic d = f; print(d<int>(1)); print(d(2)); var t = A().k; print(t<int>()); print([id][0]('z')); print(id == f); final e = <T>(T x) => [x]; print(e<num>(1)); print(e('a').runtimeType); print(f); }
+  ''');
+
+  agrees('loops give each round its own variables', r'''
+    void main() { final fs = <int Function()>[]; for (final x in [1, 2, 3]) { fs.add(() => x); } for (var y in [4, 5]) { y++; fs.add(() => y++); } print(fs.map((f) => f()).toList()); print(fs.map((f) => f()).toList()); final l = [1, 2]; l[0] |= 6; l[1]++; l[0] <<= 2; print(l); final m = {'a': 1}; m['a'] = m['a']! + 1; m['b'] ??= 5; print(m); int z; for (z in l) { fs.add(() => z); } print(fs.last()); }
+  ''');
 }

@@ -81,4 +81,15 @@ line"""); }
     import_() => 1;
     void main() { final b = Uint8List(4); b[0] = 300; b[1] = -1; print(b); final w = b.buffer.asUint16List(); w[1] = 0xabcd; print(b); final d = ByteData(16); d.setFloat64(0, 1.5); d.setInt32(8, -7, Endian.little); print(d.getUint8(0)); print(d.getFloat64(0)); print(d.getInt32(8, Endian.little)); print(d.getInt32(8)); print(Float32List.fromList([0.1])[0]); print(Int8List.fromList([200])); print(Uint32List(2)..[1] = -1); print(Uint8ClampedList.fromList([300, -5, 7])); print(Uint8List.sublistView(b, 1, 3)); print(b.sublist(2)); b.setRange(1, 4, b); print(b); print(Int64List.fromList([1 << 62, -1])); try { b[4]; } catch (e) { print(e); } try { Uint8List(-1); } catch (e) { print(e); } final v = Uint8List.view(b.buffer, 1, 2); v[0] = 77; print('$b ${v.length} ${v.offsetInBytes}'); print(b.map((x) => x + 1).toList()); }
   ''', imports: "import 'dart:typed_data';");
+
+  agrees('types are values', r'''
+    class A {} class B<T> { Type get t => T; Type get b => B<T>; } Type id<T>() => T;
+    void main() { print(int); print(A); print(B<int>().t); print(B<List<int>>().b); print(id<String?>()); print(A().runtimeType); print(B<int>().runtimeType == B<int>); print(1.runtimeType); print('x'.runtimeType); print([1].runtimeType); print([1].runtimeType == List<int>); print(const [1].runtimeType); print({}.runtimeType); print(<int>{}.runtimeType); print(null.runtimeType); print(1.5.runtimeType); print(true.runtimeType); print((() => 1).runtimeType); print(identical(int, int)); print(int == int); print({int: 1}[int]); switch (A) { case A: print('a'); } print(List); print(Map<String, int>); dynamic d = 5; print(d.runtimeType); print(main.runtimeType); print(const [int, String]); print(id<void Function(int, {String? a})>()); Type t = num; print(t); print(id<dynamic>() == id<Object?>()); }
+  ''');
+
+  agrees('functions have a text', r'''
+    class A { A(); A.n(); int m() => 1; static int s() => 2; int get g => 3; int operator +(int o) => 1; factory A.f() => A(); } int top(int x) => x; T gen<T>(T t) => t;
+    class G<T> { G(); G.x(); T? m(T t) => t; }
+    void main() { int local() => 1; print(local); print(top); print(A.s); print(A().m); print(A.new); print(A.n); print(A.f); int Function(int) g = gen; print(g); print(G<int>.new); print(G<int>().m); print((int x, {required String y}) => x); print([1].add); print('a'.substring); print(identical); print(A().m.toString); print((A().m).call); print(print); }
+  ''');
 }

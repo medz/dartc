@@ -55,9 +55,7 @@ final class ClosureTranslator(
     Element? name,
   ) {
     final isGeneric = element.typeParameters.isNotEmpty;
-    if (isGeneric && name == null) {
-      _unsupported(node, 'generic functions as values');
-    }
+
     if (node.body.isAsynchronous || node.body.isGenerator) {
       _unsupported(node.body, 'async and generator functions');
     }
@@ -68,9 +66,7 @@ final class ClosureTranslator(
       name: name,
     );
     // An open type is found where the closure is created.
-    final type = isOpen(element.type) && !isGeneric
-        ? HirField('type', .reference)
-        : null;
+    final type = isOpen(element.type) ? HirField('type', .reference) : null;
     final class_ = HirClass(_describe(element), null, [
       ...environment.fields,
       ?type,
@@ -90,23 +86,22 @@ final class ClosureTranslator(
                 _unsupported(node, 'a result of type ${element.returnType}'),
     );
     _scope.addLocalFunction(function);
-    if (isGeneric) {
-      _scope.addLocalClass(class_);
-    } else {
-      _scope.addClosure(
-        Closure(
-          class_,
-          element.type,
-          element.formalParameters,
-          () => function,
-          (_, self) => [self],
-          bind: environment.bindTypes,
-          typeValue: (builder) => type == null
-              ? _scope.typeValue(builder, element.type)!
-              : builder.add(HirLoad(type, builder.inputs.first)),
-        ),
-      );
-    }
+    _scope.addClosure(
+      Closure(
+        class_,
+        element.type,
+        element.formalParameters,
+        () => function,
+        (_, self) => [self],
+        typeParameters: element.typeParameters,
+        name:
+            '${_outerName(node)}.${name?.displayName ?? '<anonymous closure>'}',
+        bind: environment.bindTypes,
+        typeValue: (builder) => type == null
+            ? _scope.typeValue(builder, element.type)!
+            : builder.add(HirLoad(type, builder.inputs.first)),
+      ),
+    );
     if (name != null) _builder.locals.functions[name] = function;
     _scope.schedule(() {
       final builder = environment.build(
@@ -131,6 +126,29 @@ final class ClosureTranslator(
     return object;
   }
 
+  /// What the function around [node] is called.
+  static String _outerName(AstNode node) {
+    final parent = node.parent;
+    // A function with a name is in its declaration.
+    final outer = parent is FunctionDeclaration ? parent.parent : parent;
+    for (var at = outer; at != null; at = at.parent) {
+      switch (at) {
+        case FunctionDeclaration(:final name):
+          final isLocal = at.parent is FunctionDeclarationStatement;
+          return isLocal ? '${_outerName(at)}.${name.lexeme}' : name.lexeme;
+        case MethodDeclaration(
+          :final name,
+          declaredFragment: Fragment(:final element),
+        ):
+          return '${element.enclosingElement?.displayName}.${name.lexeme}';
+        case FunctionExpression(parent: final outer)
+            when outer is! FunctionDeclaration:
+          return '${_outerName(at)}.<anonymous closure>';
+      }
+    }
+    return '';
+  }
+
   static String _describe(ExecutableElement element) =>
       describeType(element.type);
 
@@ -139,7 +157,12 @@ final class ClosureTranslator(
     final function = node.function;
     final type = function.staticType;
     if (type is FunctionType) {
-      return call(node, _evaluator.value(function), node.argumentList);
+      return call(
+        node,
+        _evaluator.value(function),
+        node.argumentList,
+        node.typeArgumentTypes,
+      );
     }
     final element = node.element;
     final class_ = classOf(type);
@@ -162,7 +185,16 @@ final class ClosureTranslator(
   }
 
   /// Calls the function [value].
-  HirValue? call(Expression node, HirValue value, ArgumentList list) {
+  HirValue? call(
+    Expression node,
+    HirValue value,
+    ArgumentList list,
+    List<DartType>? types,
+  ) {
+    final typeList = types == null || types.isEmpty
+        ? null
+        : _scope.typeList(_builder, types) ??
+              _unsupported(node, 'these type arguments');
     final positional = <HirValue>[];
     final named = <String, HirValue>{};
     for (final argument in list.arguments) {
@@ -182,9 +214,14 @@ final class ClosureTranslator(
       }
     }
     final names = named.keys.toList()..sort();
-    final selector = _scope.callSelector(positional.length, names);
+    final selector = _scope.callSelector(
+      types?.length ?? 0,
+      positional.length,
+      names,
+    );
     final result = _builder.call(
       HirVirtualCall(selector, value, [
+        ?typeList,
         ...positional,
         for (final name in names) named[name]!,
       ]),

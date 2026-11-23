@@ -36,6 +36,20 @@ final class FunctionType extends RuntimeType {
   const FunctionType(this.result, this.required, this.optional, this.named);
 }
 
+/// A function type with type parameters, which have [bounds].
+final class GenericType extends RuntimeType {
+  final TypeList bounds;
+  final FunctionType inner;
+  const GenericType(this.bounds, this.inner);
+}
+
+/// A type parameter of the function type around, counted from the innermost
+/// one on.
+final class BoundType extends RuntimeType {
+  final int index;
+  const BoundType(this.index);
+}
+
 /// A type parameter of the class whose supertypes this is part of.
 final class VariableType extends RuntimeType {
   final int index;

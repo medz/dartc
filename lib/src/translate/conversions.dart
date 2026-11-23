@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/dart/element/type_provider.dart';
 import 'package:dartc/hir.dart';
@@ -42,6 +43,23 @@ final class Conversions(
     final box = _builder.create(class_);
     _builder.add(HirStore(class_.fields.single, box, value));
     return box;
+  }
+
+  /// [left], or what [right] gives if that is null, represented as [type].
+  HirValue ifNull(
+    AstNode node,
+    HirType type,
+    HirValue left,
+    HirValue Function() right,
+  ) {
+    if (left.type != .reference) return coerce(left, type);
+    final exit = _builder.join(node, type);
+    _builder.branch(
+      isNull(left),
+      () => _builder.jump(exit, right()),
+      () => _builder.jump(exit, coerce(left, type)),
+    );
+    return _builder.enter(exit)!;
   }
 
   HirValue isNull(HirValue value) =>

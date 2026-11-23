@@ -44,3 +44,36 @@ external int floatToInt(double value);
 external int floatBits(double value);
 external double bitsFloat(int bits);
 external double squareRoot(double value);
+external double sine(double value);
+external double cosine(double value);
+external double tangent(double value);
+external double arcSine(double value);
+external double arcCosine(double value);
+external double arcTangent(double value);
+external double exponential(double value);
+external double logarithm(double value);
+external double arcTangent2(double y, double x);
+external double power(double base, double exponent);
+
+/// Nanoseconds since 1970, or since some time that never changes.
+external int realTime();
+external int steadyTime();
+
+/// Finds out about the seconds since 1970 that are stored at [address], in the
+/// place where the program runs. Then there is, after them, what the C function
+/// `localtime_r` writes.
+external void localTime(int address);
+
+/// 32 random bits.
+external int randomBits();
+
+/// Whether [object] is of a class that extends `Error`, rather than implements
+/// it.
+external bool isSubclassOfError(Object object);
+
+/// Calls [function] with [arguments], of which the first is itself and the last
+/// have [names].
+external Object? applyFunction(Object function, List arguments, List names);
+
+/// Throws [exception] with [trace].
+external Never throwWith(Object exception, Object trace);

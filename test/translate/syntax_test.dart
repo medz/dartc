@@ -117,4 +117,9 @@ void main() {
     class L<T> { L(); factory L.sub(T t) = M<T>; factory L.pair(T a) = N<T, bool>; factory L.fix() = M<T>.fixed; T? get first => null; } class M<T> extends L<T> { final T? t; M(this.t); M.fixed() : t = null; @override T? get first => t; } class N<X, Y> extends L<X> { final X x; N(this.x); bool isY(Object? o) => o is Y; }
     void main() { number(A.b(1).n); number(A.b(1, 2).n); number(A.c(z: 4).n); final g = A.g(); truth(g is G<int>); number(const A.k(3).n); truth(identical(const A.k(3), const K(3))); number(A.two(6).n); L<int> l = L.sub(4); show(l.first); truth(l is M<int>); final p = L<num>.pair(1.5); truth(p is N<num, bool>); truth(p is N<int, bool>); truth(L<int>.fix() is M<int>); final f = A.b; number(f(9).n); L<int> Function(int) h = L.sub; truth(h(1) is M<int>); }
   ''');
+
+  agrees('patterns match', r'''
+    String g(int n) => switch (n) { < 0 => 'neg', 0 || 1 => 'small', >= 10 && < 20 => 'teen', int x => 'other $x' };
+    void main() { int? a = 5; if (a case final x?) print(x); a = null; if (a case final x?) { print(x); } else { print('null'); } Object o = 'text'; if (o case String s when s.length > 2) print(s); if (o case int n) print(n); else print('no'); for (final n in [-1, 0, 1, 15, 30]) print(g(n)); var t = 0; if (3 case var q when (t = q) > 2) t++; print(t); switch (o) { case String s when s.isEmpty: print('e'); case String _: print("s"); default: print('d'); } switch (7) { case > 5: print('big'); case 3: print('three'); } final fs = <int Function()>[]; for (var i = 0; i < 3; i++) { if (i case var k when k != 1) fs.add(() => k * 10); } print(fs.map((f) => f()).toList()); print(switch (o) { 'a' => 1, 'text' => 2, _ => 3 }); switch ('b') { case 'a': case 'b': print('ab'); case _: print('x'); } }
+  ''');
 }

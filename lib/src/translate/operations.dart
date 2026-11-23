@@ -56,6 +56,20 @@ final class OperationTranslator(
           valueType(type) ??
               (throw _builder.unit.unsupported(node, 'a value of type $type')),
         );
+      case 'isSubclassOfError':
+        return _builder.add(
+          HirIsInstance(_scope.errorTest, argument(0, .reference)),
+        );
+      case 'applyFunction':
+        return _builder.call(
+          HirVirtualCall(_scope.applySelector, argument(0, .reference), [
+            argument(1, .reference),
+            argument(2, .reference),
+          ]),
+        );
+      case 'throwWith':
+        _builder.raise(argument(0, .reference), argument(1, .reference));
+        return null;
       case 'coreClassNumber':
         final class_ = _coreClass(arguments.first);
         final level = _scope.levelOf(class_);

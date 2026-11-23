@@ -6,6 +6,7 @@ import 'builder.dart';
 import 'closure.dart';
 import 'conversions.dart';
 import 'dynamic_shape.dart';
+import 'forwarders.dart';
 import 'levels.dart';
 import 'members.dart';
 import 'scope.dart';
@@ -26,21 +27,22 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
   Map<HirSelector, Map<HirClass, HirFunction>> get dispatch => _entries;
 
   HirSelector selectorOf(DynamicShape shape) {
-    final DynamicShape(:use, :name, :library, :positional, :named) = shape;
+    final DynamicShape(:use, :name, :library, :positional, :named, :types) =
+        shape;
     final key = [
       'dynamic',
       use.name,
       name,
       positional,
+      if (types > 0) '<$types>',
       ...named,
       ?library?.uri,
     ].join(' ');
     return _selectors[key] ??= () {
-      final made = HirSelector(
-        key,
-        List.filled(positional + named.length, .reference),
-        .reference,
-      );
+      final made = HirSelector(key, [
+        if (types > 0) HirType.reference,
+        for (var i = positional + named.length; i > 0; i--) HirType.reference,
+      ], .reference);
       _shapes[made] = shape;
       _entries[made] = {};
       return made;
@@ -52,6 +54,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     Iterable<ClassElement> classes,
     HirClass Function(ClassElement element) classOf,
     Iterable<Closure> closures,
+    ClassElement functionClass,
   ) {
     var found = false;
     for (final MapEntry(key: selector, value: shape)
@@ -67,7 +70,10 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         add(classOf(class_), () => _member(class_, selector, shape));
       }
       for (final closure in closures.toList()) {
-        add(closure.class_, () => _function(closure, selector, shape));
+        add(
+          closure.class_,
+          () => _function(closure, functionClass, selector, shape),
+        );
       }
     }
     return found;
@@ -92,35 +98,71 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     return function;
   }
 
-  /// A function throwing that objects have no such member.
-  HirFunction _missing(HirSelector selector, DynamicShape shape) =>
-      _make('no ${shape.name}', selector, (builder, _) {
-        throwMissing(_scope, builder, builder.inputs.first, shape);
-        return null;
-      });
+  /// A function telling that objects have no such member, or one that takes
+  /// [found] and is called [name].
+  HirFunction _missing(
+    HirSelector selector,
+    DynamicShape shape, {
+    String? name,
+    String? found,
+  }) => _make('no ${shape.name}', selector, (builder, _) {
+    final [receiver, ...all] = builder.inputs;
+    final types = shape.types > 0 ? all.first : null;
+    final given = types == null ? all : all.sublist(1);
+    final isSetter = shape.use == .set;
+    return callMissing(
+      _scope,
+      builder,
+      receiver,
+      shape.use.index,
+      name ?? (isSetter ? '${shape.name}=' : shape.name),
+      given.take(isSetter ? 1 : shape.positional).toList(),
+      {
+        for (final (i, name) in shape.named.indexed)
+          name: given[shape.positional + i],
+      },
+      types: types,
+      found: found,
+    );
+  });
 
   HirFunction _function(
     Closure closure,
+    ClassElement functionClass,
     HirSelector selector,
     DynamicShape shape,
   ) {
     if (shape.name != 'call' || shape.use == .set) {
-      return _missing(selector, shape);
+      return _member(functionClass, selector, shape);
     }
     if (shape.use == .get) {
       return _make(selector.name, selector, (builder, _) {
         return builder.inputs.first;
       });
     }
-    if (!accepts(closure.parameters, shape.positional, shape.named)) {
-      return _missing(selector, shape);
+    final count = closure.typeParameters.length;
+    if (shape.types > 0 && shape.types != count ||
+        !accepts(closure.parameters, shape.positional, shape.named)) {
+      return _missing(selector, shape, name: closure.name);
     }
     return _make(selector.name, selector, (builder, conversions) {
       final self = builder.inputs.first;
+      if (closure.forward case final forward?) {
+        final (positional, named) = (shape.positional, shape.named);
+        final given = builder.inputs.sublist(1);
+        return forward(builder, self, given, positional, named);
+      }
       closure.bindTypes(builder, self);
       return builder.call(
         HirCall(closure.target(), [
           ...closure.leading(builder, self),
+          if (count > 0)
+            _typesFor(
+              builder,
+              closure.typeParameters.first.enclosingElement!,
+              closure.typeParameters,
+              shape,
+            ),
           ..._arguments(builder, conversions, closure.parameters, shape),
         ]),
       );
@@ -148,10 +190,9 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       isSetter: shape.use == .set,
       isGetter: shape.use != .set,
     );
-    final found = method ?? accessor;
-    if (found == null) {
-      _rejectHandler(class_, shape);
-      return _missing(selector, shape);
+    if (method == null && accessor == null) {
+      return _forward(class_, own, selector, shape) ??
+          _missing(selector, shape);
     }
     if (method == null) {
       return _make(selector.name, selector, (builder, conversions) {
@@ -164,9 +205,11 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       });
     }
     final (:element, :level) = method;
-    if (!accepts(element.formalParameters, shape.positional, shape.named)) {
-      _rejectHandler(class_, shape);
-      return _missing(selector, shape);
+    final count = element.typeParameters.length;
+    if (shape.types > 0 && shape.types != count ||
+        !accepts(element.formalParameters, shape.positional, shape.named)) {
+      final type = describeType(element.type);
+      return _missing(selector, shape, found: type);
     }
     return _make(selector.name, selector, (builder, conversions) {
       final receiver = builder.inputs.first;
@@ -182,28 +225,33 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     });
   }
 
-  void _rejectHandler(ClassElement class_, DynamicShape shape) {
-    final level = _scope.levelOf(class_);
-    final handler = memberNamed(level, 'noSuchMethod', null);
-    final isOwn = handler?.level.superLevel != null;
-    if (isOwn) {
-      shape.reject('noSuchMethod');
-    }
-  }
-
   /// The type arguments of a call of [method] that gives none.
   HirValue? _typeArguments(
     FunctionBuilder builder,
     ExecutableElement method,
     DynamicShape shape,
   ) {
-    if (method.typeParameters.isEmpty) return null;
-    final list = _scope.typeList(builder, [
-      for (final parameter in method.typeParameters)
-        parameter.bound ?? builder.library.typeProvider.dynamicType,
-    ]);
+    final parameters = method.typeParameters;
+    return parameters.isEmpty
+        ? null
+        : _typesFor(builder, method, parameters, shape);
+  }
+
+  /// The type arguments that a call gives for [parameters], or their bounds.
+  HirValue _typesFor(
+    FunctionBuilder builder,
+    Element owner,
+    List<TypeParameterElement> parameters,
+    DynamicShape shape,
+  ) {
+    final list = shape.types > 0
+        ? builder.inputs[1]
+        : _scope.typeList(builder, [
+            for (final parameter in parameters)
+              parameter.bound ?? builder.library.typeProvider.dynamicType,
+          ]);
     if (list == null) shape.reject('these bounds in a dynamic call');
-    builder.bindTypes(method, list);
+    builder.bindTypes(owner, list);
     return list;
   }
 
@@ -248,9 +296,48 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         shape.positional,
         shape.named,
         shape.reject,
+        types: shape.types,
       ),
       builder.inputs.skip(1).toList(),
     );
+  }
+
+  /// Uses a member that [class_] only forwards to its `noSuchMethod`, if it has
+  /// one like that.
+  HirFunction? _forward(
+    ClassElement class_,
+    Level level,
+    HirSelector selector,
+    DynamicShape shape,
+  ) {
+    if (shape.use != .call) return null;
+    for (final type in class_.allSupertypes) {
+      final method = type.element.getMethod(shape.name);
+      final isKnown =
+          method != null &&
+          !method.isStatic &&
+          (shape.library == null || shape.library == method.library) &&
+          implementationIn(level, method) == null;
+      if (!isKnown) continue;
+      final viewed = viewedAt(level, method);
+      final parameters = viewed.formalParameters;
+      if (!accepts(parameters, shape.positional, shape.named)) {
+        final type = describeType(viewed.type);
+        return _missing(selector, shape, found: type);
+      }
+      return _make(selector.name, selector, (builder, conversions) {
+        final receiver = builder.inputs.first;
+        builder.setReceiver(receiver, level);
+        return builder.call(
+          HirCall(_scope.forwarderOf(level, method), [
+            receiver,
+            ?_typeArguments(builder, method, shape),
+            ..._arguments(builder, conversions, parameters, shape),
+          ]),
+        );
+      });
+    }
+    return null;
   }
 
   /// [receiver] as members of [level] take it.
@@ -287,7 +374,8 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         if (_place(parameter, shape, position) case final at?)
           _checked(
             conversions,
-            builder.inputs[(parameter.isPositional ? position++ : at) + 1],
+            builder.inputs[(parameter.isPositional ? position++ : at) +
+                (shape.types > 0 ? 2 : 1)],
             parameter,
             shape,
           )
@@ -338,29 +426,6 @@ bool accepts(
       positional >= places.where((p) => p.isRequired).length &&
       names.containsAll(named) &&
       parameters.every((p) => !p.isRequiredNamed || named.contains(p.name));
-}
-
-/// Throws that [object] has no member for [shape].
-void throwMissing(
-  ProgramScope scope,
-  FunctionBuilder builder,
-  HirValue object,
-  DynamicShape shape,
-) {
-  final kind = switch (shape.use) {
-    .call => 'method',
-    .get => 'getter',
-    .set => 'setter',
-  };
-  builder
-    ..call(
-      HirCall(scope.runtime('throwMissing'), [
-        object,
-        builder.add(scope.text(kind)),
-        builder.add(scope.text(shape.name)),
-      ]),
-    )
-    ..end(HirUnreachable());
 }
 
 /// Uses a member of [object], which can be anything.
