@@ -102,6 +102,36 @@ void main() {
     }
   ''');
 
+  // 16 MB, and 64 MB that are dropped.
+  limited('lists of about a kilobyte share memory', 60, '''
+    void main() {
+      final kept = <List<Object?>>[];
+      var sum = 0;
+      for (var i = 0; i < 20000; i++) {
+        kept.add(List.filled(100, i));
+        for (var j = 0; j < 4; j++) { sum += List.filled(100, i).length; }
+      }
+      for (final list in kept) { sum += list[99] as int; }
+      if (sum == 8000000 + 199990000) print('ok');
+    }
+  ''');
+
+  // 10 MB, among which 400 MB are dropped.
+  limited('memory stays small where objects are replaced', 40, '''
+    class P { int a, b, c; P(this.a, this.b, this.c); }
+    void main() {
+      const count = 200000;
+      final kept = List.filled(count, P(0, 0, 0));
+      var at = 1, sum = 0;
+      for (var i = 0; i < 10000000; i++) {
+        at = (at * 1103515245 + 12345) & 0x7fffffff;
+        kept[(at >> 8) % count] = P(i, at, 1);
+      }
+      for (final p in kept) { sum += p.c; }
+      if (sum > 199000) print('ok');
+    }
+  ''');
+
   limited('variables, fields and arguments keep their objects', 12, '''
     class P { int n; P? next; P(this.n, [this.next]); int get sum => n; }
     class Q extends P { Q(super.n); static Q one = Q(5); int get sum => n * 2; }
