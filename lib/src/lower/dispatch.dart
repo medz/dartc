@@ -17,7 +17,23 @@ const _tableSymbol = '.dispatch', _holeSymbol = '.hole';
   List<Map<int, T>> rows,
 ) {
   final offsets = List.filled(rows.length, 0);
-  final taken = <int, T>{};
+  final entries = <T?>[];
+  // Where the next entry may be that is not taken, at or after each.
+  final free = <int>[];
+  int nextFree(int at) {
+    var found = at;
+    while (found < free.length && free[found] != found) {
+      found = free[found];
+    }
+    // What was followed is shorter from now on.
+    for (var i = at; i < found;) {
+      final next = free[i];
+      free[i] = found;
+      i = next;
+    }
+    return found;
+  }
+
   // The fullest rows are hardest to place. Sorting by index too keeps the
   // result the same on every run.
   final order = [for (var i = 0; i < rows.length; i++) i]
@@ -28,20 +44,24 @@ const _tableSymbol = '.dispatch', _holeSymbol = '.hole';
   for (final i in order) {
     final row = rows[i];
     if (row.isEmpty) continue;
-    final first = row.keys.reduce((a, b) => a < b ? a : b);
+    final columns = row.keys.toList()..sort();
+    bool isTaken(int at) => at < entries.length && entries[at] != null;
     // Ends at the latest after everything taken so far.
-    var offset = -first;
-    while (row.keys.any((column) => taken.containsKey(offset + column))) {
-      offset++;
+    var at = nextFree(0);
+    while (columns.any((column) => isTaken(at - columns.first + column))) {
+      at = nextFree(at + 1);
     }
-    offsets[i] = offset;
-    row.forEach((column, value) => taken[offset + column] = value);
+    final offset = offsets[i] = at - columns.first;
+    while (entries.length <= offset + columns.last) {
+      free.add(entries.length);
+      entries.add(null);
+    }
+    row.forEach((column, value) {
+      entries[offset + column] = value;
+      free[offset + column] = offset + column + 1;
+    });
   }
-  final length = taken.keys.fold(0, (end, at) => at >= end ? at + 1 : end);
-  return (
-    offsets: offsets,
-    entries: [for (var i = 0; i < length; i++) taken[i]],
-  );
+  return (offsets: offsets, entries: entries);
 }
 
 /// How objects are laid out and where calls on them go.

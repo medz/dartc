@@ -34,6 +34,7 @@ void verifyHir(HirModule module) {
       throw HirError('array ${class_.name} has several fields');
     }
   }
+  final constants = _ConstantVerifier(classes);
   final globals = module.globals.toSet();
   if (globals.length != module.globals.length) {
     throw HirError('a global is listed twice');
@@ -42,7 +43,7 @@ void verifyHir(HirModule module) {
     if (!isConstant(type, initial)) {
       throw HirError('global $name starts with $initial');
     }
-    _checkConstant(classes, initial);
+    constants.check(initial);
   }
   _checkRuntime(module, functions);
   module.tests.forEach((test, passing) {
@@ -69,7 +70,14 @@ void verifyHir(HirModule module) {
     });
   });
   for (final function in module.functions) {
-    _FunctionVerifier(module, functions, classes, globals, function).run();
+    _FunctionVerifier(
+      module,
+      functions,
+      classes,
+      constants,
+      globals,
+      function,
+    ).run();
   }
 }
 
@@ -105,31 +113,36 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('uncaught', uncaught, [.reference], uncaught?.result);
 }
 
-/// Checks a constant and those it refers to, which form no cycle.
-void _checkConstant(Set<HirClass> classes, Object? value) {
-  if (value is! HirConstObject) return;
-  final HirConstObject(:target, :fields) = value;
-  if (!classes.contains(target)) {
-    throw HirError('unlisted class ${target.name}');
-  }
-  final expected = target.fields;
-  if (fields.length != expected.length ||
-      !expected.every(
-        (field) =>
-            fields.containsKey(field) && isConstant(field.type, fields[field]),
-      )) {
-    throw HirError('constant ${target.name} has wrong fields');
-  }
-  final isRight = switch (target.elements) {
-    null => value.elements == null,
-    .references => value.elements?.every((e) => isConstant(.reference, e)),
-    .bytes => value.elements?.every((e) => e is int && e >= 0 && e < 256),
-  };
-  if (isRight != true) {
-    throw HirError('constant ${target.name} has wrong elements');
-  }
-  for (final part in [...fields.values, ...?value.elements]) {
-    _checkConstant(classes, part);
+/// Checks constants and those they refer to, which form no cycle.
+final class _ConstantVerifier(final Set<HirClass> _classes) {
+  final _checked = Set<HirConstObject>.identity();
+
+  void check(Object? value) {
+    if (value is! HirConstObject || !_checked.add(value)) return;
+    final HirConstObject(:target, :fields) = value;
+    if (!_classes.contains(target)) {
+      throw HirError('unlisted class ${target.name}');
+    }
+    final expected = target.fields;
+    if (fields.length != expected.length ||
+        !expected.every(
+          (field) =>
+              fields.containsKey(field) &&
+              isConstant(field.type, fields[field]),
+        )) {
+      throw HirError('constant ${target.name} has wrong fields');
+    }
+    final isRight = switch (target.elements) {
+      null => value.elements == null,
+      .references => value.elements?.every((e) => isConstant(.reference, e)),
+      .bytes => value.elements?.every((e) => e is int && e >= 0 && e < 256),
+    };
+    if (isRight != true) {
+      throw HirError('constant ${target.name} has wrong elements');
+    }
+    for (final part in [...fields.values, ...?value.elements]) {
+      check(part);
+    }
   }
 }
 
@@ -137,6 +150,7 @@ final class _FunctionVerifier(
   final HirModule module,
   final Set<HirFunction> functions,
   final Set<HirClass> classes,
+  final _ConstantVerifier constants,
   final Set<HirGlobal> globals,
   final HirFunction function,
 ) {
@@ -255,7 +269,7 @@ final class _FunctionVerifier(
         _expect(index, .integer, 'index');
         _expect(value, element.type, 'element');
       case HirStatic(:final object):
-        _checkConstant(classes, object);
+        constants.check(object);
       case HirLoadGlobal(:final global):
         _checkGlobal(global);
       case HirStoreGlobal(:final global, :final value):

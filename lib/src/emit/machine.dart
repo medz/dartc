@@ -51,6 +51,20 @@ final class const MachineRegisters({
     return [for (final type in signature.parameters) next(.of(type))];
   }
 
+  /// How many of a call's arguments are passed on the stack.
+  int stackWords(LirSignature signature) {
+    var words = 0, floats = 0;
+    for (final type in signature.parameters) {
+      type == .f64 ? floats++ : words++;
+    }
+    return _excess(words, .word) + _excess(floats, .float);
+  }
+
+  int _excess(int count, RegisterBank bank) {
+    final registers = arguments[bank]!.length;
+    return count > registers ? count - registers : 0;
+  }
+
   /// The register holding a call's result.
   Location resultLocation(LirType type) {
     final bank = RegisterBank.of(type);
