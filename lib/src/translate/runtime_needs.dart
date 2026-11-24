@@ -15,7 +15,8 @@ final class RuntimeNeeds(
   HirFunction? get eventLoop => _eventLoop;
   HirFunction? get callback => _callback;
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
-  HirFunction? _eventLoop, _callback;
+  HirFunction? get exitCode => _exitCode;
+  HirFunction? _eventLoop, _callback, _exitCode;
 
   /// Says that it creates objects.
   void addAllocation() => _allocate ??= _runtime('allocate');
@@ -25,6 +26,9 @@ final class RuntimeNeeds(
 
   /// Says that it lets work be done later.
   void addEvents() => _eventLoop ??= _runtime('runEventLoop');
+
+  /// Says that it sets the code that it ends with.
+  void addExitCode() => _exitCode ??= _runtime('exitCode');
 
   /// Adds what [functions], which are those known so far, need.
   void update(Iterable<HirFunction> functions) {

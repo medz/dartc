@@ -116,7 +116,7 @@ final class ProgramTranslator(final SourceProgram program)
     final main = _functions.of(entry);
     final start = EntryTranslator(this, _unit, entry, main)..begin();
     _translateAll();
-    start.finish(_needs.eventLoop);
+    start.finish(_needs.eventLoop, _needs.exitCode);
     return _module(start.function, const {});
   }
 
@@ -214,6 +214,7 @@ final class ProgramTranslator(final SourceProgram program)
   void _addRuntime() {
     if (_closures.closures.isNotEmpty) _dispatch.instantiate(_functionClass);
     if (_links.schedulers.any(_functions.contains)) _needs.addEvents();
+    if (_functions.contains(_links.setExitCode)) _needs.addExitCode();
     _needs.update(_allFunctions);
   }
 

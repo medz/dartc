@@ -11,20 +11,16 @@ void reachabilityFence(Object? object) {}
 bool get has63BitSmis => true;
 
 @patch
-String allocateOneByteString(int length) => objects.newCoreArray(
-  '_OneByteString',
-  length,
-);
+String allocateOneByteString(int length) =>
+    objects.newCoreArray('_OneByteString', length);
 
 @patch
 void writeIntoOneByteString(String string, int index, int codePoint) =>
     objects.storeUint8(string, index, codePoint);
 
 @patch
-String allocateTwoByteString(int length) => objects.newCoreArray(
-  '_TwoByteString',
-  length * 2,
-);
+String allocateTwoByteString(int length) =>
+    objects.newCoreArray('_TwoByteString', length * 2);
 
 @patch
 void writeIntoTwoByteString(String string, int index, int codePoint) =>
@@ -122,6 +118,9 @@ set printToZone(void Function(String)? value) {
 abstract interface class EventSource {
   /// Whether there is still something to wait for.
   bool get keepsAlive;
+
+  /// How many times [runOne] handles what has happened by now, at most.
+  int get happened;
 
   /// Handles what has happened first, if anything has.
   bool runOne();

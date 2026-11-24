@@ -57,9 +57,12 @@ final class EntryTranslator(
   }
 
   /// Does what `main` left to be done later with [eventLoop], if there is
-  /// anything.
-  void finish(HirFunction? eventLoop) {
+  /// anything. Ends with what [exitCode] gives, if the program says so.
+  void finish(HirFunction? eventLoop, HirFunction? exitCode) {
     if (eventLoop != null) _builder.call(HirCall(eventLoop, const []));
+    if (exitCode != null) {
+      _builder.end(HirExit(_builder.call(HirCall(exitCode, const []))!));
+    }
     _builder.finish();
   }
 }

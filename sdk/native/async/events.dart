@@ -30,32 +30,55 @@ void _runImmediate() {
   callback();
 }
 
-/// What else the program waits for, if there is anything.
-EventSource? _outside;
+/// What else the program waits for.
+final List<EventSource> _outside = [];
 
-void _registerEvents(EventSource source) {
-  _outside = source;
-}
+void _registerEvents(EventSource source) => _outside.add(source);
 
 /// Runs all that is left, until there is nothing to wait for.
 void _runEventLoop() {
   _runImmediate();
-  while (true) {
-    if (_outside?.runOne() ?? false) {
+  while (_runOutside() || _EventTimer._runNext() || _waitOutside()) {}
+  for (final source in _outside) {
+    source.end();
+  }
+}
+
+/// Handles what has happened outside, then the timers whose time has come.
+/// Returns whether there was anything outside.
+bool _runOutside() {
+  var isAny = false;
+  for (var i = 0; i < _outside.length; i++) {
+    // What happens meanwhile comes after the timers.
+    for (var rest = _outside[i].happened; rest > 0; rest--) {
+      if (!_outside[i].runOne()) break;
+      isAny = true;
       _runImmediate();
-    } else if (!_EventTimer._runNext() && !_waitOutside()) {
-      break;
     }
   }
-  _outside?.end();
+  if (isAny) _EventTimer._runNext(waits: false);
+  return isAny;
 }
 
 /// Waits for something outside, if that has to be. Returns whether it did.
 bool _waitOutside() {
-  final source = _outside;
-  if (source == null || !source.keepsAlive) return false;
-  source.wait(-1);
+  if (!_outside.any((source) => source.keepsAlive)) return false;
+  _wait(-1);
   return true;
+}
+
+/// Waits for something to happen, for [microseconds] at most unless that is
+/// negative.
+void _wait(int microseconds) {
+  // Only one can be waited for, and others are asked again soon.
+  const soon = 2000;
+  if (_outside.isEmpty) return pause(microseconds);
+  final source = _outside.lastWhere(
+    (source) => source.keepsAlive,
+    orElse: () => _outside.last,
+  );
+  final isLong = microseconds < 0 || microseconds > soon;
+  source.wait(_outside.length > 1 && isLong ? soon : microseconds);
 }
 
 @patch
@@ -122,8 +145,9 @@ class _EventTimer implements Timer {
     _waiting.remove(this);
   }
 
-  /// Runs the timers that come next. Returns whether there were any.
-  static bool _runNext() {
+  /// Runs the timers that come next, or waits for the first one. Returns
+  /// whether there were any.
+  static bool _runNext({bool waits = true}) {
     final pending = <_EventTimer>[];
     if (_immediate.isNotEmpty) {
       final first = _immediate.removeAt(0);
@@ -136,7 +160,7 @@ class _EventTimer implements Timer {
       final rest = _waiting.first._wakeup - _now;
       if (rest > 0) {
         // What happens outside comes first.
-        _wait(rest > 1000 ? 1000000 : rest * 1000);
+        if (waits) _wait(rest > 1000 ? 1000000 : rest * 1000);
         return true;
       }
       final now = _now;
@@ -148,15 +172,6 @@ class _EventTimer implements Timer {
       pending[i]._run();
     }
     return true;
-  }
-
-  static void _wait(int microseconds) {
-    final source = _outside;
-    if (source == null) {
-      pause(microseconds);
-    } else {
-      source.wait(microseconds);
-    }
   }
 
   void _run() {

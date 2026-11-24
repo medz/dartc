@@ -45,6 +45,10 @@ final class RuntimeLinks(
     async.getTopLevelFunction('_registerEvents')!,
   ];
 
+  /// What sets the code that the program ends with.
+  ExecutableElement get setExitCode =>
+      library('dart:io').getClass('_ProcessUtils')!.getMethod('_setExitCode')!;
+
   /// The function type called [name], privately so in one of some libraries.
   FunctionType functionType(String name) =>
       (async.getTypeAlias('_$name') ??
@@ -52,18 +56,18 @@ final class RuntimeLinks(
               .aliasedType
           as FunctionType;
 
-  /// The function called [name], or privately so in one of some libraries.
-  TopLevelFunctionElement function(String name) =>
-      _core.getTopLevelFunction('_$name') ??
-      const ['async', 'typed_data', 'ffi']
-          .map((uri) => library('dart:$uri').getTopLevelFunction('_$name'))
-          .nonNulls
-          .firstOrNull ??
-      _heap
-          .map((library) => library.getTopLevelFunction(name))
-          .nonNulls
-          .firstOrNull ??
-      (throw StateError('No runtime with $name.'));
+  /// The only function called [name], or privately so in one of some libraries.
+  TopLevelFunctionElement function(String name) {
+    final found = [
+      _core.getTopLevelFunction('_$name'),
+      for (final uri in const ['async', 'typed_data', 'ffi', 'io'])
+        library('dart:$uri').getTopLevelFunction('_$name'),
+      for (final library in _heap) library.getTopLevelFunction(name),
+    ].nonNulls.where((function) => !function.isExternal).toList();
+    return found.length == 1
+        ? found.single
+        : throw StateError('The runtime has $name ${found.length} times.');
+  }
 
   ClassElement heapClass(String name) =>
       _heap.map((library) => library.getClass(name)).nonNulls.first;

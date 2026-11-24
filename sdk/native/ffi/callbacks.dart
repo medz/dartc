@@ -56,9 +56,19 @@ class _Posted implements EventSource {
 
   bool get keepsAlive => open > 0;
 
+  /// The addresses of those that have come, the first ones first.
+  final List<int> _come = [];
+
+  int get happened {
+    for (var next = takePosted(); next != 0; next = takePosted()) {
+      _come.add(next);
+    }
+    return _come.length;
+  }
+
   bool runOne() {
-    final posted = takePosted();
-    if (posted == 0) return false;
+    if (_come.isEmpty) return false;
+    final posted = _come.removeAt(0);
     final slot = load64(posted + _postedSlot);
     // It could be another one by now.
     final info = load64(callbackInfo() + slot * _infoBytes);
@@ -166,8 +176,7 @@ void _runFinalizers() {
 @patch
 abstract final class NativeFinalizer {
   @patch
-  factory NativeFinalizer(Pointer<NativeFinalizerFunction> callback) =
-      _AtEnd;
+  factory NativeFinalizer(Pointer<NativeFinalizerFunction> callback) = _AtEnd;
 }
 
 final class _AtEnd implements NativeFinalizer {

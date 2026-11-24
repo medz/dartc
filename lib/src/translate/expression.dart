@@ -419,6 +419,15 @@ final class ExpressionTranslator(
       case RethrowExpression():
         final (exception, trace) = _builder.caught.last;
         _builder.raise(exception, trace);
+      case BinaryExpression():
+        _binary(inner);
+        _builder.end(HirUnreachable());
+      case ConditionalExpression():
+        _conditional(inner);
+        _builder.end(HirUnreachable());
+      case SwitchExpression():
+        patterns.switchExpression(inner, _resultType(inner));
+        _builder.end(HirUnreachable());
       default:
         _unsupported(inner, describe(inner));
     }
@@ -543,8 +552,12 @@ final class ExpressionTranslator(
   HirValue equal(Expression node, (HirValue, DartType) value) => _operators
       .binary(node, '==', (this.value(node), node.staticType!), value);
 
+  /// The type of the values that [node] has, which never are there if that
+  /// cannot have any.
   DartType _resultType(Expression node) {
-    final type = node.staticType!;
+    final type = node.staticType is NeverType
+        ? _conversions.types.dynamicType
+        : node.staticType!;
     return valueType(type) != null
         ? type
         : _unsupported(node, 'a value of type $type');

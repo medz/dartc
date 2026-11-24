@@ -76,6 +76,11 @@ final class OperationTranslator(
             for (var i = 0; i < 3; i++) argument(i, .integer),
           ]),
         );
+      case 'currentUri':
+        return _builder.call(HirCall(_scope.runtime(name), const []));
+      case 'exit':
+        _builder.end(HirExit(argument(0, .integer)));
+        return null;
       case 'throwWith':
         _builder.raise(argument(0, .reference), argument(1, .reference));
         return null;

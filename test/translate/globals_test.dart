@@ -332,12 +332,8 @@ int get get => x;''',
       '1:14: $what external variables.',
     );
     reports(
-      "import 'dart:io';\nvoid main() { exitCode; }",
+      "import 'dart:developer';\nvoid main() { extensionStreamHasListener; }",
       '2:15: $what simple identifier.',
-    );
-    reports(
-      "import 'dart:io';\nvoid main() { exitCode = 1; }",
-      '2:15: $what assignment to simple identifier.',
     );
   });
 }

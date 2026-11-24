@@ -53,6 +53,31 @@ void main() {
         try { number(add(trace(1), throw A(trace(5)))); } on A catch (e) { number(e.n); }
       }
     ''');
+    shows('may be all that an expression does', '''
+      class N {
+        final Never Function(int)? f;
+        final N? next;
+        N(this.f, this.next);
+        Never go(int c) => f?.call(c) ?? next?.go.call(c) ?? last(c);
+        Never last(int c) => throw 'last \$c';
+      }
+      Never stop(int x) => throw 'stop \$x';
+      int pick(Never? Function()? g, bool b) => b ? (g?.call() ?? 3) : 4;
+      void choose(bool b) {
+        try { b ? throw 'yes' : throw 'no'; } catch (e) { print('\$e'); }
+        try { print(b ? stop(1) : throw 'no'); } catch (e) { print('\$e'); }
+        try {
+          print(switch (b) { true => throw 't', false => stop(2) });
+        } catch (e) { print('\$e'); }
+      }
+      void main() {
+        for (final n in [N(null, null), N(stop, null), N(null, N(stop, null)), N(null, N(null, null))]) {
+          try { n.go(4); } catch (e) { print('\$e'); }
+        }
+        number(pick(null, true)); number(pick(() => null, true));
+        choose(true); choose(false);
+      }
+    ''');
     shows('ends the program where nothing catches it', '''
       void main() { print('a'); try { raise(3); } finally { print('f'); } }
     ''');

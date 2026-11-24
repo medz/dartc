@@ -110,5 +110,11 @@ external bool isSubclassOfError(Object object);
 /// have [names].
 external Object? applyFunction(Object function, List arguments, List names);
 
+/// The `Uri` of the directory that paths start at.
+external Object currentUri();
+
+/// Ends the program with [code].
+external Never exit(int code);
+
 /// Throws [exception] with [trace].
 external Never throwWith(Object exception, Object trace);

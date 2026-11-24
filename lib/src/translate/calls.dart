@@ -190,14 +190,6 @@ final class CallTranslator(
         element is TopLevelFunctionElement || element is MethodElement;
     if (!isFunction) _unsupported(node, describe(node));
     element as ExecutableElement;
-    final arguments = node.argumentList.arguments;
-    switch (_coreName(element)) {
-      case 'dart:io exit':
-        final code = arguments.single.argumentExpression;
-        final type = _conversions.types.intType;
-        _builder.end(HirExit(_evaluator.valueTo(code, type)));
-        return null;
-    }
     if (_scope.operationOf(element) case final name?) {
       return _operations.call(node, name);
     }
@@ -222,11 +214,6 @@ final class CallTranslator(
   /// Calls the static member that [node] leaves out the class of.
   HirValue? shorthand(DotShorthandInvocation node) =>
       _static(node, node.memberName.element);
-
-  static String? _coreName(ExecutableElement element) =>
-      element is TopLevelFunctionElement && element.library.isInSdk
-      ? '${element.library.uri} ${element.name}'
-      : null;
 
   HirValue? _direct(
     HirFunction function,

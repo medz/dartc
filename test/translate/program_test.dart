@@ -25,9 +25,7 @@ void main() {
       exits(name, 'void main() { $body }', code);
 
   test('evaluates operands from left to right', () async {
-    final module = await translate(
-      "import 'dart:io';\nvoid main() { exit(1 + 2 * -(~3)); }",
-    );
+    final module = await translate('void main() { 1 + 2 * -(~3); }');
     expect(printHir(module), '''
 void start {
 b0():
@@ -43,7 +41,8 @@ b0():
   v4 = -v3
   v5 = v1 * v4
   v6 = v0 + v5
-  exit v6
+  v7 = null
+  return v7
 }''');
   });
 
