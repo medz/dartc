@@ -140,12 +140,3 @@ Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `t
 | 泛型类的 `late final` 字段，赋值时检查类型 | 官方没有检查 |
 | 枚举自己有叫 `_name` 的字段：报"不支持" | analyzer 把它和枚举的名字混在一起 |
 | `const bool.fromEnvironment('dart.vm.product')` 是 true | 和官方 AOT 相同，和 `dart run` 不同 |
-
-## 保存的旧内容
-
-| 内容 | 位置 |
-| --- | --- |
-| ChatGPT 的 WIP | `git stash` 的 `stash@{0}`（`8aaaff0f`） |
-| 同一份 WIP 的补丁和压缩包 | `~/dartc-wip-backup-20261123/` |
-| `.git` 快照 | `~/dartc-archive/git-snapshot-20261123/` |
-| 旧研究资料 | `~/dartc-archive/` |
