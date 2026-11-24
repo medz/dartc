@@ -7,6 +7,9 @@ final class World<C extends Object, S extends Object>(
   final bool Function(C sub, C superclass) _isSubclass,
 ) {
   final _classes = <C>{};
+
+  /// Those of [_classes] that objects of each receiver can be of.
+  final _subclasses = <C, List<C>>{};
   final _receivers = <S, Set<C>>{};
   final _found = <(C, S)>{};
   final _pending = <(C, S)>{};
@@ -20,18 +23,27 @@ final class World<C extends Object, S extends Object>(
   /// Records that objects of class [created] can exist.
   void instantiate(C created) {
     if (!_classes.add(created)) return;
+    final superclasses = {
+      for (final receiver in _subclasses.keys)
+        if (_isSubclass(created, receiver)) receiver,
+    };
+    for (final receiver in superclasses) {
+      _subclasses[receiver]!.add(created);
+    }
     _receivers.forEach((selector, receivers) {
-      if (receivers.any((receiver) => _isSubclass(created, receiver))) {
-        _meet(created, selector);
-      }
+      if (receivers.any(superclasses.contains)) _meet(created, selector);
     });
   }
 
   /// Records a call of [selector] on objects of [receiver] or its subclasses.
   void call(S selector, C receiver) {
     if (!(_receivers[selector] ??= {}).add(receiver)) return;
-    for (final created in _classes) {
-      if (_isSubclass(created, receiver)) _meet(created, selector);
+    final subclasses = _subclasses[receiver] ??= [
+      for (final created in _classes)
+        if (_isSubclass(created, receiver)) created,
+    ];
+    for (final created in subclasses) {
+      _meet(created, selector);
     }
   }
 

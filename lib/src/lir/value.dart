@@ -21,11 +21,15 @@ final class LirSignature(
   final List<LirType> parameters = .unmodifiable(parameters);
 
   @override
-  bool operator ==(Object other) =>
-      other is LirSignature &&
-      other.result == result &&
-      other.parameters.length == parameters.length &&
-      other.parameters.indexed.every((e) => e.$2 == parameters[e.$1]);
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! LirSignature || other.result != result) return false;
+    if (other.parameters.length != parameters.length) return false;
+    for (var i = 0; i < parameters.length; i++) {
+      if (other.parameters[i] != parameters[i]) return false;
+    }
+    return true;
+  }
 
   @override
   int get hashCode => Object.hash(result, Object.hashAll(parameters));
