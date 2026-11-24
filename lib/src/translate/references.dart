@@ -19,7 +19,7 @@ final class ReferenceTranslator(
 
   HirValue constructor(Expression node, ConstructorName name) {
     final element = name.element?.baseElement, type = node.staticType;
-    if (element == null || classOf(element.returnType) == null) {
+    if (element == null) {
       _unsupported(node, describe(node));
     }
     return _instantiate(node, element, type!);

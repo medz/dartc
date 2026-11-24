@@ -39,6 +39,28 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   int get functionNumber =>
       classes.indexWhere((class_) => class_.name == 'Function');
 
+  @override
+  int get recordNumber =>
+      classes.indexWhere((class_) => class_.name == 'Record');
+
+  final _names = <String, List<String>>{};
+
+  RecordType _record(
+    analyzer.RecordType type,
+    analyzer.InterfaceElement? owner,
+  ) {
+    final named = type.namedFields.toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    final names = [for (final field in named) field.name];
+    return RecordType(
+      list([
+        for (final field in type.positionalFields) field.type,
+        for (final field in named) field.type,
+      ], owner),
+      _names['$names'] ??= names,
+    );
+  }
+
   TypeList? list(
     List<analyzer.DartType> types, [
     analyzer.InterfaceElement? owner,
@@ -63,6 +85,7 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
       analyzer.InterfaceType(:final element, :final typeArguments) =>
         InterfaceType(classes.indexOf(element), list(typeArguments, owner)),
       analyzer.FunctionType() => _function(type, owner),
+      analyzer.RecordType() => _record(type, owner),
       _ => throw StateError('Unexpected $type.'),
     };
     return isNullable ? nullable(plain) : plain;
@@ -135,10 +158,28 @@ const _functions = [
   'G<int Function()>',
 ];
 
+const _records = [
+  'Record',
+  '()',
+  '(int,)',
+  '(num,)',
+  '(int, int)',
+  '(num, Object?)',
+  '(int, {int a})',
+  '(int, {num a})',
+  '({int a})',
+  '({num a})',
+  '({int b})',
+  '({int b, int a})',
+  '({Object a, num b})',
+  'G<Record>',
+  'G<(int, int)>',
+];
+
 /// The text of a random type.
 String _random(Random random, int depth) {
   String inner() => _random(random, depth - 1);
-  final text = switch (random.nextInt(depth > 0 ? 24 : 11)) {
+  final text = switch (random.nextInt(depth > 0 ? 28 : 11)) {
     0 => 'dynamic',
     1 => 'Null',
     2 => 'Never',
@@ -157,9 +198,24 @@ String _random(Random random, int depth) {
     18 => 'R',
     19 => 'L<Object>',
     20 => 'Function',
+    21 => 'Record',
+    22 || 23 || 24 => _randomRecord(random, inner),
     _ => _randomFunction(random, inner),
   };
   return text != 'dynamic' && random.nextInt(4) == 0 ? '$text?' : text;
+}
+
+String _randomRecord(Random random, String Function() inner) {
+  final fields = [for (var i = random.nextInt(3); i > 0; i--) inner()];
+  final named = [
+    for (final name in ['b', 'a'])
+      if (random.nextInt(3) == 0) '${inner()} $name',
+  ];
+  return switch ((fields, named)) {
+    ([final single], []) => '($single,)',
+    (_, []) => '(${fields.join(', ')})',
+    _ => '(${[...fields, '{${named.join(', ')}}'].join(', ')})',
+  };
 }
 
 String _randomFunction(Random random, String Function() inner) {
@@ -185,6 +241,7 @@ void main() {
     final random = Random(5);
     final texts = [
       ..._functions,
+      ..._records,
       for (var i = 0; i < 400; i++) _random(random, 3),
     ];
     final source = await load(
@@ -195,7 +252,14 @@ void main() {
     final types = [for (final alias in library.typeAliases) alias.aliasedType];
     final program_ = _Program([
       ...library.classes,
-      for (final name in ['int', 'num', 'double', 'Function', 'Comparable'])
+      for (final name in [
+        'int',
+        'num',
+        'double',
+        'Function',
+        'Comparable',
+        'Record',
+      ])
         library.typeProvider.objectElement.library.getClass(name)!,
     ]);
     program = program_;
@@ -216,7 +280,7 @@ void main() {
         );
       }
     }
-    expect(types, hasLength(400 + _functions.length));
+    expect(types, hasLength(400 + _functions.length + _records.length));
     expect(positive, greaterThan(5000));
   });
 }

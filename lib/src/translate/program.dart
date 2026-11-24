@@ -285,6 +285,23 @@ final class ProgramTranslator(final SourceProgram program)
   ClassElement get _functionClass => _core.getClass('_Closure')!;
 
   @override
+  ClassElement get recordClass => _core.getClass('_Record')!;
+
+  @override
+  HirValue record(
+    FunctionBuilder builder,
+    List<String> names,
+    List<HirValue> values,
+  ) => _array(builder, recordClass, builder.add(this.names(names)), values);
+
+  @override
+  HirInstruction names(List<String> names) {
+    final record = createdClass(recordClass);
+    assert(record.elements != null);
+    return HirStatic(_constants.names(names));
+  }
+
+  @override
   HirValue? typeValue(FunctionBuilder builder, DartType type) {
     _prepareTypes();
     return _types.value(builder, type);
@@ -316,11 +333,21 @@ final class ProgramTranslator(final SourceProgram program)
 
   @override
   HirValue list(FunctionBuilder builder, DartType type, List<HirValue> values) {
-    final element = _core.getClass('_List')!, class_ = createdClass(element);
+    final types = typeList(builder, [type])!;
+    return _array(builder, _core.getClass('_List')!, types, values);
+  }
+
+  /// An array of [element] that holds [values], and [own] in its field.
+  HirValue _array(
+    FunctionBuilder builder,
+    ClassElement element,
+    HirValue own,
+    List<HirValue> values,
+  ) {
+    final class_ = createdClass(element);
     final length = builder.add(HirConst(values.length));
     final array = builder.call(HirNewArray(class_, length))!;
-    final types = typeList(builder, [type])!;
-    builder.add(HirStore(class_.fields.single, array, types));
+    builder.add(HirStore(class_.fields.single, array, own));
     for (final (i, value) in values.indexed) {
       final index = builder.add(HirConst(i));
       builder.add(HirStoreElement(.reference, array, index, value));
@@ -361,6 +388,17 @@ final class ProgramTranslator(final SourceProgram program)
       receiver,
       isForwarder: isForwarder,
     );
+  }
+
+  @override
+  HirValue extensionTearOff(
+    FunctionBuilder builder,
+    MethodElement element,
+    HirValue receiver,
+    HirValue? types,
+  ) {
+    _addAllocation();
+    return _closures.extensionTearOff(builder, element, receiver, types);
   }
 
   @override
@@ -485,7 +523,7 @@ final class ProgramTranslator(final SourceProgram program)
   );
 
   @override
-  Level levelOf(ClassElement class_) => _classes.levels.of(class_);
+  Level levelOf(InterfaceElement class_) => _classes.levels.of(class_);
 
   @override
   HirFunction initializerOf(ConstructorElement element) =>
@@ -495,7 +533,7 @@ final class ProgramTranslator(final SourceProgram program)
   HirFunction factoryOf(ConstructorElement element) => _functions.of(element);
 
   @override
-  HirClass createdClass(ClassElement element) {
+  HirClass createdClass(InterfaceElement element) {
     final class_ = _classes.classOf(element);
     _dispatch.instantiate(element);
     _addAllocation();

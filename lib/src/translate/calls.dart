@@ -10,6 +10,7 @@ import 'conversions.dart';
 import 'creators.dart';
 import 'describe.dart';
 import 'dynamics.dart';
+import 'extensions.dart';
 import 'members.dart';
 import 'operations.dart';
 import 'scope.dart';
@@ -24,6 +25,7 @@ final class CallTranslator(
   final ChainTranslator _chains,
 ) {
   late final _conversions = Conversions(_scope, _builder);
+  late final extensions = ExtensionTranslator(_scope, _builder);
   late final _operations = OperationTranslator(_scope, _builder, _evaluator);
   late final _dynamics = DynamicTranslator(_scope, _builder, _evaluator);
 
@@ -36,7 +38,7 @@ final class CallTranslator(
     if (target != null && target.staticType is DynamicType) {
       return _dynamicCall(node, target);
     }
-    if (target?.staticType is FunctionType) {
+    if (target?.staticType is FunctionType && !isExtensionMember(element)) {
       return _callFunction(node, target!);
     }
     if (target != null &&
@@ -60,14 +62,14 @@ final class CallTranslator(
         types: _typeList(node, node.typeArgumentTypes),
       );
     }
-    final receiver = target == null ? _this(node) : object(node, target);
+    final receiver = target == null ? _this(node) : object(target, node);
     return _checked(
       node,
       element,
       method(
         node,
         receiver,
-        _receiverClass(node, target),
+        receiverType(target, node),
         element,
         node.argumentList,
         types: node.typeArgumentTypes,
@@ -78,12 +80,13 @@ final class CallTranslator(
   /// [result] of [element], checked if it can be of another type than [node],
   /// as functions taking type arguments of their object can.
   HirValue? _checked(
-    Expression node,
+    AstNode node,
     ExecutableElement element,
     HirValue? result,
   ) {
     final base = element.baseElement;
     if (result == null ||
+        isExtensionMember(base) ||
         !mentions(base.returnType, base.enclosingElement, isTaken: true)) {
       return result;
     }
@@ -144,10 +147,7 @@ final class CallTranslator(
       _builder.receiver ?? _unsupported(node, 'this here');
 
   /// The object that [target] is, of which [node] uses a member.
-  HirValue object(Expression node, Expression target) {
-    if (classFor(target.staticType) == null) {
-      _unsupported(node, describe(node));
-    }
+  HirValue object(Expression target, Expression node) {
     final result = _evaluator.value(target);
     _chains.check(node, result);
     return result;
@@ -157,13 +157,28 @@ final class CallTranslator(
   InterfaceElement? classFor(DartType? type) =>
       switch (type == null ? null : boundOf(type)) {
         FunctionType() => _scope.functionClass,
+        RecordType() => _scope.recordClass,
         DynamicType() || VoidType() => _conversions.types.objectElement,
         _ => classOf(type),
       };
 
-  InterfaceElement _receiverClass(AstNode node, Expression? target) =>
-      (target == null ? _builder.receiverClass : classFor(target.staticType)) ??
-      _unsupported(node, describe(node));
+  /// The type of [target], whose member [node] uses, or of `this`.
+  DartType? receiverType(Expression? target, [AstNode? node]) {
+    final type = switch (target?.unParenthesized) {
+      null => _builder.level?.element.thisType ?? _builder.thisType,
+      ExtensionOverride(:final extendedType) => extendedType,
+      final target => target.staticType,
+    };
+    final isSome = switch (node) {
+      MethodInvocation(:final isNullAware) ||
+      PropertyAccess(:final isNullAware) ||
+      IndexExpression(:final isNullAware) => isNullAware,
+      _ => false,
+    };
+    return isSome && type != null
+        ? _builder.library.typeSystem.promoteToNonNull(type)
+        : type;
+  }
 
   HirValue? _static(MethodInvocation node, ExecutableElement element) {
     final isFunction =
@@ -214,14 +229,13 @@ final class CallTranslator(
   /// Creates an object, or calls a factory.
   HirValue creation(InstanceCreationExpression node) {
     final element = node.constructorName.element;
-    final class_ = classOf(node.staticType);
-    if (element == null || class_ is! ClassElement) {
+    if (element == null) {
       _unsupported(node, 'objects of type ${node.staticType}');
     }
     if (node.isConst) {
       final value = node.computeConstantValue()?.value;
       return _builder.add(
-        _scope.constantOf(.reference, value) ??
+        _scope.constantOf(valueType(node.staticType!), value) ??
             _unsupported(node, 'a constant of type ${node.staticType}'),
       );
     }
@@ -234,22 +248,22 @@ final class CallTranslator(
       given = redirected(given);
       target = next;
     }
-    return _create(node, target, given);
+    return create(node, target, given);
   }
 
   /// Creates an object with [element], giving [supplied] to its parameters.
-  HirValue _create(
-    Expression node,
+  HirValue create(
+    AstNode node,
     ConstructorElement element,
     Map<FormalParameterElement, HirValue> supplied,
   ) {
-    final class_ = element.enclosingElement as ClassElement;
+    final class_ = element.enclosingElement;
     if (!_scope.declares(class_)) {
       _unsupported(node, 'calling ${class_.displayName} of the SDK');
     }
     final base = element.baseElement;
     final types = element.returnType.typeArguments;
-    if (element.isFactory) {
+    if (!isInitializerElement(element)) {
       final arguments = ordered(base, supplied);
       return _direct(_scope.factoryOf(base), element, [
         ?_typeList(node, types),
@@ -311,27 +325,37 @@ final class CallTranslator(
   HirValue? method(
     AstNode node,
     HirValue receiver,
-    InterfaceElement class_,
+    DartType? type,
     MethodElement element,
     ArgumentList list, {
     List<DartType>? types,
   }) {
     final (positional, named) = _given(list);
     final typeList = _typeList(node, types);
-    return invoke(node, receiver, class_, element, positional, named, typeList);
+    return invoke(node, receiver, type, element, positional, named, typeList);
   }
 
-  /// Calls the instance member [element] on [receiver].
+  /// Calls the instance member [element] on [receiver], which is of [type].
   HirValue? invoke(
     AstNode node,
     HirValue receiver,
-    InterfaceElement class_,
+    DartType? type,
     ExecutableElement element, [
     List<HirValue> positional = const [],
     Map<String, HirValue> named = const {},
     HirValue? types,
     bool isSome = false,
   ]) {
+    if (isExtensionMember(element)) {
+      return extensions.use(
+        node,
+        (receiver, type),
+        element,
+        positional,
+        named,
+        types,
+      );
+    }
     _checkMember(node, element);
     final names = named.keys.toList()..sort();
     final arguments = [
@@ -356,7 +380,7 @@ final class CallTranslator(
     }
     final selector = _scope.selectorOf(
       base,
-      class_,
+      classFor(type) ?? reject(describe(node)),
       positional.length,
       names,
       reject,
@@ -391,7 +415,7 @@ final class CallTranslator(
     HirValue? Function() call,
   ) {
     final type = selector.result!;
-    final null_ = _conversions.types.nullType.element as ClassElement;
+    final null_ = _conversions.types.nullType.element;
     final function = _scope.functionAt(
       _scope.levelOf(null_),
       member,
@@ -412,7 +436,7 @@ final class CallTranslator(
 
   void _checkMember(AstNode node, ExecutableElement element) {
     final owner = element.enclosingElement;
-    if (owner is! InterfaceElement) _unsupported(node, 'extensions');
+    if (owner is! InterfaceElement) _unsupported(node, describe(node));
     if (!_scope.declares(owner)) {
       _unsupported(node, 'calling ${element.displayName} of the SDK');
     }
@@ -449,14 +473,19 @@ final class CallTranslator(
   HirValue tearOff(
     AstNode node,
     HirValue receiver,
-    InterfaceElement class_,
+    DartType? type,
     MethodElement element,
   ) {
+    if (isExtensionMember(element)) {
+      return extensions.tearOff(node, (receiver, type), element);
+    }
     _checkMember(node, element);
-
     return _builder.call(
       HirVirtualCall(
-        _scope.tearOffSelector(element.baseElement, class_),
+        _scope.tearOffSelector(
+          element.baseElement,
+          classFor(type) ?? _unsupported(node, describe(node)),
+        ),
         _conversions.coerce(receiver, .reference),
         const [],
       ),
@@ -471,9 +500,8 @@ final class CallTranslator(
       if (found == null) _unsupported(node, 'this use of super');
       return _scope.tearOff(_builder, found, _this(node));
     }
-    final class_ = _receiverClass(node, target);
-    if (target == null) return tearOff(node, _this(node), class_, method);
-    return tearOff(node, object(node, target), class_, method);
+    final receiver = target == null ? _this(node) : object(target, node);
+    return tearOff(node, receiver, receiverType(target, node), found);
   }
 
   /// Reads the property [element] of [target], or of `this` if that is null.
@@ -484,12 +512,23 @@ final class CallTranslator(
     if (target is SuperExpression) {
       result = superMember(node, element, const []);
     } else {
-      final class_ = _receiverClass(node, target);
-      final receiver = target == null ? _this(node) : object(node, target);
-      final read = invoke(node, receiver, class_, element);
+      final receiver = target == null ? _this(node) : object(target, node);
+      final read = invoke(node, receiver, receiverType(target, node), element);
       result = _checked(node, element, read);
     }
     return result ?? _unsupported(node, describe(node));
+  }
+
+  /// Reads the getter or method [element] of [object], which is of a type.
+  HirValue read(
+    AstNode node,
+    (HirValue, DartType?) object,
+    ExecutableElement element,
+  ) {
+    final (value, type) = object;
+    if (element is MethodElement) return tearOff(node, value, type, element);
+    return _checked(node, element, invoke(node, value, type, element)) ??
+        _unsupported(node, describe(node));
   }
 
   /// Reads `target[index]`.
@@ -506,11 +545,11 @@ final class CallTranslator(
     final type = element.formalParameters.first.type;
     if (valueType(type) == null) _unsupported(node, describe(node));
     final isSuper = target is SuperExpression;
-    final receiver = isSuper ? _this(node) : object(node, target);
+    final receiver = isSuper ? _this(node) : object(target, node);
     final position = _evaluator.valueTo(node.index, type);
     final result = isSuper
         ? superMember(node, element, [position])
-        : invoke(node, receiver, _receiverClass(node, target), element, [
+        : invoke(node, receiver, receiverType(target, node), element, [
             position,
           ]);
     return result ?? _unsupported(node, 'using a value without a type');

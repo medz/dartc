@@ -19,6 +19,9 @@ abstract interface class Program() {
   /// The number of the class `Function`.
   int get functionNumber;
 
+  /// The number of the class `Record`.
+  int get recordNumber;
+
   String className(int number);
   String parameterName(int number);
 }
@@ -31,5 +34,6 @@ Object? receiverOf(Object function) => program.receiverOf(function);
 String functionName(Object function) => program.functionName(function);
 SuperList? superTypesOf(int number) => program.superTypesOf(number);
 int functionNumber() => program.functionNumber;
+int recordNumber() => program.recordNumber;
 String className(int number) => program.className(number);
 String parameterName(int number) => program.parameterName(number);

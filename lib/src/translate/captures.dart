@@ -26,7 +26,7 @@ final class Captures._(
   List<Element> usedBy(AstNode closure) => [...?_captured[closure]];
 
   /// Whether closures share changes of [variable].
-  bool isCell(Element variable) => _cells.contains(variable);
+  bool isCell(Object variable) => _cells.contains(variable);
 }
 
 final class _Captures() extends RecursiveAstVisitor<void> {
@@ -37,14 +37,15 @@ final class _Captures() extends RecursiveAstVisitor<void> {
   final _depths = <Element, int>{};
 
   void _declare(Element? element) {
-    if (element != null) _depths[element] = _closures.length;
+    if (element != null) _depths[variableOf(element)] = _closures.length;
   }
 
   void _use(Element? element) {
-    final depth = _depths[element];
+    if (element == null) return;
+    final variable = variableOf(element), depth = _depths[variable];
     if (depth == null) return;
     for (final closure in _closures.skip(depth)) {
-      captured[closure]!.add(element!);
+      captured[closure]!.add(variable);
     }
   }
 
@@ -116,6 +117,12 @@ final class _Captures() extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) {
     _use(node.element);
     super.visitSimpleIdentifier(node);
+  }
+
+  @override
+  void visitAssignedVariablePattern(AssignedVariablePattern node) {
+    _use(node.element);
+    super.visitAssignedVariablePattern(node);
   }
 
   void _useWritten(CompoundAssignmentExpression node) {

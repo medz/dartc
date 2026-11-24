@@ -29,6 +29,21 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
               for (final member in declaration.body.members) {
                 _addMember(unit, member);
               }
+            case EnumDeclaration(:final declaredFragment?):
+              _nodes[declaredFragment.element] = (unit, declaration);
+              for (final member in declaration.body.members) {
+                _addMember(unit, member);
+              }
+            case ExtensionDeclaration(:final declaredFragment?):
+              _nodes[declaredFragment.element] = (unit, declaration);
+              for (final member in declaration.body.members) {
+                _addMember(unit, member);
+              }
+            case ExtensionTypeDeclaration(:final declaredFragment?):
+              _nodes[declaredFragment.element] = (unit, declaration);
+              for (final member in declaration.body.members) {
+                _addMember(unit, member);
+              }
             case ClassTypeAlias(:final declaredFragment?):
               _nodes[declaredFragment.element] = (unit, declaration);
             default:
@@ -63,7 +78,7 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
   (SourceUnit, AstNode)? operator [](Element element) => _nodes[element];
 
   /// What the objects of [class_] hold besides fields.
-  HirElements? elementsOf(ClassElement class_) =>
+  HirElements? elementsOf(InterfaceElement class_) =>
       switch (pragmaOf(class_, 'dartc:elements')) {
         final kind? => HirElements.values.byName(kind),
         null => null,
@@ -102,7 +117,10 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
       MethodDeclaration(:final name) ||
       VariableDeclaration(:final name) => name.offset,
       ClassDeclaration(:final namePart) => namePart.typeName.offset,
-      ClassTypeAlias(:final name) => name.offset,
+      ClassTypeAlias(:final name) ||
+      EnumDeclaration(
+        namePart: ClassNamePart(typeName: final name),
+      ) => name.offset,
       _ => node.offset,
     };
     return CompileFailure([
@@ -122,7 +140,7 @@ final class ClassTable(final Declarations _declarations) {
   final _fields = <(Level, FieldElement), FieldPlace>{};
   final _argumentFields = <Level, HirField>{};
 
-  HirClass classOf(ClassElement element) => atLevel(levels.of(element));
+  HirClass classOf(InterfaceElement element) => atLevel(levels.of(element));
 
   /// The class whose objects have the members of [level] and before.
   HirClass atLevel(Level level) => _classes[level] ??= _class(level);
@@ -179,7 +197,7 @@ final class ClassTable(final Declarations _declarations) {
         own.length == given.length &&
         own.indexed.every((e) => e.$2 == given[e.$1]);
     if (isSame) {
-      final below = levels.of(superclass.element as ClassElement);
+      final below = levels.of(superclass.element);
       _argumentFields[level] = argumentsOf(below)!;
       return null;
     }

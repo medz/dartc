@@ -7,7 +7,7 @@ import 'package:analyzer/dart/element/type.dart';
 /// those of its superclass. Levels are told apart by themselves.
 final class Level._(
   /// The class that declares this level.
-  final ClassElement class_,
+  final InterfaceElement class_,
 
   /// What its members are declared by, as a type made of the type parameters
   /// of [class_].
@@ -27,14 +27,20 @@ final class Level._(
 
 /// The levels of the program's classes.
 final class LevelTable() {
-  final _levels = <ClassElement, Level>{};
+  final _levels = <InterfaceElement, Level>{};
 
   /// The level of [class_] itself.
-  Level of(ClassElement class_) => _levels[class_] ??= _make(class_);
+  Level of(InterfaceElement class_) => _levels[class_] ??= _make(class_);
 
-  Level _make(ClassElement class_) {
+  /// What enums extend, which implements [enumClass].
+  static ClassElement _enum(ClassElement enumClass) =>
+      enumClass.library.getClass('_Enum')!;
+
+  Level _make(InterfaceElement class_) {
     final superclass = class_.supertype?.element;
-    Level? found = superclass is ClassElement ? of(superclass) : null;
+    Level? found = superclass is ClassElement
+        ? of(class_ is EnumElement ? _enum(superclass) : superclass)
+        : null;
     for (final mixin in class_.mixins) {
       found = Level._(class_, mixin, found);
     }

@@ -60,7 +60,8 @@ final class TypeFunctions(
         false,
       ),
       'superTypesOf' => HirFunction(name, const [.integer], .reference, false),
-      'functionNumber' => HirFunction(name, const [], .integer, false),
+      'functionNumber' ||
+      'recordNumber' => HirFunction(name, const [], .integer, false),
       _ => HirFunction(name, const [.integer], .reference, false),
     };
     if (function.parameters case [.reference]) {
@@ -86,13 +87,17 @@ final class TypeFunctions(
   }
 
   /// Adds entries for new classes. Returns whether there were any.
-  bool update(Iterable<ClassElement> classes, Iterable<Closure> closures) {
+  bool update(Iterable<InterfaceElement> classes, Iterable<Closure> closures) {
     if (!isUsed) return false;
     final before = _typeOf.length;
     for (final class_ in classes) {
       _typeOf.putIfAbsent(
         _classes.classOf(class_),
         () => _entry(class_.displayName, (builder) {
+          if (class_ == _scope.recordClass) {
+            final type = HirCall(_scope.runtime('recordType'), builder.inputs);
+            return builder.call(type)!;
+          }
           final parameters = class_.typeParameters;
           if (parameters.isNotEmpty) {
             builder.setReceiver(builder.inputs.single, _scope.levelOf(class_));
@@ -166,9 +171,13 @@ final class TypeFunctions(
               );
             });
           });
-        case 'functionNumber':
+        case 'functionNumber' || 'recordNumber':
           _define(function, (builder) {
-            final number = _types.numberOf(_scope.functionClass);
+            final number = _types.numberOf(
+              name == 'recordNumber'
+                  ? _scope.recordClass.interfaces.single.element
+                  : _scope.functionClass,
+            );
             builder.end(HirReturn(builder.add(HirConst(number))));
           });
         case 'className':

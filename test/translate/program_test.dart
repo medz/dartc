@@ -414,22 +414,6 @@ b0():
       '2:21: $what async and generator functions.',
     );
     reports('external void main();', '2:21: $what a function without a body.');
-    reports(
-      'void main() { if (main case Object(hashCode: 1)) {} }',
-      '2:29: $what object pattern.',
-    );
-    reports(
-      'void main() { switch ([1]) { case [1]: } }',
-      '2:35: $what list pattern.',
-    );
-    reports(
-      'void main() { switch (1) { a: case 1: continue a; } }',
-      '2:28: $what a labeled case.',
-    );
-    reports(
-      'void main() { for (var (a, b) = (1, 2); a < b; a++) {} }',
-      '2:20: $what for parts with pattern.',
-    );
     // Also where the code can never run.
   });
 }

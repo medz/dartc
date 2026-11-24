@@ -36,6 +36,15 @@ final class FunctionType extends RuntimeType {
   const FunctionType(this.result, this.required, this.optional, this.named);
 }
 
+/// A record type, whose last [fields] have [names], in their order.
+///
+/// Equal lists of names are the same.
+final class RecordType extends RuntimeType {
+  final TypeList? fields;
+  final List<String> names;
+  const RecordType(this.fields, this.names);
+}
+
 /// A function type with type parameters, which have [bounds].
 final class GenericType extends RuntimeType {
   final TypeList bounds;

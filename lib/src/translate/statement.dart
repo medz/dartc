@@ -2,6 +2,7 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
+import 'assigned.dart';
 import 'builder.dart';
 import 'describe.dart';
 import 'expression.dart';
@@ -46,8 +47,17 @@ final class StatementTranslator(
         expressions.effect(expression);
       case VariableDeclarationStatement(:final variables):
         expressions.loops.declare(variables);
-      case IfStatement():
-        _if(node);
+      case IfStatement(:final expression, :final caseClause):
+        expressions.patterns.choose(
+          node,
+          (expression, caseClause),
+          () => statement(node.thenStatement),
+          () {
+            if (node.elseStatement case final other?) statement(other);
+          },
+        );
+      case PatternVariableDeclarationStatement(:final declaration):
+        expressions.loops.destructure(declaration);
       case WhileStatement():
         _while(node);
       case DoStatement():
@@ -98,40 +108,10 @@ final class StatementTranslator(
       _tries.leave(0, (_) => _builder.end(HirReturn()));
     } else {
       final value = expression == null
-          ? _builder.add(HirNull())
+          ? _builder.fallback?.call() ?? _builder.add(HirNull())
           : expressions.valueTo(expression, _builder.returnType!);
       _tries.leave(0, (kept) => _builder.end(HirReturn(kept)), value);
     }
-  }
-
-  void _if(IfStatement node) {
-    final exit = _builder.join(node), other = _builder.join(node);
-    final expression = node.expression;
-    if (node.caseClause case final clause?) {
-      expressions.patterns.match(
-        clause.guardedPattern,
-        expressions.value(expression),
-        expression.staticType!,
-        other,
-      );
-      _then(node, exit);
-    } else {
-      _builder.branch(
-        expressions.condition(expression),
-        () => _then(node, exit),
-        () => _builder.jump(other),
-      );
-    }
-    _builder.enter(other);
-    if (node.elseStatement case final statement_?) statement(statement_);
-    _builder
-      ..jump(exit)
-      ..enter(exit);
-  }
-
-  void _then(IfStatement node, Join exit) {
-    statement(node.thenStatement);
-    _builder.jump(exit);
   }
 
   /// Runs [ifTrue] or leaves for [exit], depending on [condition].
@@ -177,86 +157,88 @@ final class StatementTranslator(
   }
 
   void _switch(SwitchStatement node) {
-    final value = (
-      expressions.value(node.expression),
-      node.expression.staticType!,
-    );
+    final value = expressions.value(node.expression);
+    final type = node.expression.staticType!;
     final exit = _builder.join(node);
     _breaks[node] = (exit, _tries.depth);
-    _cases(node.members, 0, value, exit);
-    _builder.enter(exit);
+    final groups = _groups(node.members);
+    final patterns = [
+      for (final group in groups)
+        for (final member in group)
+          if (member is SwitchPatternCase) member.guardedPattern.pattern,
+    ];
+    expressions.patterns.matching(patterns, () {
+      final bodies = [for (final group in groups) _bodyOf(node, group)];
+      for (final (i, group) in groups.indexed) {
+        _group(node, group, (value, type), bodies[i], exit);
+      }
+    });
+    _builder
+      ..jump(exit)
+      ..enter(exit);
   }
 
-  /// Tests the cases from [index] on; those without statements share the next.
-  void _cases(
-    List<SwitchMember> members,
-    int index,
+  /// The cases of [members] that share statements.
+  static List<List<SwitchMember>> _groups(List<SwitchMember> members) {
+    final groups = <List<SwitchMember>>[];
+    var isOpen = false;
+    for (final member in members) {
+      if (isOpen) {
+        groups.last.add(member);
+      } else {
+        groups.add([member]);
+      }
+      isOpen = member.statements.isEmpty;
+    }
+    return groups;
+  }
+
+  /// Where the statements of [group] start.
+  Join _bodyOf(SwitchStatement node, List<SwitchMember> group) {
+    final patterns = [
+      for (final member in group)
+        if (member is SwitchPatternCase) member.guardedPattern.pattern,
+    ];
+    expressions.patterns.declareIn(patterns);
+    final body = _builder.joinAll(node, const [], [
+      ...patterns.expand(declaredIn),
+    ]);
+    for (final member in group) {
+      _continues[member] = (body, _tries.depth);
+    }
+    return body;
+  }
+
+  /// Goes to [body] if one of [group] matches, or goes on.
+  void _group(
+    SwitchStatement node,
+    List<SwitchMember> group,
     (HirValue, DartType) value,
+    Join body,
     Join exit,
   ) {
-    if (index == members.length) {
-      _builder.jump(exit);
-      return;
-    }
-    final tests = <Expression>[];
-    GuardedPattern? pattern;
-    var isDefault = false;
-    var last = index;
-    while (true) {
-      final member = members[last];
-      if (member.labels.isNotEmpty) _unsupported(member, 'a labeled case');
+    final patterns = expressions.patterns;
+    for (final member in group) {
       switch (member) {
-        case SwitchDefault():
-          isDefault = true;
-        case SwitchPatternCase(
-          guardedPattern: GuardedPattern(
-            pattern: ConstantPattern(:final expression),
-            whenClause: null,
-          ),
-        ):
-          tests.add(expression);
         case SwitchPatternCase(:final guardedPattern):
-          pattern = guardedPattern;
-          if (last != index) _unsupported(member, 'this kind of case');
+          final next = patterns.join(node);
+          patterns.match(guardedPattern, value.$1, value.$2, next);
+          _builder
+            ..jump(body)
+            ..enter(next);
+        case SwitchDefault():
+          _builder.jump(body);
         default:
-          _unsupported(member, 'this kind of case');
+          _unsupported(member, describe(member));
       }
-      if (member.statements.isNotEmpty || last + 1 == members.length) break;
-      last++;
     }
-    void body() {
-      members[last].statements.forEach(statement);
-      _builder.jump(exit);
-    }
-
-    if (isDefault) {
-      body();
-      return;
-    }
-    if (pattern != null) {
-      if (last != index) _unsupported(pattern, 'this kind of case');
-      final next = _builder.join(members.first.parent!);
-      expressions.patterns.match(pattern, value.$1, value.$2, next);
-      body();
-      _builder.enter(next);
-      return _cases(members, last + 1, value, exit);
-    }
-    _builder.branch(
-      _matches(value, tests),
-      body,
-      () => _cases(members, last + 1, value, exit),
-    );
-  }
-
-  /// Whether [value] equals any of the constants [tests].
-  HirValue _matches((HirValue, DartType) value, List<Expression> tests) {
-    HirValue? result;
-    for (final test in tests) {
-      final same = expressions.equal(test, value);
-      result = result == null
-          ? same
-          : _builder.add(HirBoolBinary(.or, result, same));
-    }
-    return result!;
+    final after = patterns.join(node);
+    _builder
+      ..jump(after)
+      ..enter(body);
+    group.last.statements.forEach(statement);
+    _builder
+      ..jump(exit)
+      ..enter(after);
   }
 }

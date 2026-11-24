@@ -51,10 +51,10 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
 
   /// Adds the entries found since the last time. Returns whether there were any.
   bool update(
-    Iterable<ClassElement> classes,
-    HirClass Function(ClassElement element) classOf,
+    Iterable<InterfaceElement> classes,
+    HirClass Function(InterfaceElement element) classOf,
     Iterable<Closure> closures,
-    ClassElement functionClass,
+    InterfaceElement functionClass,
   ) {
     var found = false;
     for (final MapEntry(key: selector, value: shape)
@@ -126,9 +126,53 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     );
   });
 
+  /// Uses the field of a record, if it has it.
+  HirFunction _recordField(HirSelector selector, DynamicShape shape) {
+    final missing = _missing(selector, shape);
+    return _make(selector.name, selector, (builder, _) {
+      final record = builder.inputs.first;
+      HirValue call(String name, List<HirValue> given) =>
+          builder.call(HirCall(_scope.runtime(name), [record, ...given]))!;
+      final name = builder.add(_scope.text(shape.name));
+      final index = call('recordIndex', [name]);
+      final hasNone = HirCompare(.less, index, builder.add(HirConst(0)));
+      return builder.choose(
+        builder.add(hasNone),
+        .reference,
+        () => builder.call(HirCall(missing, builder.inputs))!,
+        () {
+          final value = call('recordField', [index]);
+          if (shape.use == .get) return value;
+          return _callValue(builder, value, shape);
+        },
+      );
+    });
+  }
+
+  /// Calls [value], which a property gave.
+  HirValue _callValue(
+    FunctionBuilder builder,
+    HirValue value,
+    DynamicShape shape,
+  ) => dynamicUse(
+    _scope,
+    builder,
+    value,
+    DynamicShape(
+      .call,
+      'call',
+      null,
+      shape.positional,
+      shape.named,
+      shape.reject,
+      types: shape.types,
+    ),
+    builder.inputs.skip(1).toList(),
+  );
+
   HirFunction _function(
     Closure closure,
-    ClassElement functionClass,
+    InterfaceElement functionClass,
     HirSelector selector,
     DynamicShape shape,
   ) {
@@ -170,12 +214,12 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
   }
 
   /// What [selector] does for null.
-  HirFunction forNull(HirSelector selector, ClassElement nullClass) =>
+  HirFunction forNull(HirSelector selector, InterfaceElement nullClass) =>
       _forNull[selector] ??= _member(nullClass, selector, _shapes[selector]!);
   final _forNull = <HirSelector, HirFunction>{};
 
   HirFunction _member(
-    ClassElement class_,
+    InterfaceElement class_,
     HirSelector selector,
     DynamicShape shape,
   ) {
@@ -190,6 +234,10 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       isSetter: shape.use == .set,
       isGetter: shape.use != .set,
     );
+    final isField = class_ == _scope.recordClass && shape.use != .set;
+    if (method == null && accessor == null && isField) {
+      return _recordField(selector, shape);
+    }
     if (method == null && accessor == null) {
       return _forward(class_, own, selector, shape) ??
           _missing(selector, shape);
@@ -284,28 +332,13 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         ? _scope.loadField(builder, level, field, receiver)
         : builder.call(HirCall(_scope.memberOf(level, accessor), [own]));
     if (shape.use == .get || value == null) return value;
-    // A property that is called.
-    return dynamicUse(
-      _scope,
-      builder,
-      conversions.coerce(value, .reference),
-      DynamicShape(
-        .call,
-        'call',
-        null,
-        shape.positional,
-        shape.named,
-        shape.reject,
-        types: shape.types,
-      ),
-      builder.inputs.skip(1).toList(),
-    );
+    return _callValue(builder, conversions.coerce(value, .reference), shape);
   }
 
   /// Uses a member that [class_] only forwards to its `noSuchMethod`, if it has
   /// one like that.
   HirFunction? _forward(
-    ClassElement class_,
+    InterfaceElement class_,
     Level level,
     HirSelector selector,
     DynamicShape shape,

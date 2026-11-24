@@ -6,6 +6,7 @@ import 'builder.dart';
 import 'conversions.dart';
 import 'describe.dart';
 import 'loops.dart';
+import 'patterns.dart';
 import 'scope.dart';
 
 /// Translates literals of collections.
@@ -14,6 +15,7 @@ final class LiteralTranslator(
   final FunctionBuilder _builder,
   final Evaluator _evaluator,
   final LoopTranslator _loops,
+  final PatternTranslator _patterns,
 ) {
   late final _conversions = Conversions(_scope, _builder);
 
@@ -76,24 +78,15 @@ final class LiteralTranslator(
         _unlessNull(node, [object], () => add([object]));
       case MapLiteralEntry():
         _entry(node, types, add);
-      case IfElement(caseClause: null):
-        final exit = _builder.join(node);
-        final isTrue = _evaluator.valueTo(
-          node.expression,
-          _conversions.types.boolType,
-        );
-        _builder.branch(
-          isTrue,
-          () {
-            _element(node.thenElement, types, add);
-            _builder.jump(exit);
-          },
+      case IfElement(:final expression, :final caseClause):
+        _patterns.choose(
+          node,
+          (expression, caseClause),
+          () => _element(node.thenElement, types, add),
           () {
             if (node.elseElement case final other?) _element(other, types, add);
-            _builder.jump(exit);
           },
         );
-        _builder.enter(exit);
       case ForElement(:final forLoopParts, :final body):
         _loops.translate(node, forLoopParts, () => _element(body, types, add));
       case SpreadElement(:final expression):

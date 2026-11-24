@@ -21,7 +21,7 @@ extension Unsupported on SourceUnit {
 final class Join._(
   final HirBlock _block,
   final int _resultCount,
-  final List<Element> _variables,
+  final List<Object> _variables,
 );
 
 /// A `late` variable, whose cell has a [value] if [isSet].
@@ -40,6 +40,9 @@ final class Locals() {
   final lates = <Element, LateLocal>{};
 }
 
+/// A variable that no source declares.
+final class Temporary();
+
 /// Builds the blocks of one function and tracks its variables' values.
 final class FunctionBuilder(
   final SourceUnit unit,
@@ -49,11 +52,17 @@ final class FunctionBuilder(
   /// What the function is a member of, whose object it takes first.
   final Level? ownLevel,
 
+  /// What `this` is of, in members of extensions and extension types.
+  var DartType? thisType,
+
   /// Whether the function first takes its own closure.
   final bool isClosure = false,
 
-  /// What the type arguments that the function takes next are for.
-  final Element? typeOwner,
+  /// What the lists of type arguments that the function takes next are for.
+  final List<Element> typeOwners = const [],
+
+  /// What the function returns where nothing says what.
+  var HirValue Function()? fallback,
 
   /// The type of what the function returns.
   final DartType? returnType,
@@ -70,19 +79,22 @@ final class FunctionBuilder(
   final Locals locals = locals ?? Locals();
   final _entry = HirBlock(function.parameters);
   late HirBlock _block = _entry;
-  final _types = <Element, HirType>{};
+  final _types = <Object, HirType>{};
 
   /// The values of variables, or the cells holding them.
-  final _values = <Element, HirValue>{};
+  final _values = <Object, HirValue>{};
+
+  /// The same variable in all of the patterns that declare it.
+  static Object _same(Object variable) =>
+      variable is Element ? variableOf(variable) : variable;
 
   this {
-    if (!isClosure && ownLevel != null) {
-      _receiver = _entry.parameters.first;
-    }
+    final hasReceiver = ownLevel != null || thisType != null;
+    if (!isClosure && hasReceiver) _receiver = _entry.parameters.first;
     _level = ownLevel;
-    final hasObject = isClosure || ownLevel != null;
+    final hasObject = isClosure || hasReceiver;
     var given = _entry.parameters.skip(hasObject ? 1 : 0);
-    if (typeOwner case final owner?) {
+    for (final owner in typeOwners) {
       bindTypes(owner, given.first);
       given = given.skip(1);
     }
@@ -109,10 +121,9 @@ final class FunctionBuilder(
   /// What `this` is an object of.
   Level? get level => _level;
   Level? _level;
-  InterfaceElement? get receiverClass => _level?.element;
 
   /// Lets [value] be the object that `this` is, where [level] is translated.
-  void setReceiver(HirValue value, Level level) {
+  void setReceiver(HirValue value, Level? level) {
     _receiver = value;
     _level = level;
   }
@@ -137,6 +148,7 @@ final class FunctionBuilder(
   void finish() {
     // Only values that may be null may be left out.
     end(switch (function.result) {
+      _ when fallback != null => HirReturn(fallback!()),
       null => HirReturn(),
       .reference => HirReturn(add(HirNull())),
       _ => HirUnreachable(),
@@ -235,32 +247,33 @@ final class FunctionBuilder(
     _block = HirBlock();
   }
 
-  /// Declares [variable], not yet assigned.
-  void declare(Element variable, HirType type) {
+  /// Declares the variable [given], not yet assigned.
+  void declare(Object given, HirType type) {
+    final variable = _same(given);
     _types[variable] = type;
     _values.remove(variable);
     if (_isCell(variable)) _values[variable] = create(cells(type));
   }
 
   /// Declares [variable], of which [value] is the value or the cell.
-  void bind(Element variable, HirValue value, HirType type) {
+  void bind(Object variable, HirValue value, HirType type) {
     _types[variable] = type;
     _values[variable] = value;
   }
 
-  bool _isCell(Element variable) => captures?.isCell(variable) ?? false;
+  bool _isCell(Object variable) => captures?.isCell(_same(variable)) ?? false;
 
-  HirType? typeOf(Element variable) => _types[variable];
+  HirType? typeOf(Object variable) => _types[_same(variable)];
 
   /// The type of the value of [variable] or of the cell holding it.
-  HirType? rawTypeOf(Element variable) =>
+  HirType? rawTypeOf(Object variable) =>
       _isCell(variable) || locals.lates.containsKey(variable)
       ? .reference
-      : _types[variable];
+      : typeOf(variable);
 
   /// The value of [variable] or the cell holding it.
-  HirValue raw(Element variable) =>
-      _values[variable] ?? placeholder(rawTypeOf(variable)!);
+  HirValue raw(Object variable) =>
+      _values[_same(variable)] ?? placeholder(rawTypeOf(variable)!);
 
   /// Gives [variable] a cell of its own, with the same value.
   void renew(Element variable) {
@@ -274,16 +287,17 @@ final class FunctionBuilder(
   ///
   /// An unassigned one can only be read by code that cannot run, or passed to
   /// a join after which it is assigned again before it is read.
-  HirValue read(Element variable) {
+  HirValue read(Object variable) {
     final value = raw(variable);
     return _isCell(variable)
-        ? add(HirLoad(cells(_types[variable]!).fields.single, value))
+        ? add(HirLoad(cells(typeOf(variable)!).fields.single, value))
         : value;
   }
 
-  void assign(Element variable, HirValue value) {
+  void assign(Object given, HirValue value) {
+    final variable = _same(given);
     if (value.type != _types[variable]) {
-      throw StateError('Assigned ${value.type} to ${variable.name}.');
+      throw StateError('Assigned ${value.type} to $variable.');
     }
     if (_isCell(variable)) {
       final field = cells(_types[variable]!).fields.single;
@@ -300,12 +314,19 @@ final class FunctionBuilder(
   Join join(AstNode construct, [HirType? result]) =>
       joinAll(construct, [?result]);
 
-  /// Like [join], with any number of [results].
-  Join joinAll(AstNode construct, List<HirType> results) {
-    final variables = [
-      for (final variable in assignedIn(construct))
+  /// Like [join], with any number of [results], and with the variables [others]
+  /// as if they were assigned.
+  Join joinAll(
+    AstNode construct,
+    List<HirType> results, [
+    List<Object> others = const [],
+  ]) {
+    final variables = {
+      for (final variable in <Object>[
+        ...assignedIn(construct),
+      ].followedBy(others.map(_same)))
         if (_types.containsKey(variable)) variable,
-    ];
+    }.toList();
     final block = HirBlock([
       ...results,
       for (final variable in variables) rawTypeOf(variable)!,

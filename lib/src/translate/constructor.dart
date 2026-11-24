@@ -11,14 +11,6 @@ import 'scope.dart';
 import 'statement.dart';
 import 'types.dart';
 
-/// Whether [element] is a constructor that works on an object created before.
-bool isInitializerElement(ExecutableElement element) =>
-    element is ConstructorElement && !element.isFactory;
-
-/// Whether the function of [element] takes an object first.
-bool hasReceiver(ExecutableElement element) =>
-    isInstanceMember(element) || isInitializerElement(element);
-
 /// Translates generative constructors.
 final class ConstructorTranslator(
   final ProgramScope _scope,
@@ -28,7 +20,7 @@ final class ConstructorTranslator(
 ) {
   /// Sets fields, then runs the superclass's constructor, then the body.
   void initializer(ConstructorElement element) {
-    final class_ = element.enclosingElement as ClassElement;
+    final class_ = element.enclosingElement;
     final node = _declarations[element]?.$2 as ConstructorDeclaration?;
     if (element.isExternal) {
       throw _declarations.unsupported(element, 'external constructors');
@@ -85,7 +77,10 @@ final class ConstructorTranslator(
   }
 
   static bool _isObject(ConstructorElement element) =>
-      (element.enclosingElement as ClassElement).isDartCoreObject;
+      switch (element.enclosingElement) {
+        ClassElement(:final isDartCoreObject) => isDartCoreObject,
+        _ => false,
+      };
 
   void _setMixinFields(Level level) {
     for (final below in level.chain.skip(1).takeWhile((l) => l.isMixin)) {
@@ -119,7 +114,7 @@ final class ConstructorTranslator(
 
   /// The type arguments that [target] takes from [element].
   HirValue? _types(ConstructorElement target, ConstructorElement element) {
-    final class_ = element.enclosingElement as ClassElement;
+    final class_ = element.enclosingElement;
     final owner = takesTypes(target.baseElement);
     if (owner == null) return null;
     final own = _builder.typesOf(class_);
@@ -130,7 +125,8 @@ final class ConstructorTranslator(
         given.length == class_.typeParameters.length &&
         given.indexed.every((e) => e.$2 == class_.thisType.typeArguments[e.$1]);
     if (isSame) return own;
-    return _scope.typeList(_builder, class_.supertype!.typeArguments)!;
+    return _scope.typeList(_builder, class_.supertype!.typeArguments) ??
+        (throw _declarations.unsupported(class_, 'these type arguments'));
   }
 
   /// Runs constructor [target] on the same object, passing on the super
@@ -144,8 +140,8 @@ final class ConstructorTranslator(
     final supplied = arguments == null
         ? <FormalParameterElement, HirValue>{}
         : _statements.expressions.calls.supplied(arguments);
-    final class_ = element.enclosingElement as ClassElement;
-    if (class_.isMixinApplication) {
+    final class_ = element.enclosingElement;
+    if (class_ is ClassElement && class_.isMixinApplication) {
       // Its constructors take what those of its superclass do.
       for (final (i, parameter) in element.formalParameters.indexed) {
         supplied[target.baseElement.formalParameters[i]] = _builder.read(

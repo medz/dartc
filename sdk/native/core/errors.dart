@@ -11,10 +11,12 @@ Never _throwNegativeShift(int amount) => throw ArgumentError(amount);
 Never _throwNotFinite() => throw UnsupportedError('Infinity or NaN toInt');
 
 Never _throwNull() =>
-    throw _CastError('Null check operator used on a null value');
+    throw _typeError('Null check operator used on a null value');
+
+_TypeError _typeError(String message) => _TypeError._create('', 0, 0, message);
 
 Never _throwCast(Object? value, String type, String ending) =>
-    throw _CastError(
+    throw _typeError(
       "type '${objectTypeName(value)}' is not a subtype of type "
       "'$type'$ending",
     );
@@ -79,12 +81,6 @@ class NoSuchMethodError {
     String methodName,
     int invocationType,
   ) => _found;
-}
-
-final class _CastError extends Error implements TypeError {
-  final String _text;
-  _CastError(this._text);
-  String toString() => _text;
 }
 
 /// Notes where [error] is thrown, if it keeps that.

@@ -3,6 +3,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
+import 'assigned.dart';
 import 'builder.dart';
 import 'calls.dart';
 import 'conversions.dart';
@@ -19,6 +20,10 @@ final class LoopTranslator(
   final Evaluator _evaluator,
   final CallTranslator _calls,
   final LateTranslator _lates,
+
+  /// Assigns what a pattern sets of a value of a type.
+  final void Function(DartPattern pattern, HirValue value, DartType type)
+  _destructure,
 ) {
   late final _conversions = Conversions(_scope, _builder);
 
@@ -44,6 +49,22 @@ final class LoopTranslator(
       if (value != null) _builder.assign(variable, value);
     }
   }
+
+  void destructure(PatternVariableDeclaration node) {
+    final expression = node.expression;
+    final value = _evaluator.value(expression);
+    _destructure(node.pattern, value, expression.staticType!);
+  }
+
+  /// The variables that each round of a loop has of its own.
+  static Iterable<Element> _ownVariables(ForParts parts) => switch (parts) {
+    ForPartsWithDeclarations(:final variables) => [
+      for (final variable in variables.variables)
+        variable.declaredFragment!.element,
+    ],
+    ForPartsWithPattern(:final variables) => declaredIn(variables.pattern),
+    _ => const [],
+  };
 
   /// Does [body] as often as [parts] of [node] say.
   ///
@@ -74,8 +95,8 @@ final class LoopTranslator(
         declare(variables);
       case ForPartsWithExpression(:final initialization):
         if (initialization != null) _evaluator.effect(initialization);
-      default:
-        _unsupported(parts, describe(parts));
+      case ForPartsWithPattern(:final variables):
+        destructure(variables);
     }
     final head = _builder.join(node), exit = _builder.join(node);
     final update = _builder.join(node);
@@ -88,12 +109,7 @@ final class LoopTranslator(
       _builder
         ..jump(update)
         ..enter(update);
-      // Every round has its own variables.
-      if (parts case ForPartsWithDeclarations(:final variables)) {
-        for (final variable in variables.variables) {
-          _builder.renew(variable.declaredFragment!.element);
-        }
-      }
+      _ownVariables(parts).forEach(_builder.renew);
       parts.updaters.forEach(_evaluator.effect);
       _builder.jump(head);
     }
@@ -143,7 +159,7 @@ final class LoopTranslator(
       ..enter(next);
     final class_ = _iteratorClass;
     final method = class_.getMethod('moveNext')!;
-    final isOne = _calls.invoke(node, iterator, class_, method)!;
+    final isOne = _calls.invoke(node, iterator, class_.thisType, method)!;
     _builder.branch(isOne, () {
       body(_use(node, iterator, class_, 'current'));
       _builder.jump(next);
@@ -159,12 +175,15 @@ final class LoopTranslator(
     HirValue object,
     InterfaceElement class_,
     String name,
-  ) => _calls.invoke(node, object, class_, class_.getGetter(name)!)!;
+  ) => _calls.invoke(node, object, class_.thisType, class_.getGetter(name)!)!;
 
   /// Assigns [value], the next of the elements of [parts], to its variable.
   void _assign(ForEachParts parts, HirValue value) {
     final VariableElement variable;
+    final type = elementType(parts.iterable.staticType!);
     switch (parts) {
+      case ForEachPartsWithPattern(:final pattern):
+        return _destructure(pattern, value, type);
       case ForEachPartsWithDeclaration(:final loopVariable):
         variable = loopVariable.declaredFragment!.element;
         _builder.declare(
@@ -180,7 +199,6 @@ final class LoopTranslator(
       default:
         _unsupported(parts, describe(parts));
     }
-    final type = elementType(parts.iterable.staticType!);
     final given =
         _conversions.cast(value, type, variable.type) ??
         _unsupported(parts, 'testing for ${variable.type}');

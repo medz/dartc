@@ -9,6 +9,7 @@ import 'checks.dart';
 import 'conversions.dart';
 import 'dynamic_table.dart';
 import 'dynamics.dart';
+import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -34,7 +35,8 @@ final class OperatorTranslator(
     DartType leftType,
   ) {
     final type = right.staticType!;
-    if (element == null || isNumber(leftType) && type is! DynamicType) {
+    final isOwn = isNumber(leftType) && !isExtensionMember(element);
+    if (element == null || isOwn && type is! DynamicType) {
       return (_evaluator.value(right, placeholder: left.type!), type);
     }
     final declared = element.formalParameters.single.type;
@@ -42,6 +44,11 @@ final class OperatorTranslator(
   }
 
   HirValue unary(PrefixExpression node, String operator, HirValue operand) {
+    if (node.element case final element? when isExtensionMember(element)) {
+      final type = _calls.receiverType(node.operand);
+      return _calls.invoke(node, operand, type, element) ??
+          _unsupported(node, 'operator $operator without a result');
+    }
     if (operand.type == .reference) {
       final element = node.element, type = node.operand.staticType!;
       if (type is DynamicType) {
@@ -51,11 +58,10 @@ final class OperatorTranslator(
       if (operator == '-' && isNumber(type)) {
         return _number('numNegate', [operand]);
       }
-      final class_ = classOf(type);
-      if (element == null || class_ == null) {
+      if (element == null || classOf(type) == null) {
         _unsupported(node, 'this operator');
       }
-      return _calls.invoke(node, operand, class_, element) ??
+      return _calls.invoke(node, operand, type, element) ??
           _unsupported(node, 'operator $operator without a result');
     }
     final HirUnaryOperator found = switch ((operator, operand.type)) {
@@ -85,6 +91,16 @@ final class OperatorTranslator(
     if (leftType is DynamicType) {
       return _dynamics.operate(node, left, operator, [right]);
     }
+    final element = switch (node) {
+      BinaryExpression(:final element) ||
+      AssignmentExpression(:final element) ||
+      PrefixExpression(:final element) ||
+      PostfixExpression(:final element) => element,
+      _ => null,
+    };
+    if (element != null && isExtensionMember(element)) {
+      return _apply(node, operator, left, leftType, element, right);
+    }
     if (isNumber(leftType)) {
       if (left.type == .reference || right.type == .reference) {
         return _numbers(node, operator, left, right);
@@ -94,20 +110,25 @@ final class OperatorTranslator(
     if (left.type == .boolean && right.type == .boolean) {
       return _boolean(node, operator, left, right);
     }
-    final element = switch (node) {
-      BinaryExpression(:final element) ||
-      AssignmentExpression(:final element) ||
-      PrefixExpression(:final element) ||
-      PostfixExpression(:final element) => element,
-      _ => null,
-    };
-    final class_ = classOf(leftType);
-    if (left.type != .reference || element == null || class_ == null) {
+    if (left.type != .reference ||
+        element == null ||
+        classOf(leftType) == null) {
       _unsupported(node, 'operator $operator on these types');
     }
+    return _apply(node, operator, left, leftType, element, right);
+  }
+
+  HirValue _apply(
+    AstNode node,
+    String operator,
+    HirValue left,
+    DartType type,
+    MethodElement element,
+    HirValue right,
+  ) {
     final declared = element.formalParameters.single.type;
     final given = _conversions.coerce(right, valueType(declared)!);
-    return _calls.invoke(node, left, class_, element, [given]) ??
+    return _calls.invoke(node, left, type, element, [given]) ??
         _unsupported(node, 'operator $operator without a result');
   }
 
@@ -169,7 +190,7 @@ final class OperatorTranslator(
     if (left is HirNull || right is HirNull) return identical();
     final element = node is BinaryExpression ? node.element : null;
     final object = _conversions.types.objectElement;
-    final class_ = classOf(type) ?? object;
+    final own = classOf(type) == null ? object.thisType : type;
     final method = element ?? object.getMethod('==')!;
     return _builder.choose(
       _builder.add(
@@ -184,7 +205,7 @@ final class OperatorTranslator(
       () => _calls.invoke(
         node,
         left,
-        class_,
+        own,
         method,
         [right],
         const {},

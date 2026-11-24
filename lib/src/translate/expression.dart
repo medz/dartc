@@ -20,6 +20,7 @@ import 'members.dart';
 import 'operators.dart';
 import 'patterns.dart';
 import 'places.dart';
+import 'records.dart';
 import 'references.dart';
 import 'scope.dart';
 import 'statics.dart';
@@ -42,8 +43,10 @@ final class ExpressionTranslator(
     _scope,
     _builder,
     this,
-    (node, receiver, class_, element, list) =>
-        calls.method(node, receiver, class_, element, list),
+    (target, node) => calls.object(target, node),
+    (target) => calls.receiverType(target),
+    (node, receiver, type, element, list) =>
+        calls.method(node, receiver, type, element, list),
   );
   late final LateTranslator lates = LateTranslator(_scope, _builder);
   late final _chains = ChainTranslator(_builder);
@@ -65,7 +68,11 @@ final class ExpressionTranslator(
     _builder,
     this,
     _operators,
+    calls,
+    _records,
+    lates,
   );
+  late final _records = RecordTranslator(_scope, _builder, this);
   late final _assignments = AssignmentTranslator(
     _builder,
     this,
@@ -81,8 +88,15 @@ final class ExpressionTranslator(
     this,
     calls,
     lates,
+    (pattern, value, type) => patterns.destructure(pattern, value, type),
   );
-  late final _literals = LiteralTranslator(_scope, _builder, this, loops);
+  late final _literals = LiteralTranslator(
+    _scope,
+    _builder,
+    this,
+    loops,
+    patterns,
+  );
   late final _places = PlaceTranslator(
     _builder,
     this,
@@ -208,19 +222,18 @@ final class ExpressionTranslator(
       case FunctionExpressionInvocation():
         return closures.invocation(inner) ??
             _unsupported(inner, 'using a value of type $type');
+      case ExtensionOverride(:final argumentList):
+        return value(argumentList.arguments.single.argumentExpression);
       case FunctionReference():
         return _references.function(inner, value);
       case ConstructorReference(:final constructorName):
         return _references.constructor(inner, constructorName);
       case ImplicitCallReference(:final expression, :final element):
-        final class_ = classOf(expression.staticType);
-        if (class_ == null || element == null) {
-          _unsupported(inner, describe(inner));
-        }
+        if (element == null) _unsupported(inner, describe(inner));
         return calls.tearOff(
           inner,
-          valueAs(expression, .reference),
-          class_,
+          calls.object(expression, inner),
+          expression.staticType,
           element,
         );
       case IsExpression():
@@ -237,6 +250,10 @@ final class ExpressionTranslator(
             _unsupported(inner, 'using a value of type $type');
       case CascadeExpression():
         return _cascade(inner);
+      case PatternAssignment(:final pattern, :final expression):
+        final result = value(expression);
+        patterns.destructure(pattern, result, expression.staticType!);
+        return result;
       case SwitchExpression():
         return patterns.switchExpression(inner, _resultType(inner));
       default:
@@ -270,12 +287,18 @@ final class ExpressionTranslator(
           found ??
               _unsupported(inner, 'a constant of type ${inner.staticType}'),
         );
+      case RecordLiteral(isConst: true):
+        final found = _scope.constantOf(
+          .reference,
+          inner.computeConstantValue()?.value,
+        );
+        return _builder.add(found ?? _unsupported(inner, describe(inner)));
+      case RecordLiteral():
+        return _records.create(inner);
       case ListLiteral():
         return _literals.list(inner);
       case SetOrMapLiteral():
         return _literals.setOrMap(inner);
-      default:
-        _unsupported(inner, describe(inner));
     }
   }
 
@@ -326,8 +349,27 @@ final class ExpressionTranslator(
     }
   }
 
+  /// Reads a field of a record, if [inner] is one.
+  HirValue? _recordField(Expression inner) {
+    final (target, name) = switch (inner) {
+      PrefixedIdentifier(:final prefix, :final identifier) => (
+        prefix,
+        identifier.name,
+      ),
+      PropertyAccess(:final realTarget, :final propertyName) => (
+        realTarget,
+        propertyName.name,
+      ),
+      _ => (inner, ''),
+    };
+    final type = target.staticType;
+    if (type == null || fieldIndex(type, name) == null) return null;
+    return _records.field(calls.object(target, inner), type, name);
+  }
+
   /// Reads a property, or what a library or class declares.
   HirValue _access(Expression inner) {
+    if (_recordField(inner) case final found?) return found;
     switch (inner) {
       case PrefixedIdentifier(:final prefix, :final identifier)
           when prefix.staticType is DynamicType:
@@ -450,6 +492,7 @@ final class ExpressionTranslator(
         );
     }
     final target = node.leftOperand;
+    final type = calls.receiverType(target)!;
     if (target is SuperExpression) {
       final element = node.element ?? _unsupported(node, describe(node));
       final type = element.formalParameters.single.type;
@@ -458,24 +501,23 @@ final class ExpressionTranslator(
       return operator == '!=' ? _builder.add(HirUnary(.not, result)) : result;
     }
     final left = value(target);
-    final (right, rightType) = _rightOperand(node, left);
-    return _operators.binary(
-      node,
-      operator,
-      (left, target.staticType!),
-      (right, rightType),
-    );
+    final (right, rightType) = _rightOperand(node, left, type);
+    return _operators.binary(node, operator, (left, type), (right, rightType));
   }
 
   /// Operators of classes convert their operand as calls do.
-  (HirValue, DartType) _rightOperand(BinaryExpression node, HirValue left) {
+  (HirValue, DartType) _rightOperand(
+    BinaryExpression node,
+    HirValue left,
+    DartType leftType,
+  ) {
     final right = node.rightOperand, operator = node.operator.lexeme;
     final isEquality = operator == '==' || operator == '!=';
     return _operators.operand(
       right,
       left,
       isEquality ? null : node.element,
-      node.leftOperand.staticType!,
+      leftType,
     );
   }
 

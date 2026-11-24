@@ -38,7 +38,7 @@ final class ConstantTable(
   final HirConstObject? Function(DartType type) _typeObject,
 
   /// Tells that there are objects of a class.
-  final void Function(ClassElement class_) _instantiate,
+  final void Function(InterfaceElement class_) _instantiate,
 ) {
   final _objects = <String, HirConstObject>{};
   final _numbers = <HirConstObject, int>{};
@@ -61,6 +61,7 @@ final class ConstantTable(
                   _list(object) ??
                   _map(object) ??
                   _set(object) ??
+                  _record(object) ??
                   _object(object),
       null => null,
     };
@@ -105,6 +106,44 @@ final class ConstantTable(
   HirConstObject? _text(DartObject object) {
     final value = object.toStringValue();
     return value == null ? null : text(value);
+  }
+
+  HirConstObject? _record(DartObject object) {
+    final record = object.toRecordValue();
+    if (record == null) return null;
+    final fieldNames = record.named.keys.toList()..sort();
+    final elements = [
+      for (final field in record.positional) of(.reference, field),
+      for (final name in fieldNames) of(.reference, record.named[name]),
+    ];
+    if (elements.contains(null)) return null;
+    final class_ = _core.getClass('_Record')!;
+    final target = _classes.classOf(class_);
+    _instantiate(class_);
+    return canonical(
+      class_,
+      HirConstObject(
+        target,
+        {target.fields.single: names(fieldNames)},
+        [for (final element in elements) _boxed(element!.value)],
+      ),
+    );
+  }
+
+  /// The list of [names], of which equal ones are the same.
+  HirConstObject names(List<String> names) {
+    final class_ = _core.getClass('_List')!;
+    final target = _classes.classOf(class_);
+    _instantiate(class_);
+    final types = _listOf([_core.typeProvider.stringType])!;
+    return canonical(
+      class_,
+      HirConstObject(
+        target,
+        {target.fields.single: types.value},
+        [for (final name in names) text(name)],
+      ),
+    );
   }
 
   /// The string [value].
@@ -258,13 +297,21 @@ final class ConstantTable(
 
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
-    if (class_ is! ClassElement || _declarations[class_] == null) return null;
+    if (class_ == null || _declarations[class_] == null) return null;
     final target = _classes.classOf(class_);
     final fields = <HirField, Object?>{};
     DartObject? part = object;
     var own = type as InterfaceType;
     for (final level in _classes.levels.of(class_).chain) {
       final element = level.element;
+      if (class_ is EnumElement && element.name == '_Enum') {
+        // The analyzer does not know that enums extend it.
+        for (final field in ClassTable.instanceFields(element)) {
+          final place = _classes.fieldOf(level, field).value;
+          fields[place] = of(place.type, object.getField(field.name!))!.value;
+        }
+        break;
+      }
       if (element is ClassElement && element.isDartCoreObject) break;
       final actual = level.isMixin
           ? own.mixins.firstWhere((mixin) => mixin.element == element)
@@ -291,7 +338,7 @@ final class ConstantTable(
   }
 
   /// The object that [found] is the same as.
-  HirConstObject canonical(ClassElement class_, HirConstObject found) {
+  HirConstObject canonical(InterfaceElement class_, HirConstObject found) {
     final HirConstObject(:target, :fields, :elements) = found;
     final key = [
       class_.library.uri,

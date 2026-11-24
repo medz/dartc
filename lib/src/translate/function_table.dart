@@ -6,6 +6,7 @@ import 'builder.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'constructor.dart';
+import 'extension_constructor.dart';
 import 'levels.dart';
 import 'members.dart';
 import 'origins.dart';
@@ -50,6 +51,13 @@ final class FunctionTable(
             : element.displayName,
         [
           if (level != null) plainType(level.element) ?? .reference,
+          if (isExtensionMember(element))
+            valueType(extendedType(element)!) ??
+                (throw _declarations.unsupported(
+                  element,
+                  'extending ${extendedType(element)}',
+                )),
+          if (takesExtensionTypes(element) != null) .reference,
           if (takesTypes(element) != null) .reference,
           for (final parameter in element.formalParameters)
             valueType(parameter.type) ??
@@ -72,7 +80,7 @@ final class FunctionTable(
 
   /// The level that a function works on objects of, if it is not a mixin's.
   Level? _ownLevel(ExecutableElement element) => hasReceiver(element)
-      ? _scope.levelOf(element.enclosingElement as ClassElement)
+      ? _scope.levelOf(element.enclosingElement as InterfaceElement)
       : null;
 
   void _translate(
@@ -84,14 +92,15 @@ final class FunctionTable(
   void _translateDeclared(ExecutableElement element, Level? level) {
     final declared = _declarations[element];
     final owner = element.enclosingElement;
-    final (unit, node) = declared ?? _declarations[owner as ClassElement]!;
+    final (unit, node) = declared ?? _declarations[owner as InterfaceElement]!;
     final builder = FunctionBuilder(
       unit,
       _functions[(element, level)]!,
       element.formalParameters,
       ownLevel: level,
       returnType: element.returnType,
-      typeOwner: takesTypes(element),
+      thisType: isExtensionMember(element) ? extendedType(element) : null,
+      typeOwners: [?takesExtensionTypes(element), ?takesTypes(element)],
       captures: _scope.capturesOf(declarationOf(node)),
       cellClass: _scope.cellClass,
     );
@@ -103,6 +112,14 @@ final class FunctionTable(
         builder,
         statements,
       ).initializer(element as ConstructorElement);
+    } else if (owner is ExtensionTypeElement &&
+        element is ConstructorElement &&
+        !element.isFactory) {
+      ExtensionConstructorTranslator(
+        _scope,
+        builder,
+        statements,
+      ).translate(owner, node);
     } else {
       final body = switch (node) {
         FunctionDeclaration(

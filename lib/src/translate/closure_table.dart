@@ -194,6 +194,59 @@ final class ClosureTable(
         return HirConstObject(made.class_, const {});
       }();
 
+  final _extensionTearOffs = <MethodElement, Closure>{};
+
+  /// Gives the method [element] of an extension, used on [receiver], which has
+  /// the type arguments [types], if any.
+  HirValue extensionTearOff(
+    FunctionBuilder builder,
+    MethodElement element,
+    HirValue receiver,
+    HirValue? types,
+  ) {
+    final closure = _extensionTearOffs[element] ??= _extension(
+      element,
+      receiver.type!,
+    );
+    final [own, ...lists] = closure.class_.fields;
+    final object = builder.create(closure.class_);
+    builder.add(HirStore(own, object, receiver));
+    for (final list in lists) {
+      builder.add(HirStore(list, object, types!));
+    }
+    return object;
+  }
+
+  Closure _extension(MethodElement element, HirType type) {
+    final owner = takesExtensionTypes(element);
+    final receiver = HirField('this', type);
+    final types = owner == null ? null : HirField('types', .reference);
+    void bind(FunctionBuilder builder, HirValue self) {
+      if (owner == null) return;
+      builder.bindTypes(owner, builder.add(HirLoad(types!, self)));
+    }
+
+    final made = Closure(
+      HirClass('tear-off ${element.displayName}', null, [receiver, ?types]),
+      element.type,
+      element.formalParameters,
+      () => _scope.functionOf(element)!,
+      (builder, self) => [
+        for (final field in [receiver, ?types])
+          builder.add(HirLoad(field, self)),
+      ],
+      bind: bind,
+      typeValue: (builder) {
+        bind(builder, builder.inputs.single);
+        return _scope.typeValue(builder, element.type)!;
+      },
+      typeParameters: element.typeParameters,
+      name: _qualified(element),
+    );
+    add(made);
+    return made;
+  }
+
   final _partials = <String, Closure>{};
 
   /// The generic [function] with a list of types and their number, which then

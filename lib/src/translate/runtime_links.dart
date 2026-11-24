@@ -8,7 +8,7 @@ import 'constant_table.dart';
 final class RuntimeLinks(
   final SourceProgram _program,
   final LibraryElement _core,
-  final HirClass Function(ClassElement element) _createdClass,
+  final HirClass Function(InterfaceElement element) _createdClass,
   final ConstantTable _constants,
 ) {
   final _exhaustions = <String, HirFunction>{};

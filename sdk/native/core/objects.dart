@@ -1,7 +1,7 @@
 import 'dart:_heap/machine.dart' show addressOf, classNumber, isSame;
 import 'dart:_heap/numbers.dart' show sameObjects;
 import 'dart:_heap/program.dart' show functionName, receiverOf;
-import 'dart:_heap/types.dart' show objectTypeName;
+import 'dart:_heap/types.dart' show objectClassName, objectTypeName;
 
 @patch
 bool identical(Object? a, Object? b) => sameObjects(a, b);
@@ -31,8 +31,6 @@ class Object {
     }
     return "Instance of '${objectTypeName(obj)}'";
   }
-
-
 }
 
 @patch
@@ -54,4 +52,10 @@ class _Closure {
         ? addressOf(this) >> 4
         : (addressOf(receiver) >> 4) + classNumber(this);
   }
+}
+
+@patch
+abstract class _Enum {
+  @patch
+  String _enumToString() => '${objectClassName(this)}.$_name';
 }

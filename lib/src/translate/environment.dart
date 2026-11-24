@@ -32,7 +32,10 @@ final class Environment._(
       for (final owner in outer.typeLists.keys)
         owner: HirField('types', .reference),
     },
-    outer.receiver == null ? null : HirField('this', .reference),
+    switch (outer.receiver) {
+      null => null,
+      HirValue(:final type) => HirField('this', type!),
+    },
   );
 
   List<HirField> get fields => [
@@ -54,7 +57,7 @@ final class Environment._(
   void bindTypes(FunctionBuilder builder, HirValue object) {
     if (_receiver case final field?) {
       final receiver = builder.add(HirLoad(field, object));
-      builder.setReceiver(receiver, _outer.level!);
+      builder.setReceiver(receiver, _outer.level);
     }
     _lists.forEach((owner, field) {
       builder.bindTypes(owner, builder.add(HirLoad(field, object)));
@@ -65,7 +68,7 @@ final class Environment._(
   FunctionBuilder build(
     HirFunction function,
     List<FormalParameterElement> parameters, {
-    Element? typeOwner,
+    List<Element> typeOwners = const [],
     DartType? returnType,
   }) {
     final builder = FunctionBuilder(
@@ -73,8 +76,9 @@ final class Environment._(
       function,
       parameters,
       ownLevel: _outer.level,
+      thisType: _outer.thisType,
       isClosure: true,
-      typeOwner: typeOwner,
+      typeOwners: typeOwners,
       returnType: returnType,
       captures: _captures,
       cellClass: _outer.cellClass,

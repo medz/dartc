@@ -29,15 +29,15 @@ final class DispatchBuilder(
   final _world = World<InterfaceElement, HirSelector>(isSubclass);
   final _selectors = <String, HirSelector>{};
   final _shapes = <HirSelector, _Shape>{};
-  final _entries = <HirSelector, Map<ClassElement, HirFunction>>{};
+  final _entries = <HirSelector, Map<InterfaceElement, HirFunction>>{};
   final _adapters = <(Implementation, HirSelector, String), HirFunction>{};
 
   /// Functions made here rather than declared by the program.
   final List<HirFunction> made = [];
 
-  List<ClassElement> get classes => _world.classes.cast();
+  List<InterfaceElement> get classes => _world.classes.cast();
 
-  void instantiate(ClassElement class_) => _world.instantiate(class_);
+  void instantiate(InterfaceElement class_) => _world.instantiate(class_);
 
   HirSelector selectorOf(
     ExecutableElement member,
@@ -152,16 +152,16 @@ final class DispatchBuilder(
   bool update() {
     final entries = _world.takeEntries();
     for (final (found, selector) in entries) {
-      final class_ = found as ClassElement;
+      final class_ = found;
       _entries[selector]![class_] = _entry(class_, selector);
     }
     return entries.isNotEmpty;
   }
 
   Map<HirSelector, Map<HirClass, HirFunction>> result(
-    HirClass Function(ClassElement element) classOf,
+    HirClass Function(InterfaceElement element) classOf,
     ClosureTable closures,
-    ClassElement functionClass,
+    InterfaceElement functionClass,
   ) => {
     for (final MapEntry(key: selector, value: entries) in _entries.entries)
       selector: {
@@ -173,7 +173,7 @@ final class DispatchBuilder(
       },
   };
 
-  HirFunction _entry(ClassElement class_, HirSelector selector) {
+  HirFunction _entry(InterfaceElement class_, HirSelector selector) {
     final level = _scope.levelOf(class_);
     final shape = _shapes[selector]!;
     final own = implementationIn(level, shape.member);
@@ -222,7 +222,10 @@ final class DispatchBuilder(
 
   /// The places of parameters that calls may give values of other types, as
   /// they rely on the types that overridden members declare.
-  List<int> _checkedParameters(ClassElement class_, ExecutableElement found) {
+  List<int> _checkedParameters(
+    InterfaceElement class_,
+    ExecutableElement found,
+  ) {
     final system = found.library.typeSystem;
     final parameters = found.formalParameters;
     final checked = <int>{};

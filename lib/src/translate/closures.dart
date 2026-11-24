@@ -9,6 +9,7 @@ import 'closure.dart';
 import 'conversions.dart';
 import 'dynamics.dart';
 import 'environment.dart';
+import 'members.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -18,11 +19,15 @@ final class ClosureTranslator(
   final FunctionBuilder _builder,
   final Evaluator _evaluator,
 
-  /// Calls a method of an object.
+  /// The value of what an expression uses a member of, and its type.
+  final HirValue Function(Expression target, Expression node) _valueOf,
+  final DartType? Function(Expression target) _typeOf,
+
+  /// Calls a method of an object, which is of a type.
   final HirValue? Function(
     Expression node,
     HirValue receiver,
-    InterfaceElement class_,
+    DartType? type,
     MethodElement element,
     ArgumentList list,
   )
@@ -107,7 +112,7 @@ final class ClosureTranslator(
       final builder = environment.build(
         function,
         element.formalParameters,
-        typeOwner: isGeneric ? element : null,
+        typeOwners: [if (isGeneric) element],
         returnType: element.returnType,
       );
       if (name != null) {
@@ -156,6 +161,12 @@ final class ClosureTranslator(
   HirValue? invocation(FunctionExpressionInvocation node) {
     final function = node.function;
     final type = function.staticType;
+    final element = node.element;
+    if (element is MethodElement && isExtensionMember(element)) {
+      final value = _valueOf(function, node);
+      final type = _typeOf(function);
+      return callMethod(node, value, type, element, node.argumentList);
+    }
     if (type is FunctionType) {
       return call(
         node,
@@ -164,13 +175,11 @@ final class ClosureTranslator(
         node.typeArgumentTypes,
       );
     }
-    final element = node.element;
-    final class_ = classOf(type);
-    if (element is MethodElement && class_ != null) {
+    if (element is MethodElement && classOf(type) != null) {
       return callMethod(
         node,
         _evaluator.valueAs(function, .reference),
-        class_,
+        type,
         element,
         node.argumentList,
       );

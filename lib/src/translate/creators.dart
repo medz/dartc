@@ -28,13 +28,13 @@ final class CreatorTable(final ProgramScope _scope, final SourceUnit _unit) {
     if (redirectionOf(element) case final target?) {
       return _functions[element] ??= _redirect(element, target);
     }
-    if (element.isFactory) return _scope.factoryOf(element);
+    if (!isInitializerElement(element)) return _scope.factoryOf(element);
     return _functions[element] ??= _generative(element);
   }
 
   HirFunction _generative(ConstructorElement element) {
     final initializer = _scope.initializerOf(element);
-    final class_ = element.enclosingElement as ClassElement;
+    final class_ = element.enclosingElement;
     final function = HirFunction(
       'create ${initializer.name}',
       initializer.parameters.skip(1),
@@ -60,7 +60,7 @@ final class CreatorTable(final ProgramScope _scope, final SourceUnit _unit) {
       _unit,
       function,
       element.formalParameters,
-      typeOwner: owner,
+      typeOwners: [?owner],
     );
     final conversions = Conversions(_scope, builder);
     final given = redirected({

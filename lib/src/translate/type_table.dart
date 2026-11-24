@@ -6,6 +6,7 @@ import 'builder.dart';
 import 'classes.dart';
 import 'constant_table.dart';
 import 'members.dart';
+import 'records.dart';
 import 'scope.dart';
 
 /// The types that a program needs when it runs, as objects of the runtime.
@@ -41,9 +42,10 @@ final class TypeTable(
     );
   }
 
-  /// The object for [type], which is closed or, as part of the supertypes of
+  /// The object for [declared], which is closed or, as part of the supertypes of
   /// [owner], made of its parameters. Null if it is neither.
-  HirConstObject? constant(DartType type, {InterfaceElement? owner}) {
+  HirConstObject? constant(DartType declared, {InterfaceElement? owner}) {
+    final type = declared.extensionTypeErasure;
     final plain = _constantPlain(type, owner);
     final needsForm =
         type.nullabilitySuffix == .question && !hasBasicForm(type);
@@ -82,6 +84,11 @@ final class TypeTable(
         return _object('InterfaceType', [numberOf(element), arguments.value]);
       case FunctionType():
         return _constantFunction(type, owner);
+      case RecordType():
+        final fields = list(fieldTypes(type), owner: owner);
+        if (fields == null) return null;
+        final names = _constants.names(fieldNames(type));
+        return _object('RecordType', [fields.value, names]);
       default:
         return null;
     }
@@ -220,8 +227,9 @@ final class TypeTable(
       .fields
       .firstWhere((field) => field.name == name);
 
-  /// The object for [type] where [builder] is, or null if it is generic.
-  HirValue? value(FunctionBuilder builder, DartType type) {
+  /// The object for [declared] where [builder] is, or null if it is generic.
+  HirValue? value(FunctionBuilder builder, DartType declared) {
+    final type = declared.extensionTypeErasure;
     if (constant(type) case final found?) return builder.add(HirStatic(found));
     final plain = _plain(builder, type);
     if (plain == null || type.nullabilitySuffix != .question) return plain;
@@ -256,6 +264,11 @@ final class TypeTable(
         });
       case FunctionType():
         return _function(builder, type.returnType, type.formalParameters);
+      case RecordType():
+        final fields = listValue(builder, fieldTypes(type));
+        if (fields == null) return null;
+        final names = builder.add(_scope.names(fieldNames(type)));
+        return _create(builder, 'RecordType', [fields, names]);
       default:
         return null;
     }

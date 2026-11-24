@@ -9,10 +9,10 @@ import 'types.dart';
 final class TestTable(final ClassTable _classes) {
   final _tests = <InterfaceElement, HirTypeTest>{};
 
-  final _extensions = <ClassElement, HirTypeTest>{};
+  final _extensions = <InterfaceElement, HirTypeTest>{};
 
   /// Whether objects are of classes that extend [class_].
-  HirTypeTest extendsOf(ClassElement class_) =>
+  HirTypeTest extendsOf(InterfaceElement class_) =>
       _extensions[class_] ??= HirTypeTest('extends ${class_.displayName}');
 
   /// Whether objects are of [class_].
@@ -22,9 +22,9 @@ final class TestTable(final ClassTable _classes) {
   /// The classes that pass each test, of [classes] and of those that functions
   /// are, which are like [functionClass].
   Map<HirTypeTest, Set<HirClass>> results(
-    Iterable<ClassElement> classes,
+    Iterable<InterfaceElement> classes,
     Iterable<Closure> closures,
-    ClassElement functionClass,
+    InterfaceElement functionClass,
   ) => {
     for (final MapEntry(key: tested, value: test) in _tests.entries)
       test: {

@@ -48,7 +48,7 @@ final class ForwarderTable(
       function,
       member.formalParameters,
       ownLevel: level,
-      typeOwner: isGeneric ? member : null,
+      typeOwners: [if (isGeneric) member],
     );
     final result = _call(builder, member, viewedAt(level, member));
     if (hasResult) {

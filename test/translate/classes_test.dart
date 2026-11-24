@@ -382,13 +382,5 @@ A make() => A();''',
       'class A { external A(); }\nvoid main() { A(); }',
       '1:11: $what external constructors.',
     );
-    reports(
-      'class A {}\nextension E on A { void f() {} }\nvoid main() { A().f(); }',
-      '3:15: $what extensions.',
-    );
-    reports(
-      'enum E { a }\nvoid main() { E.a; }',
-      '2:15: $what a constant of type E.',
-    );
   });
 }

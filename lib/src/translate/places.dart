@@ -45,11 +45,12 @@ final class const _Dynamic(
 ) extends Place;
 
 /// A property or element of [receiver], or of the superclass's part of `this`
-/// where [class_] is null.
+/// if [isSuper].
 final class const _Member(
   final AstNode node,
   final HirValue receiver,
-  final InterfaceElement? class_,
+  final bool isSuper,
+  final DartType? receiverType,
   final ExecutableElement? reader,
   final ExecutableElement writer,
   final List<HirValue> positions,
@@ -112,17 +113,14 @@ final class PlaceTranslator(
     final isSuper = target is SuperExpression;
     final receiver = target == null || isSuper
         ? _builder.receiver ?? reject()
-        : _calls.object(to, target);
+        : _calls.object(target, to);
     final parameters = writer.formalParameters;
     final reader = node.readElement;
     return _Member(
       node,
       receiver,
-      isSuper
-          ? null
-          : target == null
-          ? _builder.receiverClass
-          : classOf(target.staticType),
+      isSuper,
+      _calls.receiverType(target, to),
       reader is ExecutableElement ? reader : null,
       writer,
       [
@@ -191,12 +189,12 @@ final class PlaceTranslator(
     _Member place,
     ExecutableElement element,
     List<HirValue> values,
-  ) => place.class_ == null
+  ) => place.isSuper
       ? _calls.superMember(place.node, element, values)
       : _calls.invoke(
           place.node,
           place.receiver,
-          place.class_!,
+          place.receiverType,
           element,
           values,
         );

@@ -2,13 +2,15 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
-/// The representation of values of [type], or null if not supported yet.
-HirType? valueType(DartType type) {
+/// The representation of values of [declared], or null if not supported yet.
+HirType? valueType(DartType declared) {
+  final type = declared.extensionTypeErasure;
   if (type.nullabilitySuffix == .none && type is InterfaceType) {
     if (plainType(type.element) case final plain?) return plain;
   }
   return isTop(type) ||
           type is FunctionType ||
+          type is RecordType ||
           type is TypeParameterType ||
           type.isDartCoreNull ||
           type is NeverType && !isNever(type) ||
@@ -34,11 +36,13 @@ bool _isNumeric(InterfaceElement class_) =>
         plainType(class_) == .integer ||
         plainType(class_) == .float);
 
-/// Whether every value is of [type].
-bool isTop(DartType type) =>
-    type is DynamicType ||
-    type is VoidType ||
-    type.isDartCoreObject && type.nullabilitySuffix == .question;
+/// Whether every value is of [declared].
+bool isTop(DartType declared) {
+  final type = declared.extensionTypeErasure;
+  return type is DynamicType ||
+      type is VoidType ||
+      type.isDartCoreObject && type.nullabilitySuffix == .question;
+}
 
 /// Whether a value of a type can be a number.
 bool canBeNumber(DartType declared) {
@@ -58,11 +62,12 @@ bool isNumber(DartType? declared) {
       _isNumeric(type.element);
 }
 
-/// The type that a value of [type], a type parameter, has for sure.
+/// The type that a value of [type], which can be a type parameter or extension
+/// type, has for sure.
 DartType boundOf(DartType type) {
-  var found = type;
+  var found = type.extensionTypeErasure;
   while (found is TypeParameterType) {
-    found = found.bound;
+    found = found.bound.extensionTypeErasure;
   }
   return found;
 }
@@ -72,7 +77,7 @@ DartType boundOf(DartType type) {
 ///
 /// They are used as they are, or as what functions take if [isTaken].
 bool mentions(DartType type, Element? owner, {bool isTaken = false}) =>
-    switch (type) {
+    switch (type.extensionTypeErasure) {
       TypeParameterType(:final element) =>
         !isTaken && element.enclosingElement == owner,
       InterfaceType(:final typeArguments) => typeArguments.any(
@@ -83,8 +88,19 @@ bool mentions(DartType type, Element? owner, {bool isTaken = false}) =>
             formalParameters.any(
               (p) => mentions(p.type, owner, isTaken: !isTaken),
             ),
+      final RecordType type => _fieldsOf(
+        type,
+      ).any((field) => mentions(field, owner, isTaken: isTaken)),
       _ => false,
     };
+
+/// The types of the fields of [type].
+Iterable<DartType> _fieldsOf(RecordType type) => [
+  for (final field in type.positionalFields) field.type,
+  for (final field
+      in type.namedFields.toList()..sort((a, b) => a.name.compareTo(b.name)))
+    field.type,
+];
 
 /// Whether [type] is made of other type parameters than [bound].
 bool _hasFree(DartType type, Set<TypeParameterElement> bound) => switch (type) {
@@ -99,16 +115,21 @@ bool _hasFree(DartType type, Set<TypeParameterElement> bound) => switch (type) {
         type.formalParameters.any((p) => isFree(p.type)) ||
         typeParameters.any((p) => p.bound != null && isFree(p.bound!));
   }(),
+  RecordType() => _fieldsOf(type).any((field) => _hasFree(field, bound)),
   _ => false,
 };
 
 /// Whether [type] is made of type parameters.
-bool isOpen(DartType type) => switch (type) {
+bool isOpen(DartType type) => switch (type.extensionTypeErasure) {
   TypeParameterType() => true,
   InterfaceType(:final typeArguments) => typeArguments.any(isOpen),
-  FunctionType(typeParameters: [_, ...]) => _hasFree(type, const {}),
+  FunctionType(typeParameters: [_, ...]) && final type => _hasFree(
+    type,
+    const {},
+  ),
   FunctionType(:final returnType, :final formalParameters) =>
     isOpen(returnType) || formalParameters.any((p) => isOpen(p.type)),
+  final RecordType type => _fieldsOf(type).any(isOpen),
   _ => false,
 };
 
@@ -117,16 +138,17 @@ InterfaceElement? classOf(DartType? declared) {
   final type = declared == null ? null : boundOf(declared);
   if (type is! InterfaceType || type.isDartAsyncFutureOr) return null;
   final element = type.element;
-  return element is ClassElement || element is MixinElement ? element : null;
+  return element is ExtensionTypeElement ? null : element;
 }
 
-/// [type] as the official runtime calls it.
+/// The type [declared] as the official runtime calls it.
 ///
 /// Type parameters have the names that [names] gives.
 String describeType(
-  DartType type, [
+  DartType declared, [
   Map<TypeParameterElement, String> names = const {},
 ]) {
+  final type = declared.extensionTypeErasure;
   if (type is TypeParameterType) {
     final name = names[type.element];
     if (name != null) {
@@ -140,9 +162,26 @@ String describeType(
         .join(', ');
     return '${type.element.displayName}<$arguments>$suffix';
   }
+  if (type is RecordType) return '${_describeRecord(type, names)}$suffix';
   if (type is! FunctionType) return type.getDisplayString();
   final text = _describeFunction(type, names);
   return suffix.isEmpty ? text : '($text)$suffix';
+}
+
+String _describeRecord(
+  RecordType type,
+  Map<TypeParameterElement, String> names,
+) {
+  final named = [
+    for (final field
+        in type.namedFields.toList()..sort((a, b) => a.name.compareTo(b.name)))
+      '${describeType(field.type, names)} ${field.name}',
+  ];
+  final fields = [
+    for (final field in type.positionalFields) describeType(field.type, names),
+    if (named.isNotEmpty) '{${named.join(', ')}}',
+  ];
+  return '(${fields.join(', ')})';
 }
 
 String _describeFunction(
@@ -194,7 +233,7 @@ List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
   final owner = element.enclosingElement;
   final parameters = element.typeParameters.isNotEmpty
       ? element.typeParameters
-      : owner is ClassElement
+      : owner is InterfaceElement
       ? owner.typeParameters
       : const <TypeParameterElement>[];
   final found = <TypeParameterElement, DartType>{};
@@ -213,6 +252,11 @@ List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
             match(parameter.type, b.formalParameters[i].type);
           }
         }
+      case (RecordType a, RecordType b):
+        final found = _fieldsOf(b).toList();
+        for (final (i, field) in _fieldsOf(a).indexed) {
+          if (i < found.length) match(field, found[i]);
+        }
     }
   }
 
@@ -229,11 +273,13 @@ bool isSubclass(InterfaceElement sub, InterfaceElement superclass) =>
     sub.allSupertypes.any((type) => type.element == superclass) ||
     _isHiddenSubclass(sub, superclass);
 
-/// Every integer is one of those that the official runtime calls small, and
-/// the class of functions does not tell that it implements another.
+/// Every integer is one of those that the official runtime calls small. The
+/// class of functions does not tell that it implements another, and enums do
+/// not tell what they extend.
 bool _isHiddenSubclass(InterfaceElement sub, InterfaceElement superclass) =>
     superclass.library.isDartCore &&
     (superclass.name == '_Smi' && plainType(sub) == .integer ||
+        superclass.name == '_Enum' && sub is EnumElement ||
         superclass.name == 'Function' &&
             sub.library.isDartCore &&
             sub.name == '_Closure');

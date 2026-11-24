@@ -67,8 +67,9 @@ final class Conversions(
 
   HirValue _not(HirValue value) => _builder.add(HirUnary(.not, value));
 
-  /// Whether [value] is of [type], or null if that cannot be tested yet.
-  HirValue? isInstance(HirValue value, DartType type) {
+  /// Whether [value] is of [declared], or null if that cannot be tested yet.
+  HirValue? isInstance(HirValue value, DartType declared) {
+    final type = declared.extensionTypeErasure;
     HirValue constant(bool value) => _builder.add(HirConst(value));
     if (isTop(type)) return constant(true);
     if (value.type != .reference) {
@@ -125,7 +126,11 @@ final class Conversions(
   }) {
     final representation = valueType(to);
     if (representation == null) return null;
-    if (_builder.library.typeSystem.isSubtypeOf(from, to) &&
+    final system = _builder.library.typeSystem;
+    if (system.isSubtypeOf(
+          from.extensionTypeErasure,
+          to.extensionTypeErasure,
+        ) &&
         from is! DynamicType) {
       return coerce(value, representation);
     }

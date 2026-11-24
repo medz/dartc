@@ -34,6 +34,12 @@ bool isSubtype(RuntimeType a, RuntimeType b) {
   }
   if (a is InterfaceType && b is InterfaceType) return _isSubclass(a, b);
   if (a is BoundType) return b is BoundType && a.index == b.index;
+  if (a is RecordType) {
+    if (b is InterfaceType) return b.number == recordNumber();
+    return b is RecordType &&
+        _haveSameShape(a, b) &&
+        _areSubtypes(a.fields, b.fields);
+  }
   if (a is GenericType) {
     if (b is GenericType) {
       return _areSame(a.bounds, b.bounds) && isSubtype(a.inner, b.inner);
@@ -58,6 +64,16 @@ bool _isSubclass(InterfaceType a, InterfaceType b) {
     }
   }
   return false;
+}
+
+bool _haveSameShape(RecordType a, RecordType b) {
+  if (!isSame(a.names, b.names)) return false;
+  var left = a.fields, right = b.fields;
+  while (left != null && right != null) {
+    left = left.tail;
+    right = right.tail;
+  }
+  return left == null && right == null;
 }
 
 bool _areSubtypes(TypeList? a, TypeList? b) {
@@ -124,6 +140,9 @@ RuntimeType _substitute(RuntimeType type, TypeList? own) {
   if (type is InterfaceType) {
     return InterfaceType(type.number, _substituteAll(type.arguments, own));
   }
+  if (type is RecordType) {
+    return RecordType(_substituteAll(type.fields, own), type.names);
+  }
   if (type is GenericType) {
     final inner = _substitute(type.inner, own);
     final bounds = _substituteAll(type.bounds, own);
@@ -164,6 +183,11 @@ bool isSameType(RuntimeType a, RuntimeType b) {
         _areSame(a.arguments, b.arguments);
   }
   if (a is BoundType) return b is BoundType && a.index == b.index;
+  if (a is RecordType) {
+    return b is RecordType &&
+        isSame(a.names, b.names) &&
+        _areSame(a.fields, b.fields);
+  }
   if (a is GenericType) {
     return b is GenericType &&
         _areSame(a.bounds, b.bounds) &&
@@ -207,6 +231,9 @@ int hashOfType(RuntimeType type) {
     return (_hashOfList(type.arguments) * 31 + type.number) & 0x3fffffff;
   }
   if (type is BoundType) return type.index + 11;
+  if (type is RecordType) {
+    return (_hashOfList(type.fields) * 17 + type.names.length) & 0x3fffffff;
+  }
   if (type is GenericType) {
     return (_hashOfList(type.bounds) * 13 + hashOfType(type.inner)) &
         0x3fffffff;
@@ -231,6 +258,12 @@ int _hashOfList(TypeList? list) {
 String objectTypeName(Object? object) =>
     object == null ? 'Null' : typeName(typeOf(object));
 
+/// What the class of [object] is called.
+String objectClassName(Object object) {
+  final type = typeOf(object);
+  return type is InterfaceType ? className(type.number) : '';
+}
+
 /// How many type parameters functions around have, and those around them.
 final class _Binders {
   final int count, before;
@@ -254,6 +287,7 @@ String _typeName(RuntimeType type, _Binders? binders) {
   }
   if (type is BoundType) return _boundName(type.index, binders);
   if (type is GenericType) return _genericName(type, binders);
+  if (type is RecordType) return _recordName(type, binders);
   return type is FunctionType ? _functionName(type, binders) : '';
 }
 
@@ -298,6 +332,23 @@ String _listName(TypeList list, _Binders? binders) {
     name = '$name, ${_typeName(at.head, binders)}';
   }
   return name;
+}
+
+String _recordName(RecordType type, _Binders? binders) {
+  var count = 0;
+  for (var at = type.fields; at != null; at = at.tail) {
+    count++;
+  }
+  final first = count - type.names.length;
+  var text = '', index = 0;
+  for (var at = type.fields; at != null; at = at.tail) {
+    if (index > 0) text = '$text, ';
+    if (index == first) text = '$text{';
+    text = '$text${_typeName(at.head, binders)}';
+    if (index >= first) text = '$text ${type.names[index - first]}';
+    index++;
+  }
+  return type.names.isEmpty ? '($text)' : '($text})';
 }
 
 String _functionName(FunctionType type, _Binders? binders) {

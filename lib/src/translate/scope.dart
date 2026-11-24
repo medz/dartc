@@ -104,6 +104,15 @@ abstract interface class ProgramScope() {
     bool isForwarder = false,
   });
 
+  /// Gives the method [element] of an extension, used on [receiver], as a
+  /// function. The extension has the type arguments [types], if any.
+  HirValue extensionTearOff(
+    FunctionBuilder builder,
+    MethodElement element,
+    HirValue receiver,
+    HirValue? types,
+  );
+
   /// Translates [body] as that of the function of [builder], later.
   void translateBody(FunctionBuilder builder, FunctionBody body);
 
@@ -115,6 +124,19 @@ abstract interface class ProgramScope() {
 
   /// The class `Function`.
   ClassElement get functionClass;
+
+  /// The class of records.
+  ClassElement get recordClass;
+
+  /// A record of [values], of which the last have [names], in their order.
+  HirValue record(
+    FunctionBuilder builder,
+    List<String> names,
+    List<HirValue> values,
+  );
+
+  /// The list of the [names] of fields.
+  HirInstruction names(List<String> names);
 
   /// The object for [type], or null if it is generic.
   HirValue? typeValue(FunctionBuilder builder, DartType type);
@@ -194,7 +216,7 @@ abstract interface class ProgramScope() {
   });
 
   /// The level of [class_] itself.
-  Level levelOf(ClassElement class_);
+  Level levelOf(InterfaceElement class_);
 
   /// A generative constructor's work on an object already created.
   HirFunction initializerOf(ConstructorElement element);
@@ -209,7 +231,7 @@ abstract interface class ProgramScope() {
   bool declares(InstanceElement class_);
 
   /// The class to create objects of.
-  HirClass createdClass(ClassElement element);
+  HirClass createdClass(InterfaceElement element);
 
   /// A field that [level] adds to objects, to be initialized.
   ///

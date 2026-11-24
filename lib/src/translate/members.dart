@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 
 import 'levels.dart';
 import 'types.dart';
@@ -10,13 +11,48 @@ bool isInstanceMember(Element? element) =>
     element.enclosingElement is InstanceElement &&
     !element.isStatic;
 
+/// Whether [element] is a member of values, declared by an extension or by an
+/// extension type.
+bool isExtensionMember(Element? element) =>
+    isInstanceMember(element) && extendedType(element!) != null;
+
+/// What the members of an extension or extension type, of which [element] is
+/// one, are used on.
+DartType? extendedType(Element element) => switch (element.enclosingElement) {
+  ExtensionElement(:final extendedType) => extendedType,
+  ExtensionTypeElement(:final typeErasure) => typeErasure,
+  _ => null,
+};
+
+/// Whether [element] is a constructor that works on an object created before.
+bool isInitializerElement(ExecutableElement element) =>
+    element is ConstructorElement &&
+    !element.isFactory &&
+    element.enclosingElement is! ExtensionTypeElement;
+
+/// Whether the function of [element] takes an object first.
+bool hasReceiver(ExecutableElement element) =>
+    isInstanceMember(element) && !isExtensionMember(element) ||
+    isInitializerElement(element);
+
 /// What the type arguments are for that the function of [element] takes, if
-/// it takes any.
+/// it takes any, besides those of an extension.
 Element? takesTypes(ExecutableElement element) {
   if (element.typeParameters.isNotEmpty) return element;
   final owner = element.enclosingElement;
   return element is ConstructorElement &&
-          owner is ClassElement &&
+          owner is InterfaceElement &&
+          owner.typeParameters.isNotEmpty
+      ? owner
+      : null;
+}
+
+/// The extension or extension type whose type arguments the function of
+/// [element] takes before its own.
+InstanceElement? takesExtensionTypes(ExecutableElement element) {
+  final owner = element.enclosingElement;
+  return isExtensionMember(element) &&
+          owner is InstanceElement &&
           owner.typeParameters.isNotEmpty
       ? owner
       : null;
