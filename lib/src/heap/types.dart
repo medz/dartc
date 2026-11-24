@@ -148,43 +148,35 @@ bool _areSubtypes(TypeList? a, TypeList? b) {
 
 bool _isSubfunction(FunctionType a, FunctionType b) {
   if (!isSubtype(a.result, b.result)) return false;
-  // What [a] takes, required and optional, in order.
-  var from = a.required, to = b.required;
-  var isOptional = false;
-  while (to != null) {
-    if (from == null && !isOptional) {
-      from = a.optional;
-      isOptional = true;
+  final source = a.shape, target = b.shape;
+  var from = a.parameters, to = b.parameters;
+  if (isSame(source, target)) return _areSubtypes(to, from);
+  if (source.required > target.required ||
+      source.positional < target.positional) {
+    return false;
+  }
+  for (var i = 0; i < source.positional; i++) {
+    if (i < target.positional) {
+      if (!isSubtype(to!.head, from!.head)) return false;
+      to = to.tail;
     }
-    if (from == null || !isSubtype(to.head, from.head)) return false;
-    from = from.tail;
-    to = to.tail;
+    from = from!.tail;
   }
-  if (from != null && !isOptional) return false;
-  if (!isOptional) from = a.optional;
-  for (var rest = b.optional; rest != null; rest = rest.tail) {
-    if (from == null || !isSubtype(rest.head, from.head)) return false;
-    from = from.tail;
+  var wanted = target.names;
+  for (var p = source.names; p != null; p = p.tail) {
+    if (wanted != null && isSame(p.name, wanted.name)) {
+      if (p.isRequired && !wanted.isRequired ||
+          !isSubtype(to!.head, from!.head)) {
+        return false;
+      }
+      wanted = wanted.tail;
+      to = to.tail;
+    } else if (p.isRequired) {
+      return false;
+    }
+    from = from!.tail;
   }
-  return _areNamed(a.named, b.named);
-}
-
-bool _areNamed(NamedList? a, NamedList? b) {
-  for (var at = a; at != null; at = at.tail) {
-    if (at.isRequired && _named(b, at.name)?.isRequired != true) return false;
-  }
-  for (var at = b; at != null; at = at.tail) {
-    final takes = _named(a, at.name);
-    if (takes == null || !isSubtype(at.type, takes.type)) return false;
-  }
-  return true;
-}
-
-NamedList? _named(NamedList? list, int name) {
-  for (var at = list; at != null; at = at.tail) {
-    if (at.name == name) return at;
-  }
-  return null;
+  return wanted == null;
 }
 
 /// The signature of [function] after it takes its type arguments.
@@ -238,9 +230,8 @@ RuntimeType _substitute(RuntimeType type, TypeList? own, int depth) {
   if (type is FunctionType) {
     return FunctionType(
       _substitute(type.result, own, depth),
-      _substituteAll(type.required, own, depth),
-      _substituteAll(type.optional, own, depth),
-      _substituteNamed(type.named, own, depth),
+      _substituteAll(type.parameters, own, depth),
+      type.shape,
     );
   }
   return type;
@@ -252,16 +243,6 @@ RuntimeType _argument(TypeList? at, int index) {
   }
   return at == null ? const BasicType(dynamicKind) : at.head;
 }
-
-NamedList? _substituteNamed(NamedList? list, TypeList? own, int depth) =>
-    list == null
-    ? null
-    : NamedList(
-        list.name,
-        _substitute(list.type, own, depth),
-        list.isRequired,
-        _substituteNamed(list.tail, own, depth),
-      );
 
 /// Whether [a] and [b] are the same type.
 bool isSameType(RuntimeType a, RuntimeType b) {
@@ -291,29 +272,15 @@ bool isSameType(RuntimeType a, RuntimeType b) {
   }
   return a is FunctionType &&
       b is FunctionType &&
+      isSame(a.shape, b.shape) &&
       isSameType(a.result, b.result) &&
-      areSameTypes(a.required, b.required) &&
-      areSameTypes(a.optional, b.optional) &&
-      _areSameNamed(a.named, b.named);
+      areSameTypes(a.parameters, b.parameters);
 }
 
 /// Whether [a] and [b] are equal, one by one.
 bool areSameTypes(TypeList? a, TypeList? b) {
   while (a != null && b != null) {
     if (!isSameType(a.head, b.head)) return false;
-    a = a.tail;
-    b = b.tail;
-  }
-  return a == null && b == null;
-}
-
-bool _areSameNamed(NamedList? a, NamedList? b) {
-  while (a != null && b != null) {
-    final isSame =
-        a.name == b.name &&
-        a.isRequired == b.isRequired &&
-        isSameType(a.type, b.type);
-    if (!isSame) return false;
     a = a.tail;
     b = b.tail;
   }
@@ -337,11 +304,10 @@ int hashOfType(RuntimeType type) {
         0x3fffffff;
   }
   if (type is! FunctionType) return 0;
-  var hash = hashOfType(type.result) + hashOfTypes(type.required) * 5;
-  for (var at = type.named; at != null; at = at.tail) {
-    hash = (hash * 31 + at.name) & 0x3fffffff;
-  }
-  return (hash + hashOfTypes(type.optional) * 3) & 0x3fffffff;
+  return (hashOfType(type.result) +
+          hashOfTypes(type.parameters) * 5 +
+          identityHashCode(type.shape)) &
+      0x3fffffff;
 }
 
 /// A number that is equal for lists of equal types.
@@ -454,25 +420,30 @@ String _recordName(RecordType type, _Binders? binders) {
 }
 
 String _functionName(FunctionType type, _Binders? binders) {
-  final required = type.required, optional = type.optional, named = type.named;
-  var parameters = required == null ? '' : _listName(required, binders);
-  if (optional != null) {
-    if (required != null) parameters = '$parameters, ';
-    parameters = '$parameters[${_listName(optional, binders)}]';
+  var at = type.parameters;
+  final result = _typeName(type.result, binders);
+  if (at == null) return '() => $result';
+  final shape = type.shape,
+      prefixes = shape.prefixes,
+      firstNamed = shape.positional;
+  final text = StringBuffer();
+  for (var i = 0; i < firstNamed; i++) {
+    text.write(prefixes[i]);
+    text.write(_typeName(at!.head, binders));
+    at = at.tail;
   }
-  if (named != null) {
-    if (required != null) parameters = '$parameters, ';
-    parameters = '$parameters{${_namedName(named, binders)}}';
+  if (shape.names != null) {
+    final named = List<String>.filled(prefixes.length - firstNamed - 1, '');
+    for (var p = shape.names; p != null; p = p.tail) {
+      named[p.position - firstNamed] = _typeName(at!.head, binders);
+      at = at.tail;
+    }
+    for (var i = 0; i < named.length; i++) {
+      text.write(prefixes[firstNamed + i]);
+      text.write(named[i]);
+    }
   }
-  return '($parameters) => ${_typeName(type.result, binders)}';
-}
-
-String _namedName(NamedList list, _Binders? binders) {
-  var name = '';
-  for (NamedList? at = list; at != null; at = at.tail) {
-    final own = '${_typeName(at.type, binders)} ${parameterName(at.name)}';
-    name = '$name${at.isRequired ? 'required ' : ''}$own';
-    if (at.tail != null) name = '$name, ';
-  }
-  return name;
+  text.write(prefixes.last);
+  text.write(result);
+  return text.toString();
 }

@@ -7,6 +7,7 @@ void main() {
     void ba({int? b, int? a}) {}
     void ab({int? a, int? b}) {}
     void requiredB({required int b, String? a}) {}
+    void mixed(num value, {required String z, bool? a}) {}
     class C { void ba({int? b, int? a}) {} }
 
     void main() {
@@ -24,6 +25,10 @@ void main() {
       print(f is AB);
       print(f is void Function({int? b}));
       print(f is void Function({int? c}));
+      f = mixed;
+      print(f.runtimeType);
+      print(f is void Function(int, {bool? a, required String z}));
+      print(f is void Function(int, {bool? a}));
       f = requiredB;
       print(f is void Function({String? a, required int b}));
       print(f is void Function({String? a, int b}));

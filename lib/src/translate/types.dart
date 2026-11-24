@@ -222,6 +222,22 @@ String _describeRecord(
   return '(${fields.join(', ')})';
 }
 
+/// The text before each parameter type in declaration order, then the result.
+List<String> functionTypePrefixes(List<FormalParameterElement> parameters) {
+  final parts = <String>[];
+  var before = '(', close = '';
+  for (final p in parameters) {
+    if (parts.isNotEmpty) before += ', ';
+    if (close.isEmpty && !p.isRequiredPositional) {
+      before += p.isNamed ? '{' : '[';
+      close = p.isNamed ? '}' : ']';
+    }
+    parts.add(p.isRequiredNamed ? '${before}required ' : before);
+    before = p.isNamed ? ' ${p.name}' : '';
+  }
+  return parts..add('$before$close) => ');
+}
+
 String _describeFunction(
   FunctionType type,
   Map<TypeParameterElement, String> outer,
@@ -231,22 +247,11 @@ String _describeFunction(
     names[parameter] = 'Y${names.length}';
   }
   String describe(DartType type) => describeType(type, names);
-  String list(Iterable<FormalParameterElement> parameters) =>
-      parameters.map((p) => describe(p.type)).join(', ');
-  final all = type.formalParameters;
-  final optional = all.where((p) => p.isOptionalPositional);
-  final named = all
-      .where((p) => p.isNamed)
-      .map(
-        (p) =>
-            '${p.isRequiredNamed ? 'required ' : ''}'
-            '${describe(p.type)} ${p.name}',
-      );
-  final parameters = [
-    if (all.any((p) => p.isRequiredPositional))
-      list(all.where((p) => p.isRequiredPositional)),
-    if (optional.isNotEmpty) '[${list(optional)}]',
-    if (named.isNotEmpty) '{${named.join(', ')}}',
+  final parameters = type.formalParameters;
+  final text = functionTypePrefixes(parameters);
+  final parts = [
+    for (final (i, p) in parameters.indexed) '${text[i]}${describe(p.type)}',
+    '${text.last}${describe(type.returnType)}',
   ];
   final own = [
     for (final parameter in type.typeParameters)
@@ -256,7 +261,7 @@ String _describeFunction(
         names[parameter]!,
   ];
   final generic = own.isEmpty ? '' : '<${own.join(', ')}>';
-  return '$generic(${parameters.join(', ')}) => ${describe(type.returnType)}';
+  return '$generic${parts.join()}';
 }
 
 /// Whether a function returning [type] gives its caller nothing to use.

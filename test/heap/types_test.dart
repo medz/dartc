@@ -3,7 +3,8 @@ import 'dart:math';
 import 'package:analyzer/dart/element/element.dart' as analyzer;
 import 'package:analyzer/dart/element/type.dart' as analyzer;
 import 'package:dartc/heap.dart';
-import 'package:dartc/src/translate/types.dart' show describeType;
+import 'package:dartc/src/translate/types.dart'
+    show describeType, functionTypePrefixes;
 import 'package:test/test.dart';
 
 import '../support/compiler.dart';
@@ -49,6 +50,9 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
       classes.indexWhere((class_) => class_.name == 'Future');
 
   final _names = <String, List<String>>{};
+  final _shapes = <(int, int, NamedParameter?), FunctionShape>{};
+  final _parameters = <(String, int, bool, NamedParameter?), NamedParameter>{};
+  final _parameterNames = <String, String>{};
 
   RecordType _record(
     analyzer.RecordType type,
@@ -103,24 +107,25 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
     analyzer.InterfaceElement? owner,
   ) {
     final all = type.formalParameters;
-    final named = all.where((p) => p.isNamed).toList()
-      ..sort((a, b) => a.name!.compareTo(b.name!));
-    NamedList? names;
-    for (final p in named.reversed) {
-      final name = p.name!.codeUnitAt(0);
-      names = NamedList(name, of(p.type, owner), p.isRequiredNamed, names);
+    final required = all.where((p) => p.isRequiredPositional).length;
+    final positional = all.where((p) => p.isPositional).length;
+    NamedParameter? names;
+    for (final (i, p) in all.indexed.toList().reversed) {
+      if (!p.isNamed) continue;
+      final name = _parameterNames[p.name!] ??= p.name!;
+      names = _parameters[(name, i, p.isRequiredNamed, names)] ??=
+          NamedParameter(name, i, p.isRequiredNamed, names);
     }
+    final shape = _shapes[(required, positional, names)] ??= FunctionShape(
+      required,
+      positional,
+      functionTypePrefixes(all),
+      names,
+    );
     return FunctionType(
       of(type.returnType, owner),
-      list([
-        for (final p in all)
-          if (p.isRequiredPositional) p.type,
-      ], owner),
-      list([
-        for (final p in all)
-          if (p.isOptionalPositional) p.type,
-      ], owner),
-      names,
+      list([for (final p in all) p.type], owner),
+      shape,
     );
   }
 
@@ -135,8 +140,6 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   String functionName(Object function) => throw UnimplementedError();
   @override
   String className(int number) => classes[number].displayName;
-  @override
-  String parameterName(int number) => String.fromCharCode(number);
 }
 
 /// Types that differ little.

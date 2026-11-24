@@ -312,7 +312,7 @@ final class ProgramTranslator(
   @override
   HirInstruction names(List<String> names) {
     createdClass(recordClass);
-    return HirStatic(_constants.names(names));
+    return HirStatic(_constants.strings(names));
   }
 
   @override

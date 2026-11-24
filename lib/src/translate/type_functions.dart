@@ -210,8 +210,6 @@ final class TypeFunctions(
           });
         case 'className':
           _names(function, _types.classes.map(_nameOf).toList());
-        case 'parameterName':
-          _names(function, _types.parameterNames);
       }
     }
   }
