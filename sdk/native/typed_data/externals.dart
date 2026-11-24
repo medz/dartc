@@ -47,6 +47,7 @@ class _ExternalInt8Array {
   _ExternalInt8Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -92,6 +93,7 @@ class _ExternalUint8Array {
   _ExternalUint8Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -137,6 +139,7 @@ class _ExternalInt16Array {
   _ExternalInt16Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -182,6 +185,7 @@ class _ExternalUint16Array {
   _ExternalUint16Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -227,6 +231,7 @@ class _ExternalInt32Array {
   _ExternalInt32Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -272,6 +277,7 @@ class _ExternalUint32Array {
   _ExternalUint32Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -317,6 +323,7 @@ class _ExternalInt64Array {
   _ExternalInt64Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -362,6 +369,7 @@ class _ExternalUint64Array {
   _ExternalUint64Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   int operator [](int index) {
@@ -407,6 +415,7 @@ class _ExternalFloat32Array {
   _ExternalFloat32Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   double operator [](int index) {
@@ -452,6 +461,7 @@ class _ExternalFloat64Array {
   _ExternalFloat64Array._(this._address, this.length);
 
   int get _start => _address;
+  bool get _isOutside => true;
 
   @patch
   double operator [](int index) {

@@ -1,4 +1,4 @@
-import 'dart:_heap/machine.dart' show addressOf, load8, store8;
+import 'dart:_heap/machine.dart' show addressOf;
 import 'dart:_heap/objects.dart'
     show
         lengthOf,
@@ -50,16 +50,15 @@ class _TypedListBase {
   /// Copies elements of [size] bytes, which may overlap.
   void _move(int start, int count, _TypedListBase from, int skip, int size) {
     final source = from._typedData, target = _typedData;
-    final first = source._start + from.offsetInBytes + skip * size;
-    final to = target._start + offsetInBytes + start * size;
-    final bytes = count * size;
-    if (first < to) {
-      for (var i = bytes - 1; i >= 0; i--) {
-        store8(to + i, load8(first + i));
-      }
-    } else {
-      for (var i = 0; i < bytes; i++) {
-        store8(to + i, load8(first + i));
+    final first = from.offsetInBytes + skip * size;
+    final to = offsetInBytes + start * size, bytes = count * size;
+    final isBackward = first < to;
+    for (var i = 0; i < bytes; i++) {
+      final at = isBackward ? bytes - 1 - i : i;
+      if (source._isOutside || target._isOutside) {
+        target._setUint8(to + at, source._getUint8(first + at));
+      } else {
+        storeUint8(target, to + at, loadUint8(source, first + at));
       }
     }
   }
@@ -89,6 +88,9 @@ class _TypedListBase {
 class _TypedList {
   /// Where the first byte is.
   int get _start => addressOf(this) + 24;
+
+  /// Whether that is not in this object.
+  bool get _isOutside => false;
 
   @patch
   int _getInt8(int offsetInBytes) => loadInt8(this, offsetInBytes);
