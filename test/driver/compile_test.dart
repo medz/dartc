@@ -206,6 +206,20 @@ void main() {
     );
   });
 
+  test('only programs can be run', () {
+    // What is not ASCII is a part of the path too.
+    final output = '${writeSources({}).path}/a program ü';
+    int mode() => FileStat.statSync(output).mode & 0x1ff;
+    writeOutput(Uint8List(4), output, isExecutable: false);
+    final usual = mode();
+    expect(usual & 0x49, 0);
+    writeProgram(Uint8List(4), output);
+    // Whoever may read it may run it.
+    expect(mode(), usual | (usual & 0x124) >> 2);
+    writeOutput(Uint8List(4), output, isExecutable: false);
+    expect(mode(), usual);
+  });
+
   test('writing replaces a file only when complete', () {
     final directory = writeSources({'program': 'old'});
     final output = '${directory.path}/program';

@@ -5,6 +5,7 @@ import 'package:dartc/native.dart';
 import 'package:dartc/source.dart';
 
 import 'compile.dart';
+import 'files.dart';
 
 const _usage = '''
 Usage: dartc <source.dart> -o <output> [options]

@@ -148,24 +148,3 @@ Uint8List _linuxLibrary(EmittedCode code, LibraryKind kind, String name) =>
       ),
       .shared => linkElfLibrary(code, name: name),
     };
-
-/// Writes a file, replacing [output] only once it is complete.
-void writeOutput(Uint8List bytes, String output, {required bool isExecutable}) {
-  final staged = File('$output.tmp-$pid');
-  try {
-    staged.writeAsBytesSync(bytes, flush: true);
-    if (isExecutable) {
-      final result = Process.runSync('/bin/chmod', ['+x', staged.path]);
-      if (result.exitCode != 0) {
-        throw FileSystemException('${result.stderr}', staged.path);
-      }
-    }
-    staged.renameSync(output);
-  } finally {
-    if (staged.existsSync()) staged.deleteSync();
-  }
-}
-
-/// Writes an executable file, replacing [output] only once it is complete.
-void writeProgram(Uint8List program, String output) =>
-    writeOutput(program, output, isExecutable: true);
