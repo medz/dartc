@@ -1,12 +1,15 @@
 import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/allocate.dart';
 import 'package:dartc/src/emit/arm64/registers.dart';
-import 'package:dartc/src/emit/liveness.dart';
 import 'package:dartc/src/emit/moves.dart';
 import 'package:test/test.dart';
 
 import '../lir/support.dart';
 import 'random_lir.dart';
+import 'support.dart';
+
+/// Constants that take registers are no smaller.
+const _large = 0x123456789;
 
 void main() {
   group('liveness', () {
@@ -24,7 +27,7 @@ void main() {
         loop,
         exit,
       ]);
-      final intervals = Liveness(function).intervals;
+      final intervals = livenessOf(function).intervals;
       // Read last near the top of the loop, yet needed by the next iteration.
       expect(intervals[outer]!.end, intervals[next]!.end);
       expect(intervals[count]!.end, lessThan(intervals[used]!.start));
@@ -40,7 +43,7 @@ void main() {
         entry,
         next,
       ]);
-      final intervals = Liveness(function).intervals;
+      final intervals = livenessOf(function).intervals;
       final before = intervals[entry.parameters.single]!;
       final after = intervals[next.parameters.single]!;
       expect(after.start, greaterThan(before.end));
@@ -55,7 +58,7 @@ void main() {
       final function = LirFunction('f', LirSignature([.i64, .i64], .i64), [
         block,
       ]);
-      final intervals = Liveness(function).intervals;
+      final intervals = livenessOf(function).intervals;
       expect(intervals[argument]!.crossesCall, isFalse);
       expect(intervals[kept]!.crossesCall, isTrue);
       expect(intervals[call]!.crossesCall, isFalse);
@@ -70,7 +73,7 @@ void main() {
       }
       return value;
     });
-    final allocation = Allocation(Liveness(made), arm64Registers.values);
+    final allocation = Allocation(livenessOf(made), arm64Registers.values);
     expect(allocation.spillCount, 0);
     expect(allocation.locations.values.toSet(), hasLength(2));
   });
@@ -80,14 +83,16 @@ void main() {
     final made = function('f', [.i64], .i64, (block, p) {
       longest = p[0];
       // One more value than there are registers.
-      final values = [for (var i = 0; i < 24; i++) block.add(ConstInt(i))];
+      final values = [
+        for (var i = 0; i < 24; i++) block.add(ConstInt(_large + i)),
+      ];
       LirValue sum = values.first;
       for (final value in values.skip(1)) {
         sum = block.add(IntBinary(.add, sum, value));
       }
       return block.add(IntBinary(.add, sum, longest));
     });
-    final allocation = Allocation(Liveness(made), arm64Registers.values);
+    final allocation = Allocation(livenessOf(made), arm64Registers.values);
     expect(allocation.spillCount, 1);
     expect(allocation.locations[longest], const OnStack(.spill, 0));
   });
@@ -97,16 +102,16 @@ void main() {
     final made = function('f', [.i64], .i64, (block, p) {
       final values = [
         p[0],
-        for (var i = 0; i < 23; i++) block.add(ConstInt(i)),
+        for (var i = 0; i < 23; i++) block.add(ConstInt(_large + i)),
       ];
-      newest = block.add(ConstInt(99));
+      newest = block.add(ConstInt(_large + 99));
       LirValue sum = values.first;
       for (final value in values.skip(1)) {
         sum = block.add(IntBinary(.add, sum, value));
       }
       return block.add(IntBinary(.add, sum, newest));
     });
-    final allocation = Allocation(Liveness(made), arm64Registers.values);
+    final allocation = Allocation(livenessOf(made), arm64Registers.values);
     expect(allocation.spillCount, 1);
     expect(allocation.locations[newest], const OnStack(.spill, 0));
   });
@@ -136,7 +141,9 @@ void main() {
 
   test('doubles and words do not compete for registers', () {
     final made = function('f', [.i64, .f64], .f64, (block, p) {
-      final words = [for (var i = 0; i < 23; i++) block.add(ConstInt(i))];
+      final words = [
+        for (var i = 0; i < 23; i++) block.add(ConstInt(_large + i)),
+      ];
       final floats = [
         for (var i = 0; i < 28; i++) block.add(ConstFloat(1.0 * i)),
       ];
@@ -151,7 +158,7 @@ void main() {
         FloatBinary(.add, float, block.add(Convert(.intToFloat, word))),
       );
     });
-    final allocation = Allocation(Liveness(made), arm64Registers.values);
+    final allocation = Allocation(livenessOf(made), arm64Registers.values);
     expect(allocation.spillCount, 0);
     for (final MapEntry(key: value, value: place)
         in allocation.locations.entries) {
@@ -177,7 +184,7 @@ void main() {
     var spills = 0, crossings = 0;
     for (var seed = 0; seed < 60; seed++) {
       for (final function in RandomLir(seed).functions()) {
-        final liveness = Liveness(function);
+        final liveness = livenessOf(function);
         final allocation = Allocation(liveness, arm64Registers.values);
         spills += allocation.spillCount;
         final intervals = liveness.intervals.values.toList();

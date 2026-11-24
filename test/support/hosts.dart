@@ -109,6 +109,32 @@ final class const Host._(final Target target, final String? _container) {
     Map<String, String> environment = const {},
     Duration? limit,
   }) async {
+    while (true) {
+      final result = await _run(
+        path,
+        arguments,
+        place,
+        input,
+        environment,
+        limit,
+      );
+      // Files can take some time to get to a container.
+      final isMissing =
+          _container != null &&
+          result.errors.startsWith('exec $path: no such file or directory');
+      if (!isMissing) return result;
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
+  Future<Run> _run(
+    String path,
+    List<String> arguments,
+    String? place,
+    String input,
+    Map<String, String> environment,
+    Duration? limit,
+  ) async {
     final container = _container;
     final process = container == null
         ? await Process.start(

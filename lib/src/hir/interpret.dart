@@ -182,6 +182,10 @@ final class HirInterpreter(
         final object = inputs.single;
         if (object is! HirObject) throw StateError('$object has no class.');
         return module.tests[test]!.contains(object.target);
+      case HirHasClass(:final target):
+        final object = inputs.single;
+        if (object is! HirObject) throw StateError('$object has no class.');
+        return object.target == target;
       case HirNew(:final target):
         return HirObject(target);
       case HirBox(:final target):
@@ -207,12 +211,18 @@ final class HirInterpreter(
         object.checkWritable();
         object.fields[field] = inputs[1];
         return null;
-      case HirVirtualCall(:final selector):
+      case HirVirtualCall(:final selector, :final bound):
+        if (bound != null && !_passes(bound, inputs[0])) {
+          throw StateError('${inputs[0]} is no ${bound.name}.');
+        }
         return _call(_implementation(selector, inputs[0]), inputs);
       case HirCall(:final target):
         return _call(target as HirFunction, inputs);
     }
   }
+
+  bool _passes(HirTypeTest test, Object object) =>
+      object is HirObject && module.tests[test]!.contains(object.target);
 
   Object _constant(Object? value) {
     if (value == null) return hirNull;

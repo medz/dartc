@@ -17,6 +17,9 @@ typedef _Shape = ({
   ExecutableElement member,
   int positional,
   List<String> named,
+
+  /// Whether the receiver is the object that the calling code is of.
+  bool isOwn,
 });
 
 /// Finds which functions calls on objects can reach.
@@ -44,9 +47,17 @@ final class DispatchBuilder(
     InterfaceElement receiver,
     int positional,
     List<String> named,
-    Reject reject,
-  ) {
-    final selector = _selector(member, positional, named, reject);
+    Reject reject, {
+    required bool isOwn,
+  }) {
+    final selector = _selector(
+      member,
+      positional,
+      named,
+      reject,
+      // Others need no function of their own.
+      isOwn: isOwn && member.formalParameters.any(isUnchecked),
+    );
     _world.call(selector, receiver);
     return selector;
   }
@@ -55,8 +66,9 @@ final class DispatchBuilder(
     ExecutableElement member,
     int positional,
     List<String> named,
-    Reject reject,
-  ) {
+    Reject reject, {
+    bool isOwn = false,
+  }) {
     final isGeneric = member.typeParameters.isNotEmpty;
     final types = [
       if (isGeneric) HirType.reference,
@@ -80,10 +92,16 @@ final class DispatchBuilder(
       isGeneric,
       types,
       result,
+      isOwn,
     ].join('|');
     return _selectors.putIfAbsent(key, () {
       final made = HirSelector(name, types, result);
-      _shapes[made] = (member: member, positional: positional, named: named);
+      _shapes[made] = (
+        member: member,
+        positional: positional,
+        named: named,
+        isOwn: isOwn,
+      );
       _entries[made] = {};
       return made;
     });
@@ -117,7 +135,12 @@ final class DispatchBuilder(
         const [],
         .reference,
       );
-      _shapes[made] = (member: member, positional: 0, named: const []);
+      _shapes[made] = (
+        member: member,
+        positional: 0,
+        named: const [],
+        isOwn: false,
+      );
       _entries[made] = {};
       _tearOffs.add(made);
       return made;
@@ -158,6 +181,43 @@ final class DispatchBuilder(
     return entries.isNotEmpty;
   }
 
+  /// The class of objects of [element], if there are any.
+  HirClass? created(
+    InterfaceElement element,
+    HirClass Function(InterfaceElement element) classOf,
+  ) => classes.contains(element) ? classOf(element) : null;
+
+  /// The classes that most objects are of, where they may be of many.
+  static const _common = [
+    '_GrowableList', '_List', '_OneByteString', '_Mint', '_Double', //
+    '_Map', '_Set', 'ListIterator', '_ArrayIterator',
+  ];
+  static const _commonObjects = ['_OneByteString', '_Mint'];
+
+  /// The classes that objects receiving calls of each selector often are of.
+  Map<HirSelector, List<HirClass>> likely(
+    HirClass Function(InterfaceElement element) classOf,
+  ) {
+    final common = {
+      for (final class_ in classes)
+        if (class_.library.isInSdk && _common.contains(class_.name))
+          class_.name!: class_,
+    };
+    return {
+      for (final MapEntry(key: selector, value: entries) in _entries.entries)
+        if (_shapes[selector]!.member.enclosingElement case final owner?)
+          selector: [
+            for (final name
+                in owner is ClassElement && owner.isDartCoreObject
+                    ? _commonObjects
+                    : _common)
+              if (common[name] case final class_?
+                  when entries.containsKey(class_))
+                classOf(class_),
+          ],
+    };
+  }
+
   Map<HirSelector, Map<HirClass, HirFunction>> result(
     HirClass Function(InterfaceElement element) classOf,
     ClosureTable closures,
@@ -195,7 +255,7 @@ final class DispatchBuilder(
         found,
         selector,
         shape,
-        _checkedParameters(class_, shape.member),
+        _checkedParameters(class_, shape.member, shape),
         isUnboxed: false,
         isForwarder: true,
       );
@@ -210,7 +270,11 @@ final class DispatchBuilder(
     HirSelector selector, {
     bool isUnboxed = false,
   }) {
-    final checked = _checkedParameters(level.class_, found.element);
+    final checked = _checkedParameters(
+      level.class_,
+      found.element,
+      _shapes[selector]!,
+    );
     return _adapters[(found, selector, '$checked $isUnboxed')] ??= _adapt(
       found,
       selector,
@@ -225,6 +289,7 @@ final class DispatchBuilder(
   List<int> _checkedParameters(
     InterfaceElement class_,
     ExecutableElement found,
+    _Shape shape,
   ) {
     final system = found.library.typeSystem;
     final parameters = found.formalParameters;
@@ -245,7 +310,39 @@ final class DispatchBuilder(
     for (final (i, parameter) in parameters.indexed) {
       if (mentions(parameter.type, found.enclosingElement)) checked.add(i);
     }
+    if (shape.isOwn) {
+      // Code of the object itself knows its type arguments.
+      checked.removeWhere((i) => _isGiven(class_, found, shape.member, i));
+    }
     return checked.toList()..sort();
+  }
+
+  /// Whether what is given for [member] fits the parameter of [found] at [place],
+  /// for objects of [class_].
+  static bool _isGiven(
+    InterfaceElement class_,
+    ExecutableElement found,
+    ExecutableElement member,
+    int place,
+  ) {
+    List<FormalParameterElement>? of(ExecutableElement element) {
+      final owner = element.enclosingElement;
+      if (owner is! InterfaceElement) return null;
+      final type = class_.thisType.asInstanceOf(owner);
+      return <ExecutableElement>[...?type?.methods, ...?type?.setters]
+          .where((own) => own.baseElement == element)
+          .firstOrNull
+          ?.formalParameters;
+    }
+
+    final own = of(found), given = of(member);
+    if (own == null || given == null) return false;
+    final parameter = own[place];
+    final source = parameter.isNamed
+        ? given.where((p) => p.isNamed && p.name == parameter.name).firstOrNull
+        : given.elementAtOrNull(place);
+    return source == null ||
+        found.library.typeSystem.isSubtypeOf(source.type, parameter.type);
   }
 
   /// A function called as [selector] says that does the work of

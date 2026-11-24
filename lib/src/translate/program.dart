@@ -177,7 +177,8 @@ final class ProgramTranslator(
           _closures.closures,
           _functionClass,
         ),
-        integers: _integers,
+        likely: _dispatch.likely(_classes.classOf),
+        integers: _dispatch.created(boxElement(.integer), _classes.classOf),
         allocate: _needs.allocate,
         raise: _needs.raise,
         stackOverflow: _needs.stackOverflow,
@@ -187,14 +188,6 @@ final class ProgramTranslator(
         exports: exports,
         eventLoop: _needs.eventLoop,
       );
-
-  /// The class of boxed integers, if there are any.
-  HirClass? get _integers {
-    final element = boxElement(.integer);
-    return _dispatch.classes.contains(element)
-        ? _classes.classOf(element)
-        : null;
-  }
 
   Iterable<HirFunction> get _allFunctions => [
     ..._functions.all,
@@ -476,11 +469,7 @@ final class ProgramTranslator(
   HirClass boxClass(HirType type) => createdClass(boxElement(type));
 
   @override
-  ClassElement boxElement(HirType type) => _core.getClass(switch (type) {
-    .integer => '_Mint',
-    .float => '_Double',
-    _ => 'bool',
-  })!;
+  ClassElement boxElement(HirType type) => _core.getClass(boxName(type))!;
 
   @override
   HirConstObject boxOf(Object value) => _constants.box(value);
@@ -596,6 +585,14 @@ final class ProgramTranslator(
     InterfaceElement receiver,
     int positional,
     List<String> named,
-    Reject reject,
-  ) => _dispatch.selectorOf(member, receiver, positional, named, reject);
+    Reject reject, {
+    required bool isOwn,
+  }) => _dispatch.selectorOf(
+    member,
+    receiver,
+    positional,
+    named,
+    reject,
+    isOwn: isOwn,
+  );
 }

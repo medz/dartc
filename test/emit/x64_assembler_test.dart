@@ -79,12 +79,48 @@ void main() {
     _encodes('4c0fafe3', (a) => a.imul(12, 3));
     _encodes('490fafdc', (a) => a.imul(3, 12));
     _encodes('4899', (a) => a.cqo());
-    _encodes('4883f8ff', (a) => a.cmpImmediate(0, -1));
-    _encodes('4983fbff', (a) => a.cmpImmediate(11, -1));
+    _encodes('4883c1ff', (a) => a.binaryImmediate(.add, 1, -1));
+    _encodes('4983c37f', (a) => a.binaryImmediate(.add, 11, 127));
+    _encodes('4981c3e8030000', (a) => a.binaryImmediate(.add, 11, 1000));
+    _encodes('4881c490eefeff', (a) => a.binaryImmediate(.add, 4, -70000));
+    _encodes('4883c9ff', (a) => a.binaryImmediate(.or, 1, -1));
+    _encodes('4983cb7f', (a) => a.binaryImmediate(.or, 11, 127));
+    _encodes('4981cbe8030000', (a) => a.binaryImmediate(.or, 11, 1000));
+    _encodes('4881cc90eefeff', (a) => a.binaryImmediate(.or, 4, -70000));
+    _encodes('4883e1ff', (a) => a.binaryImmediate(.and, 1, -1));
+    _encodes('4983e37f', (a) => a.binaryImmediate(.and, 11, 127));
+    _encodes('4981e3e8030000', (a) => a.binaryImmediate(.and, 11, 1000));
+    _encodes('4881e490eefeff', (a) => a.binaryImmediate(.and, 4, -70000));
+    _encodes('4883e9ff', (a) => a.binaryImmediate(.sub, 1, -1));
+    _encodes('4983eb7f', (a) => a.binaryImmediate(.sub, 11, 127));
+    _encodes('4981ebe8030000', (a) => a.binaryImmediate(.sub, 11, 1000));
+    _encodes('4881ec90eefeff', (a) => a.binaryImmediate(.sub, 4, -70000));
+    _encodes('4883f1ff', (a) => a.binaryImmediate(.xor, 1, -1));
+    _encodes('4983f37f', (a) => a.binaryImmediate(.xor, 11, 127));
+    _encodes('4981f3e8030000', (a) => a.binaryImmediate(.xor, 11, 1000));
+    _encodes('4881f490eefeff', (a) => a.binaryImmediate(.xor, 4, -70000));
+    _encodes('4883f9ff', (a) => a.binaryImmediate(.cmp, 1, -1));
+    _encodes('4983fb7f', (a) => a.binaryImmediate(.cmp, 11, 127));
+    _encodes('4981fbe8030000', (a) => a.binaryImmediate(.cmp, 11, 1000));
+    _encodes('4881fc90eefeff', (a) => a.binaryImmediate(.cmp, 4, -70000));
     _encodes('4881ec00100000', (a) => a.subStack(4096));
     _encodes('4883e4f0', (a) => a.alignStack());
-    _encodes('48c1e803', (a) => a.shrImmediate(0, 3));
-    _encodes('49c1e903', (a) => a.shrImmediate(9, 3));
+    _encodes('48c1e005', (a) => a.shiftImmediate(.shl, 0, 5));
+    _encodes('49c1e105', (a) => a.shiftImmediate(.shl, 9, 5));
+    _encodes('48c1e805', (a) => a.shiftImmediate(.shr, 0, 5));
+    _encodes('49c1e905', (a) => a.shiftImmediate(.shr, 9, 5));
+    _encodes('48c1f805', (a) => a.shiftImmediate(.sar, 0, 5));
+    _encodes('49c1f905', (a) => a.shiftImmediate(.sar, 9, 5));
+    _encodes('4969c9e8030000', (a) => a.imulImmediate(1, 9, 1000));
+    _encodes('4c69c990eefeff', (a) => a.imulImmediate(9, 1, -70000));
+    _encodes(
+      '4a8d4cca18',
+      (a) => a.lea(1, const Memory(2, offset: 24, index: 9, isScaled: true)),
+    );
+    _encodes(
+      '4d8b54c500',
+      (a) => a.load(10, const Memory(13, index: 0, isScaled: true)),
+    );
     _encodes('488d10', (a) => a.lea(2, const Memory(0)));
     _encodes('488d5308', (a) => a.lea(2, const Memory(3, offset: 8)));
     _encodes('488d1424', (a) => a.lea(2, const Memory(4)));
@@ -389,12 +425,12 @@ void main() {
     assembler
       ..bind(start)
       ..jump(end)
-      ..jumpIf(.less, start)
+      ..jumpIf(.less, start, holds: false)
       ..callLabel(end)
       ..bind(end);
     expect(assembler.finish(), [
       0xe9, 11, 0, 0, 0, //
-      0x0f, 0x8c, 0xf5, 0xff, 0xff, 0xff, //
+      0x0f, 0x8d, 0xf5, 0xff, 0xff, 0xff, //
       0xe8, 0, 0, 0, 0,
     ]);
     expect(() => assembler.bind(end), throwsStateError);
@@ -422,7 +458,6 @@ void main() {
 
   test('what does not fit is rejected', () {
     final assembler = X64Assembler();
-    expect(() => assembler.cmpImmediate(1, 200), throwsRangeError);
     expect(
       () => assembler.lea(1, const Memory(1, offset: 1 << 31)),
       throwsRangeError,

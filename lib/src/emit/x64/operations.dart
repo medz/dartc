@@ -14,7 +14,12 @@ const _rdx = X64Assembler.rdx;
 /// scratch registers.
 final class X64Operations(final X64Assembler _assembler) {
   /// Computes [instruction] into [d]; [d] may equal any operand.
-  void emit(LirInstruction instruction, int d, List<int> operands) {
+  void emit(
+    LirInstruction instruction,
+    int d,
+    List<int> operands, {
+    bool isScaled = false,
+  }) {
     switch (instruction) {
       case ConstInt(:final value):
         _assembler.constant(d, value);
@@ -49,6 +54,7 @@ final class X64Operations(final X64Assembler _assembler) {
           operands[0],
           offset: offset,
           index: index == null ? null : operands[1],
+          isScaled: isScaled,
         );
         _assembler.loadWidth(width, d, at);
       case FrameAddress():
@@ -61,13 +67,106 @@ final class X64Operations(final X64Assembler _assembler) {
   }
 
   /// Stores register [value] at [base] plus the register [index], if any.
-  void store(Store store, int base, int? index, int value) =>
-      _assembler.storeWidth(
-        store.width,
-        value,
-        Memory(base, offset: store.offset, index: index),
-        scratch: rightFloatScratch,
-      );
+  void store(
+    Store store,
+    int base,
+    int? index,
+    int value, {
+    bool isScaled = false,
+  }) => _assembler.storeWidth(
+    store.width,
+    value,
+    Memory(base, offset: store.offset, index: index, isScaled: isScaled),
+    scratch: rightFloatScratch,
+  );
+
+  /// d = l op [value], which the instruction can have.
+  void immediate(IntOp op, int d, int l, int value) {
+    switch (op) {
+      case .add:
+        _assembler.lea(d, Memory(l, offset: value));
+      case .sub:
+        _assembler.lea(d, Memory(l, offset: -value));
+      case .mul:
+        _assembler.imulImmediate(d, l, value);
+      case .and:
+        _copy(d, l);
+        _assembler.binaryImmediate(.and, d, value);
+      case .or:
+        _copy(d, l);
+        _assembler.binaryImmediate(.or, d, value);
+      case .xor:
+        _copy(d, l);
+        _assembler.binaryImmediate(.xor, d, value);
+      case .shl:
+        _copy(d, l);
+        _assembler.shiftImmediate(.shl, d, value);
+      case .sar:
+        _copy(d, l);
+        _assembler.shiftImmediate(.sar, d, value);
+      case .shr:
+        _copy(d, l);
+        _assembler.shiftImmediate(.shr, d, value);
+      case .div || .rem:
+        throw StateError('${op.name} has no immediate.');
+    }
+  }
+
+  /// Computes whether register [l] is in [relation] to [value] into [d].
+  void setComparison(Relation relation, int d, int l, int value) => _assembler
+    ..binaryImmediate(.cmp, l, value)
+    ..setByte(_rax, _condition(relation))
+    ..extendByte(d, _rax);
+
+  void jumpIf(
+    Compare comparison,
+    List<int> operands,
+    Label label, {
+    required bool holds,
+    int? immediate,
+  }) {
+    final relation = comparison.relation;
+    if (comparison.left.type != .f64) {
+      immediate == null
+          ? _assembler.binary(.cmp, operands[0], operands[1])
+          : _assembler.binaryImmediate(.cmp, operands[0], immediate);
+      _assembler.jumpIf(_condition(relation), label, holds: holds);
+      return;
+    }
+    final [l, r] = operands;
+    switch (relation) {
+      case .lt || .le:
+        _assembler
+          ..fcmp(r, l)
+          ..jumpIf(
+            relation == .lt ? .above : .aboveOrEqual,
+            label,
+            holds: holds,
+          );
+      case .gt || .ge:
+        _assembler
+          ..fcmp(l, r)
+          ..jumpIf(
+            relation == .gt ? .above : .aboveOrEqual,
+            label,
+            holds: holds,
+          );
+      default:
+        _assembler.fcmp(l, r);
+        if ((relation == .eq) == holds) {
+          // Equal, and none of them is NaN.
+          final skip = Label();
+          _assembler
+            ..jumpIf(.parity, skip)
+            ..jumpIf(.equal, label)
+            ..bind(skip);
+        } else {
+          _assembler
+            ..jumpIf(.parity, label)
+            ..jumpIf(.notEqual, label);
+        }
+    }
+  }
 
   void _integer(IntOp op, int d, int l, int r) {
     switch (op) {
@@ -150,7 +249,7 @@ final class X64Operations(final X64Assembler _assembler) {
     _copy(divisor, r);
     _assembler
       ..mov(kept, _rdx)
-      ..cmpImmediate(divisor, -1)
+      ..binaryImmediate(.cmp, divisor, -1)
       ..jumpIf(.equal, special)
       ..cqo()
       ..unary(.idiv, divisor)

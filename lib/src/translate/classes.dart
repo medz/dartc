@@ -214,6 +214,7 @@ final class ClassTable(final Declarations _declarations) {
     return _argumentFields[level] = HirField(
       '${level.element.displayName} types',
       .reference,
+      isFinal: true,
     );
   }
 
@@ -224,7 +225,11 @@ final class ClassTable(final Declarations _declarations) {
         valueType(element.type) ??
         (throw unsupported('a field of type ${element.type}'));
     final name = element.displayName;
-    final value = HirField(name, type);
+    final value = HirField(
+      name,
+      type,
+      isFinal: element.isFinal && !element.isLate,
+    );
     final isSet = element.isLate ? HirField('$name is set', .boolean) : null;
     _fields[(level, element)] = (value: value, isSet: isSet);
     return [value, ?isSet];

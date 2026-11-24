@@ -237,7 +237,7 @@ final class _FunctionVerifier(
       case HirConst() || HirNull() || HirClassNumber() || HirNativeFunction():
         break;
       case HirNewArray(:final target, :final length):
-        if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+        _checkClass(target);
         if (target.elements == null) _fail('${target.name} has no elements');
         _expect(length, .integer, 'length');
       case HirLength(:final array):
@@ -264,15 +264,16 @@ final class _FunctionVerifier(
       case HirMachine(:final op, :final arguments):
         _checkTypes(op.parameters, arguments, op.name);
       case HirIsInstance(:final test, :final object):
-        if (!module.tests.containsKey(test)) {
-          _fail('unlisted test ${test.name}');
-        }
+        _checkTest(test);
         _expect(object, .reference, 'is ${test.name}');
+      case HirHasClass(:final target, :final object):
+        _checkClass(target);
+        _expect(object, .reference, 'is exactly ${target.name}');
       case HirNew(:final target):
-        if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+        _checkClass(target);
         if (target.elements != null) _fail('${target.name} has elements');
       case HirBox(:final target, :final value):
-        if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+        _checkClass(target);
         if (target.fields.length != 1 || target.elements != null) {
           _fail('${target.name} is no box');
         }
@@ -282,12 +283,34 @@ final class _FunctionVerifier(
       case HirStore(:final field, :final object, :final value):
         _expect(object, .reference, 'object');
         _expect(value, field.type, 'field ${field.name}');
-      case HirVirtualCall(:final selector, :final receiver, :final arguments):
+      case HirVirtualCall(
+        :final selector,
+        :final receiver,
+        :final arguments,
+        :final bound,
+      ):
+        if (bound != null) _checkTest(bound);
         if (!module.dispatch.containsKey(selector)) {
           _fail('unlisted selector ${selector.name}');
         }
         _expect(receiver, .reference, 'receiver');
         _checkTypes(selector.parameters, arguments, 'call to ${selector.name}');
+      case HirIntBinary() ||
+          HirFloatBinary() ||
+          HirBoolBinary() ||
+          HirUnary() ||
+          HirCompare():
+        _checkOperator(instruction);
+      case HirCall(:final target, :final arguments):
+        if (!functions.contains(target)) {
+          _fail('unlisted callee ${target.name}');
+        }
+        _checkTypes(target.parameters, arguments, 'call to ${target.name}');
+    }
+  }
+
+  void _checkOperator(HirInstruction instruction) {
+    switch (instruction) {
       case HirIntBinary(:final operator, :final left, :final right):
         _expect(left, .integer, operator.symbol);
         _expect(right, .integer, operator.symbol);
@@ -305,12 +328,17 @@ final class _FunctionVerifier(
         if (!ordered && !relation.isEquality) {
           _fail('${left.type!.dartName} has no ${relation.symbol}');
         }
-      case HirCall(:final target, :final arguments):
-        if (!functions.contains(target)) {
-          _fail('unlisted callee ${target.name}');
-        }
-        _checkTypes(target.parameters, arguments, 'call to ${target.name}');
+      default:
+        break;
     }
+  }
+
+  void _checkClass(HirClass target) {
+    if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+  }
+
+  void _checkTest(HirTypeTest test) {
+    if (!module.tests.containsKey(test)) _fail('unlisted test ${test.name}');
   }
 
   void _checkGlobal(HirGlobal global) {

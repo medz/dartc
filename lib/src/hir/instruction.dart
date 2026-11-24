@@ -177,11 +177,14 @@ final class HirStore(
 }
 
 /// Calls what the class of [receiver], which is never null, has for [selector].
+///
+/// The class passes the test [bound], if there is one.
 final class HirVirtualCall(
   final HirSelector selector,
   final HirValue receiver,
-  Iterable<HirValue> arguments,
-) extends HirCalling {
+  Iterable<HirValue> arguments, {
+  final HirTypeTest? bound,
+}) extends HirCalling {
   final List<HirValue> arguments = .unmodifiable(arguments);
   @override
   HirType? get type => selector.result;
@@ -319,6 +322,20 @@ final class HirCompare(
 /// Whether the class of [object], which is never null, passes [test].
 final class HirIsInstance(final HirTypeTest test, final HirValue object)
     extends HirInstruction {
+  @override
+  HirType get type => .boolean;
+  @override
+  List<HirValue> get inputs => [object];
+}
+
+/// Whether [object], which is never null, is of the class [target].
+///
+/// It can be an integer without an object only if it [mayBeInteger].
+final class HirHasClass(
+  final HirClass target,
+  final HirValue object, {
+  final bool mayBeInteger = true,
+}) extends HirInstruction {
   @override
   HirType get type => .boolean;
   @override

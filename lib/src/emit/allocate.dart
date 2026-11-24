@@ -26,6 +26,16 @@ final class const InRegister(final RegisterBank bank, final int number)
   String toString() => '${bank.name}$number';
 }
 
+/// A word that is not stored.
+final class const IsConstant(final int value) extends Location {
+  @override
+  bool operator ==(Object other) => other is IsConstant && other.value == value;
+  @override
+  int get hashCode => value.hashCode;
+  @override
+  String toString() => '#$value';
+}
+
 /// The words of a stack frame.
 enum StackArea() {
   /// Arguments beyond the registers, written by the caller.
@@ -65,6 +75,9 @@ final class Allocation(
   final Map<RegisterBank, RegisterSet> registers,
 ) {
   final locations = <LirValue, Location>{};
+
+  /// Where values in registers are on the stack, too.
+  final homes = <LirValue, OnStack>{};
   int spillCount = 0;
 
   this {
@@ -82,10 +95,8 @@ final class Allocation(
       final bank = RegisterBank.of(current.value.type!);
       final active = inUse[bank]!, set = registers[bank]!;
       active.removeWhere((_, interval) => interval.end < current.start);
-      // The collector looks for references only on the stack, and a throw
-      // restores no registers.
-      if (current.crossesThrow ||
-          current.crossesCall && current.value.type == .ref) {
+      // A throw restores no registers.
+      if (current.crossesThrow) {
         _spill(current);
         continue;
       }
@@ -93,10 +104,10 @@ final class Allocation(
         if (!current.crossesCall) ...set.volatile,
         ...set.preserved,
       ];
-      final free = usable.where((r) => !active.containsKey(r)).firstOrNull;
+      final free = _preferred(current, usable, active);
       if (free != null) {
         active[free] = current;
-        locations[current.value] = InRegister(bank, free);
+        _take(current, bank, free);
         continue;
       }
       if (usable.isEmpty) {
@@ -113,10 +124,38 @@ final class Allocation(
       }
       _spill(evicted);
       active[victim] = current;
-      locations[current.value] = InRegister(bank, victim);
+      _take(current, bank, victim);
     }
   }
 
-  void _spill(Interval interval) =>
-      locations[interval.value] = OnStack(.spill, spillCount++);
+  /// A register for [interval] of those that are [usable], if one is free. It is
+  /// one that saves copying, if there is such.
+  int? _preferred(
+    Interval interval,
+    List<int> usable,
+    Map<int, Interval> active,
+  ) {
+    for (final other
+        in liveness.related[interval.value] ?? const <LirValue>[]) {
+      if (locations[other] case InRegister(:final number)
+          when usable.contains(number) && !active.containsKey(number)) {
+        return number;
+      }
+    }
+    return usable.where((r) => !active.containsKey(r)).firstOrNull;
+  }
+
+  void _take(Interval interval, RegisterBank bank, int register) {
+    locations[interval.value] = InRegister(bank, register);
+    // The collector looks for references only on the stack. It does not move
+    // objects, so they are in registers as well.
+    if (interval.crossesCall && interval.value.type == .ref) {
+      homes[interval.value] = OnStack(.spill, spillCount++);
+    }
+  }
+
+  void _spill(Interval interval) {
+    final home = homes.remove(interval.value);
+    locations[interval.value] = home ?? OnStack(.spill, spillCount++);
+  }
 }

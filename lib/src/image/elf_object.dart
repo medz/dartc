@@ -138,9 +138,7 @@ final class _ElfObject(final EmittedCode code) {
     });
   }
 
-  Uint8List write() {
-    _relocate();
-    final names = ElfNames(), sectionNames = ElfNames();
+  Uint8List _symbolTable(ElfNames names) {
     final symbols = ByteWriter(.little)..zeros(elfSymbolBytes);
     for (var i = 0; i < _sections.length; i++) {
       symbols
@@ -151,6 +149,13 @@ final class _ElfObject(final EmittedCode code) {
         ..zeros(16);
     }
     symbols.bytes(encodeElfSymbols(_symbols, names).sublist(elfSymbolBytes));
+    return symbols.finish();
+  }
+
+  Uint8List write() {
+    _relocate();
+    final names = ElfNames(), sectionNames = ElfNames();
+    final symbols = _symbolTable(names);
     final out = ByteWriter(.little)..zeros(ElfHeaders.fileBytes);
     final headers = ByteWriter(.little)..zeros(ElfHeaders.sectionBytes);
     void section(
@@ -200,7 +205,7 @@ final class _ElfObject(final EmittedCode code) {
     section(
       '.symtab',
       table,
-      symbols.finish(),
+      symbols,
       link: symbolsNumber + 1,
       info: _sections.length + 1,
       entryBytes: elfSymbolBytes,

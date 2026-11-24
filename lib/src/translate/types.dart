@@ -20,6 +20,13 @@ HirType? valueType(DartType declared) {
       : null;
 }
 
+/// What the class of boxes for [type] is called.
+String boxName(HirType type) => switch (type) {
+  .integer => '_Mint',
+  .float => '_Double',
+  _ => 'bool',
+};
+
 /// How objects of [class_] are represented without boxes, if they are.
 HirType? plainType(InterfaceElement class_) => class_.library.isDartCore
     ? switch (class_.name) {

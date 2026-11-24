@@ -6,6 +6,7 @@ import 'package:dartc/emit.dart';
 import 'package:dartc/image.dart';
 import 'package:dartc/lower.dart';
 import 'package:dartc/native.dart';
+import 'package:dartc/optimize.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 
@@ -15,14 +16,19 @@ import 'package:dartc/translate.dart';
 /// yet.
 ///
 /// If [collectsAlways], the program collects before every allocation.
+/// [optimizations] are done.
 Future<Uint8List> compileProgram(
   String path, {
   Target target = .macosArm64,
+  Set<Optimization> optimizations = const {...Optimization.values},
   bool collectsAlways = false,
 }) async {
-  final program = translateProgram(
-    await loadProgram(path, sdk: await packagedSdk(target)),
-    target: target,
+  final program = optimizeProgram(
+    translateProgram(
+      await loadProgram(path, sdk: await packagedSdk(target)),
+      target: target,
+    ),
+    enabled: optimizations,
   );
   final lowered = lowerProgram(
     program,
@@ -59,6 +65,7 @@ Future<({Uint8List bytes, String header})> compileLibrary(
   LibraryKind kind, {
   required String name,
   Target target = .macosArm64,
+  Set<Optimization> optimizations = const {...Optimization.values},
   bool collectsAlways = false,
 }) async {
   final (:module, :header) = translateLibrary(
@@ -66,7 +73,7 @@ Future<({Uint8List bytes, String header})> compileLibrary(
     target: target,
   );
   final lowered = lowerProgram(
-    module,
+    optimizeProgram(module, enabled: optimizations),
     system: target.system,
     collectsAlways: collectsAlways,
   );

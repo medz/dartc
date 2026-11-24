@@ -4,6 +4,7 @@ import 'allocate.dart';
 import 'liveness.dart';
 import 'machine.dart';
 import 'moves.dart';
+import 'selection.dart';
 import 'stack_maps.dart';
 import 'support.dart';
 
@@ -18,7 +19,8 @@ final class FunctionEmitter(
   /// What the calls keep alive, and where they continue if they throw.
   final List<StackMap> stackMaps = [];
   final List<ThrowTarget> throwTargets = [];
-  late final _liveness = Liveness(function);
+  late final _selection = Selection(function, _machine);
+  late final _liveness = Liveness(function, _selection);
   late final _allocation = Allocation(_liveness, _registers.values);
   late final int _outgoing = _outgoingWords();
   late final List<InRegister> _saved = _savedRegisters();
@@ -29,12 +31,19 @@ final class FunctionEmitter(
       _labels[block] = _machine.label();
     }
     _prologue();
-    for (final block in _liveness.order) {
+    final order = _liveness.order;
+    for (final (i, block) in order.indexed) {
+      _next = order.elementAtOrNull(i + 1);
       _machine.bind(_labels[block]!);
-      block.instructions.forEach(_instruction);
+      for (final instruction in block.instructions) {
+        if (!_selection.isFolded(instruction)) _instruction(instruction);
+      }
       _terminator(block.terminator!);
     }
   }
+
+  /// The block whose code comes next.
+  LirBlock? _next;
 
   /// The registers that callers rely on and this function changes.
   ///
@@ -85,7 +94,7 @@ final class FunctionEmitter(
     );
     _move([
       for (final (i, parameter) in function.entry.parameters.indexed)
-        _between(incoming[i], _place(parameter), parameter.type),
+        ..._into(parameter, incoming[i]),
     ]);
   }
 
@@ -114,7 +123,22 @@ final class FunctionEmitter(
     _machine.access(register, index * 8, fromFrame: fromFrame, store: store);
   }
 
-  Location _place(LirValue value) => _allocation.locations[value]!;
+  /// Where [value] is.
+  Location _place(LirValue value) =>
+      _allocation.locations[value] ??
+      switch (Selection.constantOf(value)) {
+        final constant? => IsConstant(constant),
+        null => throw StateError('A value has no place.'),
+      };
+
+  /// What copies [value] from [source] to where it is.
+  List<Move> _into(LirValue value, Location source) => [
+    // Parameters that nothing uses are nowhere.
+    if (_allocation.locations[value] case final place?)
+      _between(source, place, value.type!),
+    if (_allocation.homes[value] case final home?)
+      _between(source, home, value.type!),
+  ];
 
   static Move _between(Location source, Location destination, LirType type) =>
       (source: source, destination: destination, bank: .of(type));
@@ -123,6 +147,10 @@ final class FunctionEmitter(
   int _use(LirValue value, int slot) {
     switch (_place(value)) {
       case InRegister(:final number):
+        return number;
+      case IsConstant(value: final constant):
+        final number = _registers.operands[RegisterBank.word]![slot];
+        _machine.constant(number, constant);
         return number;
       case final OnStack word:
         final bank = RegisterBank.of(value.type!);
@@ -135,8 +163,13 @@ final class FunctionEmitter(
   /// Computes [value] into its own register, or through one to its spill.
   void _define(LirValue value, void Function(int register) compute) {
     switch (_place(value)) {
-      case InRegister(:final number):
-        compute(number);
+      case final InRegister register:
+        compute(register.number);
+        if (_allocation.homes[value] case final home?) {
+          _accessStack(register, home, store: true);
+        }
+      case IsConstant():
+        throw StateError('A constant is computed.');
       case final OnStack word:
         final bank = RegisterBank.of(value.type!);
         final number = _registers.operands[bank]!.first;
@@ -163,6 +196,13 @@ final class FunctionEmitter(
         case (OnStack source, OnStack destination):
           _accessStack(carrier, source, store: false);
           _accessStack(carrier, destination, store: true);
+        case (IsConstant(:final value), InRegister(:final number)):
+          _machine.constant(number, value);
+        case (IsConstant(:final value), OnStack destination):
+          _machine.constant(carrier.number, value);
+          _accessStack(carrier, destination, store: true);
+        case (_, IsConstant()):
+          throw StateError('A constant is changed.');
       }
     }
   }
@@ -172,10 +212,9 @@ final class FunctionEmitter(
       case final LirCall call:
         _transfer(call);
         if (call.type case final type?) {
-          _move([
-            _between(_registers.resultLocation(type), _place(call), type),
-          ]);
+          _move(_into(call, _registers.resultLocation(type)));
         }
+
       case Resume(:final frame, :final code, :final exception, :final trace):
         final [first, second] = _caught;
         _move([
@@ -189,20 +228,37 @@ final class FunctionEmitter(
           _between(_place(code), _callee, .i64),
         ]);
         _machine.resume();
-      case Store(:final base, :final index, :final value):
+      case Store(:final value):
+        final [base, ...rest] = _selection.inputsOf(instruction);
         final at = _use(base, 0);
-        final by = index == null ? null : _use(index, 1);
-        _machine.store(instruction, at, by, _use(value, 2));
+        final by = rest.length == 1 ? null : _use(rest.first, 1);
+        _machine.store(
+          instruction,
+          at,
+          by,
+          _use(value, 2),
+          isScaled: _selection.isScaled(instruction),
+        );
       default:
-        final operands = [
-          for (final (i, input) in instruction.inputs.indexed) _use(input, i),
-        ];
+        // What nothing uses has no place.
+        if (!_allocation.locations.containsKey(instruction)) return;
+        final operands = _operands(_selection.inputsOf(instruction));
         _define(
           instruction,
-          (result) => _machine.operation(instruction, result, operands),
+          (result) => _machine.operation(
+            instruction,
+            result,
+            operands,
+            immediate: _selection.immediateOf(instruction),
+            isScaled: _selection.isScaled(instruction),
+          ),
         );
     }
   }
+
+  List<int> _operands(List<LirValue> inputs) => [
+    for (final (i, input) in inputs.indexed) _use(input, i),
+  ];
 
   List<InRegister> get _caught => [
     for (final number in _registers.caught) InRegister(.word, number),
@@ -239,7 +295,9 @@ final class FunctionEmitter(
   List<int> _references(LirCall call) => [
     for (final value in _liveness.liveAfter(call))
       if (value.type == .ref)
-        if (_place(value) case OnStack(:final index))
+        if (_allocation.homes[value] ?? _place(value) case OnStack(
+          :final index,
+        ))
           (_outgoing + index) * 8 - _frameBytes
         else
           throw StateError('A reference is not on the stack.'),
@@ -257,12 +315,8 @@ final class FunctionEmitter(
         _epilogue();
       case Jump(:final edge):
         _follow(edge);
-      case Branch(:final condition, :final ifTrue, :final ifFalse):
-        final otherwise = _machine.label();
-        _machine.jumpIfZero(_use(condition, 0), otherwise);
-        _follow(ifTrue);
-        _machine.bind(otherwise);
-        _follow(ifFalse);
+      case final Branch branch:
+        _branch(branch);
       case Unreachable():
         _machine.breakpoint();
       case Throw(:final exception, :final trace):
@@ -284,28 +338,80 @@ final class FunctionEmitter(
     final Invoke(:call, :onReturn, :onThrow) = invoke;
     _transfer(call);
     final returnOffset = _machine.offset;
-    _follow(onReturn, [
-      if (call.type case final type?) _registers.resultLocation(type),
-    ]);
+    _follow(
+      onReturn,
+      supplied: [
+        if (call.type case final type?) _registers.resultLocation(type),
+      ],
+      isLast: false,
+    );
     // The frame is found here again, without the stack it reached down to.
     throwTargets.add(ThrowTarget(returnOffset, _machine.offset));
     _machine.restoreStack(_frameBytes);
-    _follow(onThrow, _caught);
+    _follow(onThrow, supplied: _caught);
+  }
+
+  /// Whether branches on conditions may not reach all of the function.
+  late final bool _isLong =
+      function.blocks.fold(0, (sum, b) => sum + b.instructions.length + 8) >
+      10000;
+
+  void _branch(Branch branch) {
+    final Branch(:ifTrue, :ifFalse) = branch;
+    final comparison = _selection.comparisonOf(branch);
+    final operands = _operands(_selection.endInputsOf(branch));
+    void jump(CodeLabel label, {required bool holds}) => comparison == null
+        ? _machine.jumpIfZero(operands.single, label, isZero: !holds)
+        : _machine.jumpIf(
+            comparison,
+            operands,
+            label,
+            holds: holds,
+            immediate: _selection.immediateOf(comparison),
+          );
+    final trueMoves = _movesFor(ifTrue), falseMoves = _movesFor(ifFalse);
+    final canJumpIfTrue = trueMoves.isEmpty,
+        canJumpIfFalse = falseMoves.isEmpty;
+    if (!_isLong &&
+        canJumpIfFalse &&
+        (!canJumpIfTrue || ifTrue.target == _next)) {
+      jump(_labels[ifFalse.target]!, holds: false);
+      _follow(ifTrue);
+    } else if (!_isLong && canJumpIfTrue) {
+      jump(_labels[ifTrue.target]!, holds: true);
+      _follow(ifFalse);
+    } else {
+      final otherwise = _machine.label();
+      jump(otherwise, holds: false);
+      _follow(ifTrue, isLast: false);
+      _machine.bind(otherwise);
+      _follow(ifFalse);
+    }
+  }
+
+  /// The copies that following [edge] needs, whose target first receives what
+  /// is at [supplied].
+  List<Move> _movesFor(LirEdge edge, [List<Location> supplied = const []]) {
+    final parameters = edge.target.parameters;
+    return [
+      for (final (i, source) in supplied.indexed)
+        ..._into(parameters[i], source),
+      for (final (i, argument) in edge.arguments.indexed)
+        if (parameters[supplied.length + i] case final parameter
+            when _allocation.locations.containsKey(parameter))
+          ..._into(parameter, _place(argument)),
+    ].where((move) => move.source != move.destination).toList();
   }
 
   /// Continues on [edge], whose target first receives what is at [supplied].
-  void _follow(LirEdge edge, [List<Location> supplied = const []]) {
-    final parameters = edge.target.parameters;
-    _move([
-      for (final (i, source) in supplied.indexed)
-        _between(source, _place(parameters[i]), parameters[i].type),
-      for (final (i, argument) in edge.arguments.indexed)
-        _between(
-          _place(argument),
-          _place(parameters[supplied.length + i]),
-          argument.type!,
-        ),
-    ]);
-    _machine.jump(_labels[edge.target]!);
+  void _follow(
+    LirEdge edge, {
+    List<Location> supplied = const [],
+    bool isLast = true,
+  }) {
+    _move(_movesFor(edge, supplied));
+    if (!isLast || edge.target != _next) {
+      _machine.jump(_labels[edge.target]!);
+    }
   }
 }

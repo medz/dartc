@@ -45,6 +45,9 @@ final class HirFunction(
 /// given the addresses of the block of the call and of what is passed on the
 /// stack, and [eventLoop], which does what those left to be done later.
 ///
+/// Objects that receive calls of a selector are often of the classes that
+/// [likely] gives for it.
+///
 /// Integers are boxed in objects of [integers], or in references themselves.
 ///
 /// The remaining functions do the work of the runtime. [allocate] gives the
@@ -60,6 +63,7 @@ final class HirModule(
   Map<HirSelector, Map<HirClass, HirFunction>> dispatch = const {},
   Iterable<HirGlobal> globals = const [],
   Map<HirTypeTest, Set<HirClass>> tests = const {},
+  final Map<HirSelector, List<HirClass>> likely = const {},
   final HirClass? integers,
   final HirFunction? allocate,
   final HirFunction? raise,

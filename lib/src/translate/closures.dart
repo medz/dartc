@@ -68,7 +68,9 @@ final class ClosureTranslator(
       name: name,
     );
     // An open type is found where the closure is created.
-    final type = isOpen(element.type) ? HirField('type', .reference) : null;
+    final type = isOpen(element.type)
+        ? HirField('type', .reference, isFinal: true)
+        : null;
     final class_ = HirClass(_describe(element), null, [
       ...environment.fields,
       ?type,

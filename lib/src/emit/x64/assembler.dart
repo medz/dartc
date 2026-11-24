@@ -67,6 +67,9 @@ final class const Memory(
   final int base, {
   final int offset = 0,
   final int? index,
+
+  /// Whether the index is a number of 8 bytes.
+  final bool isScaled = false,
 });
 
 /// Encodes 64-bit x64 instructions, with registers given by number.
@@ -118,7 +121,7 @@ final class X64Assembler() {
 
   /// Emits what tells [reg] and [memory].
   void _memory(int reg, Memory memory) {
-    final Memory(:base, :offset, :index) = memory;
+    final Memory(:base, :offset, :index, :isScaled) = memory;
     // rbp and r13 always have an offset.
     final mode = offset == 0 && base & 7 != rbp
         ? 0
@@ -129,7 +132,7 @@ final class X64Assembler() {
     if (index != null || base & 7 == rsp) {
       if (index == rsp) throw ArgumentError.value(index, 'index');
       _byte(mode << 6 | (reg & 7) << 3 | 4);
-      _byte(((index ?? rsp) & 7) << 3 | (base & 7));
+      _byte((isScaled ? 0xc0 : 0) | ((index ?? rsp) & 7) << 3 | (base & 7));
     } else {
       _byte(mode << 6 | (reg & 7) << 3 | (base & 7));
     }
@@ -182,41 +185,43 @@ final class X64Assembler() {
     _registers(d, m);
   }
 
+  /// d = m * [value], which fits 32 bits.
+  void imulImmediate(int d, int m, int value) {
+    _rex(d, m);
+    _byte(0x69);
+    _registers(d, m);
+    _word32(value);
+  }
+
   /// Extends the sign of rax to rdx.
   void cqo() {
     _byte(0x48);
     _byte(0x99);
   }
 
-  /// Compares register [d] with a small [value].
-  void cmpImmediate(int d, int value) {
-    if (!_fits(value, 8)) throw RangeError('$value does not fit 8 bits.');
+  /// Whether instructions can have [value].
+  static bool isImmediate(int value) => _fits(value, 32);
+
+  /// d = d op [value], for those that [WordOp] has except `mov` and `test`.
+  void binaryImmediate(WordOp op, int d, int value) {
+    final isByte = _fits(value, 8);
     _rex(0, d);
-    _byte(0x83);
-    _registers(7, d);
-    _byte(value);
+    _byte(isByte ? 0x83 : 0x81);
+    // The operation is part of the other opcodes.
+    _registers(op.code >> 3, d);
+    isByte ? _byte(value) : _word32(value);
   }
 
-  /// Changes the stack pointer, or aligns it down to 16.
-  void subStack(int bytes) {
-    _rex(0, rsp);
-    _byte(0x81);
-    _registers(5, rsp);
-    _word32(bytes);
-  }
+  void subStack(int bytes) => binaryImmediate(.sub, rsp, bytes);
 
-  void alignStack() {
-    _rex(0, rsp);
-    _byte(0x83);
-    _registers(4, rsp);
-    _byte(0xf0);
-  }
+  /// Moves the stack pointer down to a multiple of 16.
+  void alignStack() => binaryImmediate(.and, rsp, -16);
 
-  /// d = d >> [count], without a sign.
-  void shrImmediate(int d, int count) {
+  /// Shifts [d] by [count].
+  void shiftImmediate(UnaryOp op, int d, int count) {
     _rex(0, d);
     _byte(0xc1);
-    _registers(5, d);
+    _registers(op.extension, d);
     _byte(count);
   }
 
@@ -380,9 +385,10 @@ final class X64Assembler() {
     _label(label);
   }
 
-  void jumpIf(Condition condition, Label label) {
+  /// Jumps when [condition] [holds], or only if it does not.
+  void jumpIf(Condition condition, Label label, {bool holds = true}) {
     _byte(0x0f);
-    _byte(0x80 | condition.code);
+    _byte(0x80 | condition.code ^ (holds ? 0 : 1));
     _label(label);
   }
 

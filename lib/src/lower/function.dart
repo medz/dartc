@@ -85,12 +85,8 @@ final class FunctionLowering(
     final block = _block;
     final operators = OperatorLowering(block);
     switch (instruction) {
-      case HirConst(:final Object value):
-        return block.add(switch (value) {
-          int() => ConstInt(value),
-          double() => ConstFloat(value),
-          _ => ConstInt(value == true ? 1 : 0),
-        });
+      case HirConst() || HirNull() || HirStatic():
+        return _constant(block, instruction);
       case HirIntBinary(:final operator, :final left, :final right):
         return operators.integer(operator, _value(left), _value(right));
       case HirFloatBinary(:final operator, :final left, :final right):
@@ -101,14 +97,9 @@ final class FunctionLowering(
         return operators.unary(operator, _value(operand));
       case HirCompare(:final relation, :final left, :final right):
         return operators.compare(relation, _value(left), _value(right));
-      case HirNull():
-        return block.add(ConstNull());
       case HirNew(:final target):
-        return layout.setClass(
-          block,
-          block.add(layout.allocation(block, target)),
-          target,
-        );
+        final made = block.add(layout.allocation(block, target));
+        return layout.setClass(block, made, target);
       case HirNewArray(:final target, :final length):
         return layout.setClass(
           block,
@@ -122,11 +113,6 @@ final class FunctionLowering(
         return machine.nativeFunction(block, name);
       case HirClassNumber(:final target):
         return block.add(ConstInt(layout.numberOf(target) ?? -1));
-      case HirStatic(:final object):
-        final bits = statics.bitsOf(object);
-        return bits == null
-            ? block.add(StaticObject(statics.constant(object)))
-            : block.add(Convert(.intToRef, block.add(ConstInt(bits))));
       case HirLoadGlobal(:final global):
         return block.add(
           Load(
@@ -163,11 +149,34 @@ final class FunctionLowering(
       case HirUnbox(:final field, :final object):
         return _continue(_boxes.unbox(block, field, _value(object)));
       case HirVirtualCall() || HirCall():
+        // Finding what is called can end the block.
         final call = _call(instruction as HirCalling);
         return _block.add(call);
+      case HirHasClass(:final target, :final object, :final mayBeInteger):
+        final number = _classNumber(_value(object), mayBeInteger: mayBeInteger);
+        final wanted = _block.add(ConstInt(layout.numberOf(target)!));
+        return _block.add(Compare(.eq, number, wanted));
       case HirIsInstance(:final test, :final object):
         final number = _classNumber(_value(object));
         return layout.isInstance(_block, statics.test(test), number);
+    }
+  }
+
+  LirValue? _constant(LirBlock block, HirInstruction instruction) {
+    switch (instruction) {
+      case HirConst(:final Object value):
+        return block.add(switch (value) {
+          int() => ConstInt(value),
+          double() => ConstFloat(value),
+          _ => ConstInt(value == true ? 1 : 0),
+        });
+      case HirStatic(:final object):
+        final bits = statics.bitsOf(object);
+        return bits == null
+            ? block.add(StaticObject(statics.constant(object)))
+            : block.add(Convert(.intToRef, block.add(ConstInt(bits))));
+      default:
+        return block.add(ConstNull());
     }
   }
 

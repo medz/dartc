@@ -1,6 +1,7 @@
 import 'package:dartc/lir.dart';
 
 import 'allocate.dart';
+import 'selection.dart';
 
 /// A branch destination inside the code being assembled.
 abstract interface class CodeLabel();
@@ -61,7 +62,7 @@ final class const MachineRegisters({
 ///
 /// From the stack pointer up, a frame holds outgoing arguments, spilled values,
 /// preserved registers and the saved frame and return addresses.
-abstract interface class Machine() {
+abstract interface class Machine() implements Abilities {
   MachineRegisters get registers;
 
   /// Where the next instruction will be.
@@ -84,6 +85,9 @@ abstract interface class Machine() {
 
   void copy(InRegister from, InRegister to);
 
+  /// Makes [register] have [value].
+  void constant(int register, int value);
+
   /// Loads or stores a word at any [offset] from the stack pointer, or from the
   /// frame address if [fromFrame].
   void access(
@@ -102,14 +106,41 @@ abstract interface class Machine() {
   CodeLabel label();
   void bind(CodeLabel label);
   void jump(CodeLabel label);
-  void jumpIfZero(int register, CodeLabel label);
+
+  /// Jumps if [register] is 0, or only if it is not.
+  void jumpIfZero(int register, CodeLabel label, {required bool isZero});
+
+  /// Jumps if [comparison] of [operands] [holds], or only if it does not. The
+  /// right one is [immediate] if that is given.
+  void jumpIf(
+    Compare comparison,
+    List<int> operands,
+    CodeLabel label, {
+    required bool holds,
+    int? immediate,
+  });
 
   /// Stops the program, where code never comes.
   void breakpoint();
 
-  /// Computes [instruction] into [result], which may equal any operand.
-  void operation(LirInstruction instruction, int result, List<int> operands);
+  /// Computes [instruction] into [result], which may equal any operand. What is
+  /// on its right is [immediate] if that is given, and its index is a number of
+  /// 8 bytes if it [isScaled].
+  void operation(
+    LirInstruction instruction,
+    int result,
+    List<int> operands, {
+    int? immediate,
+    bool isScaled = false,
+  });
 
-  /// Stores register [value] at [base] plus the register [index], if any.
-  void store(Store store, int base, int? index, int value);
+  /// Stores register [value] at [base] plus the register [index], if any, which
+  /// is a number of 8 bytes if it [isScaled].
+  void store(
+    Store store,
+    int base,
+    int? index,
+    int value, {
+    bool isScaled = false,
+  });
 }

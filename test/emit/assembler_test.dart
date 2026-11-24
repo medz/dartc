@@ -58,6 +58,90 @@ void main() {
     _encodes(0x9ac32841, (a) => a.asr(1, 2, 3));
   });
 
+  test('immediates', () {
+    _encodes(0xf100153f, (a) => a.cmpImmediate(9, 5));
+    _encodes(0xb100153f, (a) => a.cmpImmediate(9, -5));
+    _encodes(0xf13ffc1f, (a) => a.cmpImmediate(0, 4095));
+    _encodes(0x91001c41, (a) => a.addSigned(1, 2, 7));
+    _encodes(0xd1001c41, (a) => a.addSigned(1, 2, -7));
+    _encodes(0x8b040c71, (a) => a.addScaled(17, 3, 4));
+    _encodes(0xd37df041, (a) => a.lslImmediate(1, 2, 3));
+    _encodes(0xd340fc41, (a) => a.lslImmediate(1, 2, 0));
+    _encodes(0xd3410041, (a) => a.lslImmediate(1, 2, 63));
+    _encodes(0xd343fc41, (a) => a.lsrImmediate(1, 2, 3));
+    _encodes(0xd37ffc41, (a) => a.lsrImmediate(1, 2, 63));
+    _encodes(0x9341fc41, (a) => a.asrImmediate(1, 2, 1));
+    _encodes(0x937ffc41, (a) => a.asrImmediate(1, 2, 63));
+    _encodes(0x92400041, (a) => a.andMask(1, 2, Arm64Assembler.maskOf(0x1)!));
+    _encodes(0xb2400441, (a) => a.orrMask(1, 2, Arm64Assembler.maskOf(0x3)!));
+    _encodes(0xd2401c41, (a) => a.eorMask(1, 2, Arm64Assembler.maskOf(0xff)!));
+    _encodes(
+      0x92403c41,
+      (a) => a.andMask(1, 2, Arm64Assembler.maskOf(0xffff)!),
+    );
+    _encodes(
+      0xb27c6c41,
+      (a) => a.orrMask(1, 2, Arm64Assembler.maskOf(0xfffffff0)!),
+    );
+    _encodes(
+      0xd2410041,
+      (a) => a.eorMask(1, 2, Arm64Assembler.maskOf(-9223372036854775808)!),
+    );
+    _encodes(
+      0x9240f841,
+      (a) => a.andMask(1, 2, Arm64Assembler.maskOf(0x7fffffffffffffff)!),
+    );
+    _encodes(0xb27ff841, (a) => a.orrMask(1, 2, Arm64Assembler.maskOf(-2)!));
+    _encodes(
+      0xd200f041,
+      (a) => a.eorMask(1, 2, Arm64Assembler.maskOf(0x5555555555555555)!),
+    );
+    _encodes(
+      0x9200e441,
+      (a) => a.andMask(1, 2, Arm64Assembler.maskOf(0x3333333333333333)!),
+    );
+    _encodes(
+      0xb2009c41,
+      (a) => a.orrMask(1, 2, Arm64Assembler.maskOf(0xff00ff00ff00ff)!),
+    );
+    _encodes(
+      0xd2008041,
+      (a) => a.eorMask(1, 2, Arm64Assembler.maskOf(0x1000100010001)!),
+    );
+    _encodes(
+      0x92607c41,
+      (a) => a.andMask(1, 2, Arm64Assembler.maskOf(-4294967296)!),
+    );
+    _encodes(
+      0xb2441c41,
+      (a) => a.orrMask(1, 2, Arm64Assembler.maskOf(-1152921504606846961)!),
+    );
+    _encodes(0xd2402c41, (a) => a.eorMask(1, 2, Arm64Assembler.maskOf(0xfff)!));
+    _encodes(
+      0x9240dc41,
+      (a) => a.andMask(1, 2, Arm64Assembler.maskOf(0xffffffffffffff)!),
+    );
+
+    for (final value in [0, -1, 5, 0x1234, 0x5555555555555554]) {
+      expect(Arm64Assembler.maskOf(value), isNull, reason: '$value');
+    }
+    expect(Arm64Assembler.isSmall(4095), isTrue);
+    expect(Arm64Assembler.isSmall(-4095), isTrue);
+    expect(Arm64Assembler.isSmall(4096), isFalse);
+  });
+
+  test('branches on conditions', () {
+    final assembler = Arm64Assembler();
+    final label = Label();
+    assembler
+      ..bind(label)
+      ..jumpIf(.lt, label, holds: true)
+      ..jumpIf(.lt, label, holds: false)
+      ..jumpIfZero(3, label)
+      ..jumpIfZero(3, label, isZero: false);
+    expect(_words(assembler), [0x5400000b, 0x54ffffea, 0xb4ffffc3, 0xb5ffffa3]);
+  });
+
   test('floating point', () {
     _encodes(0x1e632841, (a) => a.fadd(1, 2, 3));
     _encodes(0x1e633841, (a) => a.fsub(1, 2, 3));

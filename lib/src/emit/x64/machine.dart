@@ -61,6 +61,25 @@ final class X64Machine(
       : _assembler.fmov(to.number, from.number);
 
   @override
+  void constant(int register, int value) =>
+      _assembler.constant(register, value);
+
+  @override
+  bool takesImmediate(IntOp op, int value) => switch (op) {
+    .add ||
+    .sub ||
+    .mul ||
+    .and ||
+    .or ||
+    .xor => X64Assembler.isImmediate(value) && X64Assembler.isImmediate(-value),
+    .shl || .sar || .shr => value >= 0 && value < 64,
+    .div || .rem => false,
+  };
+
+  @override
+  bool comparesImmediate(int value) => X64Assembler.isImmediate(value);
+
+  @override
   void access(
     InRegister register,
     int offset, {
@@ -102,18 +121,58 @@ final class X64Machine(
   void jump(covariant Label label) => _assembler.jump(label);
 
   @override
-  void jumpIfZero(int register, covariant Label label) => _assembler
+  void jumpIfZero(
+    int register,
+    covariant Label label, {
+    required bool isZero,
+  }) => _assembler
     ..binary(.test, register, register)
-    ..jumpIf(.equal, label);
+    ..jumpIf(isZero ? .equal : .notEqual, label);
+
+  @override
+  void jumpIf(
+    Compare comparison,
+    List<int> operands,
+    covariant Label label, {
+    required bool holds,
+    int? immediate,
+  }) => _operations.jumpIf(
+    comparison,
+    operands,
+    label,
+    holds: holds,
+    immediate: immediate,
+  );
 
   @override
   void breakpoint() => _assembler.breakpoint();
 
   @override
-  void operation(LirInstruction instruction, int result, List<int> operands) =>
-      _operations.emit(instruction, result, operands);
+  void operation(
+    LirInstruction instruction,
+    int result,
+    List<int> operands, {
+    int? immediate,
+    bool isScaled = false,
+  }) => switch (instruction) {
+    IntBinary(:final op) when immediate != null => _operations.immediate(
+      op,
+      result,
+      operands.single,
+      immediate,
+    ),
+    Compare(left: LirValue(type: .i64), :final relation)
+        when immediate != null =>
+      _operations.setComparison(relation, result, operands.single, immediate),
+    _ => _operations.emit(instruction, result, operands, isScaled: isScaled),
+  };
 
   @override
-  void store(Store store, int base, int? index, int value) =>
-      _operations.store(store, base, index, value);
+  void store(
+    Store store,
+    int base,
+    int? index,
+    int value, {
+    bool isScaled = false,
+  }) => _operations.store(store, base, index, value, isScaled: isScaled);
 }

@@ -3,10 +3,41 @@ import 'machine.dart';
 import 'program.dart';
 import 'type_objects.dart';
 
+/// Where classes are that have been found to be of others, or 0.
+int _found = 0;
+const _foundCount = 1024;
+
 /// Whether [value] is of [type].
-bool isInstance(Object? value, RuntimeType type) => value == null
-    ? isSubtype(const BasicType(nullKind), type)
-    : isSubtype(typeOf(value), type);
+bool isInstance(Object? value, RuntimeType type) {
+  // The types of these are the same objects, and mostly known.
+  if (value is int) {
+    if (isSame(typeOf(value), type)) return true;
+  } else if (value is String) {
+    if (isSame(typeOf(value), type)) return true;
+  } else if (value is double) {
+    if (isSame(typeOf(value), type)) return true;
+  } else if (value is bool) {
+    if (isSame(typeOf(value), type)) return true;
+  }
+  return _isInstance(value, type);
+}
+
+bool _isInstance(Object? value, RuntimeType type) {
+  if (value == null) return isSubtype(const BasicType(nullKind), type);
+  if (type is BasicType && type.kind <= objectKind) return true;
+  if (type is! InterfaceType || !_areTop(type.arguments)) {
+    return isSubtype(typeOf(value), type);
+  }
+  // Only the class of the object matters then.
+  if (_found == 0) _found = mapMemory(_foundCount * 8);
+  final number = classNumber(value);
+  final key = (number << 32 | type.number) + 1;
+  final at = _found + ((number * 31 + type.number) & _foundCount - 1) * 8;
+  if (_found != 0 && load64(at) == key) return true;
+  final result = isSubtype(typeOf(value), type);
+  if (result && _found != 0) store64(at, key);
+  return result;
+}
 
 /// [type] or null.
 RuntimeType nullable(RuntimeType type) {
@@ -29,6 +60,13 @@ RuntimeType futureOr(RuntimeType inner) {
 
 RuntimeType _futureOf(RuntimeType inner) =>
     InterfaceType(futureNumber(), TypeList(inner, null));
+
+bool _areTop(TypeList? types) {
+  for (var at = types; at != null; at = at.tail) {
+    if (!_isTop(at.head)) return false;
+  }
+  return true;
+}
 
 bool _isTop(RuntimeType type) => type is BasicType && type.kind <= anyKind;
 bool _isKind(RuntimeType type, int kind) =>

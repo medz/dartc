@@ -4,13 +4,14 @@ import 'package:dartc/emit.dart';
 import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/allocate.dart';
 import 'package:dartc/src/emit/arm64/registers.dart';
-import 'package:dartc/src/emit/liveness.dart';
+import 'package:dartc/src/emit/selection.dart';
 import 'package:dartc/src/emit/stack_maps.dart';
 import 'package:dartc/src/emit/support.dart';
 import 'package:test/test.dart';
 
 import '../lir/support.dart';
 import 'random_lir.dart';
+import 'support.dart';
 
 final _pair = LirSignature([.ref, .ref], .ref);
 
@@ -27,7 +28,7 @@ LirModule _module(
 );
 
 Set<LirValue> _liveAfter(LirFunction function, LirCall call) =>
-    Liveness(function).liveAfter(call);
+    livenessOf(function).liveAfter(call);
 
 void main() {
   test('exactly the values used after a call are alive across it', () {
@@ -89,7 +90,7 @@ void main() {
     var found = 0;
     for (var seed = 0; seed < 60; seed++) {
       for (final made in RandomLir(seed).functions()) {
-        final liveness = Liveness(made);
+        final liveness = livenessOf(made);
         final allocation = Allocation(liveness, arm64Registers.values);
         for (final block in made.blocks) {
           for (final call in callsOf(block)) {
@@ -97,7 +98,8 @@ void main() {
               expect(liveness.intervals[value]!.crossesCall, isTrue);
               if (value.type != .ref) continue;
               found++;
-              expect(allocation.locations[value], isA<OnStack>());
+              final home = allocation.homes[value];
+              expect(home ?? allocation.locations[value], isA<OnStack>());
             }
           }
         }
@@ -110,10 +112,11 @@ void main() {
     var found = 0;
     for (var seed = 0; seed < 60; seed++) {
       for (final made in RandomLir(seed).functions()) {
-        final allocation = Allocation(Liveness(made), arm64Registers.values);
+        final allocation = Allocation(livenessOf(made), arm64Registers.values);
         for (final block in made.blocks) {
           if (block.terminator case Invoke(:final onThrow)) {
             for (final value in onThrow.arguments) {
+              if (Selection.constantOf(value) != null) continue;
               found++;
               expect(allocation.locations[value], isA<OnStack>());
             }

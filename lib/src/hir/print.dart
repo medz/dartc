@@ -109,6 +109,8 @@ final class _Printer(final HirFunction function) {
       '${_name(receiver)}->${selector.name}(${_list(arguments)})',
     HirIsInstance(:final test, :final object) =>
       '${_name(object)} is ${test.name}',
+    HirHasClass(:final target, :final object) =>
+      '${_name(object)} is exactly ${target.name}',
     HirNewArray(:final target, :final length) =>
       'new ${target.name}[${_name(length)}]',
     HirLength(:final array) => '${_name(array)}.length',

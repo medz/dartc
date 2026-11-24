@@ -26,15 +26,19 @@ final class Environment._(
     {
       for (final used in captures.usedBy(node))
         if (used != name)
-          used: HirField(used.displayName, outer.rawTypeOf(used)!),
+          used: HirField(
+            used.displayName,
+            outer.rawTypeOf(used)!,
+            isFinal: true,
+          ),
     },
     {
       for (final owner in outer.typeLists.keys)
-        owner: HirField('types', .reference),
+        owner: HirField('types', .reference, isFinal: true),
     },
     switch (outer.receiver) {
       null => null,
-      HirValue(:final type) => HirField('this', type!),
+      HirValue(:final type) => HirField('this', type!, isFinal: true),
     },
   );
 

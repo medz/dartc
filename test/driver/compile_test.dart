@@ -9,6 +9,7 @@ import 'dart:typed_data';
 import 'package:dartc/driver.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/lower.dart';
+import 'package:dartc/optimize.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
@@ -31,7 +32,16 @@ Future<(int, int)> _both(String source) async {
   for (final host in Host.all) {
     writeProgram(await compileProgram(path, target: host.target), program);
     final compiled = await host.run(program);
-    expect(compiled.output, official.stdout, reason: '${host.target}');
+    expect(
+      compiled.output,
+      official.stdout,
+      reason: '${host.target}: ${compiled.errors}',
+    );
+    expect(
+      compiled.code,
+      official.exitCode,
+      reason: '${host.target}: ${compiled.errors}',
+    );
     if (code == official.exitCode) code = compiled.code;
   }
   return (official.exitCode, code);
@@ -72,18 +82,23 @@ Future<void> _compareRandom(String source, String reason) async {
   final machineLevel = LoweredRun(module, maxSteps: steps);
   expect(machineLevel.code, isNull, reason: reason);
   expect(machineLevel.output, official.stdout, reason: reason);
+  final optimized = optimizeProgram(module);
+  final again = HirInterpreter(optimized, maxSteps: steps);
+  expect(again.run(), isNull, reason: reason);
+  expect(again.output, official.stdout, reason: reason);
   final program = '${directory.path}/program';
   for (final host in Host.all) {
     for (final collectsAlways in [false, true]) {
       final lowered = lowerProgram(
-        module,
+        optimized,
         system: host.target.system,
         collectsAlways: collectsAlways,
       );
       host.write(lowered, program, entry: entrySymbol);
       final native = await host.run(program);
-      expect(native.code, 0, reason: '${host.target}: $reason');
-      expect(native.output, official.stdout, reason: '${host.target}: $reason');
+      final told = '${host.target}: $reason\n${native.errors}';
+      expect(native.code, 0, reason: told);
+      expect(native.output, official.stdout, reason: told);
     }
   }
 }

@@ -137,7 +137,9 @@ final class ClosureTable(
   /// One that is generic has a field for its type arguments.
   Closure static(ExecutableElement element) => _static[element] ??= () {
     final owner = takesTypes(element);
-    final types = owner == null ? null : HirField('types', .reference);
+    final types = owner == null
+        ? null
+        : HirField('types', .reference, isFinal: true);
     final made = Closure(
       HirClass(element.displayName, null, [?types]),
       element.type,
@@ -219,8 +221,10 @@ final class ClosureTable(
 
   Closure _extension(MethodElement element, HirType type) {
     final owner = takesExtensionTypes(element);
-    final receiver = HirField('this', type);
-    final types = owner == null ? null : HirField('types', .reference);
+    final receiver = HirField('this', type, isFinal: true);
+    final types = owner == null
+        ? null
+        : HirField('types', .reference, isFinal: true);
     void bind(FunctionBuilder builder, HirValue self) {
       if (owner == null) return;
       builder.bindTypes(owner, builder.add(HirLoad(types!, self)));
@@ -271,9 +275,9 @@ final class ClosureTable(
   }
 
   Closure _partial(FunctionType type, int count) {
-    final inner = HirField('function', .reference);
-    final list = HirField('types', .reference);
-    final own = HirField('type', .reference);
+    final inner = HirField('function', .reference, isFinal: true);
+    final list = HirField('types', .reference, isFinal: true);
+    final own = HirField('type', .reference, isFinal: true);
     final made = Closure(
       HirClass('part of ${describeType(type)}', null, [inner, list, own]),
       type,
@@ -330,7 +334,7 @@ final class ClosureTable(
   }) {
     final (:element, :level) = found;
     final closure = _tearOffs[found] ??= () {
-      final field = HirField('receiver', .reference);
+      final field = HirField('receiver', .reference, isFinal: true);
       final made = Closure(
         HirClass('tear-off ${element.displayName}', null, [field]),
         element.type,

@@ -390,18 +390,21 @@ final class CallTranslator(
       if (function == null) reject(describe(node));
       return _direct(function, element, [receiver, ...arguments]);
     }
+    final class_ = classFor(type) ?? reject(describe(node));
     final selector = _scope.selectorOf(
       base,
-      classFor(type) ?? reject(describe(node)),
+      class_,
       positional.length,
       names,
       reject,
+      isOwn: receiver == _builder.receiver,
     );
+    final bound = _isObject(class_) ? null : _scope.testOf(class_);
     HirValue? call() => _builder.call(
       HirVirtualCall(selector, receiver, [
         for (final (i, value) in arguments.indexed)
           _conversions.coerce(value, selector.parameters[i]),
-      ]),
+      ], bound: bound),
     );
     final owner = base.enclosingElement;
     final mayBeNull =
@@ -416,6 +419,9 @@ final class CallTranslator(
     if (isNever(element.returnType)) _builder.end(HirUnreachable());
     return result;
   }
+
+  static bool _isObject(InterfaceElement class_) =>
+      class_ is ClassElement && class_.isDartCoreObject;
 
   /// What [call] gives, or what null does for [member] if [receiver] is null.
   HirValue _orNull(

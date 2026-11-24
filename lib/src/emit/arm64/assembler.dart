@@ -131,6 +131,81 @@ final class Arm64Assembler() {
 
   void cmp(int n, int m) => _three(0xeb000000, zero, n, m);
 
+  /// Whether [cmpImmediate] and [addSigned] can have [value].
+  static bool isSmall(int value) => value > -4096 && value < 4096;
+
+  void cmpImmediate(int n, int value) => _emit(
+    (value < 0 ? 0xb1000000 : 0xf1000000) |
+        _field(value.abs(), 12, 'compare immediate') << 10 |
+        n << 5 |
+        zero,
+  );
+
+  /// d = n + value.
+  void addSigned(int d, int n, int value) => _emit(
+    (value < 0 ? 0xd1000000 : 0x91000000) |
+        _field(value.abs(), 12, 'add immediate') << 10 |
+        n << 5 |
+        d,
+  );
+
+  /// d = n + m * 8.
+  void addScaled(int d, int n, int m) => _three(0x8b000c00, d, n, m);
+
+  void lslImmediate(int d, int n, int count) =>
+      _emit(0xd3400000 | (-count & 63) << 16 | 63 - count << 10 | n << 5 | d);
+  void lsrImmediate(int d, int n, int count) =>
+      _emit(0xd340fc00 | _field(count, 6, 'shift') << 16 | n << 5 | d);
+  void asrImmediate(int d, int n, int count) =>
+      _emit(0x9340fc00 | _field(count, 6, 'shift') << 16 | n << 5 | d);
+
+  /// How `and` and the like have [value], if they can: a run of ones, repeated.
+  static int? maskOf(int value) {
+    if (value == 0 || value == -1) return null;
+    for (var size = 64; size >= 2; size >>= 1) {
+      final part = size == 64 ? value : value & ((1 << size) - 1);
+      for (var rotation = 0; rotation < size; rotation++) {
+        final ones = _runOf(part, size, rotation);
+        if (ones == null || !_repeats(value, part, size)) continue;
+        final n = size == 64 ? 1 : 0;
+        final length = (-(size << 1) & 63 | ones - 1) & 63;
+        return n << 12 | rotation << 6 | length;
+      }
+    }
+    return null;
+  }
+
+  static bool _repeats(int value, int part, int size) {
+    if (size == 64) return true;
+    for (var at = 0; at < 64; at += size) {
+      if (value >>> at & ((1 << size) - 1) != part) return false;
+    }
+    return true;
+  }
+
+  /// How many ones there are if [part], of [size] bits, is those at the low end
+  /// rotated right by [rotation].
+  static int? _runOf(int part, int size, int rotation) {
+    final mask = size == 64 ? -1 : (1 << size) - 1;
+    final turned = rotation == 0
+        ? part
+        : (part << rotation | (part & mask) >>> (size - rotation)) & mask;
+    var ones = 0;
+    while (ones < size && turned >>> ones & 1 == 1) {
+      ones++;
+    }
+    final isRun = ones > 0 && ones < size && turned == (1 << ones) - 1;
+    return isRun ? ones : null;
+  }
+
+  void andMask(int d, int n, int mask) => _masked(0x92000000, d, n, mask);
+  void orrMask(int d, int n, int mask) => _masked(0xb2000000, d, n, mask);
+  void eorMask(int d, int n, int mask) => _masked(0xd2000000, d, n, mask);
+
+  /// [mask] is what [maskOf] gives.
+  void _masked(int base, int d, int n, int mask) =>
+      _emit(base | mask << 10 | n << 5 | d);
+
   /// d = 1 if [condition] holds, else 0.
   void cset(int d, Condition condition) =>
       _emit(0x9a9f07e0 | (condition.code ^ 1) << 12 | d);
@@ -234,9 +309,17 @@ final class Arm64Assembler() {
 
   void jump(Label label) => _branch(0x14000000, label, conditional: false);
 
-  /// Jumps when register [t] is 0.
-  void jumpIfZero(int t, Label label) =>
-      _branch(0xb4000000 | t, label, conditional: true);
+  /// Jumps when register [t] is 0, or only if it is not.
+  void jumpIfZero(int t, Label label, {bool isZero = true}) =>
+      _branch((isZero ? 0xb4000000 : 0xb5000000) | t, label, conditional: true);
+
+  /// Jumps when [condition] [holds], or only if it does not.
+  void jumpIf(Condition condition, Label label, {required bool holds}) =>
+      _branch(
+        0x54000000 | condition.code ^ (holds ? 0 : 1),
+        label,
+        conditional: true,
+      );
 
   void _branch(int base, Label label, {required bool conditional}) {
     final at = _words.length;

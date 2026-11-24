@@ -27,6 +27,9 @@ final class RuntimeLinks(
       switch ('${element.library.uri}') {
         'dart:_heap/machine.dart' ||
         'dart:_heap/objects.dart' => element.displayName,
+        // The official sources use this for what they know.
+        'dart:_internal' when element.displayName == 'unsafeCast' =>
+          element.displayName,
         _ => null,
       };
 

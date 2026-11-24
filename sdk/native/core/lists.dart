@@ -49,6 +49,9 @@ class _List<E> {
   }
 
   @patch
+  void operator []=(int index, E value) => _set(index, value);
+
+  @patch
   void _setIndexed(int index, E value) => _set(index, value);
 }
 

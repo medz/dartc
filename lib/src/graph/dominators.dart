@@ -57,6 +57,10 @@ final class Dominators<B extends Object>(
     } while (changed);
   }
 
+  /// The last block that every path from the entry to [block] passes through
+  /// before it, or itself if it is the entry.
+  B parentOf(B block) => _parent[block]!;
+
   /// Whether every path from the entry to [below] passes through [above].
   bool dominates(B above, B below) {
     var block = below;

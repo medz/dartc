@@ -1,7 +1,13 @@
 import 'value.dart';
 
 /// A value that each object of a class holds.
-final class HirField(final String name, final HirType type);
+///
+/// One that [isFinal] is set once, before it is read.
+final class HirField(
+  final String name,
+  final HirType type, {
+  final bool isFinal = false,
+});
 
 /// How an array holds one of its elements.
 enum HirElement(

@@ -56,6 +56,11 @@ HirInstruction copyInstruction(
     of(right),
   ),
   HirIsInstance(:final test, :final object) => HirIsInstance(test, of(object)),
+  HirHasClass(:final target, :final object, :final mayBeInteger) => HirHasClass(
+    target,
+    of(object),
+    mayBeInteger: mayBeInteger,
+  ),
 };
 
 HirCalling _copyCalling(
@@ -65,8 +70,13 @@ HirCalling _copyCalling(
   HirNew(:final target) => HirNew(target),
   HirBox(:final target, :final value) => HirBox(target, of(value)),
   HirNewArray(:final target, :final length) => HirNewArray(target, of(length)),
-  HirVirtualCall(:final selector, :final receiver, :final arguments) =>
-    HirVirtualCall(selector, of(receiver), arguments.map(of)),
+  HirVirtualCall(
+    :final selector,
+    :final receiver,
+    :final arguments,
+    :final bound,
+  ) =>
+    HirVirtualCall(selector, of(receiver), arguments.map(of), bound: bound),
   HirCall(:final target, :final arguments) => HirCall(
     target,
     arguments.map(of),

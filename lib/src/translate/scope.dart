@@ -284,8 +284,9 @@ abstract interface class ProgramScope() {
     InterfaceElement receiver,
     int positional,
     List<String> named,
-    Reject reject,
-  );
+    Reject reject, {
+    required bool isOwn,
+  });
 }
 
 /// Evaluates expressions of one function.

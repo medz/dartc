@@ -14,10 +14,11 @@ const _flags = 4, _allocated = 1, _marked = 2, _fixed = 4;
 
 // The state: the blocks, the bytes mapped since the last collection and how
 // many start the next, the stack of objects to scan, whether any did not fit
-// there, and lists of free cells.
+// there, lists of free cells, and where cells are that were never used, from
+// somewhere to the end of a block. All three are for each size.
 const _blocks = 0, _grown = 8, _limit = 16;
 const _pending = 24, _pendingBytes = 32, _pendingEnd = 40;
-const _missed = 48, _free = 56;
+const _missed = 48, _free = 56, _unused = 328, _unusedEnd = 600;
 const _stateBytes = 1024;
 
 // A block: the next one, the size of its cells, and its own size.
@@ -34,8 +35,27 @@ const _firstPendingBytes = 65536, _garbage = 0x5bad5bad5bad5bad;
 
 /// Zeroed memory for an object of [bytes] bytes, marked as in use, or 0.
 int allocate(int bytes) {
-  if (heap == 0 && !_start()) return 0;
   final cell = (bytes + 15) & ~15;
+  if (cell <= _largestCell && heap != 0 && !collectsAlways()) {
+    final size = heap + (cell >> 4) * 8, found = load64(size + _free);
+    if (found != 0) {
+      store64(size + _free, load64(found + _nextFree));
+      store64(found, _allocated << 32);
+      _fill(found + 8, cell - 8, 0);
+      return found;
+    }
+    final unused = load64(size + _unused);
+    if (unused != load64(size + _unusedEnd)) {
+      store64(size + _unused, unused + cell);
+      store64(unused, _allocated << 32);
+      return unused;
+    }
+  }
+  return _allocateSlowly(cell);
+}
+
+int _allocateSlowly(int cell) {
+  if (heap == 0 && !_start()) return 0;
   if (collectsAlways() || load64(heap + _grown) >= load64(heap + _limit)) {
     collect();
   }
@@ -82,8 +102,15 @@ int _freeList(int cell) =>
 
 int _takeFree(int cell) {
   final list = _freeList(cell), found = load64(list);
-  if (found != 0) store64(list, load64(found + _nextFree));
-  return found;
+  if (found != 0) {
+    store64(list, load64(found + _nextFree));
+    return found;
+  }
+  if (cell > _largestCell) return 0;
+  final size = heap + (cell >> 4) * 8, unused = load64(size + _unused);
+  if (unused == load64(size + _unusedEnd)) return 0;
+  store64(size + _unused, unused + cell);
+  return unused;
 }
 
 void _giveFree(int cell, int address) {
@@ -104,8 +131,13 @@ bool _addBlock(int cell) {
   store64(block + _blockBytes, bytes);
   store64(heap + _blocks, block);
   store64(heap + _grown, load64(heap + _grown) + bytes);
-  for (var at = block + _firstCell; at + cell <= block + bytes; at += cell) {
-    _giveFree(cell, at);
+  final first = block + _firstCell;
+  if (isLarge) {
+    _giveFree(cell, first);
+  } else {
+    final size = heap + (cell >> 4) * 8;
+    store64(size + _unused, first);
+    store64(size + _unusedEnd, first + (bytes - _firstCell) ~/ cell * cell);
   }
   return true;
 }
@@ -225,6 +257,7 @@ void _scanMarked() {
 /// The lists of free cells are made anew, without blocks that become unused.
 int _sweep() {
   _fill(heap + _free, _largestCell ~/ 16 * 8 + 8, 0);
+  _fill(heap + _unused, _stateBytes - _unused, 0);
   var kept = 0, link = heap + _blocks;
   while (load64(link) != 0) {
     final block = load64(link), used = _usedBytes(block);

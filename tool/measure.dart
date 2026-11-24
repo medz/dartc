@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dartc/driver.dart';
+import 'package:dartc/optimize.dart';
 
 /// The least time of some runs of [program], in milliseconds, and what it
 /// prints.
@@ -18,8 +19,16 @@ import 'package:dartc/driver.dart';
 }
 
 /// Measures the programs in `tool/bench/programs`, or those that are named,
-/// against the official compiler.
-Future<void> main(List<String> names) async {
+/// against the official compiler. Optimizations called `-name` are left out.
+Future<void> main(List<String> arguments) async {
+  final names = [
+    for (final argument in arguments)
+      if (!argument.startsWith('-')) argument,
+  ];
+  final optimizations = {
+    for (final optimization in Optimization.values)
+      if (!arguments.contains('-${optimization.name}')) optimization,
+  };
   final directory = Directory.systemTemp.createTempSync('dartc-measure-');
   final files = Directory('tool/bench/programs').listSync().whereType<File>();
   final paths = [for (final file in files) file.path]..sort();
@@ -29,7 +38,7 @@ Future<void> main(List<String> names) async {
     if (names.isNotEmpty && !names.contains(name)) continue;
     final program = '${directory.path}/$name';
     final watch = Stopwatch()..start();
-    final bytes = await compileProgram(path);
+    final bytes = await compileProgram(path, optimizations: optimizations);
     final compiling = watch.elapsedMilliseconds;
     writeProgram(bytes, program);
     Process.runSync(Platform.resolvedExecutable, [

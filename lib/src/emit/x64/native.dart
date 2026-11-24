@@ -102,7 +102,7 @@ void emitCallbacks(X64Assembler assembler) {
     ..pop(number)
     ..address(_r11, callbacksSymbol)
     ..binary(.sub, number, _r11)
-    ..shrImmediate(number, 3);
+    ..shiftImmediate(.shr, number, 3);
   _enterBlock(assembler);
   assembler
     ..mov(_rdi, number)

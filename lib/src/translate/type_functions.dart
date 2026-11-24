@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
@@ -103,7 +104,7 @@ final class TypeFunctions(
           if (parameters.isNotEmpty) {
             builder.setReceiver(builder.inputs.single, _scope.levelOf(class_));
           }
-          return _types.value(builder, class_.thisType)!;
+          return _types.value(builder, _toldType(class_))!;
         }),
       );
     }
@@ -130,6 +131,19 @@ final class TypeFunctions(
       );
     }
     return _typeOf.length > before;
+  }
+
+  /// The type of objects of [class_], which can be the only class of those of
+  /// another one that programs know.
+  static InterfaceType _toldType(InterfaceElement class_) {
+    final provider = class_.library.typeProvider;
+    if (!class_.library.isDartCore) return class_.thisType;
+    return switch (class_.name) {
+      '_Mint' => provider.intType,
+      '_Double' => provider.doubleType,
+      '_OneByteString' || '_TwoByteString' => provider.stringType,
+      _ => class_.thisType,
+    };
   }
 
   HirFunction _entry(
