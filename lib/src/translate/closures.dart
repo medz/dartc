@@ -97,7 +97,7 @@ final class ClosureTranslator(
         (_, self) => [self],
         typeParameters: element.typeParameters,
         name:
-            '${_outerName(node)}.${name?.displayName ?? '<anonymous closure>'}',
+            '${outerName(node)}.${name?.displayName ?? '<anonymous closure>'}',
         bind: environment.bindTypes,
         typeValue: (builder) => type == null
             ? _scope.typeValue(builder, element.type)!
@@ -137,7 +137,7 @@ final class ClosureTranslator(
   }
 
   /// What the function around [node] is called.
-  static String _outerName(AstNode node) {
+  static String outerName(AstNode node) {
     final parent = node.parent;
     // A function with a name is in its declaration.
     final outer = parent is FunctionDeclaration ? parent.parent : parent;
@@ -145,7 +145,7 @@ final class ClosureTranslator(
       switch (at) {
         case FunctionDeclaration(:final name):
           final isLocal = at.parent is FunctionDeclarationStatement;
-          return isLocal ? '${_outerName(at)}.${name.lexeme}' : name.lexeme;
+          return isLocal ? '${outerName(at)}.${name.lexeme}' : name.lexeme;
         case MethodDeclaration(
           :final name,
           declaredFragment: Fragment(:final element),
@@ -153,7 +153,7 @@ final class ClosureTranslator(
           return '${element.enclosingElement?.displayName}.${name.lexeme}';
         case FunctionExpression(parent: final outer)
             when outer is! FunctionDeclaration:
-          return '${_outerName(at)}.<anonymous closure>';
+          return '${outerName(at)}.<anonymous closure>';
       }
     }
     return '';

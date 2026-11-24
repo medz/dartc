@@ -1,5 +1,6 @@
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
+import 'package:dartc/native.dart';
 
 import 'dispatch.dart';
 import 'function.dart';
@@ -52,11 +53,23 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
       for (final MapEntry(key: name, value: signature)
           in systemFunctions.entries)
         if (called.contains(name)) LirExternal(name, signature),
+      for (final name in machine.nativeFunctions)
+        if (!called.contains(name)) LirExternal(name, LirSignature([])),
+      if (machine.callsNative)
+        LirExternal(callNativeSymbol, callNativeSignature),
     ],
     data: [
       ...statics.tables,
       if (machine.usesBuffer)
         LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
+      if (machine.keepsNativeFrame)
+        LirData(nativeFrameSymbol, List.filled(8, 0), writable: true),
+      if (machine.callsNative)
+        LirData(
+          callBlockSymbol,
+          List.filled(CallBlock.size, 0),
+          writable: true,
+        ),
       if (machine.usesArguments)
         LirData(
           argumentsSymbol,

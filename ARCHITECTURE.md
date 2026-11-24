@@ -56,10 +56,11 @@
 | `hir` | Dart 层 IR：数据、验证、打印、解释 | `graph` |
 | `source` | 把补丁合进标准库，调用 analyzer | analyzer |
 | `world` | 哪些类和调用会相遇 | 无 |
-| `translate` | AST → HIR，按需翻译可达的声明 | `source` `world` `hir` `graph` analyzer |
-| `lower` | HIR → LIR | `hir` `lir` `graph` |
+| `translate` | AST → HIR，按需翻译可达的声明 | `source` `world` `hir` `graph` `native` analyzer |
+| `lower` | HIR → LIR | `hir` `lir` `graph` `native` |
+| `native` | C 的类型、布局、函数怎么传值 | 无 |
 | `heap` | 运行时的 Dart 源码：回收器、异常展开、数字、类型，随程序一起编译 | 无 |
-| `emit` | LIR → 机器码 | `lir` `graph` |
+| `emit` | LIR → 机器码 | `lir` `graph` `native` |
 | `image` | 机器码 → 文件 | `emit` |
 | `driver` | 把阶段串起来，CLI 和 API 共用 | 全部 |
 
@@ -155,6 +156,8 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | `async`、生成器 | 函数体是另一个函数，在等待处拆开：等待之后还要用的值放在一个帧对象里，再进入时按编号跳到原处（`hir/coroutine.dart`）。运行时用官方的 `_SuspendState` 等类，所以微任务的次序相同 |
 | 事件循环 | `main` 返回后，`sdk/native/async/events.dart` 运行微任务和定时器，直到没有要等的 |
 | `void` | 函数仍然返回值，因为调用者可能不知道它是 `void`。只有返回 `Never` 的函数没有结果 |
+| 调用 C 函数 | 先把参数写进一个块（`CallBlock`），再由一小段汇编装进寄存器和栈、调用、存回结果。哪个值在哪里由 `native` 按签名算好 |
+| C 的内存 | `Pointer` 只有地址；结构体是（所在的对象，偏移），字段直接读写内存。对象不移动，所以类型化数据也能给 C |
 | `late` | 变量旁边有一个"已赋值"标志；局部变量放在自己的小对象里，其中也放初始化要用的变量 |
 | 函数值 | 每个闭包、提取一个类，捕获的变量是字段；闭包会共享改动的变量放在一个小对象里。调用按"参数个数和名字"选择，参数和结果都是对象 |
 | dynamic 调用 | 按名字、参数个数和名字选择；每个类一个函数，负责检查参数，没有这个成员就抛 `NoSuchMethodError` |

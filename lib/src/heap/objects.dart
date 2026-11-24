@@ -55,6 +55,20 @@ external double logarithm(double value);
 external double arcTangent2(double y, double x);
 external double power(double base, double exponent);
 
+/// Reads and writes memory at [address].
+external int load16(int address);
+external void store16(int address, int value);
+external double loadSingle(int address);
+external void storeSingle(int address, double value);
+external double loadDouble(int address);
+external void storeDouble(int address, double value);
+
+/// Where the bytes of [typedData] are.
+external int dataAddress(Object typedData);
+
+/// Typed data of [length] elements at [address].
+external T listAt<T>(int kind, int address, int length);
+
 /// Nanoseconds since 1970, or since some time that never changes.
 external int realTime();
 external int steadyTime();

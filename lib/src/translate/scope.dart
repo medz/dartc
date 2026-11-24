@@ -12,6 +12,7 @@ import 'constant_table.dart';
 import 'dynamic_shape.dart';
 import 'levels.dart';
 import 'members.dart';
+import 'native_scope.dart';
 
 /// Reports that something is not supported yet.
 typedef Reject = Never Function(String what);
@@ -129,6 +130,9 @@ abstract interface class ProgramScope() {
 
   /// The class `Function`.
   ClassElement get functionClass;
+
+  /// The functions of C that the program calls.
+  NativeScope get natives;
 
   /// The class `Future`.
   ClassElement get futureClass;

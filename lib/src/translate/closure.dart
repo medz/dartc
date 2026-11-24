@@ -39,12 +39,18 @@ final class Closure(
   /// What they are called where they are not given what they need.
   final String name = 'call',
 
+  /// What their parameters are called, if not as they are declared.
+  final String Function(int index)? parameterName,
+
   /// What their text says after their type.
   final String text = '',
 
   /// Whether closures of one object's method are equal.
   final bool isTearOff = false,
 }) {
+  String nameOf(FormalParameterElement parameter) =>
+      parameterName?.call(parameters.indexOf(parameter)) ?? '${parameter.name}';
+
   void bindTypes(FunctionBuilder builder, HirValue self) =>
       bind?.call(builder, self);
 

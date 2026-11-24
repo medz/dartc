@@ -10,6 +10,8 @@ import 'package:dartc/hir.dart';
 import 'builder.dart';
 import 'conversions.dart';
 import 'members.dart';
+import 'native_members.dart';
+import 'native_types.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -20,6 +22,7 @@ final class ExtensionTranslator(
   final FunctionBuilder _builder,
 ) {
   late final _conversions = Conversions(_scope, _builder);
+  late final _natives = NativeMembers(_scope, _builder);
 
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
@@ -88,6 +91,10 @@ final class ExtensionTranslator(
   ) {
     final (value, type) = receiver;
     final base = element.baseElement;
+    if (NativeTypes.isFfi(base) && type != null) {
+      final found = _natives.use(node, (value, type), base, positional);
+      if (found != null) return found.result;
+    }
     if (fieldOfAccessor(base) != null) return value;
     final function =
         _scope.functionOf(base) ??

@@ -14,6 +14,21 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   trap([], null),
   load8([.integer], .integer),
   store8([.integer, .integer], null),
+  load16([.integer], .integer),
+  store16([.integer, .integer], null),
+
+  /// Numbers of 32 and of 64 bits.
+  loadSingle([.integer], .float),
+  storeSingle([.integer, .float], null),
+  loadDouble([.integer], .float),
+  storeDouble([.integer, .float], null),
+
+  /// Where calls of C functions are prepared, and the call of one from there.
+  callBlock([], .integer),
+  callNative([.integer], null),
+
+  /// Where the frame of the innermost call of a C function is.
+  nativeFrame([], .integer),
   outputBuffer([], .integer),
 
   /// Where the number of the program's arguments is, then the address of those.

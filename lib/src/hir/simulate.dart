@@ -110,19 +110,10 @@ final class HirMachineState(final HirModule _module) {
       case .arguments:
         // Nothing is stored there, so there are none.
         return 16;
-      case .load8:
-        return _memory[number(0)] ?? 0;
-      case .store8:
-        _memory[number(0)] = number(1) & 0xff;
-        return null;
-      case .load64:
-        return ByteData.sublistView(_read(number(0), 8)).getInt64(0, .little);
-      case .store64:
-        final bytes = ByteData(8)..setInt64(0, number(1), .little);
-        for (var i = 0; i < 8; i++) {
-          _memory[number(0) + i] = bytes.getUint8(i);
-        }
-        return null;
+      case .nativeFrame:
+        return 24;
+      case .callBlock || .callNative:
+        throw UnsupportedError('Calls of C functions.');
       case .write:
         (number(0) == 1 ? _output : _errors).add(_read(number(1), number(2)));
         return null;
@@ -149,6 +140,11 @@ final class HirMachineState(final HirModule _module) {
         return null;
       case .localTime:
         _localTime(number(0));
+        return null;
+      case .load8 || .load16 || .load64 || .loadSingle || .loadDouble:
+        return _load(op, number(0));
+      case .store8 || .store16 || .store64 || .storeSingle || .storeDouble:
+        _store(op, number(0), inputs[1]);
         return null;
       default:
         return _function(op, [
@@ -191,6 +187,42 @@ final class HirMachineState(final HirModule _module) {
     }
     for (final (i, byte) in [...ascii.encode(time.timeZoneName), 0].indexed) {
       _memory[name + i] = byte;
+    }
+  }
+
+  Object _load(HirMachineOp op, int address) {
+    final bytes = ByteData.sublistView(_read(address, 8));
+    return switch (op) {
+      .load8 => bytes.getUint8(0),
+      .load16 => bytes.getUint16(0, .little),
+      .loadSingle => bytes.getFloat32(0, .little),
+      .loadDouble => bytes.getFloat64(0, .little),
+      _ => bytes.getInt64(0, .little),
+    };
+  }
+
+  void _store(HirMachineOp op, int address, Object value) {
+    final size = switch (op) {
+      .store8 => 1,
+      .store16 => 2,
+      .storeSingle => 4,
+      _ => 8,
+    };
+    final bytes = ByteData(8);
+    switch (op) {
+      case .storeSingle:
+        bytes.setFloat32(0, value as double, .little);
+      case .storeDouble:
+        bytes.setFloat64(0, value as double, .little);
+      default:
+        bytes.setInt64(0, value as int, .little);
+    }
+    _write(address, ByteData.sublistView(bytes, 0, size));
+  }
+
+  void _write(int address, ByteData bytes) {
+    for (var i = 0; i < bytes.lengthInBytes; i++) {
+      _memory[address + i] = bytes.getUint8(i);
     }
   }
 

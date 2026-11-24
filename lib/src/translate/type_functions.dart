@@ -198,19 +198,30 @@ final class TypeFunctions(
 
   /// What [class_] is called, as those that implement a class of the SDK are
   /// not seen.
-  static String _nameOf(InterfaceElement class_) => class_.library.isDartAsync
-      ? class_.displayName == '_Future'
-            ? 'Future'
-            : class_.displayName
-      : class_.library.isDartCore
-      ? switch (class_.name!) {
-          '_Mint' => 'int',
-          '_Double' => 'double',
-          '_OneByteString' || '_TwoByteString' => 'String',
-          '_GrowableList' || '_List' || '_ImmutableList' => 'List',
-          final name => name,
-        }
-      : class_.displayName;
+  static String _nameOf(InterfaceElement class_) {
+    final name = class_.displayName;
+    return switch ('${class_.library.uri}') {
+      'dart:core' => switch (name) {
+        '_Mint' => 'int',
+        '_Double' => 'double',
+        '_OneByteString' || '_TwoByteString' => 'String',
+        '_GrowableList' || '_List' || '_ImmutableList' => 'List',
+        _ => name,
+      },
+      'dart:async' => name == '_Future' ? 'Future' : name,
+      'dart:typed_data' => switch (_typedData.firstMatch(name)) {
+        null => name,
+        final match => '${match[1] ?? match[2]}List',
+      },
+      _ => name,
+    };
+  }
+
+  /// The names of the classes of typed data that is not part of other.
+  static final _typedData = RegExp(
+    r'^_(?:((?:Int|Uint|Float)[0-9x]+(?:Clamped)?)List'
+    r'|External((?:Int|Uint|Float)[0-9x]+(?:Clamped)?)Array)$',
+  );
 
   /// Does [work] for the number that the function is given.
   void _choose(

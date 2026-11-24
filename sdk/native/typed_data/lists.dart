@@ -1,3 +1,4 @@
+import 'dart:_heap/machine.dart' show addressOf, load8, store8;
 import 'dart:_heap/objects.dart'
     show
         lengthOf,
@@ -49,15 +50,16 @@ class _TypedListBase {
   /// Copies elements of [size] bytes, which may overlap.
   void _move(int start, int count, _TypedListBase from, int skip, int size) {
     final source = from._typedData, target = _typedData;
-    final first = from.offsetInBytes + skip * size;
-    final to = offsetInBytes + start * size, bytes = count * size;
+    final first = source._start + from.offsetInBytes + skip * size;
+    final to = target._start + offsetInBytes + start * size;
+    final bytes = count * size;
     if (first < to) {
       for (var i = bytes - 1; i >= 0; i--) {
-        storeUint8(target, to + i, loadUint8(source, first + i));
+        store8(to + i, load8(first + i));
       }
     } else {
       for (var i = 0; i < bytes; i++) {
-        storeUint8(target, to + i, loadUint8(source, first + i));
+        store8(to + i, load8(first + i));
       }
     }
   }
@@ -85,6 +87,9 @@ class _TypedListBase {
 
 @patch
 class _TypedList {
+  /// Where the first byte is.
+  int get _start => addressOf(this) + 24;
+
   @patch
   int _getInt8(int offsetInBytes) => loadInt8(this, offsetInBytes);
   @patch
@@ -176,7 +181,7 @@ class _Int8ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadInt8(_typedData, offsetInBytes + (index));
+    return _typedData._getInt8(offsetInBytes + (index));
   }
 }
 
@@ -220,7 +225,7 @@ class _Uint8ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadUint8(_typedData, offsetInBytes + (index));
+    return _typedData._getUint8(offsetInBytes + (index));
   }
 }
 
@@ -264,7 +269,7 @@ class _Uint8ClampedArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadUint8(_typedData, offsetInBytes + (index));
+    return _typedData._getUint8(offsetInBytes + (index));
   }
 }
 
@@ -308,7 +313,7 @@ class _Int16ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadInt16(_typedData, offsetInBytes + (index << 1));
+    return _typedData._getInt16(offsetInBytes + (index << 1));
   }
 }
 
@@ -352,7 +357,7 @@ class _Uint16ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadUint16(_typedData, offsetInBytes + (index << 1));
+    return _typedData._getUint16(offsetInBytes + (index << 1));
   }
 }
 
@@ -396,7 +401,7 @@ class _Int32ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadInt32(_typedData, offsetInBytes + (index << 2));
+    return _typedData._getInt32(offsetInBytes + (index << 2));
   }
 }
 
@@ -440,7 +445,7 @@ class _Uint32ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadUint32(_typedData, offsetInBytes + (index << 2));
+    return _typedData._getUint32(offsetInBytes + (index << 2));
   }
 }
 
@@ -484,7 +489,7 @@ class _Int64ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadInt64(_typedData, offsetInBytes + (index << 3));
+    return _typedData._getInt64(offsetInBytes + (index << 3));
   }
 }
 
@@ -528,7 +533,7 @@ class _Uint64ArrayView {
   @patch
   int operator [](int index) {
     _checkRead(index, length);
-    return loadInt64(_typedData, offsetInBytes + (index << 3));
+    return _typedData._getInt64(offsetInBytes + (index << 3));
   }
 }
 
@@ -572,7 +577,7 @@ class _Float32ArrayView {
   @patch
   double operator [](int index) {
     _checkRead(index, length);
-    return loadFloat32(_typedData, offsetInBytes + (index << 2));
+    return _typedData._getFloat32(offsetInBytes + (index << 2));
   }
 }
 
@@ -616,7 +621,7 @@ class _Float64ArrayView {
   @patch
   double operator [](int index) {
     _checkRead(index, length);
-    return loadFloat64(_typedData, offsetInBytes + (index << 3));
+    return _typedData._getFloat64(offsetInBytes + (index << 3));
   }
 }
 

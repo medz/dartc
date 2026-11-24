@@ -130,12 +130,17 @@ void collect() {
 
 /// Marks what the functions that are running refer to.
 void _markStack() {
-  var frame = frameAddress();
+  var frame = frameAddress(), native = load64(nativeFrame());
   while (true) {
     final table = stackMaps();
     final at = findReturn(table, load64(frame + 8) - codeStart());
-    // Outside the program, nothing holds objects.
-    if (at == 0) return;
+    if (at == 0) {
+      // C called this. What called C is further out, if there is anything.
+      if (native == 0) return;
+      frame = native;
+      native = load64(native - 8);
+      continue;
+    }
     final record = table + at;
     // The record tells about the caller, whose frame is stored first.
     frame = load64(frame);

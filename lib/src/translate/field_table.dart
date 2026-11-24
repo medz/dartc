@@ -8,6 +8,8 @@ import 'classes.dart';
 import 'conversions.dart';
 import 'late.dart';
 import 'levels.dart';
+import 'native_fields.dart';
+import 'native_types.dart';
 import 'scope.dart';
 
 /// Uses the fields of objects.
@@ -27,6 +29,9 @@ final class FieldTable(
     FieldElement element,
     HirValue object,
   ) {
+    if (_native(level, element) case final field?) {
+      return NativeFields(_scope, builder).load(field, object);
+    }
     final (:value, :isSet) = _classes.fieldOf(level, element);
     if (isSet == null) return builder.add(HirLoad(value, object));
     if (!element.hasInitializer) {
@@ -43,6 +48,9 @@ final class FieldTable(
     HirValue object,
     HirValue given,
   ) {
+    if (_native(level, element) case final field?) {
+      return NativeFields(_scope, builder).store(field, object, given);
+    }
     final (:value, :isSet) = _classes.fieldOf(level, element);
     if (isSet == null) {
       builder.add(HirStore(value, object, given));
@@ -51,6 +59,11 @@ final class FieldTable(
       LateAccess(_scope, builder, element, storage).write(given);
     }
   }
+
+  /// How C has the field [element], if it does.
+  NativeField? _native(Level level, FieldElement element) => element.isExternal
+      ? _scope.natives.types.field(level.element, element)
+      : null;
 
   HirFunction _getterOf(Level level, FieldElement element) =>
       _getters[(level, element)] ??= () {

@@ -56,6 +56,10 @@ abstract interface class Machine() {
   int get globalRoots;
   int get globalRootCount;
 
+  /// Where the frame of the innermost call of a C function is, or 0. The frame
+  /// of the one before is 8 bytes below it.
+  int get nativeFrame;
+
   /// Whether to collect before every allocation, to find mistakes.
   bool get collectsAlways;
 
@@ -99,3 +103,4 @@ int addressOf(Object object) => machine.addressOf(object);
 
 /// Whether [a] and [b] are at the same place.
 bool isSame(Object? a, Object? b) => identical(a, b);
+int nativeFrame() => machine.nativeFrame;

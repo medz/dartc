@@ -17,6 +17,19 @@ final class MachineLowering(
   /// Whether it uses the arguments at [argumentsSymbol].
   bool usesArguments = false;
 
+  /// Whether it uses the word at [nativeFrameSymbol].
+  bool keepsNativeFrame = false;
+
+  /// Whether it calls functions of C, and which ones it names.
+  bool callsNative = false;
+  final nativeFunctions = <String>{};
+
+  /// The address of the function of C called [name].
+  LirValue nativeFunction(LirBlock block, String name) {
+    nativeFunctions.add(name);
+    return block.add(Convert(.ptrToInt, block.add(SymbolAddress(name))));
+  }
+
   /// Whether it uses the buffer at [bufferSymbol].
   bool usesBuffer = false;
 
@@ -26,6 +39,26 @@ final class MachineLowering(
     .codeStart: textSymbol,
     .stackMaps: stackMapSymbol,
     .classTable: classTableSymbol,
+    .nativeFrame: nativeFrameSymbol,
+  };
+
+  /// How some read and write memory.
+  static const _loads = <HirMachineOp, Width>{
+    .load8: .u8,
+    .load16: .u16,
+    .load32: .u32,
+    .load32Signed: .i32,
+    .load64: .i64,
+    .loadSingle: .f32,
+    .loadDouble: .f64,
+  };
+  static const _stores = <HirMachineOp, Width>{
+    .store8: .u8,
+    .store16: .u16,
+    .store32: .u32,
+    .store64: .i64,
+    .storeSingle: .f32,
+    .storeDouble: .f64,
   };
 
   /// The functions of the C library that do the work of some.
@@ -49,22 +82,23 @@ final class MachineLowering(
     LirValue load(Width width) => block.add(Load(width, address()));
     LirValue symbol(String name) =>
         block.add(Convert(.ptrToInt, block.add(SymbolAddress(name))));
+    if (op == .nativeFrame || op == .callNative) keepsNativeFrame = true;
     if (_symbols[op] case final name?) return symbol(name);
     if (_functions[op] case final name?) {
       return block.add(callSystem(name, arguments));
     }
+    if (_loads[op] case final width?) return load(width);
+    if (_stores[op] case final width?) {
+      block.add(Store(width, address(), arguments[1]));
+      return null;
+    }
     switch (op) {
-      case .load64:
-        return load(.i64);
-      case .load32:
-        return load(.u32);
-      case .load32Signed:
-        return load(.i32);
-      case .store64:
-        block.add(Store(.i64, address(), arguments[1]));
-        return null;
-      case .store32:
-        block.add(Store(.u32, address(), arguments[1]));
+      case .callBlock:
+        callsNative = true;
+        return symbol(callBlockSymbol);
+      case .callNative:
+        callsNative = true;
+        block.add(Call(callNativeSymbol, callNativeSignature, [address()]));
         return null;
       case .mapMemory:
         return _map(block, arguments.single);
@@ -74,11 +108,6 @@ final class MachineLowering(
       case .outputBuffer:
         usesBuffer = true;
         return symbol(bufferSymbol);
-      case .load8:
-        return load(.u8);
-      case .store8:
-        block.add(Store(.u8, address(), arguments[1]));
-        return null;
       case .write:
         writesOutput = true;
         final [file, from, count] = arguments;

@@ -67,6 +67,15 @@ final class OperationTranslator(
             argument(2, .reference),
           ]),
         );
+      case 'dataAddress':
+        final function = _scope.runtime(name);
+        return _builder.call(HirCall(function, [argument(0, .reference)]));
+      case 'listAt':
+        return _builder.call(
+          HirCall(_scope.runtime(name), [
+            for (var i = 0; i < 3; i++) argument(i, .integer),
+          ]),
+        );
       case 'throwWith':
         _builder.raise(argument(0, .reference), argument(1, .reference));
         return null;

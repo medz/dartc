@@ -12,6 +12,8 @@ import 'describe.dart';
 import 'dynamics.dart';
 import 'extensions.dart';
 import 'members.dart';
+import 'native_members.dart';
+import 'native_types.dart';
 import 'operations.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -26,6 +28,7 @@ final class CallTranslator(
 ) {
   late final _conversions = Conversions(_scope, _builder);
   late final extensions = ExtensionTranslator(_scope, _builder);
+  late final _natives = NativeMembers(_scope, _builder);
   late final _operations = OperationTranslator(_scope, _builder, _evaluator);
   late final _dynamics = DynamicTranslator(_scope, _builder, _evaluator);
 
@@ -197,6 +200,15 @@ final class CallTranslator(
     }
     if (_scope.operationOf(element) case final name?) {
       return _operations.call(node, name);
+    }
+    if (NativeTypes.isFfi(element)) {
+      final found = _natives.invoke(
+        node,
+        element,
+        (argument) =>
+            _evaluator.valueTo(argument, argument.correspondingParameter!.type),
+      );
+      if (found != null) return found;
     }
     final function = _scope.functionOf(element.baseElement);
     if (function == null) {

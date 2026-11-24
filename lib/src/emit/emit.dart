@@ -2,6 +2,7 @@ import 'package:dartc/lir.dart';
 
 import 'arm64/assembler.dart';
 import 'arm64/function.dart';
+import 'arm64/native.dart';
 import 'code.dart';
 import 'stack_maps.dart';
 import 'support.dart';
@@ -22,11 +23,16 @@ EmittedCode emitArm64(LirModule module) {
     maps.addAll(emitter.stackMaps);
     targets.addAll(emitter.throwTargets);
   }
+  final externals = {for (final external in module.externals) external.name};
+  if (externals.remove(callNativeSymbol)) {
+    functions[callNativeSymbol] = assembler.offset;
+    emitNativeCall(assembler);
+  }
   return EmittedCode(
     assembler.finish(),
     functions,
     assembler.relocations,
-    externals: module.externals.map((external) => external.name),
+    externals: externals,
     data: {
       for (final data in module.data)
         if (!data.writable) data.name: data.bytes,

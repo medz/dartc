@@ -207,7 +207,13 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
               closure.typeParameters,
               shape,
             ),
-          ..._arguments(builder, conversions, closure.parameters, shape),
+          ..._arguments(
+            builder,
+            conversions,
+            closure.parameters,
+            shape,
+            closure,
+          ),
         ]),
       );
     });
@@ -320,6 +326,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         builder.inputs[1],
         accessor.formalParameters.single,
         shape,
+        field != null && field.isExternal ? '#externalFieldValue' : null,
       );
       if (field != null) {
         _scope.storeField(builder, level, field, receiver, value);
@@ -384,13 +391,14 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     Conversions conversions,
     HirValue value,
     FormalParameterElement parameter,
-    DynamicShape shape,
-  ) =>
+    DynamicShape shape, [
+    String? name,
+  ]) =>
       conversions.cast(
         value,
         conversions.types.objectQuestionType,
         parameter.type,
-        ending: " of '${parameter.name}'",
+        ending: " of '${name ?? parameter.name}'",
       ) ??
       shape.reject('testing for ${parameter.type}');
 
@@ -399,8 +407,9 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     FunctionBuilder builder,
     Conversions conversions,
     List<FormalParameterElement> parameters,
-    DynamicShape shape,
-  ) {
+    DynamicShape shape, [
+    Closure? closure,
+  ]) {
     var position = 0;
     return [
       for (final parameter in parameters)
@@ -411,6 +420,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
                 (shape.types > 0 ? 2 : 1)],
             parameter,
             shape,
+            closure?.nameOf(parameter),
           )
         else
           builder.add(_scope.defaultOf(parameter)),

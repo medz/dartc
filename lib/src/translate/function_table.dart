@@ -129,7 +129,11 @@ final class FunctionTable(
         ConstructorDeclaration(:final body) => body,
         _ => throw StateError('Unexpected declaration $node.'),
       };
-      if (CoroutineKind.of(body) case final kind?) {
+      final isNative =
+          element.isExternal && _scope.natives.define(builder, element);
+      if (isNative) {
+        // It does only what the function of C does.
+      } else if (CoroutineKind.of(body) case final kind?) {
         CoroutineTranslator(
           _scope,
           builder,

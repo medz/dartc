@@ -431,11 +431,15 @@ void _randomGraph(Random random, int steps) {
     final alive = [0, ...reachable()];
     switch (random.nextInt(8)) {
       case 0 when _machine.frames.length < 20:
+        if (random.nextInt(4) == 0) {
+          _machine.calledFromC.add(_machine.frames.length);
+        }
         _machine.frames.add([
           for (var i = any(SimulatedMachine.frameSizes); i > 0; i--) any(alive),
         ]);
       case 1 when _machine.frames.isNotEmpty && random.nextInt(3) == 0:
         _machine.frames.removeLast();
+        _machine.calledFromC.remove(_machine.frames.length);
       case 2:
         _machine.setGlobal(
           random.nextInt(SimulatedMachine.globalCount),

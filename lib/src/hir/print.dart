@@ -113,6 +113,7 @@ final class _Printer(final HirFunction function) {
       '${_name(array)}[${element.name} ${_name(index)}]',
     HirStoreElement(:final element, :final array, :final index, :final value) =>
       '${_name(array)}[${element.name} ${_name(index)}] = ${_name(value)}',
+    HirNativeFunction(:final name) => 'native $name',
     HirClassNumber(:final target) => 'number ${target.name}',
     HirCall(:final target, :final arguments) =>
       '${target.name}(${_list(arguments)})',

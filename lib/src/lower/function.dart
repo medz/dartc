@@ -106,6 +106,8 @@ final class FunctionLowering(
         );
       case HirLength() || HirLoadElement() || HirStoreElement():
         return _element(block, instruction);
+      case HirNativeFunction(:final name):
+        return machine.nativeFunction(block, name);
       case HirClassNumber(:final target):
         return block.add(ConstInt(layout.numberOf(target) ?? -1));
       case HirStatic(:final object):

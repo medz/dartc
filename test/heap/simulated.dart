@@ -27,10 +27,13 @@ final class SimulatedMachine({
 }) implements Machine {
   final _regions = <int, ByteData>{};
   int _next = 0x100000, mapped = 0, mostMapped = 0, collections = 0;
-  late final int _frames, _maps, _classes, _globals, _handlers;
+  late final int _frames, _maps, _classes, _globals, _handlers, _native;
 
   /// References held by functions that are running, innermost last.
   final List<List<int>> frames = [];
+
+  /// Which of them C calls, rather than the one before.
+  final Set<int> calledFromC = {};
 
   /// The number of references each kind of frame holds, by return address.
   static const _kinds = [0, 1, 2, 5];
@@ -44,6 +47,7 @@ final class SimulatedMachine({
     _frames = mapMemory(1 << 16);
     _globals = mapMemory(globalCount * 8);
     _handlers = mapMemory(4096);
+    _native = mapMemory(8);
     final words = <int>[];
     for (final (i, offsets) in classes.indexed) {
       words.addAll([offsets.length, i == arrayClass ? 1 : 0, ...offsets]);
@@ -84,7 +88,16 @@ final class SimulatedMachine({
     var address = _frames + (1 << 16) - 16;
     store64(address, 0);
     store64(address + 8, 0x77777777);
-    for (final references in frames) {
+    var native = 0;
+    for (final (i, references) in frames.indexed) {
+      if (calledFromC.contains(i)) {
+        // The call of C, whose frame tells about the one before, and C itself.
+        store64(address - 8, native);
+        native = address;
+        store64(address - 64, 0x33333333);
+        store64(address - 56, 0x77777777);
+        address -= 64;
+      }
       final kind = _kinds.indexOf(references.length);
       // The caller's references are below its frame address.
       for (final (j, reference) in references.indexed) {
@@ -95,6 +108,7 @@ final class SimulatedMachine({
       store64(callee + 8, _code + 100 + kind * 4);
       address = callee;
     }
+    store64(_native, native);
     return address;
   }
 
@@ -105,6 +119,8 @@ final class SimulatedMachine({
       store64(_globals + index * 8, reference);
   int global(int index) => load64(_globals + index * 8);
 
+  @override
+  int get nativeFrame => _native;
   @override
   int get codeStart => _code;
   @override

@@ -24,6 +24,7 @@ import 'function_table.dart';
 import 'global_table.dart';
 import 'levels.dart';
 import 'members.dart';
+import 'native_table.dart';
 import 'runtime_links.dart';
 import 'scope.dart';
 import 'statement.dart';
@@ -145,7 +146,7 @@ final class ProgramTranslator(final SourceProgram program)
         ..._cells.values,
       ],
       dispatch: dispatch,
-      globals: _globals.globals,
+      globals: [..._globals.globals, ...natives.globals],
       tests: _tests.results(
         _dispatch.classes,
         _closures.closures,
@@ -290,11 +291,13 @@ final class ProgramTranslator(final SourceProgram program)
   ClassElement get _functionClass => _core.getClass('_Closure')!;
 
   @override
+  late final NativeTable natives = NativeTable(this, _unit);
+
+  @override
   ClassElement get futureClass => _core.typeProvider.futureElement;
 
   @override
-  FunctionType runtimeFunctionType(String name) =>
-      _links.async.getTypeAlias('_$name')!.aliasedType as FunctionType;
+  FunctionType runtimeFunctionType(String name) => _links.functionType(name);
 
   @override
   ClassElement get recordClass => _core.getClass('_Record')!;

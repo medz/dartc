@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
@@ -42,11 +43,20 @@ final class RuntimeLinks(
   MethodElement get scheduler =>
       async.getClass('_AsyncRun')!.getMethod('_scheduleImmediate')!;
 
-  /// The function called [name], or privately so in `dart:core` or
-  /// `dart:async`.
+  /// The function type called [name], privately so in one of some libraries.
+  FunctionType functionType(String name) =>
+      (async.getTypeAlias('_$name') ??
+                  library('dart:ffi').getTypeAlias('_$name'))!
+              .aliasedType
+          as FunctionType;
+
+  /// The function called [name], or privately so in one of some libraries.
   TopLevelFunctionElement function(String name) =>
       _core.getTopLevelFunction('_$name') ??
-      async.getTopLevelFunction('_$name') ??
+      const ['async', 'typed_data', 'ffi']
+          .map((uri) => library('dart:$uri').getTopLevelFunction('_$name'))
+          .nonNulls
+          .firstOrNull ??
       _heap
           .map((library) => library.getTopLevelFunction(name))
           .nonNulls

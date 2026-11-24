@@ -193,6 +193,8 @@ final class HirInterpreter(
       case HirStoreElement(:final element):
         _array(inputs[0]).store(element, inputs[1] as int, inputs[2]);
         return null;
+      case HirNativeFunction(:final name):
+        throw UnsupportedError('The C function $name.');
       case HirClassNumber(:final target):
         return module.classes.indexOf(target);
       case HirLoad(:final field):

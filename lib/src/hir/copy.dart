@@ -11,6 +11,7 @@ HirInstruction copyInstruction(
   HirConst(:final value) => HirConst(value),
   HirNull() => HirNull(),
   HirClassNumber(:final target) => HirClassNumber(target),
+  HirNativeFunction(:final name) => HirNativeFunction(name),
   HirStatic(:final object) => HirStatic(object),
   HirLoadGlobal(:final global) => HirLoadGlobal(global),
   HirStoreGlobal(:final global, :final value) => HirStoreGlobal(

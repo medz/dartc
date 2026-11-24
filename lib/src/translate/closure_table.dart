@@ -105,7 +105,7 @@ final class ClosureTable(
             value,
             conversions.types.objectQuestionType,
             type,
-            ending: " of '${parameter.name}'",
+            ending: " of '${closure.nameOf(parameter)}'",
           ) ??
           (throw StateError('No test for $type.'));
     }

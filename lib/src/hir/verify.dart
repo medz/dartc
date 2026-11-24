@@ -227,7 +227,7 @@ final class _FunctionVerifier(
 
   void _checkInstruction(HirInstruction instruction) {
     switch (instruction) {
-      case HirConst() || HirNull() || HirClassNumber():
+      case HirConst() || HirNull() || HirClassNumber() || HirNativeFunction():
         break;
       case HirNewArray(:final target, :final length):
         if (!classes.contains(target)) _fail('unlisted class ${target.name}');

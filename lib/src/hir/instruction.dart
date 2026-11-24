@@ -94,6 +94,14 @@ final class HirClassNumber(final HirClass target) extends HirInstruction {
   List<HirValue> get inputs => const [];
 }
 
+/// The address of the function of C called [name].
+final class HirNativeFunction(final String name) extends HirInstruction {
+  @override
+  HirType get type => .integer;
+  @override
+  List<HirValue> get inputs => const [];
+}
+
 /// The object that [object] is.
 final class HirStatic(final HirConstObject object) extends HirInstruction {
   @override

@@ -42,6 +42,13 @@ const stackOverflowSymbol = '.stackOverflow';
 /// A static holding the lowest address that the stack may reach.
 const stackLimitSymbol = '.stackLimit';
 
+/// A function that calls the function of C whose call a block describes, given
+/// the address of that. An external one called so is part of emitted code.
+const callNativeSymbol = '.callNative';
+
+/// Data that emitted code keeps the frame of the innermost such call in.
+const nativeFrameSymbol = '.nativeFrame';
+
 /// An object that exists from the start and is never collected.
 ///
 /// [references] gives the objects that [bytes], which are zero there, refer to.

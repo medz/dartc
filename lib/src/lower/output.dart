@@ -12,6 +12,10 @@ const _interrupted = 4, _brokenPipe = 13, _ignore = 1;
 const bufferSymbol = '.buffer';
 const bufferBytes = 4096;
 
+/// Where calls of C functions are prepared.
+const callBlockSymbol = '.callBlock';
+final callNativeSignature = LirSignature([.ptr]);
+
 /// Where the number of the program's arguments is, then their address.
 const argumentsSymbol = '.arguments';
 const argumentsBytes = 16;

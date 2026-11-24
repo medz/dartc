@@ -43,7 +43,10 @@ final class _Captures() extends RecursiveAstVisitor<void> {
   final _depths = <Element, int>{};
 
   void _declare(Element? element) {
-    if (element != null) _depths[variableOf(element)] = _closures.length;
+    // Constants are the same everywhere.
+    if (element == null) return;
+    if (element is VariableElement && element.isConst) return;
+    _depths[variableOf(element)] = _closures.length;
   }
 
   void _use(Element? element) {
