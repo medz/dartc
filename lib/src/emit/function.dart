@@ -64,10 +64,7 @@ final class FunctionEmitter(
     var words = 0;
     for (final block in function.blocks) {
       for (final call in callsOf(block)) {
-        final extra = _registers
-            .argumentLocations(call.signature, .outgoing)
-            .whereType<OnStack>()
-            .length;
+        final extra = _registers.stackWords(call.signature);
         if (extra > words) words = extra;
       }
     }

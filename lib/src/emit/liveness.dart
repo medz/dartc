@@ -127,8 +127,22 @@ final class Liveness(final LirFunction function, final Selection selection) {
     for (final edge in block.terminator!.edges) ...?_liveIn[edge.target],
   };
 
+  /// Whether some block comes after one that it leads to, as in loops.
+  bool _goesBack() {
+    final seen = <LirBlock>{};
+    for (final block in order) {
+      seen.add(block);
+      if (block.terminator!.edges.any((edge) => seen.contains(edge.target))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Grows live-in sets until stable; each is bounded by the value count.
   void _solve() {
+    // Otherwise once is enough.
+    final repeats = _goesBack();
     bool changed;
     do {
       changed = false;
@@ -144,7 +158,7 @@ final class Liveness(final LirFunction function, final Selection selection) {
         live.removeAll(block.parameters);
         if (live.length != _liveIn[block]?.length) {
           _liveIn[block] = live;
-          changed = true;
+          changed = repeats;
         }
       }
     } while (changed);
