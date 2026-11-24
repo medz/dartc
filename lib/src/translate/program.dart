@@ -16,6 +16,7 @@ import 'creators.dart';
 import 'dispatch.dart';
 import 'dynamic_shape.dart';
 import 'dynamic_table.dart';
+import 'entry.dart';
 import 'expression.dart';
 import 'field_table.dart';
 import 'forwarders.dart';
@@ -94,19 +95,21 @@ final class ProgramTranslator(final SourceProgram program)
   /// The classes of local functions and variables that are no values.
   final _localClasses = <HirClass>[];
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
+  HirFunction? _eventLoop;
 
   HirModule translate() {
-    final start = program.main.units.first;
+    final unit = program.main.units.first;
     final entry = program.main.element.entryPoint;
     if (entry == null) {
       throw CompileFailure([
-        start.problemAt(0, 'The program has no main function.'),
+        unit.problemAt(0, 'The program has no main function.'),
       ]);
     }
     if (entry.formalParameters.isNotEmpty) {
       throw _declarations.unsupported(entry, 'parameters of main');
     }
-    final main = _functions.main(entry);
+    checkImports(program);
+    final main = _functions.of(entry);
     do {
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
@@ -126,6 +129,7 @@ final class ProgramTranslator(final SourceProgram program)
         _typeFunctions.update(_dispatch.classes, _closures.closures) ||
         _pending.isNotEmpty);
     _typeFunctions.finish();
+    final start = startFunction(main, _eventLoop);
     final dispatch = {
       ..._dispatch.result(_classes.classOf, _closures, _functionClass),
       ..._closures.dispatch,
@@ -134,8 +138,8 @@ final class ProgramTranslator(final SourceProgram program)
       ..._applications.dispatch,
     };
     return HirModule(
-      main,
-      _allFunctions,
+      start,
+      [start, ..._allFunctions],
       classes: [
         ..._dispatch.classes.map(_classes.classOf),
         for (final closure in _closures.closures) closure.class_,
@@ -185,6 +189,9 @@ final class ProgramTranslator(final SourceProgram program)
   /// Adds what the functions found so far need of the runtime.
   void _addRuntime() {
     if (_closures.closures.isNotEmpty) _dispatch.instantiate(_functionClass);
+    if (_functions.contains(_links.scheduler)) {
+      _eventLoop ??= runtime('runEventLoop');
+    }
     if (!_canThrow) return;
     _stackOverflow ??= _links.exhaustion('StackOverflowError');
     _raise ??= runtime('raise');
@@ -283,6 +290,13 @@ final class ProgramTranslator(final SourceProgram program)
 
   /// The class of objects that are functions.
   ClassElement get _functionClass => _core.getClass('_Closure')!;
+
+  @override
+  ClassElement get futureClass => _core.typeProvider.futureElement;
+
+  @override
+  FunctionType runtimeFunctionType(String name) =>
+      _links.async.getTypeAlias('_$name')!.aliasedType as FunctionType;
 
   @override
   ClassElement get recordClass => _core.getClass('_Record')!;
@@ -420,9 +434,13 @@ final class ProgramTranslator(final SourceProgram program)
       _forwarders.of(level, element);
 
   @override
-  void translateBody(FunctionBuilder builder, FunctionBody body) {
+  void translateBody(
+    FunctionBuilder builder,
+    FunctionBody body, [
+    HirCoroutine? coroutine,
+  ]) {
     StatementTranslator(this, builder).body(body);
-    builder.finish();
+    if (builder.finish(coroutine) case final frame?) addLocalClass(frame);
   }
 
   @override

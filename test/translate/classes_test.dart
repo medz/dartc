@@ -367,14 +367,6 @@ A make() => A();''',
 
     const what = 'Not supported yet:';
     reports(
-      'class A(int x) {}\nvoid main() { A(1); }',
-      '1:7: $what primary constructors.',
-    );
-    reports(
-      'class A(final int x);\nvoid main() { A(1); }',
-      '1:7: $what primary constructors.',
-    );
-    reports(
       'class A { external void f(); }\nvoid main() { A().f(); }',
       '1:28: $what a function without a body.',
     );

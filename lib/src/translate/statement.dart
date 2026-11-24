@@ -4,6 +4,7 @@ import 'package:dartc/hir.dart';
 
 import 'assigned.dart';
 import 'builder.dart';
+import 'coroutine_body.dart';
 import 'describe.dart';
 import 'expression.dart';
 import 'scope.dart';
@@ -16,6 +17,7 @@ final class StatementTranslator(
 ) {
   final expressions = ExpressionTranslator(_scope, _builder);
   late final _tries = TryTranslator(_scope, _builder, statement);
+  late final _coroutine = CoroutineBody(_scope, _builder, expressions);
 
   /// Where `break` and `continue` statements go, by the statement they name,
   /// with the number of `finally` blocks around.
@@ -26,6 +28,19 @@ final class StatementTranslator(
       throw _builder.unit.unsupported(node, what);
 
   void body(FunctionBody body) {
+    final isCoroutine = _builder.coroutine != null;
+    if (isCoroutine) _coroutine.begin(_end);
+    _body(body);
+    if (isCoroutine) _end();
+  }
+
+  /// Ends a function that can be left in the middle.
+  void _end() => _leave(_builder.add(HirNull()));
+
+  void _leave(HirValue value) =>
+      _tries.leave(0, (kept) => _coroutine.finish(kept!), value);
+
+  void _body(FunctionBody body) {
     switch (body) {
       case BlockFunctionBody(:final block):
         statement(block);
@@ -62,6 +77,19 @@ final class StatementTranslator(
         _while(node);
       case DoStatement():
         _do(node);
+      case YieldStatement():
+        _coroutine.yieldStatement(node, _end);
+      case ForStatement(awaitKeyword: _?, :final ForEachParts forLoopParts):
+        expressions.loops.eachOfStream(
+          node,
+          forLoopParts,
+          () => statement(node.body),
+          within: (exit, next) {
+            _breaks[node] = (exit, _tries.depth);
+            _continues[node] = (next, _tries.depth);
+          },
+          protect: (body, last) => _tries.protect(node, body, last),
+        );
       case ForStatement(:final forLoopParts):
         expressions.loops.translate(
           node,
@@ -102,6 +130,13 @@ final class StatementTranslator(
   }
 
   void _return(Expression? expression) {
+    if (_builder.coroutine != null) {
+      return _leave(
+        expression == null
+            ? _builder.add(HirNull())
+            : expressions.valueAsObject(expression, _builder.returnType!),
+      );
+    }
     final result = _builder.function.result;
     if (result == null) {
       if (expression != null) expressions.effect(expression);

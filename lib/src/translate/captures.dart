@@ -8,7 +8,8 @@ import 'primary.dart';
 /// Which variables the closures inside one declaration use.
 ///
 /// The initializer of a `late` local variable, which is evaluated later, counts
-/// as a closure, and is told by the variable's declaration.
+/// as a closure, and is told by the variable's declaration. So does the body of
+/// an `async` function or generator, which then is told by itself.
 final class Captures._(
   final Map<AstNode, Set<Element>> _captured,
   final Set<Element> _cells,
@@ -16,7 +17,11 @@ final class Captures._(
   factory of(AstNode declaration) {
     final visitor = _Captures();
     declaration.accept(visitor);
-    final used = {for (final elements in visitor.captured.values) ...elements};
+    final used = {
+      for (final MapEntry(:key, :value) in visitor.captured.entries)
+        // What is left in the middle has its own variables.
+        if (key is! FunctionBody) ...value,
+    };
     return Captures._(visitor.captured, {
       for (final variable in assignedIn(declaration))
         if (!variable.isLate && used.contains(variable)) variable,
@@ -60,6 +65,17 @@ final class _Captures() extends RecursiveAstVisitor<void> {
     void visit() => super.visitFunctionExpression(node);
     isClosure ? _within(node, visit) : visit();
   }
+
+  @override
+  void visitBlockFunctionBody(BlockFunctionBody node) =>
+      _visitBody(node, () => super.visitBlockFunctionBody(node));
+
+  @override
+  void visitExpressionFunctionBody(ExpressionFunctionBody node) =>
+      _visitBody(node, () => super.visitExpressionFunctionBody(node));
+
+  void _visitBody(FunctionBody node, void Function() visit) =>
+      node.isAsynchronous || node.isGenerator ? _within(node, visit) : visit();
 
   void _within(AstNode closure, void Function() visit) {
     captured[closure] = {};

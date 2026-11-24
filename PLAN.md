@@ -16,8 +16,8 @@
 | 8 | 异常 | 完成 |
 | 9 | 闭包、泛型、类型检查 | 完成 |
 | 10 | 官方 `dart:core`：字符串、集合、`print` | 完成 |
-| 11 | 记录、模式、枚举、扩展、生成器、async | 下一步 |
-| 12 | FFI、导出函数、库和目标文件 | |
+| 11 | 记录、模式、枚举、扩展、生成器、async | 完成 |
+| 12 | FFI、导出函数、库和目标文件 | 下一步 |
 | 13 | Linux，x64 | |
 | 14 | 优化 | |
 | 15 | 换掉旧编译器 | |
@@ -61,7 +61,7 @@ void main() { exit(1 + 2 * 3); }
 - 10c（完成）：列表、集合、映射、`for-in`、字面量。`hello`、`print_integers`、`map_sum`、`persistent_cell` 四个程序通过。
 - 10d（完成）：其余的 `dart:core`、`dart:math`、`dart:convert`、`dart:collection`、`dart:typed_data`，`noSuchMethod`，正则表达式，`Type` 的值，泛型函数当作值，简单的模式。第 8、9 步的限制都取消了，只有堆栈的文字还是空的。
 
-第 10 步留下的限制：
+第 10、11 步留下的限制：
 
 | 限制 | 何时解决 |
 | --- | --- |
@@ -70,15 +70,16 @@ void main() { exit(1 + 2 * 3); }
 | 正则表达式的 `\p{…}` 在运行时抛 `UnsupportedError` | 需要时再做 |
 | SIMD 类型（`Float32x4` 等）的运算 | 需要时再做 |
 | 函数类型的文字里，命名参数按字母排序；官方按声明的顺序 | 需要时再做 |
-| 异步的标准库（`Future`、`Stream`、`Zone`）、`dart:io`、`dart:isolate` | 第 11、12 步 |
+| `dart:io`（只有 `exit`）、`dart:isolate`，`main` 的参数 | 第 12 步 |
+| 延迟导入（`deferred as`） | 需要时再做 |
 
 **11 其余的语法。** 分小步，每小步单独完成和提交：
 
 - 11a（完成）：扩展、扩展类型、枚举。
 - 11b（完成）：记录；记录、列表、映射、对象的模式；模式的赋值和声明。
 - 11c（完成）：主构造函数、点简写等其余的同步语法。
-- 11d：生成器 `sync*`。
-- 11e：`async`、`await`、`async*`、`await for`，`dart:async`，事件循环。
+- 11d（完成）：生成器 `sync*`。
+- 11e（完成）：`async`、`await`、`async*`、`await for`，`dart:async`，事件循环。
 
 **12–13。** 到时按功能再分小步，每小步同样对照 `dart`。
 

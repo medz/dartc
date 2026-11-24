@@ -1,6 +1,5 @@
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
 import 'support.dart';
 
 const _tools = r'''
@@ -181,18 +180,6 @@ void main() {
       void use(P p) { p.f((b) => b.n); show(p.h()(4)); p.k = () => B(7); number(p.k!().n); try { p.k = () => A(8); number(p.k!().n); } on TypeError { print('T'); } }
       void main() { use(P()); use(Q()); }
     ''');
-  });
-
-  group('not supported yet:', () {
-    void reports(String source, String problem) => test(problem, () async {
-      await expectLater(translate(source), failsWith(['main.dart:$problem']));
-    });
-
-    const what = 'Not supported yet:';
-    reports(
-      'void main() { final f = () async {}; f(); }',
-      '1:28: $what async and generator functions.',
-    );
   });
 
   agrees('generic functions are values', r'''

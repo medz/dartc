@@ -24,7 +24,7 @@ void agrees(
   String source, {
   String imports = '',
 
-  /// Whether it creates too much to collect always.
+  /// Whether it creates too much to collect always, or depends on time.
   bool isLong = false,
 }) => test(name, () async {
   final text = "import 'dart:io';\n$imports\n$source";

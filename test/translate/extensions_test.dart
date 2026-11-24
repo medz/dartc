@@ -171,6 +171,48 @@ void main() {
 }
 ''');
 
+  agrees('with enums and other types', r'''
+enum Level { low(1), high(10); final int n; const Level(this.n); static const all = [low, high]; static const map = {low: 'l', high: 'h'}; }
+class Conf { final Level level; final List<Level> more; const Conf(this.level, [this.more = const [Level.low]]); }
+const conf = Conf(Level.high);
+extension LevelX on Level { Level get other => this == Level.low ? Level.high : Level.low; static Level parse(String s) => Level.values.firstWhere((l) => l.name == s); }
+extension OnFn on void Function(int) { void twice(int n) { this(n); this(n + 1); } void callAll(List<int> l) => l.forEach(this); }
+extension on num { num get sq => this * this; Comparable<num> get c => this; }
+extension Nums<T extends num> on Iterable<T> { num get total => fold<num>(0, (a, b) => a + b); T get biggest => reduce((a, b) => m.max(a, b)); }
+extension Opt<T extends Object> on T? { R? map<R>(R Function(T) f) { final self = this; return self == null ? null : f(self); } T get must => this!; }
+extension Phantom on bool { int get asInt => this ? 1 : 0; bool operator [](bool o) => this && o; }
+sealed class S { }
+enum Planet implements Comparable<Planet> { a, b; @override int compareTo(Planet o) => index.compareTo(o.index); bool operator <(Planet o) => compareTo(o) < 0; }
+mixin M on Enum { String get tag => '${index}-$name'; }
+enum WithM with M { x, y }
+enum G<T> { i<int>(), s<String>(); const G(); List<T> make() => <T>[]; static G<int> one() => i; }
+class Holder<E extends Enum> { final List<E> values; Holder(this.values); E next(E e) => values[(e.index + 1) % values.length]; }
+abstract class Base { int get v; }
+extension BaseX on Base { int get vv => v * 2; void run() { void inner() { print(vv + v); print(this.vv); } inner(); } }
+class Impl extends Base { int v = 4; void test() { print(vv); run(); } }
+void main() {
+  print(conf.level.n); print(conf.more); print(Level.all); print(Level.map); print(conf.level.other); print(LevelX.parse('low'));
+  final f = LevelX.parse; print(f('high'));
+  ((int n) => print('n$n')).twice(3); void g(int n) => print('g$n'); g.twice(7); g.callAll([1,2]); (print as void Function(int)).twice(0);
+  print(3.sq); print(2.5.sq); num q = 4; print(q.sq); print(q.c.compareTo(3));
+  print([1,2,3].total); print([1.5,2].total); print([1,5,2].biggest); print(<double>[1,0].biggest);
+  int? a = conf.level.n > 100 ? null : 5; print(a.map((x) => x + 1)); String? z = conf.level.n > 1 ? null : ''; print(z.map((s) => s.length));
+  try { z.must; } catch (e) { print(e); } print(a.must);
+  print(true.asInt); print(true[false]);
+  print(Planet.a < Planet.b); print([Planet.b, Planet.a]..sort()); print(WithM.y.tag);
+  print(G.i.make().runtimeType); print(G.one()); print(G.s is G<String>); print(G.values.runtimeType);
+  print(Holder(Level.values).next(Level.high)); Impl().test(); Base b = Impl(); print(b.vv); b.run();
+  Impl()..run()..v = 9..run();
+  a?..sq..abs(); z?..length;
+  final List<num> ns = <int>[4]; print(ns.total);
+  print(Level.low.hashCode == Level.low.hashCode); print({Level.low, Level.high, Level.low}.length); print(identical(const [Level.low], const [Level.low]));
+  var sum = 0; for (final l in Level.values) { sum += switch (l) { Level.low => 1, Level.high => 2 }; } print(sum);
+  Object o = Level.low; print(switch (o) { Level.low => 'low', Level.high => 'high', _ => '?' });
+  print(Level.values.map((e) => e.name).join(',')); dynamic d = Level.high; print(d.n); try { d.foo(); } catch (e) { print('$e'.split('\n').first); } print(d.toString());
+  print(Enum.compareByIndex(Level.low, Level.high)); print(Level.values.asMap()); print(Level.high.toString().length);
+}
+''', imports: "import 'dart:math' as m;");
+
   group('extension types', () {
     agrees('members and constructors', r'''
 extension type Id(int value) {

@@ -14,6 +14,7 @@ HirType? valueType(DartType declared) {
           type is TypeParameterType ||
           type.isDartCoreNull ||
           type is NeverType && !isNever(type) ||
+          type.isDartAsyncFutureOr ||
           classOf(type) != null
       ? .reference
       : null;
@@ -39,6 +40,9 @@ bool _isNumeric(InterfaceElement class_) =>
 /// Whether every value is of [declared].
 bool isTop(DartType declared) {
   final type = declared.extensionTypeErasure;
+  if (type is InterfaceType && type.isDartAsyncFutureOr) {
+    return isTop(type.typeArguments.single);
+  }
   return type is DynamicType ||
       type is VoidType ||
       type.isDartCoreObject && type.nullabilitySuffix == .question;
@@ -50,7 +54,9 @@ bool canBeNumber(DartType declared) {
   return isTop(type) ||
       type.isDartCoreObject ||
       type is InterfaceType &&
-          (_isNumeric(type.element) || type.element.name == 'Comparable');
+          (type.isDartAsyncFutureOr ||
+              _isNumeric(type.element) ||
+              type.element.name == 'Comparable');
 }
 
 /// Whether the type given is that of numbers, without null.
@@ -88,14 +94,14 @@ bool mentions(DartType type, Element? owner, {bool isTaken = false}) =>
             formalParameters.any(
               (p) => mentions(p.type, owner, isTaken: !isTaken),
             ),
-      final RecordType type => _fieldsOf(
+      final RecordType type => fieldsOf(
         type,
       ).any((field) => mentions(field, owner, isTaken: isTaken)),
       _ => false,
     };
 
 /// The types of the fields of [type].
-Iterable<DartType> _fieldsOf(RecordType type) => [
+Iterable<DartType> fieldsOf(RecordType type) => [
   for (final field in type.positionalFields) field.type,
   for (final field
       in type.namedFields.toList()..sort((a, b) => a.name.compareTo(b.name)))
@@ -115,7 +121,7 @@ bool _hasFree(DartType type, Set<TypeParameterElement> bound) => switch (type) {
         type.formalParameters.any((p) => isFree(p.type)) ||
         typeParameters.any((p) => p.bound != null && isFree(p.bound!));
   }(),
-  RecordType() => _fieldsOf(type).any((field) => _hasFree(field, bound)),
+  RecordType() => fieldsOf(type).any((field) => _hasFree(field, bound)),
   _ => false,
 };
 
@@ -129,7 +135,7 @@ bool isOpen(DartType type) => switch (type.extensionTypeErasure) {
   ),
   FunctionType(:final returnType, :final formalParameters) =>
     isOpen(returnType) || formalParameters.any((p) => isOpen(p.type)),
-  final RecordType type => _fieldsOf(type).any(isOpen),
+  final RecordType type => fieldsOf(type).any(isOpen),
   _ => false,
 };
 
@@ -222,7 +228,10 @@ String _describeFunction(
 }
 
 /// Whether a function returning [type] gives its caller nothing to use.
-bool hasNoResult(DartType type) => type is VoidType || isNever(type);
+///
+/// Where the result is of type `void`, there can be one, which a caller that
+/// does not know that type uses.
+bool hasNoResult(DartType type) => isNever(type);
 
 /// Whether expressions of [type] never give a value.
 bool isNever(DartType? type) =>
@@ -253,8 +262,8 @@ List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
           }
         }
       case (RecordType a, RecordType b):
-        final found = _fieldsOf(b).toList();
-        for (final (i, field) in _fieldsOf(a).indexed) {
+        final found = fieldsOf(b).toList();
+        for (final (i, field) in fieldsOf(a).indexed) {
           if (i < found.length) match(field, found[i]);
         }
     }

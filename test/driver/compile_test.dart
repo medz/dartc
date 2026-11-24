@@ -18,6 +18,7 @@ import 'package:test/test.dart';
 import '../image/support.dart' show skipExecution;
 import '../lower/support.dart';
 import '../support/new_compiler.dart';
+import 'random_async.dart';
 import 'random_dart.dart';
 import 'random_patterns.dart';
 
@@ -155,6 +156,12 @@ void main() {
   for (var seed = 0; seed < 4; seed++) {
     test('random patterns, seed $seed', () async {
       await _compareRandom(RandomPatterns(seed).generate(), 'seed $seed');
+    }, skip: skipExecution);
+  }
+
+  for (var seed = 0; seed < 4; seed++) {
+    test('random async functions, seed $seed', () async {
+      await _compareRandom(RandomAsync(seed).generate(), 'seed $seed');
     }, skip: skipExecution);
   }
 

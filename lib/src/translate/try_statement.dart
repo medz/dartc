@@ -46,6 +46,15 @@ final class TryTranslator(
   void translate(TryStatement node) {
     final finallyBlock = node.finallyBlock;
     if (finallyBlock == null) return _tryCatch(node);
+    protect(
+      node,
+      () => node.catchClauses.isEmpty ? _statement(node.body) : _tryCatch(node),
+      () => _statement(finallyBlock),
+    );
+  }
+
+  /// Does [body] of [node], then [last] in any case.
+  void protect(AstNode node, void Function() body, void Function() last) {
     // Made before the body declares variables of its own.
     final after = _builder.join(node);
     final result = _builder.function.result;
@@ -59,16 +68,14 @@ final class TryTranslator(
     );
     final caught = _builder.joinAll(node, const [.reference, .reference]);
     _finallies.add(scope);
-    _builder.within(caught, () {
-      node.catchClauses.isEmpty ? _statement(node.body) : _tryCatch(node);
-    });
+    _builder.within(caught, body);
     _enterFinally(scope, _completed);
     _builder.enter(caught);
     final [exception, trace] = _builder.resultsOf(caught);
     _enterFinally(scope, _thrown, exception: exception, trace: trace);
     _finallies.removeLast();
     _builder.enter(scope.join);
-    _statement(finallyBlock);
+    last();
     _leaveFinally(scope, after);
   }
 

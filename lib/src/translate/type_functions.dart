@@ -61,7 +61,8 @@ final class TypeFunctions(
       ),
       'superTypesOf' => HirFunction(name, const [.integer], .reference, false),
       'functionNumber' ||
-      'recordNumber' => HirFunction(name, const [], .integer, false),
+      'recordNumber' ||
+      'futureNumber' => HirFunction(name, const [], .integer, false),
       _ => HirFunction(name, const [.integer], .reference, false),
     };
     if (function.parameters case [.reference]) {
@@ -171,13 +172,13 @@ final class TypeFunctions(
               );
             });
           });
-        case 'functionNumber' || 'recordNumber':
+        case 'functionNumber' || 'recordNumber' || 'futureNumber':
           _define(function, (builder) {
-            final number = _types.numberOf(
-              name == 'recordNumber'
-                  ? _scope.recordClass.interfaces.single.element
-                  : _scope.functionClass,
-            );
+            final number = _types.numberOf(switch (name) {
+              'recordNumber' => _scope.recordClass.interfaces.single.element,
+              'futureNumber' => _scope.futureClass,
+              _ => _scope.functionClass,
+            });
             builder.end(HirReturn(builder.add(HirConst(number))));
           });
         case 'className':
@@ -197,7 +198,11 @@ final class TypeFunctions(
 
   /// What [class_] is called, as those that implement a class of the SDK are
   /// not seen.
-  static String _nameOf(InterfaceElement class_) => class_.library.isDartCore
+  static String _nameOf(InterfaceElement class_) => class_.library.isDartAsync
+      ? class_.displayName == '_Future'
+            ? 'Future'
+            : class_.displayName
+      : class_.library.isDartCore
       ? switch (class_.name!) {
           '_Mint' => 'int',
           '_Double' => 'double',

@@ -1,11 +1,14 @@
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'constructor.dart';
+import 'coroutine.dart';
+import 'coroutines.dart';
 import 'extension_constructor.dart';
 import 'levels.dart';
 import 'members.dart';
@@ -25,14 +28,9 @@ final class FunctionTable(
 
   Iterable<HirFunction> get all => _functions.values;
 
-  /// The function that starts the program, whose result nothing uses.
-  HirFunction main(ExecutableElement element) {
-    _scope.schedule(() => _translate(element, null, null));
-    return _functions[(element, null)] = HirFunction(
-      element.displayName,
-      const [],
-    );
-  }
+  /// Whether [element] is part of the program.
+  bool contains(ExecutableElement element) =>
+      _functions.containsKey((element, null));
 
   /// The function of [element], which can be a member of a level.
   ///
@@ -66,7 +64,9 @@ final class FunctionTable(
                   'a parameter of type ${parameter.type}',
                 )),
         ],
-        isInitializer || hasNoResult(result)
+        isInitializer ||
+                hasNoResult(result) ||
+                result is VoidType && RuntimeLinks.isRuntime(element.library)
             ? null
             : valueType(result) ??
                   (throw _declarations.unsupported(
@@ -129,10 +129,14 @@ final class FunctionTable(
         ConstructorDeclaration(:final body) => body,
         _ => throw StateError('Unexpected declaration $node.'),
       };
-      if (body.isAsynchronous || body.isGenerator) {
-        throw unit.unsupported(body, 'async and generator functions');
+      if (CoroutineKind.of(body) case final kind?) {
+        CoroutineTranslator(
+          _scope,
+          builder,
+        ).start(body, kind, element.returnType, element.formalParameters);
+      } else {
+        statements.body(body);
       }
-      statements.body(body);
     }
     builder.finish();
   }

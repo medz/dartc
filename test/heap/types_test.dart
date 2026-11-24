@@ -9,6 +9,7 @@ import 'package:test/test.dart';
 import '../support/new_compiler.dart';
 
 const _classes = '''
+import 'dart:async';
 class A {} class B extends A {} class I {} class C extends B implements I {}
 class G<T> {} class H<T> extends G<T> implements I {}
 class P<X, Y> {} class Q<T> extends P<T, G<T>> {} class R extends Q<A> {}
@@ -42,6 +43,10 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   @override
   int get recordNumber =>
       classes.indexWhere((class_) => class_.name == 'Record');
+
+  @override
+  int get futureNumber =>
+      classes.indexWhere((class_) => class_.name == 'Future');
 
   final _names = <String, List<String>>{};
 
@@ -82,6 +87,8 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
       analyzer.TypeParameterType(:final element) => VariableType(
         owner!.typeParameters.indexOf(element),
       ),
+      analyzer.InterfaceType(isDartAsyncFutureOr: true, :final typeArguments) =>
+        futureOr(of(typeArguments.single, owner)),
       analyzer.InterfaceType(:final element, :final typeArguments) =>
         InterfaceType(classes.indexOf(element), list(typeArguments, owner)),
       analyzer.FunctionType() => _function(type, owner),
@@ -176,10 +183,29 @@ const _records = [
   'G<(int, int)>',
 ];
 
+const _futures = [
+  'FutureOr<int>',
+  'FutureOr<int?>',
+  'FutureOr<int>?',
+  'FutureOr<num>',
+  'FutureOr<Object>',
+  'FutureOr<Object?>',
+  'FutureOr<dynamic>',
+  'FutureOr<Null>',
+  'FutureOr<Never>',
+  'FutureOr<FutureOr<int>>',
+  'Future<int>',
+  'Future<int?>',
+  'Future<int>?',
+  'Future<Null>',
+  'Future<Never>',
+  'Future<FutureOr<int>>',
+];
+
 /// The text of a random type.
 String _random(Random random, int depth) {
   String inner() => _random(random, depth - 1);
-  final text = switch (random.nextInt(depth > 0 ? 28 : 11)) {
+  final text = switch (random.nextInt(depth > 0 ? 32 : 11)) {
     0 => 'dynamic',
     1 => 'Null',
     2 => 'Never',
@@ -199,6 +225,8 @@ String _random(Random random, int depth) {
     19 => 'L<Object>',
     20 => 'Function',
     21 => 'Record',
+    25 || 26 => 'Future<${inner()}>',
+    27 || 28 || 29 => 'FutureOr<${inner()}>',
     22 || 23 || 24 => _randomRecord(random, inner),
     _ => _randomFunction(random, inner),
   };
@@ -242,6 +270,7 @@ void main() {
     final texts = [
       ..._functions,
       ..._records,
+      ..._futures,
       for (var i = 0; i < 400; i++) _random(random, 3),
     ];
     final source = await load(
@@ -261,11 +290,14 @@ void main() {
         'Record',
       ])
         library.typeProvider.objectElement.library.getClass(name)!,
+      library.typeProvider.futureElement,
     ]);
     program = program_;
     final found = [for (final type in types) program_.of(type)];
     for (final (i, type) in found.indexed) {
       final name = describeType(types[i]).replaceAll('Never?', 'Null');
+      // Some of these are the same as simpler types.
+      if (name.contains('FutureOr')) continue;
       expect(typeName(type), name, reason: texts[i]);
     }
     var positive = 0;
@@ -280,7 +312,10 @@ void main() {
         );
       }
     }
-    expect(types, hasLength(400 + _functions.length + _records.length));
+    expect(
+      types,
+      hasLength(400 + _functions.length + _records.length + _futures.length),
+    );
     expect(positive, greaterThan(5000));
   });
 }

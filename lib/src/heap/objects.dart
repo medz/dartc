@@ -67,6 +67,9 @@ external void localTime(int address);
 /// 32 random bits.
 external int randomBits();
 
+/// Waits for [microseconds].
+external void pause(int microseconds);
+
 /// Whether [object] is of a class that extends `Error`, rather than implements
 /// it.
 external bool isSubclassOfError(Object object);

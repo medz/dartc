@@ -107,4 +107,20 @@ void main() {
     void main() { final I c = C(); c.f(1); c.f(1, 2, 3); c.g(); c.g(y: 'q'); c.h(5); c.h<num>(5); c.p; c.p = 4; c + 2; I d = D(); d.f(8); go(() => (E() as I).f(1)); final t = c.f; t(5); print(t);
      dynamic k = K(); go(() => k.m()); go(() => k.m(1, 2)); go(() => k.m(a: 1)); go(() => k.gt = 1); go(() => k.fi = 1); go(() => k.gt(3)); go(() => k.zz(1, q: 2)); go(() => k.zz); go(() => k.zz = 5); go(() => k[1]); go(() => k + 1); go(() => -k); go(() => k()); go(() => k < 1); go(() => k[1] = 2); dynamic f = top; go(() => f()); go(() => f(1, 2)); go(() => f(1, c: 2)); dynamic m = K().m; go(() => m()); dynamic n; go(() => n()); go(() => n.x = 1); go(() => n[0] = 1); go(() => n.toString(1)); go(() => f.foo); dynamic s = 'x'; go(() => s.length(1)); go(() => s.foo()); dynamic l = [1]; go(() => l.foo); dynamic ty = int; go(() => ty()); dynamic ctor = K.new; go(() => ctor(1)); Function ff = top; go(() => ff()); go(() => k.hashCode = 1); go(() => k._priv); dynamic lf = (int a) { return a; }; go(() => lf()); int loc(String z) => 1; dynamic ll = loc; go(() => ll(1, 2)); }
   ''');
+
+  agrees('results of void functions', r'''
+void f() => 3;
+void g(int n) { if (n > 1) return; print('g'); }
+class A { void m() {} void n() => 'A'; set s(int v) => v * 2; void operator []=(int i, int v) => v; }
+class B extends A { int m() => 5; void n() => super.n(); }
+void h<T>(T x) => x;
+void each(void Function(int) w) { dynamic d = w; print(d(4)); }
+Object? pass(void Function() w) => (w as dynamic)();
+void main() {
+  dynamic d = f; print(d()); d = g; print(d(1)); print(d(2)); A a = B(); d = a; print(d.m()); print(d.n()); print(A().runtimeType); d = A(); print(d.n()); print(d.s = 3); print(d[0] = 4);
+  d = h; print(d<int>(7)); print(d('x')); each((n) => n + 1); each((n) { }); print(pass(f)); print(pass(() => 'c')); print(pass(a.m)); print(pass(a.n));
+  final List<void> l = [1, 2]; print(l); void v = 3; Object? o = [v].first as Object?; print(o); print([f].map((x) => x as dynamic).first()); [1].forEach((e) => e); a..m()..n();
+  void local() => 9; print(pass(local)); d is Function ? f() : g(3); print(Function.apply(f, []));
+}
+''');
 }

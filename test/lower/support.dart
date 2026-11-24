@@ -28,7 +28,7 @@ final class LoweredRun(
 
   this {
     int? errorAddress;
-    var error = 0;
+    var error = 0, waited = 0;
     int address(LirMemory memory) => errorAddress ??= memory.map(Uint8List(4));
     final interpreter = LirInterpreter(
       lowerProgram(module),
@@ -66,8 +66,14 @@ final class LoweredRun(
             atan2(arguments[0] as double, arguments[1] as double),
         'pow': (_, arguments) =>
             pow(arguments[0] as double, arguments[1] as double).toDouble(),
-        'clock_gettime_nsec_np': (_, _) =>
-            DateTime.now().microsecondsSinceEpoch * 1000,
+        'clock_gettime_nsec_np': (_, arguments) => arguments.single == 0
+            ? DateTime.now().microsecondsSinceEpoch * 1000
+            : ++waited * 1000,
+        // Waiting takes no time here.
+        'usleep': (_, arguments) {
+          waited += arguments.single as int;
+          return null;
+        },
         'arc4random': (_, _) => Random().nextInt(1 << 32) | 1 << 40,
         'localtime_r': (memory, arguments) {
           final [from as int, to as int] = arguments;

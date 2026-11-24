@@ -130,6 +130,16 @@ String what(Object o) {
       return 'default';
   }
 }
+int own(int n) {
+  switch (n) {
+    case 1: var x = 1; while (x < 5) { x++; if (x == 4) break; } print(x);
+    case 2: for (var x = 0; x < 2; x++) { print('b$x'); }
+    case 3 when n > 1: { var y = n; y++; print(y); }
+    default: var x = n; x += 2; return x;
+  }
+  final z = switch (n) { 1 => () { var x = 4; x++; return x; }(), var k when k > 2 => k + 1, var k => k * 5 };
+  return z;
+}
 int jump(int n) {
   var steps = 0;
   switch (n) {
@@ -144,6 +154,7 @@ int jump(int n) {
 void main() {
   for (final o in <Object>[(1, 'a'), ('a', 2), ['q'], 'w', {'s': 'e'}, 101, 99, 3.5, 1.5, 2, 4, 5, true, {1}]) print(what(o));
   for (final n in [1, 2, 3, 4, 5]) print(jump(n));
+  for (final n in [1, 2, 3, 4, 5]) print(own(n));
   var s = 0; outer: for (var i = 0; i < 5; i++) { switch (i) { case 1: continue outer; case 3: break outer; default: s += i; } } print(s);
   final x = switch ((1, 2)) { (var a, var b) when a > b => a, (var a, _) => a * 10 }; print(x);
   final Object v = 3; print(switch (v) { int n && >= 1 && <= 3 => 'range $n', int() || double() => 'number', _ => '?' });

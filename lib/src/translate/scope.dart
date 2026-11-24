@@ -113,8 +113,13 @@ abstract interface class ProgramScope() {
     HirValue? types,
   );
 
-  /// Translates [body] as that of the function of [builder], later.
-  void translateBody(FunctionBuilder builder, FunctionBody body);
+  /// Translates [body] as that of the function of [builder], which [coroutine]
+  /// tells how to leave if it is not done at once.
+  void translateBody(
+    FunctionBuilder builder,
+    FunctionBody body, [
+    HirCoroutine? coroutine,
+  ]);
 
   /// The value of [node] in the function of [builder], as one of [type].
   HirValue evaluate(FunctionBuilder builder, Expression node, DartType type);
@@ -124,6 +129,12 @@ abstract interface class ProgramScope() {
 
   /// The class `Function`.
   ClassElement get functionClass;
+
+  /// The class `Future`.
+  ClassElement get futureClass;
+
+  /// The function type called [name] in the runtime.
+  FunctionType runtimeFunctionType(String name);
 
   /// The class of records.
   ClassElement get recordClass;

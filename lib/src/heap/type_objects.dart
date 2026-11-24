@@ -45,6 +45,13 @@ final class RecordType extends RuntimeType {
   const RecordType(this.fields, this.names);
 }
 
+/// A value of [inner], or a future of one. Where that is the same as a simpler
+/// type, types never have this form.
+final class FutureOrType extends RuntimeType {
+  final RuntimeType inner;
+  const FutureOrType(this.inner);
+}
+
 /// A function type with type parameters, which have [bounds].
 final class GenericType extends RuntimeType {
   final TypeList bounds;

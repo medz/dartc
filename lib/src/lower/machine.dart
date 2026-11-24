@@ -90,7 +90,7 @@ final class MachineLowering(
       case .parseDouble:
         final none = block.add(Convert(.intToPtr, number(0)));
         return block.add(callSystem('strtod', [address(), none]));
-      case .realTime || .steadyTime || .localTime || .randomBits:
+      case .realTime || .steadyTime || .localTime || .randomBits || .pause:
         return _system(block, op, arguments);
       case .classNumber:
         return block.add(Load(.u32, arguments.single, offset: classOffset));
@@ -136,6 +136,9 @@ final class MachineLowering(
         final from = block.add(Convert(.intToPtr, arguments.single));
         final to = block.add(PtrAdd(from, number(8)));
         block.add(callSystem('localtime_r', [from, to]));
+        return null;
+      case .pause:
+        block.add(callSystem('usleep', arguments));
         return null;
       default:
         final bits = block.add(callSystem('arc4random', []));

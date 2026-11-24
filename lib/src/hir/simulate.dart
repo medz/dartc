@@ -138,9 +138,12 @@ final class HirMachineState(final HirModule _module) {
       case .realTime:
         return DateTime.now().microsecondsSinceEpoch * 1000;
       case .steadyTime:
-        return _watch.elapsedMicroseconds * 1000;
+        return ++_passed * 1000;
       case .randomBits:
         return Random().nextInt(1 << 32);
+      case .pause:
+        _passed += number(0);
+        return null;
       case .localTime:
         _localTime(number(0));
         return null;
@@ -152,7 +155,10 @@ final class HirMachineState(final HirModule _module) {
     }
   }
 
-  final _watch = Stopwatch()..start();
+  /// The microseconds that passed for the program, which take no time here.
+  ///
+  /// Each time that it asks, it finds that one passed.
+  int _passed = 0;
 
   double _function(HirMachineOp op, List<double> inputs) => switch (op) {
     .sine => sin(inputs[0]),
@@ -170,7 +176,8 @@ final class HirMachineState(final HirModule _module) {
 
   /// Of what the system tells about a time, only its zone.
   void _localTime(int address) {
-    final seconds = ByteData.sublistView(_read(address, 8)).getInt64(0, .little);
+    final seconds = ByteData.sublistView(_read(address, 8))
+        .getInt64(0, .little);
     final time = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
     final name = address + 200;
     final zone = ByteData(16)

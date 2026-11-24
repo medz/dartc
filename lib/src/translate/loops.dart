@@ -7,6 +7,7 @@ import 'assigned.dart';
 import 'builder.dart';
 import 'calls.dart';
 import 'conversions.dart';
+import 'coroutine_body.dart';
 import 'late_locals.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -28,6 +29,7 @@ final class LoopTranslator(
   final void Function(SimpleIdentifier name, HirValue value, DartType type)
   _assignNamed,
 ) {
+  late final _coroutine = CoroutineBody(_scope, _builder, _evaluator);
   late final _conversions = Conversions(_scope, _builder);
 
   Never _unsupported(AstNode node, String what) =>
@@ -135,9 +137,44 @@ final class LoopTranslator(
   ) {
     final iterable = parts.iterable;
     each(node, iterable, _iterable(iterable), within: within, (value) {
-      _assign(parts, value);
+      _assign(parts, value, elementType(iterable.staticType!));
       body();
     });
+  }
+
+  /// Does [body] for each value of a stream, within [protect], which does its
+  /// second part in any case.
+  void eachOfStream(
+    AstNode node,
+    ForEachParts parts,
+    void Function() body, {
+    required void Function(Join exit, Join next) within,
+    required void Function(void Function() body, void Function() last) protect,
+  }) {
+    final source = parts.iterable, from = source.staticType!;
+    final types = _conversions.types;
+    final type = switch (boundOf(from)) {
+      final InterfaceType type =>
+        type.asInstanceOf(types.streamElement)?.typeArguments.single,
+      _ => null,
+    };
+    final element = type ?? types.dynamicType;
+    final stream = _evaluator.valueAsObject(source, types.streamType(element));
+    _coroutine.each(
+      node,
+      stream,
+      element,
+      (value) {
+        _assign(
+          parts,
+          _conversions.coerce(value, valueType(element)!),
+          element,
+        );
+        body();
+      },
+      within: within,
+      protect: protect,
+    );
   }
 
   /// What [node] gives, as something to iterate over.
@@ -181,9 +218,10 @@ final class LoopTranslator(
   ) => _calls.invoke(node, object, class_.thisType, class_.getGetter(name)!)!;
 
   /// Assigns [value], the next of the elements of [parts], to its variable.
-  void _assign(ForEachParts parts, HirValue value) {
+  ///
+  /// It is of [type].
+  void _assign(ForEachParts parts, HirValue value, DartType type) {
     final VariableElement variable;
-    final type = elementType(parts.iterable.staticType!);
     switch (parts) {
       case ForEachPartsWithPattern(:final pattern):
         return _destructure(pattern, value, type);

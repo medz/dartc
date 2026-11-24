@@ -8,6 +8,7 @@ import 'describe.dart';
 import 'loops.dart';
 import 'patterns.dart';
 import 'scope.dart';
+import 'try_statement.dart';
 
 /// Translates literals of collections.
 final class LiteralTranslator(
@@ -86,6 +87,23 @@ final class LiteralTranslator(
           () {
             if (node.elseElement case final other?) _element(other, types, add);
           },
+        );
+      case ForElement(
+        awaitKeyword: _?,
+        :final ForEachParts forLoopParts,
+        :final body,
+      ):
+        final tries = TryTranslator(
+          _scope,
+          _builder,
+          (statement) => _unsupported(statement),
+        );
+        _loops.eachOfStream(
+          node,
+          forLoopParts,
+          () => _element(body, types, add),
+          within: (_, _) {},
+          protect: (body, last) => tries.protect(node, body, last),
         );
       case ForElement(:final forLoopParts, :final body):
         _loops.translate(node, forLoopParts, () => _element(body, types, add));

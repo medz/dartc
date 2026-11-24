@@ -47,10 +47,19 @@ final class TypeTable(
   HirConstObject? constant(DartType declared, {InterfaceElement? owner}) {
     final type = declared.extensionTypeErasure;
     final plain = _constantPlain(type, owner);
-    final needsForm =
-        type.nullabilitySuffix == .question && !hasBasicForm(type);
-    if (plain == null || !needsForm) return plain;
-    return _object('NullableType', [plain]);
+    if (plain == null || type.nullabilitySuffix != .question) return plain;
+    return hasBasicForm(type) ? plain : _nullable(plain);
+  }
+
+  /// [type] or null, like the runtime makes it.
+  HirConstObject _nullable(HirConstObject type) {
+    if (type.target.name == 'NullableType') return type;
+    if (type.target.name != 'BasicType') return _object('NullableType', [type]);
+    return switch (type.fields.values.single) {
+      3 => _object('BasicType', [2]),
+      5 => _object('BasicType', [4]),
+      _ => type,
+    };
   }
 
   /// Whether [type] is one of the basic ones, with or without null.
@@ -76,8 +85,8 @@ final class TypeTable(
       case TypeParameterType(:final element):
         if (owner == null || element.enclosingElement != owner) return null;
         return _object('VariableType', [owner.typeParameters.indexOf(element)]);
-      case InterfaceType(isDartAsyncFutureOr: true):
-        return null;
+      case InterfaceType(isDartAsyncFutureOr: true, :final typeArguments):
+        return _constantFutureOr(typeArguments.single, owner);
       case InterfaceType(:final element, :final typeArguments):
         final arguments = list(typeArguments, owner: owner);
         if (arguments == null) return null;
@@ -92,6 +101,23 @@ final class TypeTable(
       default:
         return null;
     }
+  }
+
+  /// The object for `FutureOr` of [inner], like the runtime makes it.
+  HirConstObject? _constantFutureOr(DartType inner, InterfaceElement? owner) {
+    final own = constant(inner, owner: owner);
+    if (own == null) return null;
+    final kind = own.target.name == 'BasicType'
+        ? own.fields.values.single
+        : null;
+    if (kind is int && kind <= 3) return own;
+    if (kind == null) return _object('FutureOrType', [own]);
+    final future = _scope.futureClass;
+    final plain = _object('InterfaceType', [
+      numberOf(future),
+      _object('TypeList', [own, null]),
+    ]);
+    return kind == 4 ? _nullable(plain) : plain;
   }
 
   HirConstObject? _constantFunction(
@@ -242,8 +268,10 @@ final class TypeTable(
         return builder.add(HirStatic(_object('BoundType', [_bound(element)])));
       case TypeParameterType(:final element):
         return _parameter(builder, element);
-      case InterfaceType(isDartAsyncFutureOr: true):
-        return null;
+      case InterfaceType(isDartAsyncFutureOr: true, :final typeArguments):
+        final inner = value(builder, typeArguments.single);
+        if (inner == null) return null;
+        return builder.call(HirCall(_scope.runtime('futureOr'), [inner]));
       case InterfaceType(:final element, :final typeArguments):
         final arguments = listValue(builder, typeArguments);
         if (arguments == null) return null;

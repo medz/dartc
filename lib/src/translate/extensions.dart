@@ -58,6 +58,9 @@ final class ExtensionTranslator(
         FunctionType(:final returnType, :final formalParameters) =>
           _mentions(returnType, parameter) ||
               formalParameters.any((p) => _mentions(p.type, parameter)),
+        RecordType() => fieldsOf(
+          type,
+        ).any((field) => _mentions(field, parameter)),
         _ => false,
       };
 

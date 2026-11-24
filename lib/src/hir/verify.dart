@@ -93,7 +93,9 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('raise', module.raise, [.reference, .reference]);
   check('stackOverflow', module.stackOverflow, []);
   check('outOfMemory', module.outOfMemory, []);
-  check('uncaught', module.uncaught, [.reference]);
+  // What it gives, if anything, is not used.
+  final uncaught = module.uncaught;
+  check('uncaught', uncaught, [.reference], uncaught?.result);
 }
 
 /// Checks a constant and those it refers to, which form no cycle.

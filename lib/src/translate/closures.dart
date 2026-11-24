@@ -7,6 +7,8 @@ import 'builder.dart';
 import 'captures.dart';
 import 'closure.dart';
 import 'conversions.dart';
+import 'coroutine.dart';
+import 'coroutines.dart';
 import 'dynamics.dart';
 import 'environment.dart';
 import 'members.dart';
@@ -59,10 +61,6 @@ final class ClosureTranslator(
     Element? name,
   ) {
     final isGeneric = element.typeParameters.isNotEmpty;
-
-    if (node.body.isAsynchronous || node.body.isGenerator) {
-      _unsupported(node.body, 'async and generator functions');
-    }
     final environment = Environment.of(
       _builder,
       node,
@@ -117,7 +115,15 @@ final class ClosureTranslator(
       if (name != null) {
         builder.bind(name, builder.inputs.first, .reference);
       }
-      _scope.translateBody(builder, node.body);
+      if (CoroutineKind.of(node.body) case final kind?) {
+        CoroutineTranslator(
+          _scope,
+          builder,
+        ).start(node.body, kind, element.returnType, element.formalParameters);
+        builder.finish();
+      } else {
+        _scope.translateBody(builder, node.body);
+      }
     });
     final object = _builder.create(class_);
     environment.store(object);

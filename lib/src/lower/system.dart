@@ -34,6 +34,9 @@ final systemFunctions = {
   /// localtime_r(seconds, result), the result.
   'localtime_r': LirSignature([.ptr, .ptr], .ptr),
 
+  /// usleep(microseconds).
+  'usleep': LirSignature([.i64]),
+
   /// 32 random bits; others are unknown.
   'arc4random': LirSignature([], .i64),
 

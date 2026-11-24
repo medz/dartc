@@ -154,13 +154,15 @@ final class CallTranslator(
   }
 
   /// The class whose members values of [type] have.
-  InterfaceElement? classFor(DartType? type) =>
-      switch (type == null ? null : boundOf(type)) {
-        FunctionType() => _scope.functionClass,
-        RecordType() => _scope.recordClass,
-        DynamicType() || VoidType() => _conversions.types.objectElement,
-        _ => classOf(type),
-      };
+  InterfaceElement? classFor(DartType? type) => switch (type == null
+      ? null
+      : boundOf(type)) {
+    FunctionType() => _scope.functionClass,
+    RecordType() => _scope.recordClass,
+    DynamicType() || VoidType() || InterfaceType(isDartAsyncFutureOr: true) =>
+      _conversions.types.objectElement,
+    _ => classOf(type),
+  };
 
   /// The type of [target], whose member [node] uses, or of `this`.
   DartType? receiverType(Expression? target, [AstNode? node]) {

@@ -19,6 +19,17 @@ RuntimeType nullable(RuntimeType type) {
   return NullableType(type);
 }
 
+/// [inner] or a future of it.
+RuntimeType futureOr(RuntimeType inner) {
+  if (_isTop(inner) || _isKind(inner, objectKind)) return inner;
+  if (_isKind(inner, neverKind)) return _futureOf(inner);
+  if (_isKind(inner, nullKind)) return NullableType(_futureOf(inner));
+  return FutureOrType(inner);
+}
+
+RuntimeType _futureOf(RuntimeType inner) =>
+    InterfaceType(futureNumber(), TypeList(inner, null));
+
 bool _isTop(RuntimeType type) => type is BasicType && type.kind <= anyKind;
 bool _isKind(RuntimeType type, int kind) =>
     type is BasicType && type.kind == kind;
@@ -26,8 +37,20 @@ bool _isKind(RuntimeType type, int kind) =>
 bool isSubtype(RuntimeType a, RuntimeType b) {
   if (isSame(a, b) || _isTop(b) || _isKind(a, neverKind)) return true;
   if (_isTop(a)) return false;
-  if (_isKind(a, nullKind)) return b is NullableType || _isKind(b, nullKind);
-  if (a is NullableType) return b is NullableType && isSubtype(a.inner, b);
+  if (_isKind(a, nullKind)) {
+    return b is NullableType ||
+        _isKind(b, nullKind) ||
+        b is FutureOrType && isSubtype(a, b.inner);
+  }
+  if (a is FutureOrType) {
+    return isSubtype(_futureOf(a.inner), b) && isSubtype(a.inner, b);
+  }
+  if (a is NullableType) {
+    return isSubtype(const BasicType(nullKind), b) && isSubtype(a.inner, b);
+  }
+  if (b is FutureOrType) {
+    return isSubtype(a, b.inner) || isSubtype(a, _futureOf(b.inner));
+  }
   if (b is NullableType) return isSubtype(a, b.inner);
   if (b is BasicType) {
     return b.kind == objectKind || a is BasicType && a.kind == b.kind;
@@ -140,6 +163,7 @@ RuntimeType _substitute(RuntimeType type, TypeList? own) {
   if (type is InterfaceType) {
     return InterfaceType(type.number, _substituteAll(type.arguments, own));
   }
+  if (type is FutureOrType) return futureOr(_substitute(type.inner, own));
   if (type is RecordType) {
     return RecordType(_substituteAll(type.fields, own), type.names);
   }
@@ -183,6 +207,9 @@ bool isSameType(RuntimeType a, RuntimeType b) {
         _areSame(a.arguments, b.arguments);
   }
   if (a is BoundType) return b is BoundType && a.index == b.index;
+  if (a is FutureOrType) {
+    return b is FutureOrType && isSameType(a.inner, b.inner);
+  }
   if (a is RecordType) {
     return b is RecordType &&
         isSame(a.names, b.names) &&
@@ -231,6 +258,7 @@ int hashOfType(RuntimeType type) {
     return (_hashOfList(type.arguments) * 31 + type.number) & 0x3fffffff;
   }
   if (type is BoundType) return type.index + 11;
+  if (type is FutureOrType) return hashOfType(type.inner) * 19 + 5;
   if (type is RecordType) {
     return (_hashOfList(type.fields) * 17 + type.names.length) & 0x3fffffff;
   }
@@ -288,6 +316,9 @@ String _typeName(RuntimeType type, _Binders? binders) {
   if (type is BoundType) return _boundName(type.index, binders);
   if (type is GenericType) return _genericName(type, binders);
   if (type is RecordType) return _recordName(type, binders);
+  if (type is FutureOrType) {
+    return 'FutureOr<${_typeName(type.inner, binders)}>';
+  }
   return type is FunctionType ? _functionName(type, binders) : '';
 }
 

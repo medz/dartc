@@ -44,4 +44,7 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   steadyTime([], .integer),
   localTime([.integer], null),
   randomBits([], .integer),
+
+  /// Waits for microseconds.
+  pause([.integer], null),
 }

@@ -29,7 +29,12 @@ void main() {
       "import 'dart:io';\nvoid main() { exit(1 + 2 * -(~3)); }",
     );
     expect(printHir(module), '''
-void main {
+void start {
+b0():
+  v0 = main()
+  return
+}
+reference main {
 b0():
   v0 = 1
   v1 = 2
@@ -410,8 +415,8 @@ b0():
     const what = 'Not supported yet:';
     reports('void main(List<String> a) {}', '2:6: $what parameters of main.');
     reports(
-      'Future<void> main() async {}',
-      '2:21: $what async and generator functions.',
+      "import 'dart:math' deferred as m; void main() {}",
+      '2:1: $what deferred imports.',
     );
     reports('external void main();', '2:21: $what a function without a body.');
     // Also where the code can never run.

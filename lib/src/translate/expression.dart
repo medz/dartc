@@ -3,6 +3,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
+import 'access.dart';
 import 'builder.dart';
 import 'assignments.dart';
 import 'calls.dart';
@@ -11,6 +12,7 @@ import 'checks.dart';
 import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
+import 'coroutine_body.dart';
 import 'describe.dart';
 import 'dynamics.dart';
 import 'late_locals.dart';
@@ -86,6 +88,16 @@ final class ExpressionTranslator(
     _operators,
     _conversions,
   );
+  late final _accesses = AccessTranslator(
+    _builder,
+    this,
+    calls,
+    _statics,
+    _dynamics,
+    _records,
+    _chains,
+  );
+  late final _coroutine = CoroutineBody(_scope, _builder, this);
   late final _references = ReferenceTranslator(_scope, _builder);
   late final _texts = TextTranslator(_scope, _builder, this);
   late final LoopTranslator loops = LoopTranslator(
@@ -214,7 +226,7 @@ final class ExpressionTranslator(
       case SimpleIdentifier(:final element):
         return _identifier(inner, element);
       case PrefixedIdentifier() || PropertyAccess():
-        return _access(inner);
+        return _accesses.read(inner);
       case PrefixExpression():
         return _prefix(inner);
       case PostfixExpression(:final operator, :final operand):
@@ -233,6 +245,40 @@ final class ExpressionTranslator(
             _unsupported(inner, 'using a value of type $type');
       case ExtensionOverride(:final argumentList):
         return value(argumentList.arguments.single.argumentExpression);
+      case FunctionReference() ||
+          ConstructorReference() ||
+          ImplicitCallReference():
+        return _reference(inner);
+      case IsExpression():
+        return _isExpression(inner);
+      case AsExpression():
+        return _asExpression(inner);
+      case InstanceCreationExpression() ||
+          DotShorthandConstructorInvocation() ||
+          DotShorthandInvocation() ||
+          DotShorthandPropertyAccess() ||
+          MethodInvocation():
+        return _invocation(inner, placeholder);
+      case IndexExpression():
+        return calls.index(inner);
+      case AwaitExpression():
+        return _coroutine.awaitExpression(inner);
+      case CascadeExpression():
+        return _cascade(inner);
+      case PatternAssignment(:final pattern, :final expression):
+        final result = value(expression);
+        patterns.destructure(pattern, result, expression.staticType!);
+        return result;
+      case SwitchExpression():
+        return patterns.switchExpression(inner, _resultType(inner));
+      default:
+        _unsupported(inner, describe(inner));
+    }
+  }
+
+  /// A function that is a value.
+  HirValue _reference(Expression inner) {
+    switch (inner) {
       case FunctionReference():
         return _references.function(inner, value);
       case ConstructorReference(:final constructorName):
@@ -249,28 +295,8 @@ final class ExpressionTranslator(
           inner,
           method,
           inner.typeArgumentTypes,
-          type!,
+          inner.staticType!,
         );
-      case IsExpression():
-        return _isExpression(inner);
-      case AsExpression():
-        return _asExpression(inner);
-      case InstanceCreationExpression() ||
-          DotShorthandConstructorInvocation() ||
-          DotShorthandInvocation() ||
-          DotShorthandPropertyAccess() ||
-          MethodInvocation():
-        return _invocation(inner, placeholder);
-      case IndexExpression():
-        return calls.index(inner);
-      case CascadeExpression():
-        return _cascade(inner);
-      case PatternAssignment(:final pattern, :final expression):
-        final result = value(expression);
-        patterns.destructure(pattern, result, expression.staticType!);
-        return result;
-      case SwitchExpression():
-        return patterns.switchExpression(inner, _resultType(inner));
       default:
         _unsupported(inner, describe(inner));
     }
@@ -279,9 +305,7 @@ final class ExpressionTranslator(
   /// Calls something by its name, or creates an object.
   HirValue _invocation(Expression inner, HirType placeholder) {
     HirValue result(HirValue? given, Element? element) =>
-        given ??
-        _neverResult(element, placeholder) ??
-        _unsupported(inner, 'using a value of type ${inner.staticType}');
+        given ?? _neverResult(element, placeholder) ?? _builder.add(HirNull());
     switch (inner) {
       case InstanceCreationExpression(
             constructorName: ConstructorName(:final element),
@@ -389,71 +413,12 @@ final class ExpressionTranslator(
         _throw(expression);
       case FunctionExpressionInvocation():
         closures.invocation(inner);
+      case AwaitExpression():
+        _coroutine.awaitExpression(inner);
+        _builder.end(HirUnreachable());
       case RethrowExpression():
         final (exception, trace) = _builder.caught.last;
         _builder.raise(exception, trace);
-      default:
-        _unsupported(inner, describe(inner));
-    }
-  }
-
-  /// Reads a field of a record, if [inner] is one.
-  HirValue? _recordField(Expression inner) {
-    final (target, name) = switch (inner) {
-      PrefixedIdentifier(:final prefix, :final identifier) => (
-        prefix,
-        identifier.name,
-      ),
-      PropertyAccess(:final realTarget, :final propertyName) => (
-        realTarget,
-        propertyName.name,
-      ),
-      _ => (inner, ''),
-    };
-    final type = target.staticType;
-    if (type == null || fieldIndex(type, name) == null) return null;
-    return _records.field(calls.object(target, inner), type, name);
-  }
-
-  /// Reads a property, or what a library or class declares.
-  HirValue _access(Expression inner) {
-    if (_recordField(inner) case final found?) return found;
-    switch (inner) {
-      case PrefixedIdentifier(:final prefix, :final identifier)
-          when prefix.staticType is DynamicType:
-        return _dynamics.get(inner, value(prefix), identifier.name);
-      case PropertyAccess(:final realTarget, :final propertyName)
-          when realTarget.staticType is DynamicType:
-        final object = value(realTarget);
-        _chains.check(inner, object);
-        return _dynamics.get(inner, object, propertyName.name);
-      case PrefixedIdentifier(
-            prefix: Expression(staticType: FunctionType()) &&
-                final Expression function,
-            identifier: SimpleIdentifier(name: 'call'),
-          ) ||
-          PropertyAccess(
-            target: Expression(staticType: FunctionType()) &&
-                final Expression function,
-            propertyName: SimpleIdentifier(name: 'call'),
-          ):
-        final result = value(function);
-        _chains.check(inner, result);
-        return result;
-      case PrefixedIdentifier(
-        :final prefix,
-        identifier: SimpleIdentifier(:final element),
-      ):
-        return isInstanceMember(element)
-            ? calls.property(inner, prefix, element!)
-            : _statics.read(inner, element);
-      case PropertyAccess(
-        :final realTarget,
-        propertyName: SimpleIdentifier(:final element),
-      ):
-        return isInstanceMember(element)
-            ? calls.property(inner, realTarget, element!)
-            : _statics.read(inner, element);
       default:
         _unsupported(inner, describe(inner));
     }
@@ -505,6 +470,11 @@ final class ExpressionTranslator(
         _builder.typeOf(element) != null &&
         !(element is VariableElement && element.isConst)) {
       return lates.read(element) ?? _builder.read(element);
+    }
+    final type = _builder.thisType;
+    if (element == null && node is SimpleIdentifier && type != null) {
+      final found = _records.field(_builder.receiver!, type, node.name);
+      if (found != null) return found;
     }
     return isInstanceMember(element)
         ? calls.property(node, null, element!)

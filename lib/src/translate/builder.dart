@@ -7,6 +7,7 @@ import 'package:dartc/source.dart';
 
 import 'assigned.dart';
 import 'captures.dart';
+import 'coroutine.dart';
 import 'levels.dart';
 
 extension Unsupported on SourceUnit {
@@ -22,6 +23,10 @@ final class Join._(
   final HirBlock _block,
   final int _resultCount,
   final List<Object> _variables,
+
+  /// The values of variables where it was made, which those that are declared
+  /// later do not have.
+  final Map<Object, HirValue> _values,
 );
 
 /// A `late` variable, whose cell has a [value] if [isSet].
@@ -144,8 +149,13 @@ final class FunctionBuilder(
 
   void bindTypes(Element owner, HirValue list) => typeLists[owner] = list;
 
+  /// Where the function can be left, if it can.
+  Coroutine? coroutine;
+
   /// Gives [function] the blocks that can run.
-  void finish() {
+  ///
+  /// If [how] tells how to leave it, returns the class of what is kept then.
+  HirClass? finish([HirCoroutine? how]) {
     // Only values that may be null may be left out.
     end(switch (function.result) {
       _ when fallback != null => HirReturn(fallback!()),
@@ -153,12 +163,18 @@ final class FunctionBuilder(
       .reference => HirReturn(add(HirNull())),
       _ => HirUnreachable(),
     });
+    if (how != null) {
+      final split = splitCoroutine(_entry, how, function.name);
+      function.define(split.blocks);
+      return split.frame;
+    }
     function.define(
       reversePostorder(
         _entry,
         (block) => block.terminator!.edges.map((edge) => edge.target),
       ),
     );
+    return null;
   }
 
   /// Where throws go, innermost last.
@@ -208,14 +224,14 @@ final class FunctionBuilder(
     HirValue Function() ifTrue,
     HirValue Function() ifFalse,
   ) {
-    final exit = Join._(HirBlock([type]), 1, const []);
+    final exit = Join._(HirBlock([type]), 1, const [], Map.of(_values));
     branch(condition, () => jump(exit, ifTrue()), () => jump(exit, ifFalse()));
     return enter(exit)!;
   }
 
   /// Does [work], which throws, unless [condition] holds.
   void unless(HirValue condition, void Function() work) {
-    final exit = Join._(HirBlock(), 0, const []);
+    final exit = Join._(HirBlock(), 0, const [], Map.of(_values));
     branch(condition, () => jump(exit), () {
       work();
       end(HirUnreachable());
@@ -331,7 +347,7 @@ final class FunctionBuilder(
       ...results,
       for (final variable in variables) rawTypeOf(variable)!,
     ]);
-    return Join._(block, results.length, variables);
+    return Join._(block, results.length, variables, Map.of(_values));
   }
 
   HirEdge _edge(Join join, [List<HirValue> results = const []]) =>
@@ -349,6 +365,9 @@ final class FunctionBuilder(
   /// Continues at [join], returning the first value its predecessors supply.
   HirValue? enter(Join join) {
     _block = join._block;
+    _values
+      ..clear()
+      ..addAll(join._values);
     for (final (i, variable) in join._variables.indexed) {
       _values[variable] = join._block.parameters[join._resultCount + i];
     }

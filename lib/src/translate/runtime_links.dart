@@ -36,9 +36,17 @@ final class RuntimeLinks(
   Iterable<LibraryElement> get _heap =>
       _program.sdk.map((library) => library.element).where(isRuntime);
 
-  /// The function called [name], or privately so in `dart:core`.
+  LibraryElement get async => library('dart:async');
+
+  /// What lets work be done later.
+  MethodElement get scheduler =>
+      async.getClass('_AsyncRun')!.getMethod('_scheduleImmediate')!;
+
+  /// The function called [name], or privately so in `dart:core` or
+  /// `dart:async`.
   TopLevelFunctionElement function(String name) =>
       _core.getTopLevelFunction('_$name') ??
+      async.getTopLevelFunction('_$name') ??
       _heap
           .map((library) => library.getTopLevelFunction(name))
           .nonNulls
