@@ -4,4 +4,5 @@ library;
 export 'src/driver/command.dart';
 export 'src/driver/compile.dart';
 export 'src/driver/files.dart';
+export 'src/driver/packaged.dart';
 export 'src/driver/sdk.dart';

@@ -5,6 +5,17 @@ import 'package:test/test.dart';
 import '../support/compiler.dart';
 
 void main() {
+  test('only what finds the package uses isolates', () {
+    final using = [
+      for (final file in Directory('lib').listSync(recursive: true))
+        if (file is File &&
+            file.path.endsWith('.dart') &&
+            file.readAsStringSync().contains("import 'dart:isolate'"))
+          file.path,
+    ];
+    expect(using, ['lib/src/driver/packaged.dart']);
+  });
+
   test('the compiler is one program that needs no other files', () {
     final directory = writeSources({
       'main.dart': "void main(List<String> names) => print('hello \$names');",

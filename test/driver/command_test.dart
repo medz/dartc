@@ -16,6 +16,7 @@ Future<({int code, String output, String errors, Directory directory})> run(
     arguments(directory.path),
     output: output,
     errors: errors,
+    sdk: packagedSdkFiles,
   );
   return (
     code: code,

@@ -17,7 +17,8 @@ Future<void> main(List<String> arguments) async {
     ..writeAsStringSync('''
 import 'dart:io';
 
-import 'package:dartc/driver.dart';
+// The rest of the driver is for where the libraries are files.
+import 'package:dartc/src/driver/command.dart';
 import 'package:dartc/source.dart';
 
 const _sdk = '${packSdkFiles(await packagedSdkFiles())}';
@@ -27,7 +28,7 @@ Future<void> main(List<String> arguments) async {
     arguments,
     output: stdout,
     errors: stderr,
-    sdk: unpackSdkFiles(_sdk),
+    sdk: () async => unpackSdkFiles(_sdk),
   );
 }
 ''');
