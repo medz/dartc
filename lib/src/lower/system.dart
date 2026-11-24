@@ -50,6 +50,19 @@ final systemFunctions = {
   'munmap': LirSignature([.i64, .i64], .i64),
 
   'pthread_self': LirSignature([], .i64),
+  'abort': LirSignature([]),
+  'malloc': LirSignature([.i64], .ptr),
+
+  /// memcpy(to, from, bytes).
+  'memcpy': LirSignature([.ptr, .ptr, .i64]),
+
+  'pthread_mutex_lock': LirSignature([.ptr]),
+  'pthread_mutex_unlock': LirSignature([.ptr]),
+  'pthread_cond_signal': LirSignature([.ptr]),
+
+  /// pthread_cond_wait(condition, mutex), and with a time.
+  'pthread_cond_wait': LirSignature([.ptr, .ptr]),
+  'pthread_cond_timedwait_relative_np': LirSignature([.ptr, .ptr, .ptr]),
 
   /// The end of a thread's stack, and its size.
   'pthread_get_stackaddr_np': LirSignature([.i64], .i64),

@@ -39,9 +39,11 @@ final class RuntimeLinks(
 
   LibraryElement get async => library('dart:async');
 
-  /// What lets work be done later.
-  MethodElement get scheduler =>
-      async.getClass('_AsyncRun')!.getMethod('_scheduleImmediate')!;
+  /// What lets work be done later, each of which needs the event loop.
+  List<ExecutableElement> get schedulers => [
+    async.getClass('_AsyncRun')!.getMethod('_scheduleImmediate')!,
+    async.getTopLevelFunction('_registerEvents')!,
+  ];
 
   /// The function type called [name], privately so in one of some libraries.
   FunctionType functionType(String name) =>

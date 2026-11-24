@@ -23,6 +23,10 @@ EmittedCode emitArm64(LirModule module) {
     maps.addAll(emitter.stackMaps);
     targets.addAll(emitter.throwTargets);
   }
+  if (functions.containsKey(callbackEntrySymbol)) {
+    functions[callbacksSymbol] = assembler.offset;
+    emitCallbacks(assembler);
+  }
   final externals = {for (final external in module.externals) external.name};
   if (externals.remove(callNativeSymbol)) {
     functions[callNativeSymbol] = assembler.offset;

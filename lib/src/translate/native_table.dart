@@ -6,6 +6,7 @@ import 'package:dartc/source.dart';
 
 import 'builder.dart';
 import 'closure.dart';
+import 'native_callbacks.dart';
 import 'native_calls.dart';
 import 'native_scope.dart';
 import 'native_types.dart';
@@ -22,7 +23,7 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
   final _addresses = <Element, HirGlobal>{};
 
   /// Where the addresses of functions are kept.
-  Iterable<HirGlobal> get globals => _addresses.values;
+  Iterable<HirGlobal> get globals => [..._addresses.values, ..._made.values];
 
   @override
   HirValue? function(
@@ -75,6 +76,72 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
     ).forward(builder.add(HirLoad(address, self)), signature, arguments, type);
     builder.finish();
     return (class_, address);
+  }
+
+  late final _callbacks = NativeCallbackTable(_scope, _unit);
+  final _made = <Object, HirGlobal>{};
+
+  @override
+  HirValue? staticCallback(
+    FunctionBuilder builder,
+    Object key,
+    (FunctionType native, FunctionType type) types,
+    HirValue Function() function,
+    HirValue? Function() exceptional,
+  ) {
+    final (native, type) = types;
+    final signature = this.types.signature(native);
+    if (signature == null) return null;
+    final global = _made[key] ??= HirGlobal('callback', .integer, 0);
+    final known = builder.add(HirLoadGlobal(global));
+    final zero = builder.add(HirConst(0));
+    return builder.choose(
+      builder.add(HirCompare(.notEqual, known, zero)),
+      .integer,
+      () => known,
+      () {
+        final callback = _callbacks.create(builder, signature, type, (
+          function: function(),
+          exceptional: exceptional(),
+          isLater: false,
+        ));
+        final made = builder.call(
+          HirCall(_scope.runtime('staticCallback'), [
+            callback,
+            builder.add(HirConst(passingOf(signature).stackBytes)),
+          ]),
+        )!;
+        builder.add(HirStoreGlobal(global, made));
+        return made;
+      },
+    );
+  }
+
+  @override
+  HirValue? callable(
+    FunctionBuilder builder,
+    (FunctionType native, FunctionType type) types,
+    HirValue function, {
+    HirValue? exceptional,
+    required bool isLater,
+  }) {
+    final (native, type) = types;
+    final signature = this.types.signature(native);
+    final list = _scope.typeList(builder, [native]);
+    if (signature == null || list == null) return null;
+    final callback = _callbacks.create(builder, signature, type, (
+      function: function,
+      exceptional: exceptional,
+      isLater: isLater,
+    ));
+    final name = isLater ? 'listeningCallable' : 'localCallable';
+    return builder.call(
+      HirCall(_scope.runtime(name), [
+        list,
+        callback,
+        builder.add(HirConst(passingOf(signature).stackBytes)),
+      ]),
+    );
   }
 
   @override

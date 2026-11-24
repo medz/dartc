@@ -154,7 +154,7 @@ final class RandomNative(int seed) {
     final types = [for (var i = _random.nextInt(11); i >= 0; i--) _type()];
     final result = _random.nextInt(types.length);
     final name = 'f$index', type = types[result];
-    final isBack = _chance(99999);
+    final isBack = _chance(3);
     final parameters = [for (final (i, t) in types.indexed) '${t.c} a$i'];
     final sums = [
       for (final (i, t) in types.indexed)

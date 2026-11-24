@@ -117,3 +117,19 @@ void Function(String)? get printToZone => _zonePrint;
 set printToZone(void Function(String)? value) {
   _zonePrint = value;
 }
+
+/// What happens outside of the program that it waits for.
+abstract interface class EventSource {
+  /// Whether there is still something to wait for.
+  bool get keepsAlive;
+
+  /// Handles what has happened first, if anything has.
+  bool runOne();
+
+  /// Waits for something to happen, for [microseconds] at most unless that is
+  /// negative.
+  void wait(int microseconds);
+
+  /// Does what is done when the program ends.
+  void end();
+}

@@ -131,6 +131,9 @@ abstract interface class ProgramScope() {
   /// The class `Function`.
   ClassElement get functionClass;
 
+  /// Says that C calls the program.
+  void addCallbacks();
+
   /// The functions of C that the program calls.
   NativeScope get natives;
 

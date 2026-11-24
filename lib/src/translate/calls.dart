@@ -202,12 +202,7 @@ final class CallTranslator(
       return _operations.call(node, name);
     }
     if (NativeTypes.isFfi(element)) {
-      final found = _natives.invoke(
-        node,
-        element,
-        (argument) =>
-            _evaluator.valueTo(argument, argument.correspondingParameter!.type),
-      );
+      final found = _natives.invoke(node, element, _nativeArgument);
       if (found != null) return found;
     }
     final function = _scope.functionOf(element.baseElement);
@@ -220,6 +215,9 @@ final class CallTranslator(
       ...given,
     ]);
   }
+
+  HirValue _nativeArgument(Expression argument) =>
+      _evaluator.value(argument, placeholder: .reference);
 
   /// Calls the static member that [node] leaves out the class of.
   HirValue? shorthand(DotShorthandInvocation node) =>
@@ -254,6 +252,10 @@ final class CallTranslator(
   }) {
     if (element == null) {
       _unsupported(node, 'objects of type ${node.staticType}');
+    }
+    if (NativeTypes.isFfi(element) &&
+        element.enclosingElement.name == 'NativeCallable') {
+      return _natives.callable(node, element.name, arguments, _nativeArgument);
     }
     if (isConst) {
       final value = node.computeConstantValue()?.value;

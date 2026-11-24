@@ -112,7 +112,12 @@ final class HirMachineState(final HirModule _module) {
         return 16;
       case .nativeFrame:
         return 24;
-      case .callBlock || .callNative:
+      case .callBlock ||
+          .callNative ||
+          .callbacks ||
+          .callbackInfo ||
+          .takePosted ||
+          .waitPosted:
         throw UnsupportedError('Calls of C functions.');
       case .write:
         (number(0) == 1 ? _output : _errors).add(_read(number(1), number(2)));

@@ -117,17 +117,41 @@ final class NativeValues(
     );
   }
 
+  /// Stores [value], the result of a function of C, as [passing] tells.
+  void storeResult(
+    HirValue block,
+    Passing passing,
+    NativeType type,
+    HirValue value,
+  ) {
+    final ready = prepare(value, type, isByAddress: false);
+    if (passing case ByAddress(:final place)) {
+      _call('copyBytes', [
+        _machine(.load64, [_at(block, place)]),
+        addressOf(ready),
+        _number(type.size),
+      ]);
+      return;
+    }
+    store(block, passing, type, ready);
+  }
+
   /// What is stored in [block] as [passing] tells, as a value of [type] that
-  /// has [dartType].
+  /// has [dartType]. What is passed on the stack is at [stack], if that is not
+  /// part of the block.
   HirValue load(
     HirValue block,
     Passing passing,
     NativeType type,
-    DartType dartType,
-  ) {
+    DartType dartType, {
+    HirValue? stack,
+  }) {
+    HirValue at(int place) => stack == null || place < CallBlock.stack
+        ? _at(block, place)
+        : _at(stack, place - CallBlock.stack);
     switch (passing) {
       case ByAddress(:final place):
-        final from = _machine(.load64, [_at(block, place)]);
+        final from = _machine(.load64, [at(place)]);
         final memory = newMemory(type);
         _call('copyBytes', [addressOf(memory), from, _number(type.size)]);
         return wrap(memory, dartType);
@@ -135,15 +159,11 @@ final class NativeValues(
         final memory = newMemory(type);
         final to = addressOf(memory);
         for (final (:offset, :size, :place) in pieces) {
-          _call('copyBytes', [
-            _at(to, offset),
-            _at(block, place),
-            _number(size),
-          ]);
+          _call('copyBytes', [_at(to, offset), at(place), _number(size)]);
         }
         return wrap(memory, dartType);
       case InPieces(:final pieces):
-        return loadScalar(_at(block, pieces.single.place), type, dartType);
+        return loadScalar(at(pieces.single.place), type, dartType);
     }
   }
 

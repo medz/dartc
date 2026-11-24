@@ -2,6 +2,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 import 'package:dartc/native.dart';
 
+import 'callbacks.dart';
 import 'dispatch.dart';
 import 'function.dart';
 import 'machine.dart';
@@ -40,6 +41,8 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
     ...layout.functions,
     ...runtimeFunctions(module, symbols),
     if (machine.writesOutput) writeFunction(),
+    if (module.callback case final callback?)
+      ...callbackFunctions(symbols[callback]!, signatureOf(callback)),
     _startFunction(module, symbols, machine),
   ];
   final called = {
@@ -62,6 +65,7 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
       ...statics.tables,
       if (machine.usesBuffer)
         LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
+      if (module.callback != null) ...[...callbackData(), callbackMessage],
       if (machine.keepsNativeFrame)
         LirData(nativeFrameSymbol, List.filled(8, 0), writable: true),
       if (machine.callsNative)
@@ -104,6 +108,7 @@ LirFunction _startFunction(
       ..add(Store(.i64, place, count))
       ..add(Store(.ptr, place, address, offset: 8));
   }
+  if (module.callback != null) setMainThread(start);
   if (machine.writesOutput) ignoreBrokenPipes(start);
   if (module.stackOverflow != null) setStackLimit(start);
   final main = Call(symbols[module.main]!, signatureOf(module.main), const []);

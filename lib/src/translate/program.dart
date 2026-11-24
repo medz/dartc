@@ -96,7 +96,7 @@ final class ProgramTranslator(final SourceProgram program)
   /// The classes of local functions and variables that are no values.
   final _localClasses = <HirClass>[];
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
-  HirFunction? _eventLoop;
+  HirFunction? _eventLoop, _callback;
 
   HirModule translate() {
     final unit = program.main.units.first;
@@ -157,6 +157,7 @@ final class ProgramTranslator(final SourceProgram program)
       stackOverflow: _stackOverflow,
       outOfMemory: _outOfMemory,
       uncaught: _uncaught,
+      callback: _callback,
     );
   }
 
@@ -188,7 +189,7 @@ final class ProgramTranslator(final SourceProgram program)
   /// Adds what the functions found so far need of the runtime.
   void _addRuntime() {
     if (_closures.closures.isNotEmpty) _dispatch.instantiate(_functionClass);
-    if (_functions.contains(_links.scheduler)) {
+    if (_links.schedulers.any(_functions.contains)) {
       _eventLoop ??= runtime('runEventLoop');
     }
     if (!_canThrow) return;
@@ -289,6 +290,9 @@ final class ProgramTranslator(final SourceProgram program)
 
   /// The class of objects that are functions.
   ClassElement get _functionClass => _core.getClass('_Closure')!;
+
+  @override
+  void addCallbacks() => _callback ??= runtime('runCallback');
 
   @override
   late final NativeTable natives = NativeTable(this, _unit);

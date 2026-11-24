@@ -38,7 +38,9 @@ final class HirFunction(
 /// The remaining functions do the work of the runtime. [allocate] gives the
 /// address of memory for an object, of the size it takes, or 0. [raise] throws
 /// an exception with its trace. [stackOverflow] and [outOfMemory] throw theirs.
-/// [uncaught] reports an exception that ends the program.
+/// [uncaught] reports an exception that ends the program. [callback] does what
+/// a function of C that the program made does, given its number, the address
+/// of the block of the call, and that of what is passed on the stack.
 final class HirModule(
   final HirFunction main,
   Iterable<HirFunction> functions, {
@@ -51,6 +53,7 @@ final class HirModule(
   final HirFunction? stackOverflow,
   final HirFunction? outOfMemory,
   final HirFunction? uncaught,
+  final HirFunction? callback,
 }) {
   final Map<HirTypeTest, Set<HirClass>> tests = .unmodifiable(tests);
   final List<HirGlobal> globals = .unmodifiable(globals);

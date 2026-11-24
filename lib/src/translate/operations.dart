@@ -67,7 +67,7 @@ final class OperationTranslator(
             argument(2, .reference),
           ]),
         );
-      case 'dataAddress':
+      case 'dataAddress' || 'registerEvents':
         final function = _scope.runtime(name);
         return _builder.call(HirCall(function, [argument(0, .reference)]));
       case 'listAt':

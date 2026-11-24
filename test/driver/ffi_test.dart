@@ -22,7 +22,9 @@ void _buildLibrary(String c, String path) {
 }
 
 /// Checks that the program [source] does what it does officially.
-Future<void> _agrees(String source, String c) async {
+///
+/// It may create too much to collect always.
+Future<void> _agrees(String source, String c, {bool isLong = false}) async {
   final directory = writeSources({});
   final library = '${directory.path}/library.dylib';
   _buildLibrary(c, library);
@@ -30,7 +32,7 @@ Future<void> _agrees(String source, String c) async {
   File(path).writeAsStringSync(source.replaceAll('LIBRARY', library));
   final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
   expect(official.stdout, isNotEmpty, reason: '${official.stderr}');
-  for (final collectsAlways in [false, true]) {
+  for (final collectsAlways in [false, if (!isLong) true]) {
     final program = '${directory.path}/program';
     writeProgram(
       await compileProgram(path, collectsAlways: collectsAlways),
@@ -55,6 +57,20 @@ void main() {
 
     test('names of types and functions', () async {
       await _agrees(namesDart, '');
+    });
+
+    test('callbacks', () async {
+      await _agrees(callbacksDart, callbacksC, isLong: true);
+      final short = callbacksDart.replaceFirst('i < 3000', 'i < 3');
+      await _agrees(short, callbacksC);
+    });
+
+    test('callbacks that throw', () async {
+      await _agrees(throwingDart, callbacksC);
+    });
+
+    test('callbacks from other threads', () async {
+      await _agrees(listeningDart, callbacksC);
     });
 
     for (var seed = 0; seed < 4; seed++) {

@@ -63,6 +63,20 @@ external void storeSingle(int address, double value);
 external double loadDouble(int address);
 external void storeDouble(int address, double value);
 
+/// Where the functions of C that the program can make are, and the words that
+/// tell about them.
+external int callbacks();
+external int callbackInfo();
+
+/// The first call from C to be done later, or 0.
+external int takePosted();
+
+/// Waits for such a call, for some microseconds at most unless that is negative.
+external void waitPosted(int microseconds);
+
+/// Lets the program wait for what [source], an `EventSource`, tells.
+external void registerEvents(Object source);
+
 /// Where the bytes of [typedData] are.
 external int dataAddress(Object typedData);
 

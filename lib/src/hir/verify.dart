@@ -93,6 +93,8 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('raise', module.raise, [.reference, .reference]);
   check('stackOverflow', module.stackOverflow, []);
   check('outOfMemory', module.outOfMemory, []);
+  final callback = module.callback;
+  check('callback', callback, [.integer, .integer, .integer], callback?.result);
   // What it gives, if anything, is not used.
   final uncaught = module.uncaught;
   check('uncaught', uncaught, [.reference], uncaught?.result);

@@ -46,6 +46,12 @@ const stackLimitSymbol = '.stackLimit';
 /// the address of that. An external one called so is part of emitted code.
 const callNativeSymbol = '.callNative';
 
+/// Functions of C, one after the other, each of which calls
+/// [callbackEntrySymbol] with its number, the address of the block of the call,
+/// and that of what is passed on the stack. They are part of emitted code where
+/// there is such a function.
+const callbacksSymbol = '.callbacks', callbackEntrySymbol = '.callbackEntry';
+
 /// Data that emitted code keeps the frame of the innermost such call in.
 const nativeFrameSymbol = '.nativeFrame';
 

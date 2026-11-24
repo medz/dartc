@@ -36,7 +36,12 @@ void verifyModule(LirModule module) {
       }
     });
   }
-  names.addAll(const [textSymbol, stackMapSymbol, handlerSymbol]);
+  names.addAll(const [
+    textSymbol,
+    stackMapSymbol,
+    handlerSymbol,
+    callbacksSymbol,
+  ]);
   for (final table in module.tables) {
     for (final function in table.functions) {
       if (module.signatures.containsKey(function)) continue;

@@ -1,5 +1,6 @@
 // What is done after `main`.
 import 'dart:_heap/objects.dart' show pause, steadyTime;
+import 'dart:_internal' show EventSource;
 
 @patch
 void _beforeScheduleMicrotaskCallback() {}
@@ -29,10 +30,32 @@ void _runImmediate() {
   callback();
 }
 
+/// What else the program waits for, if there is anything.
+EventSource? _outside;
+
+void _registerEvents(EventSource source) {
+  _outside = source;
+}
+
 /// Runs all that is left, until there is nothing to wait for.
 void _runEventLoop() {
   _runImmediate();
-  while (_EventTimer._runNext()) {}
+  while (true) {
+    if (_outside?.runOne() ?? false) {
+      _runImmediate();
+    } else if (!_EventTimer._runNext() && !_waitOutside()) {
+      break;
+    }
+  }
+  _outside?.end();
+}
+
+/// Waits for something outside, if that has to be. Returns whether it did.
+bool _waitOutside() {
+  final source = _outside;
+  if (source == null || !source.keepsAlive) return false;
+  source.wait(-1);
+  return true;
 }
 
 @patch
@@ -110,10 +133,11 @@ class _EventTimer implements Timer {
       pending.add(first);
     } else {
       if (_waiting.isEmpty) return false;
-      while (true) {
-        final rest = _waiting.first._wakeup - _now;
-        if (rest <= 0) break;
-        pause(rest > 1000 ? 1000000 : rest * 1000);
+      final rest = _waiting.first._wakeup - _now;
+      if (rest > 0) {
+        // What happens outside comes first.
+        _wait(rest > 1000 ? 1000000 : rest * 1000);
+        return true;
       }
       final now = _now;
       while (_waiting.isNotEmpty && _waiting.first._wakeup <= now) {
@@ -124,6 +148,15 @@ class _EventTimer implements Timer {
       pending[i]._run();
     }
     return true;
+  }
+
+  static void _wait(int microseconds) {
+    final source = _outside;
+    if (source == null) {
+      pause(microseconds);
+    } else {
+      source.wait(microseconds);
+    }
   }
 
   void _run() {

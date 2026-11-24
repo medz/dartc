@@ -150,3 +150,91 @@ void main() {
   final p = Pointer<Pointer<Int8>>.fromAddress(lib.lookup<Void>('abs').address); print(p.value.runtimeType); print(p.cast<Int8>().runtimeType); print(lib.lookup<Int8>('abs').runtimeType);
 }
 ''';
+
+const callbacksC = r'''
+#include <stdint.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <unistd.h>
+typedef struct { int32_t x, y; } Point;
+typedef struct { int64_t a, b, c; } Big;
+typedef struct { float a, b, c; } Vec;
+int32_t apply(int32_t (*f)(int32_t), int32_t x) { return f(x) + 1; }
+double applyD(double (*f)(float, int8_t, double), float a, int8_t b) { return f(a, b, 2.5) * 2; }
+void each(void (*f)(int32_t), int n) { for (int i = 0; i < n; i++) f(i); }
+Point applyP(Point (*f)(Point, int64_t), Point p) { p.x++; return f(p, 7); }
+Big applyB(Big (*f)(Big, Vec, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int8_t, int16_t), Big b) { Vec v = { 1.5f, 2.5f, 3.5f }; return f(b, v, 1, -2, 3, -4, 5, -6, 7, -8, 900); }
+int32_t nested(int32_t (*f)(int32_t, void *), int32_t n) { return n <= 0 ? 0 : f(n, f) + 1; }
+static void (*stored)(int32_t);
+void store(void (*f)(int32_t)) { stored = f; }
+void call(int32_t n) { stored(n); }
+int compareBytes(const void *a, const void *b);
+static void *run(void *f) { for (int i = 0; i < 5; i++) ((void (*)(int32_t, double, Point))f)(i, i / 2.0, (Point){i, -i}); return NULL; }
+void inThread(void *f, int wait) { pthread_t t; pthread_create(&t, NULL, run, f); if (wait) pthread_join(t, NULL); }
+#include <stdio.h>
+void finalize(void *p) { printf("finalize %d\n", *(int32_t *)p); fflush(stdout); }
+''';
+
+const throwingDart = r'''
+import 'dart:ffi';
+import 'dart:async';
+final lib = DynamicLibrary.open('LIBRARY');
+int dbl(int x) { if (x == 5) throw 'five'; return x * 2; }
+void bad(int x) { print(x); if (x == 1) throw StateError('one'); }
+void main() {
+  runZonedGuarded(() {
+  final apply = lib.lookupFunction<Int32 Function(Pointer<NativeFunction<Int32 Function(Int32)>>, Int32), int Function(Pointer<NativeFunction<Int32 Function(Int32)>>, int)>('apply');
+  final p = Pointer.fromFunction<Int32 Function(Int32)>(dbl, -100); print(apply(p, 4)); print(apply(p, 5)); print('after');
+  final each = lib.lookupFunction<Void Function(Pointer<NativeFunction<Void Function(Int32)>>, Int), void Function(Pointer<NativeFunction<Void Function(Int32)>>, int)>('each');
+  each(Pointer.fromFunction(bad), 3); print('done');
+  final c = NativeCallable<Int32 Function(Int32)>.isolateLocal((int x) { if (x > 0) throw 'closure'; return 1; }, exceptionalReturn: 3); print(apply(c.nativeFunction, 1)); c.close(); c.close(); try { c.nativeFunction; } catch (e) { print(e); } print(c.keepIsolateAlive);
+  }, (e, s) => print('zone $e'));
+  print('end');
+}
+''';
+
+const listeningDart = r'''
+import 'dart:ffi';
+import 'dart:async';
+final lib = DynamicLibrary.open('LIBRARY');
+final class Point extends Struct { @Int32() external int x; @Int32() external int y; }
+void main() async {
+  final run = lib.lookupFunction<Void Function(Pointer<NativeFunction<Void Function(Int32, Double, Point)>>, Int), void Function(Pointer<NativeFunction<Void Function(Int32, Double, Point)>>, int)>('inThread');
+  late NativeCallable<Void Function(Int32, Double, Point)> l; var n = 0; final done = Completer();
+  l = NativeCallable<Void Function(Int32, Double, Point)>.listener((int a, double b, Point p) { print('$a $b ${p.x} ${p.y}'); if (a == 3) scheduleMicrotask(() => print('micro')); if (++n == 5) { l.close(); done.complete(); } });
+  print(l.keepIsolateAlive); run(l.nativeFunction, 1); print('started'); await done.future; print('done');
+  final m = NativeCallable<Void Function(Int32, Double, Point)>.listener((int a, double b, Point p) { print('m $a'); if (a == 4) throw 'err'; }); m.keepIsolateAlive = false; run(m.nativeFunction, 1); await Future.delayed(Duration(milliseconds: 20)); print('not reached');
+}
+''';
+
+const callbacksDart = r'''
+import 'dart:ffi';
+import 'dart:typed_data';
+final lib = DynamicLibrary.open('LIBRARY');
+final class Point extends Struct { @Int32() external int x; @Int32() external int y; }
+final class Big extends Struct { @Int64() external int a, b, c; }
+final class Vec extends Struct { @Float() external double a, b, c; }
+int dbl(int x) => x * 2;
+double mul(double a, int b, double c) { print('$a $b $c'); return a * b + c; }
+Point moved(Point p, int n) { final garbage = [for (var i = 0; i < 100; i++) Uint8List(1000)]; print('${p.x} ${p.y} $n ${garbage.length}'); return Struct.create<Point>()..x = p.y..y = p.x + n; }
+Big bigger(Big b, Vec v, int c, int d, int e, int f, int g, int h, int i, int j, int k) { print('${b.a} ${b.b} ${b.c} ${v.a} ${v.b} ${v.c} $c $d $e $f $g $h $i $j $k'); return Struct.create<Big>()..a = b.c..b = b.a + c..c = k; }
+typedef NestedC = Int32 Function(Int32, Pointer<Void>);
+final nested = lib.lookupFunction<Int32 Function(Pointer<NativeFunction<NestedC>>, Int32), int Function(Pointer<NativeFunction<NestedC>>, int)>('nested');
+int back(int n, Pointer<Void> self) { final l = List.generate(50, (i) => 'x$i'); if (n == 3) { try { throw l.last; } catch (e) { print('caught $e'); } } final r = nested(self.cast(), n - 1); return r + l.length; }
+int cmp(Pointer<Void> a, Pointer<Void> b) => a.cast<Int32>().value - b.cast<Int32>().value;
+@Native<Void Function(Pointer<Void>, Size, Size, Pointer<NativeFunction<Int Function(Pointer<Void>, Pointer<Void>)>>)>() external void qsort(Pointer<Void> p, int n, int s, Pointer<NativeFunction<Int Function(Pointer<Void>, Pointer<Void>)>> f);
+@Native<Pointer<Void> Function(Size)>() external Pointer<Void> malloc(int n);
+void main() {
+  final apply = lib.lookupFunction<Int32 Function(Pointer<NativeFunction<Int32 Function(Int32)>>, Int32), int Function(Pointer<NativeFunction<Int32 Function(Int32)>>, int)>('apply');
+  print(apply(Pointer.fromFunction(dbl, 0), 21)); var base = 100; final c = NativeCallable<Int32 Function(Int32)>.isolateLocal((int x) => base += x, exceptionalReturn: -1); print(apply(c.nativeFunction, 5)); print(apply(c.nativeFunction, 6)); print(base); c.close();
+  print(lib.lookupFunction<Double Function(Pointer<NativeFunction<Double Function(Float, Int8, Double)>>, Float, Int8), double Function(Pointer<NativeFunction<Double Function(Float, Int8, Double)>>, double, int)>('applyD')(Pointer.fromFunction(mul, 0.0), 1.5, -7));
+  final p = Struct.create<Point>()..x = 3..y = 4; final q = lib.lookupFunction<Point Function(Pointer<NativeFunction<Point Function(Point, Int64)>>, Point), Point Function(Pointer<NativeFunction<Point Function(Point, Int64)>>, Point)>('applyP')(Pointer.fromFunction(moved), p); print('${q.x} ${q.y} ${p.x}');
+  final b = Struct.create<Big>()..a = 1..b = 2..c = 3; final b2 = lib.lookupFunction<Big Function(Pointer<NativeFunction<Big Function(Big, Vec, Int8, Int8, Int8, Int8, Int8, Int8, Int8, Int8, Int16)>>, Big), Big Function(Pointer<NativeFunction<Big Function(Big, Vec, Int8, Int8, Int8, Int8, Int8, Int8, Int8, Int8, Int16)>>, Big)>('applyB')(Pointer.fromFunction(bigger), b); print('${b2.a} ${b2.b} ${b2.c}');
+  print(nested(Pointer.fromFunction(back, -1), 6)); final arr = malloc(40).cast<Int32>(); arr.asTypedList(10).setAll(0, [5, 3, 9, 1, 7, 2, 8, 0, 6, 4]); qsort(arr.cast(), 10, 4, Pointer.fromFunction(cmp, 0)); print(arr.asTypedList(10)); print(Pointer.fromFunction<Int32 Function(Int32)>(dbl, 0).asFunction<int Function(int)>()(8));
+  lib.lookupFunction<Void Function(Pointer<NativeFunction<Void Function(Int32)>>), void Function(Pointer<NativeFunction<Void Function(Int32)>>)>('store')(NativeCallable<Void Function(Int32)>.isolateLocal((int n) => print('stored $n')).let((c) { c.keepIsolateAlive = false; return c.nativeFunction; })); lib.lookupFunction<Void Function(Int32), void Function(int)>('call')(77);
+  for (var i = 0; i < 3000; i++) { final k = NativeCallable<Int32 Function(Int32)>.isolateLocal((int x) => x + i, exceptionalReturn: 0); if (apply(k.nativeFunction, 1) != i + 2) print('wrong $i'); k.close(); }
+  final fin = NativeFinalizer(lib.lookup('finalize')); final o = Big2(); fin.attach(o, malloc(4).cast<Int32>().let((m) { m.value = 5; return m.cast(); })); fin.attach(o, nullptr, detach: o); fin.detach(o);
+}
+class Big2 implements Finalizable {}
+extension<T> on T { R let<R>(R Function(T) f) => f(this); }
+''';

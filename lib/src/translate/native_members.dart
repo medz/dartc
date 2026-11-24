@@ -68,6 +68,8 @@ final class NativeMembers(
     switch ((owner, element.name)) {
       case (null, 'sizeOf'):
         return _number(_type(node, _typeArguments(node).single).size);
+      case ('Pointer', 'fromFunction'):
+        return _fromFunction(node, valueOf);
       case ('Struct' || 'Union', 'create'):
         return _create(node, valueOf);
       case ('Native', 'addressOf'):
@@ -89,6 +91,63 @@ final class NativeMembers(
             : _values.pointer(address, node.staticType!);
     }
     return null;
+  }
+
+  /// How Dart has a function of C of type [native].
+  FunctionType _ownType(AstNode node, FunctionType native, DartType? given) =>
+      given is FunctionType
+      ? given
+      : _unsupported(node, 'a C function of type $native');
+
+  HirValue _fromFunction(
+    InvocationExpression node,
+    HirValue Function(Expression argument) valueOf,
+  ) {
+    final native = _function(node, _typeArguments(node).single);
+    final [function, ...rest] = [
+      for (final argument in node.argumentList.arguments)
+        argument.argumentExpression,
+    ];
+    final type = _ownType(node, native, function.staticType);
+    final address = _natives.staticCallback(
+      _builder,
+      node,
+      (native, type),
+      () => valueOf(function),
+      () => rest.isEmpty ? null : valueOf(rest.single),
+    );
+    return address == null
+        ? _unsupported(node, 'a C function of type $native')
+        : _values.pointer(address, node.staticType!);
+  }
+
+  /// Creates an object of `NativeCallable` with the constructor called [name].
+  HirValue callable(
+    Expression node,
+    String? name,
+    ArgumentList arguments,
+    HirValue Function(Expression argument) valueOf,
+  ) {
+    final isLater = name == 'listener';
+    if (!isLater && name != 'isolateLocal') _unsupported(node, 'this callable');
+    final native = _function(node, _argument(node.staticType!));
+    Expression? function, exceptional;
+    for (final argument in arguments.arguments) {
+      if (argument is NamedArgument) {
+        exceptional = argument.argumentExpression;
+      } else {
+        function = argument.argumentExpression;
+      }
+    }
+    final type = _ownType(node, native, function!.staticType);
+    return _natives.callable(
+          _builder,
+          (native, type),
+          valueOf(function),
+          exceptional: exceptional == null ? null : valueOf(exceptional),
+          isLater: isLater,
+        ) ??
+        _unsupported(node, 'a C function of type $native');
   }
 
   HirValue _create(

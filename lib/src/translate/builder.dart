@@ -209,6 +209,14 @@ final class FunctionBuilder(
       ? end(HirThrow(exception, trace))
       : jumpWith(_handlers.last, [exception, trace]);
 
+  /// A block where throws can go.
+  Join handler() => Join._(
+    HirBlock(const [.reference, .reference]),
+    2,
+    const [],
+    Map.of(_values),
+  );
+
   /// Does [body], where throws go to [handler], which receives the exception
   /// and its trace.
   void within(Join handler, void Function() body) {

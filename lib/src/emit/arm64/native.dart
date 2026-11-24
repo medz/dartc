@@ -3,9 +3,8 @@ import 'package:dartc/native.dart';
 
 import 'assembler.dart';
 
-/// Registers that calls keep, for the block and for the frame of the call
-/// before.
-const _block = 19, _outer = 20;
+/// A register that calls keep, for the block.
+const _block = 19;
 
 const _scratch = 9, _from = 10, _to = 11, _word = 12, _function = 16;
 const _saved = 16;
@@ -22,10 +21,10 @@ void emitNativeCall(Arm64Assembler assembler) {
     ..constant(_scratch, _saved)
     ..subStack(_scratch)
     ..store(_block, stack, 0)
-    ..store(_outer, stack, 8)
     ..mov(_block, 0)
     ..address(_scratch, nativeFrameSymbol)
-    ..load(_outer, _scratch, 0)
+    ..load(_word, _scratch, 0)
+    ..store(_word, stack, 8)
     ..store(frame, _scratch, 0);
   _copyStack(assembler);
   for (var i = 0; i < 8; i++) {
@@ -44,14 +43,14 @@ void emitNativeCall(Arm64Assembler assembler) {
     assembler.store(i, _block, CallBlock.resultFloats + i * 8, float: true);
   }
   assembler
-    ..address(_scratch, nativeFrameSymbol)
-    ..store(_outer, _scratch, 0)
-    // Back below the frame, where the registers are.
+    // Back below the frame, where that of the call before is.
     ..constant(_scratch, _saved)
     ..sub(_scratch, frame, _scratch)
     ..addImmediate(stack, _scratch, 0)
+    ..load(_word, stack, 8)
+    ..address(_scratch, nativeFrameSymbol)
+    ..store(_word, _scratch, 0)
     ..load(_block, stack, 0)
-    ..load(_outer, stack, 8)
     ..addImmediate(stack, frame, 0)
     ..popFrame()
     ..ret();
@@ -76,4 +75,44 @@ void _copyStack(Arm64Assembler assembler) {
     ..sub(bytes, bytes, _scratch)
     ..jump(loop)
     ..bind(done);
+}
+
+/// Emits the functions of C that programs can make.
+void emitCallbacks(Arm64Assembler assembler) {
+  const frame = Arm64Assembler.frame, stack = Arm64Assembler.stack;
+  const number = 16;
+  final common = Label();
+  for (var i = 0; i < Callbacks.count; i++) {
+    assembler
+      ..movz(number, i, 0)
+      ..jump(common);
+  }
+  assembler
+    ..bind(common)
+    ..pushFrame()
+    ..addImmediate(frame, stack, 0)
+    ..constant(_scratch, CallBlock.stack)
+    ..subStack(_scratch);
+  for (var i = 0; i < 8; i++) {
+    assembler
+      ..store(i, stack, CallBlock.words + i * 8)
+      ..store(i, stack, CallBlock.floats + i * 8, float: true);
+  }
+  assembler
+    ..store(8, stack, CallBlock.resultAddress)
+    ..mov(0, number)
+    ..addImmediate(1, stack, 0)
+    // Above the saved frame and return addresses.
+    ..addImmediate(2, frame, 16)
+    ..call(callbackEntrySymbol);
+  for (var i = 0; i < 2; i++) {
+    assembler.load(i, stack, CallBlock.resultWords + i * 8);
+  }
+  for (var i = 0; i < 4; i++) {
+    assembler.load(i, stack, CallBlock.resultFloats + i * 8, float: true);
+  }
+  assembler
+    ..addImmediate(stack, frame, 0)
+    ..popFrame()
+    ..ret();
 }

@@ -2,6 +2,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
 import 'dispatch.dart';
+import 'callbacks.dart';
 import 'output.dart';
 import 'statics.dart';
 import 'system.dart';
@@ -40,6 +41,8 @@ final class MachineLowering(
     .stackMaps: stackMapSymbol,
     .classTable: classTableSymbol,
     .nativeFrame: nativeFrameSymbol,
+    .callbacks: callbacksSymbol,
+    .callbackInfo: callbackInfoSymbol,
   };
 
   /// How some read and write memory.
@@ -93,13 +96,8 @@ final class MachineLowering(
       return null;
     }
     switch (op) {
-      case .callBlock:
-        callsNative = true;
-        return symbol(callBlockSymbol);
-      case .callNative:
-        callsNative = true;
-        block.add(Call(callNativeSymbol, callNativeSignature, [address()]));
-        return null;
+      case .takePosted || .waitPosted || .callBlock || .callNative:
+        return _callC(block, op, arguments);
       case .mapMemory:
         return _map(block, arguments.single);
       case .unmapMemory:
@@ -152,6 +150,27 @@ final class MachineLowering(
         return number(collectsAlways ? 1 : 0);
       default:
         throw StateError('No code for ${op.name}.');
+    }
+  }
+
+  /// Calls functions of C, or handles calls from there.
+  LirValue? _callC(LirBlock block, HirMachineOp op, List<LirValue> arguments) {
+    switch (op) {
+      case .takePosted:
+        return block.add(Call(takePostedSymbol, LirSignature([], .i64), []));
+      case .waitPosted:
+        block.add(Call(waitPostedSymbol, LirSignature([.i64]), arguments));
+        return null;
+      case .callBlock:
+        callsNative = true;
+        return block.add(
+          Convert(.ptrToInt, block.add(SymbolAddress(callBlockSymbol))),
+        );
+      default:
+        callsNative = true;
+        final address = block.add(Convert(.intToPtr, arguments.single));
+        block.add(Call(callNativeSymbol, callNativeSignature, [address]));
+        return null;
     }
   }
 

@@ -27,6 +27,27 @@ abstract interface class NativeScope() {
   /// A function that makes structs of [type] of what they are in, and where.
   HirValue maker(FunctionBuilder builder, DartType type);
 
+  /// The address of the function of C that calls [function], which is constant,
+  /// made once for each [key]. It gives [exceptional] where that throws, if it
+  /// gives anything.
+  HirValue? staticCallback(
+    FunctionBuilder builder,
+    Object key,
+    (FunctionType native, FunctionType type) types,
+    HirValue Function() function,
+    HirValue? Function() exceptional,
+  );
+
+  /// An object for a function of C that calls [function], at once unless it
+  /// [isLater].
+  HirValue? callable(
+    FunctionBuilder builder,
+    (FunctionType native, FunctionType type) types,
+    HirValue function, {
+    HirValue? exceptional,
+    required bool isLater,
+  });
+
   /// Lets [builder] do what the function [element], which is declared for one
   /// of C, does. Returns whether that is supported.
   bool define(FunctionBuilder builder, ExecutableElement element);

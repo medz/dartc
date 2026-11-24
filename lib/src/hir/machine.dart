@@ -27,6 +27,15 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   callBlock([], .integer),
   callNative([.integer], null),
 
+  /// Where the functions of C that programs can make are, and the words that
+  /// tell about them.
+  callbacks([], .integer),
+  callbackInfo([], .integer),
+
+  /// The first call from C to be done later, or 0, and waiting for one.
+  takePosted([], .integer),
+  waitPosted([.integer], null),
+
   /// Where the frame of the innermost call of a C function is.
   nativeFrame([], .integer),
   outputBuffer([], .integer),
