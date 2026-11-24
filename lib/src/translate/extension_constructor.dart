@@ -5,6 +5,7 @@ import 'package:dartc/hir.dart';
 
 import 'builder.dart';
 import 'conversions.dart';
+import 'primary.dart';
 import 'scope.dart';
 import 'statement.dart';
 import 'types.dart';
@@ -27,28 +28,27 @@ final class ExtensionConstructorTranslator(
   ///
   /// That is [owner] itself for one made of its name.
   void translate(ExtensionTypeElement owner, AstNode node) {
+    final (:initializers, :body) = partsOf(node);
     final value = node is ConstructorDeclaration
-        ? _declared(owner, node)
+        ? _converted(_initial(node, initializers))
         : _converted(_builder.read(_primary(owner)));
+    if (body != null && body is! EmptyFunctionBody) {
+      _builder
+        ..setReceiver(value, null)
+        ..thisType = _type
+        ..fallback = () => value;
+      _statements.body(body);
+    }
     _builder.end(HirReturn(value));
   }
 
   static FormalParameterElement _primary(ExtensionTypeElement owner) =>
       owner.primaryConstructor.formalParameters.single;
 
-  HirValue _declared(ExtensionTypeElement owner, ConstructorDeclaration node) {
-    final value = _converted(_initial(node));
-    if (node.body is! EmptyFunctionBody) {
-      _builder
-        ..setReceiver(value, null)
-        ..thisType = _type
-        ..fallback = () => value;
-      _statements.body(node.body);
-    }
-    return value;
-  }
-
-  HirValue _initial(ConstructorDeclaration node) {
+  HirValue _initial(
+    ConstructorDeclaration node,
+    List<ConstructorInitializer> initializers,
+  ) {
     final expressions = _statements.expressions;
     HirValue? value;
     for (final parameter in node.declaredFragment!.element.formalParameters) {
@@ -56,7 +56,7 @@ final class ExtensionConstructorTranslator(
         value = _builder.read(parameter);
       }
     }
-    for (final initializer in node.initializers) {
+    for (final initializer in initializers) {
       switch (initializer) {
         case ConstructorFieldInitializer(:final expression):
           value = expressions.valueTo(expression, _type);

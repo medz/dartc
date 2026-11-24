@@ -7,6 +7,7 @@ import 'classes.dart';
 import 'conversions.dart';
 import 'levels.dart';
 import 'members.dart';
+import 'primary.dart';
 import 'scope.dart';
 import 'statement.dart';
 import 'types.dart';
@@ -21,11 +22,11 @@ final class ConstructorTranslator(
   /// Sets fields, then runs the superclass's constructor, then the body.
   void initializer(ConstructorElement element) {
     final class_ = element.enclosingElement;
-    final node = _declarations[element]?.$2 as ConstructorDeclaration?;
+    final parts = partsOf(_declarations[element]?.$2);
     if (element.isExternal) {
       throw _declarations.unsupported(element, 'external constructors');
     }
-    final initializers = node?.initializers ?? const <ConstructorInitializer>[];
+    final (:initializers, :body) = parts;
     for (final redirect
         in initializers.whereType<RedirectingConstructorInvocation>()) {
       _run(redirect.element!, redirect.argumentList, element);
@@ -71,9 +72,7 @@ final class ConstructorTranslator(
     } else {
       _setMixinFields(level);
     }
-    if (node != null && node.body is! EmptyFunctionBody) {
-      _statements.body(node.body);
-    }
+    if (body != null && body is! EmptyFunctionBody) _statements.body(body);
   }
 
   static bool _isObject(ConstructorElement element) =>
@@ -96,8 +95,11 @@ final class ConstructorTranslator(
         _builder.add(HirStore(isSet, _builder.receiver!, no));
         continue;
       }
-      final declaration = _declarations[field]!.$2 as VariableDeclaration;
-      final initializer = declaration.initializer;
+      // A parameter that declares a field has no initializer.
+      final initializer = switch (_declarations[field]?.$2) {
+        VariableDeclaration(:final initializer) => initializer,
+        _ => null,
+      };
       if (initializer == null) continue;
       _store(field, _statements.expressions.valueTo(initializer, field.type));
     }

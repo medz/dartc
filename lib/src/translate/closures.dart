@@ -25,11 +25,10 @@ final class ClosureTranslator(
 
   /// Calls a method of an object, which is of a type.
   final HirValue? Function(
-    Expression node,
     HirValue receiver,
     DartType? type,
     MethodElement element,
-    ArgumentList list,
+    FunctionExpressionInvocation node,
   )
   callMethod,
 ) {
@@ -165,7 +164,7 @@ final class ClosureTranslator(
     if (element is MethodElement && isExtensionMember(element)) {
       final value = _valueOf(function, node);
       final type = _typeOf(function);
-      return callMethod(node, value, type, element, node.argumentList);
+      return callMethod(value, type, element, node);
     }
     if (type is FunctionType) {
       return call(
@@ -176,13 +175,8 @@ final class ClosureTranslator(
       );
     }
     if (element is MethodElement && classOf(type) != null) {
-      return callMethod(
-        node,
-        _evaluator.valueAs(function, .reference),
-        type,
-        element,
-        node.argumentList,
-      );
+      final object = _evaluator.valueAs(function, .reference);
+      return callMethod(object, type, element, node);
     }
     return _dynamics.call(
       node,

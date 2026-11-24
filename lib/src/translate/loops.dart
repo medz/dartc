@@ -7,7 +7,6 @@ import 'assigned.dart';
 import 'builder.dart';
 import 'calls.dart';
 import 'conversions.dart';
-import 'describe.dart';
 import 'late_locals.dart';
 import 'scope.dart';
 import 'types.dart';
@@ -24,6 +23,10 @@ final class LoopTranslator(
   /// Assigns what a pattern sets of a value of a type.
   final void Function(DartPattern pattern, HirValue value, DartType type)
   _destructure,
+
+  /// Assigns a value of a type to what is named.
+  final void Function(SimpleIdentifier name, HirValue value, DartType type)
+  _assignNamed,
 ) {
   late final _conversions = Conversions(_scope, _builder);
 
@@ -196,8 +199,8 @@ final class LoopTranslator(
           )
           when _builder.typeOf(element) != null:
         variable = element;
-      default:
-        _unsupported(parts, describe(parts));
+      case ForEachPartsWithIdentifier(:final identifier):
+        return _assignNamed(identifier, value, type);
     }
     final given =
         _conversions.cast(value, type, variable.type) ??

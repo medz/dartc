@@ -14,6 +14,7 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
     for (final library in libraries) {
       for (final unit in library.units) {
         for (final declaration in unit.ast.declarations) {
+          _addPrimary(unit, declaration);
           switch (declaration) {
             case FunctionDeclaration(:final declaredFragment?):
               _nodes[declaredFragment.element] = (unit, declaration);
@@ -51,6 +52,18 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
           }
         }
       }
+    }
+  }
+
+  void _addPrimary(SourceUnit unit, AstNode declaration) {
+    final part = switch (declaration) {
+      ClassDeclaration(:final namePart) ||
+      EnumDeclaration(:final namePart) ||
+      ExtensionTypeDeclaration(:final namePart) => namePart,
+      _ => null,
+    };
+    if (part case PrimaryConstructorDeclaration(:final declaredFragment?)) {
+      _nodes[declaredFragment.element] = (unit, declaration);
     }
   }
 
@@ -158,9 +171,6 @@ final class ClassTable(final Declarations _declarations) {
     if (plainType(element) case final plain?) {
       return HirClass(element.displayName, null, [HirField('value', plain)]);
     }
-    if (element is ClassElement && element.primaryConstructor != null) {
-      throw unsupported('primary constructors');
-    }
     final below = superLevel?.element;
     final isRoot =
         below == null || below is ClassElement && below.isDartCoreObject;
@@ -225,7 +235,8 @@ final class ClassTable(final Declarations _declarations) {
       class_.fields.where(
         (field) =>
             !field.isStatic &&
-            field.isOriginDeclaration &&
+            (field.isOriginDeclaration ||
+                field.isOriginDeclaringFormalParameter) &&
             !field.isAbstract &&
             !field.isExternal,
       );

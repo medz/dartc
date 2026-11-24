@@ -19,6 +19,7 @@ import '../image/support.dart' show skipExecution;
 import '../lower/support.dart';
 import '../support/new_compiler.dart';
 import 'random_dart.dart';
+import 'random_patterns.dart';
 
 /// Exit codes of the official runtime and of the compiled program.
 Future<(int, int)> _both(String source) async {
@@ -41,18 +42,20 @@ String _caught(String body) =>
     '  on TypeError catch (e) { print(e); }\n'
     "  on Error { print('!E'); }\n";
 
-/// Runs random functions everywhere and compares what they print.
-Future<void> _compareRandom(int seed) async {
+/// A program that prints what random functions give.
+String _randomFunctions(int seed) {
   final generator = RandomDart(seed);
   final functions = generator.generate(25);
   final checks = [
     for (final (call, _) in generator.calls) _caught('print($call);'),
   ];
-  final directory = writeSources({
-    'main.dart': '$functions\nvoid main() {\n${checks.join()}}',
-  });
+  return '$functions\nvoid main() {\n${checks.join()}}';
+}
+
+/// Runs [source] everywhere and compares what it prints.
+Future<void> _compareRandom(String source, String reason) async {
+  final directory = writeSources({'main.dart': source});
   final path = '${directory.path}/main.dart';
-  final reason = 'seed $seed';
   final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
   expect(official.exitCode, 0, reason: '$reason: ${official.stderr}');
   final sdk = await packagedSdk();
@@ -145,7 +148,13 @@ void main() {
 
   for (var seed = 0; seed < 12; seed++) {
     test('random functions, seed $seed', () async {
-      await _compareRandom(seed);
+      await _compareRandom(_randomFunctions(seed), 'seed $seed');
+    }, skip: skipExecution);
+  }
+
+  for (var seed = 0; seed < 4; seed++) {
+    test('random patterns, seed $seed', () async {
+      await _compareRandom(RandomPatterns(seed).generate(), 'seed $seed');
     }, skip: skipExecution);
   }
 
@@ -194,7 +203,7 @@ void main() {
   test('the command line reports problems and its usage', () async {
     final directory = writeSources({
       'good.dart': "import 'dart:io';\nvoid main() { exit(9); }",
-      'bad.dart': 'void main() {\n  (1, 2);\n}',
+      'bad.dart': 'external void f();\nvoid main() {\n  f();\n}',
     });
     Future<ProcessResult> run(List<String> arguments) => Process.run(
       '$hostSdk/bin/dart',
@@ -209,8 +218,8 @@ void main() {
     expect(bad.exitCode, 1);
     expect(
       bad.stderr,
-      '${directory.path}/bad.dart:2:3: '
-      'Not supported yet: record literal.\n',
+      '${directory.path}/bad.dart:1:18: '
+      'Not supported yet: a function without a body.\n',
     );
     expect(File(output).existsSync(), isFalse);
     expect((await run([])).exitCode, 64);

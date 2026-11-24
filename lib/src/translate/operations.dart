@@ -20,7 +20,7 @@ final class OperationTranslator(
   };
 
   /// The result of [node], which calls the operation [name], if it has one.
-  HirValue? call(MethodInvocation node, String name) {
+  HirValue? call(InvocationExpression node, String name) {
     final arguments = node.argumentList.arguments;
     HirValue argument(int index, HirType type) =>
         _evaluator.valueAs(arguments[index].argumentExpression, type);
@@ -95,7 +95,7 @@ final class OperationTranslator(
 
   /// An array of [element] with the type arguments that [node] gives.
   HirValue _newArray(
-    MethodInvocation node,
+    InvocationExpression node,
     ClassElement element,
     HirValue length,
   ) {

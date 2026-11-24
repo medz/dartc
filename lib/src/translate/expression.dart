@@ -45,8 +45,14 @@ final class ExpressionTranslator(
     this,
     (target, node) => calls.object(target, node),
     (target) => calls.receiverType(target),
-    (node, receiver, type, element, list) =>
-        calls.method(node, receiver, type, element, list),
+    (receiver, type, element, node) => calls.method(
+      node,
+      receiver,
+      type,
+      element,
+      node.argumentList,
+      types: node.typeArgumentTypes,
+    ),
   );
   late final LateTranslator lates = LateTranslator(_scope, _builder);
   late final _chains = ChainTranslator(_builder);
@@ -89,6 +95,7 @@ final class ExpressionTranslator(
     calls,
     lates,
     (pattern, value, type) => patterns.destructure(pattern, value, type),
+    (name, value, type) => _places.writeNamed(name, value, type),
   );
   late final _literals = LiteralTranslator(
     _scope,
@@ -124,6 +131,8 @@ final class ExpressionTranslator(
     switch (inner) {
       case MethodInvocation():
         calls.invocation(inner);
+      case DotShorthandInvocation():
+        calls.shorthand(inner);
       case FunctionExpressionInvocation():
         closures.invocation(inner);
       case ConditionalExpression(:final DartType staticType)
@@ -230,24 +239,30 @@ final class ExpressionTranslator(
         return _references.constructor(inner, constructorName);
       case ImplicitCallReference(:final expression, :final element):
         if (element == null) _unsupported(inner, describe(inner));
-        return calls.tearOff(
+        final method = calls.tearOff(
           inner,
           calls.object(expression, inner),
           expression.staticType,
           element,
         );
+        return _references.withTypes(
+          inner,
+          method,
+          inner.typeArgumentTypes,
+          type!,
+        );
       case IsExpression():
         return _isExpression(inner);
       case AsExpression():
         return _asExpression(inner);
-      case InstanceCreationExpression():
-        return calls.creation(inner);
+      case InstanceCreationExpression() ||
+          DotShorthandConstructorInvocation() ||
+          DotShorthandInvocation() ||
+          DotShorthandPropertyAccess() ||
+          MethodInvocation():
+        return _invocation(inner, placeholder);
       case IndexExpression():
         return calls.index(inner);
-      case MethodInvocation():
-        return calls.invocation(inner) ??
-            _neverResult(inner.methodName.element, placeholder) ??
-            _unsupported(inner, 'using a value of type $type');
       case CascadeExpression():
         return _cascade(inner);
       case PatternAssignment(:final pattern, :final expression):
@@ -256,6 +271,37 @@ final class ExpressionTranslator(
         return result;
       case SwitchExpression():
         return patterns.switchExpression(inner, _resultType(inner));
+      default:
+        _unsupported(inner, describe(inner));
+    }
+  }
+
+  /// Calls something by its name, or creates an object.
+  HirValue _invocation(Expression inner, HirType placeholder) {
+    HirValue result(HirValue? given, Element? element) =>
+        given ??
+        _neverResult(element, placeholder) ??
+        _unsupported(inner, 'using a value of type ${inner.staticType}');
+    switch (inner) {
+      case InstanceCreationExpression(
+            constructorName: ConstructorName(:final element),
+            :final argumentList,
+            :final isConst,
+          ) ||
+          DotShorthandConstructorInvocation(
+            :final element,
+            :final argumentList,
+            :final isConst,
+          ):
+        return calls.creation(inner, element, argumentList, isConst: isConst);
+      case DotShorthandInvocation(:final memberName):
+        return result(calls.shorthand(inner), memberName.element);
+      case DotShorthandPropertyAccess(
+        propertyName: SimpleIdentifier(:final element),
+      ):
+        return _statics.read(inner, element);
+      case MethodInvocation(:final methodName):
+        return result(calls.invocation(inner), methodName.element);
       default:
         _unsupported(inner, describe(inner));
     }
@@ -337,6 +383,8 @@ final class ExpressionTranslator(
     switch (inner) {
       case MethodInvocation():
         calls.invocation(inner);
+      case DotShorthandInvocation():
+        calls.shorthand(inner);
       case ThrowExpression(:final expression):
         _throw(expression);
       case FunctionExpressionInvocation():

@@ -308,6 +308,7 @@ final class PatternTranslator(
     final (:value, :type, :path) = matched;
     final names = [for (final field in pattern.fields) ?field.effectiveName]
       ..sort();
+    final object = _conversions.coerce(value, .reference);
     final own = boundOf(type), count = pattern.fields.length - names.length;
     final fits =
         own is RecordType &&
@@ -315,7 +316,6 @@ final class PatternTranslator(
         own.positionalFields.length == count &&
         '${fieldNames(own)}' == '$names';
     if (!fits) {
-      final object = _conversions.coerce(value, .reference);
       final test = _builder.call(
         HirCall(_scope.runtime('hasShape'), [
           object,
@@ -332,7 +332,7 @@ final class PatternTranslator(
       final name = field.effectiveName;
       final index = name == null ? position++ : count + names.indexOf(name);
       final element = _builder.add(
-        HirLoadElement(.reference, value, _builder.add(HirConst(index))),
+        HirLoadElement(.reference, object, _builder.add(HirConst(index))),
       );
       final found = fits
           ? fieldTypes(own)[index]

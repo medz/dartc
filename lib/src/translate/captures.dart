@@ -3,6 +3,7 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 
 import 'assigned.dart';
+import 'primary.dart';
 
 /// Which variables the closures inside one declaration use.
 ///
@@ -150,6 +151,9 @@ final class _Captures() extends RecursiveAstVisitor<void> {
 }
 
 /// The member or top-level declaration that [node] is part of.
+///
+/// Where a field of a class with a primary constructor is initialized, whose
+/// parameters that can use, it is the class.
 AstNode declarationOf(AstNode node) {
   var found = node;
   while (found.parent is! CompilationUnit &&
@@ -157,5 +161,7 @@ AstNode declarationOf(AstNode node) {
       found.parent != null) {
     found = found.parent!;
   }
-  return found;
+  final owner = found.parent?.parent;
+  final isPart = found is FieldDeclaration || found is PrimaryConstructorBody;
+  return isPart && hasPrimary(owner) ? owner! : found;
 }

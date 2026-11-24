@@ -51,12 +51,22 @@ final class ReferenceTranslator(
       return _instantiate(node, element.baseElement, node.staticType!);
     }
     final types = node.typeArgumentTypes ?? const [];
-    final type = node.staticType;
+    return withTypes(node, valueOf(name), types, node.staticType!);
+  }
+
+  /// The generic [function] with [types], if there are any, which then is of
+  /// [type].
+  HirValue withTypes(
+    Expression node,
+    HirValue function,
+    List<DartType> types,
+    DartType type,
+  ) {
+    if (types.isEmpty) return function;
     final list = _scope.typeList(_builder, types);
-    if (types.isEmpty || type is! FunctionType || list == null) {
+    if (type is! FunctionType || list == null) {
       _unsupported(node, describe(node));
     }
-    final function = valueOf(name);
     return _scope.partial(_builder, function, (list, types.length), type);
   }
 

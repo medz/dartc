@@ -149,6 +149,37 @@ final class PlaceTranslator(
     );
   }
 
+  /// Assigns [value], of [type], to the variable or setter that [name] is.
+  void writeNamed(SimpleIdentifier name, HirValue value, DartType type) {
+    final element = name.element;
+    final setter = switch (element) {
+      SetterElement() => element,
+      GetterElement(:final variable) => variable.setter,
+      PropertyInducingElement(:final setter) => setter,
+      _ => null,
+    };
+    if (setter == null) _unsupported(name, 'assignment to ${describe(name)}');
+    final to = setter.formalParameters.single.type;
+    final found =
+        _conversions.cast(value, type, to) ??
+        _unsupported(name, 'testing for $to');
+    write(
+      setter.isStatic
+          ? _Static(name, null, setter, to)
+          : _Member(
+              name,
+              _builder.receiver!,
+              false,
+              _calls.receiverType(null),
+              null,
+              setter,
+              const [],
+              to,
+            ),
+      found,
+    );
+  }
+
   HirValue read(Place place) => switch (place) {
     _Dynamic(:final node, :final object, :final name, index: null) =>
       _dynamics.get(node, object, name),

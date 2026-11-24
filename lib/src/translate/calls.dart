@@ -180,10 +180,11 @@ final class CallTranslator(
         : type;
   }
 
-  HirValue? _static(MethodInvocation node, ExecutableElement element) {
+  HirValue? _static(InvocationExpression node, Element? element) {
     final isFunction =
         element is TopLevelFunctionElement || element is MethodElement;
     if (!isFunction) _unsupported(node, describe(node));
+    element as ExecutableElement;
     final arguments = node.argumentList.arguments;
     switch (_coreName(element)) {
       case 'dart:io exit':
@@ -206,6 +207,10 @@ final class CallTranslator(
     ]);
   }
 
+  /// Calls the static member that [node] leaves out the class of.
+  HirValue? shorthand(DotShorthandInvocation node) =>
+      _static(node, node.memberName.element);
+
   static String? _coreName(ExecutableElement element) =>
       element is TopLevelFunctionElement && element.library.isInSdk
       ? '${element.library.uri} ${element.name}'
@@ -227,19 +232,23 @@ final class CallTranslator(
   }
 
   /// Creates an object, or calls a factory.
-  HirValue creation(InstanceCreationExpression node) {
-    final element = node.constructorName.element;
+  HirValue creation(
+    Expression node,
+    ConstructorElement? element,
+    ArgumentList arguments, {
+    required bool isConst,
+  }) {
     if (element == null) {
       _unsupported(node, 'objects of type ${node.staticType}');
     }
-    if (node.isConst) {
+    if (isConst) {
       final value = node.computeConstantValue()?.value;
       return _builder.add(
         _scope.constantOf(valueType(node.staticType!), value) ??
             _unsupported(node, 'a constant of type ${node.staticType}'),
       );
     }
-    var target = element, given = supplied(node.argumentList);
+    var target = element, given = supplied(arguments);
     for (
       var next = redirectionOf(target);
       next != null;
