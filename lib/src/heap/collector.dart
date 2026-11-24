@@ -1,8 +1,10 @@
 // A mark-sweep collector that never moves objects.
 //
-// Objects start with a 32-bit class number and 32-bit flags. Small objects
-// live in blocks of equal cells, each size with its own list of free cells;
-// large ones have a block each. This file uses only what the compiler supports.
+// Objects start with a 32-bit class number and 32-bit flags. They live in
+// blocks of equal cells, each size with its own list of free cells; large ones
+// have a block each. The sizes are the multiples of 16 up to some size, and
+// then four up to each power of two. This file uses only what the compiler
+// supports.
 import 'machine.dart';
 import 'returns.dart';
 
@@ -12,17 +14,23 @@ int heap = 0;
 // Flags of an object. Fixed ones exist from the start of the program.
 const _flags = 4, _allocated = 1, _marked = 2, _fixed = 4;
 
-// The state: the blocks, the bytes mapped since the last collection and how
+// The state: the blocks, the bytes used up since the last collection and how
 // many start the next, the stack of objects to scan, whether any did not fit
-// there, lists of free cells, and where cells are that were never used, from
-// somewhere to the end of a block. All three are for each size.
+// there, lists of free cells, where cells are that were never used, from
+// somewhere to the end of a block, lists of blocks with more free cells, and
+// the bytes that the free or unused cells were. The last five are for each
+// size, of which there are 57. The first stands for those that have a block
+// each.
 const _blocks = 0, _grown = 8, _limit = 16;
 const _pending = 24, _pendingBytes = 32, _pendingEnd = 40;
-const _missed = 48, _free = 56, _unused = 328, _unusedEnd = 600;
-const _stateBytes = 1024;
+const _missed = 48, _free = 56, _unused = 512, _unusedEnd = 968;
+const _partial = 1424, _given = 1880, _stateBytes = 2336;
 
-// A block: the next one, the size of its cells, and its own size.
-const _next = 0, _cellBytes = 8, _blockBytes = 16, _firstCell = 32;
+// A block: the next one, the size of its cells, its own size, its free cells
+// and their bytes, as long as they are not taken, and the next block of the
+// size that has any.
+const _next = 0, _cellBytes = 8, _blockBytes = 16;
+const _ownFree = 24, _freeBytes = 32, _nextPartial = 40, _firstCell = 48;
 
 // Where arrays have their number of elements, and where those are.
 const _length = 16, _elements = 24;
@@ -30,13 +38,14 @@ const _length = 16, _elements = 24;
 // A free cell holds the next one after its header.
 const _nextFree = 8;
 
-const _smallBlock = 262144, _largestCell = 512, _smallestLimit = 4194304;
+const _sharedBlock = 262144, _smallCell = 512, _largestCell = 32768;
+const _smallestLimit = 4194304;
 const _firstPendingBytes = 65536, _garbage = 0x5bad5bad5bad5bad;
 
 /// Zeroed memory for an object of [bytes] bytes, marked as in use, or 0.
 int allocate(int bytes) {
   final cell = (bytes + 15) & ~15;
-  if (cell <= _largestCell && heap != 0 && !collectsAlways()) {
+  if (cell <= _smallCell && heap != 0 && !collectsAlways()) {
     final size = heap + (cell >> 4) * 8, found = load64(size + _free);
     if (found != 0) {
       store64(size + _free, load64(found + _nextFree));
@@ -54,23 +63,45 @@ int allocate(int bytes) {
   return _allocateSlowly(cell);
 }
 
-int _allocateSlowly(int cell) {
+int _allocateSlowly(int bytes) {
   if (heap == 0 && !_start()) return 0;
   if (collectsAlways() || load64(heap + _grown) >= load64(heap + _limit)) {
     collect();
   }
-  var found = _takeFree(cell);
+  final cell = _cellFor(bytes), size = heap + _sizeOf(cell) * 8;
+  var found = _take(size, cell, bytes);
   if (found == 0) {
-    if (!_addBlock(cell)) {
+    if (!_addBlock(size, cell)) {
       collect();
       // A collection may free cells, or the memory for a block.
-      if (load64(_freeList(cell)) == 0 && !_addBlock(cell)) return 0;
+      if (load64(size + _partial) == 0 && !_addBlock(size, cell)) return 0;
     }
-    found = _takeFree(cell);
+    found = _take(size, cell, bytes);
   }
-  _fill(found, cell, 0);
   store32(found + _flags, _allocated);
   return found;
+}
+
+/// The size of the cell that [bytes] need, which are a multiple of 16.
+int _cellFor(int bytes) {
+  if (bytes <= _smallCell || bytes > _largestCell) return bytes;
+  var step = _smallCell ~/ 4;
+  while (bytes > step * 8) {
+    step *= 2;
+  }
+  return (bytes + step - 1) & -step;
+}
+
+/// Which of the sizes [cell] is. The large ones are one.
+int _sizeOf(int cell) {
+  if (cell <= _smallCell) return cell >> 4;
+  if (cell > _largestCell) return 0;
+  var shift = 7, first = _smallCell ~/ 16;
+  while (cell >> shift > 8) {
+    shift++;
+    first += 4;
+  }
+  return first + (cell >> shift) - 4;
 }
 
 /// Creates the state, if there is memory for it.
@@ -95,50 +126,54 @@ void _fill(int address, int bytes, int value) {
   }
 }
 
-/// Where the list of free cells of a size is. All large sizes share one, which
-/// holds a cell only between adding its block and taking it.
-int _freeList(int cell) =>
-    heap + _free + (cell > _largestCell ? 0 : (cell >> 4) * 8);
-
-int _takeFree(int cell) {
-  final list = _freeList(cell), found = load64(list);
-  if (found != 0) {
-    store64(list, load64(found + _nextFree));
-    return found;
+/// A zeroed cell of a size, or 0 if none is left. Only [bytes] of it are used.
+int _take(int size, int cell, int bytes) {
+  final unused = load64(size + _unused);
+  if (unused != load64(size + _unusedEnd)) {
+    store64(size + _unused, unused + cell);
+    return unused;
   }
-  if (cell > _largestCell) return 0;
-  final size = heap + (cell >> 4) * 8, unused = load64(size + _unused);
-  if (unused == load64(size + _unusedEnd)) return 0;
-  store64(size + _unused, unused + cell);
-  return unused;
+  if (load64(size + _free) == 0) _takePartial(size);
+  final found = load64(size + _free);
+  if (found == 0) return 0;
+  store64(size + _free, load64(found + _nextFree));
+  _fill(found, bytes, 0);
+  return found;
 }
 
-void _giveFree(int cell, int address) {
-  final list = _freeList(cell);
-  store64(address, 0);
-  store64(address + _nextFree, load64(list));
-  store64(list, address);
+/// Takes the free cells of the next block that has any, after all others of the
+/// size were used.
+void _takePartial(int size) {
+  final block = load64(size + _partial);
+  if (block == 0) return;
+  store64(size + _partial, load64(block + _nextPartial));
+  store64(size + _free, load64(block + _ownFree));
+  _give(size, load64(block + _freeBytes));
+}
+
+/// Counts what was given before, as that is used up.
+void _give(int size, int bytes) {
+  store64(heap + _grown, load64(heap + _grown) + load64(size + _given));
+  store64(size + _given, bytes);
 }
 
 /// Maps more cells of a size, if there is memory for them.
-bool _addBlock(int cell) {
+bool _addBlock(int size, int cell) {
   final isLarge = cell > _largestCell;
-  final bytes = isLarge ? cell + _firstCell : _smallBlock;
+  final bytes = isLarge ? cell + _firstCell : _sharedBlock;
   final block = mapMemory(bytes);
   if (block == 0) return false;
   store64(block + _next, load64(heap + _blocks));
   store64(block + _cellBytes, cell);
   store64(block + _blockBytes, bytes);
   store64(heap + _blocks, block);
-  store64(heap + _grown, load64(heap + _grown) + bytes);
   final first = block + _firstCell;
-  if (isLarge) {
-    _giveFree(cell, first);
-  } else {
-    final size = heap + (cell >> 4) * 8;
-    store64(size + _unused, first);
-    store64(size + _unusedEnd, first + (bytes - _firstCell) ~/ cell * cell);
-  }
+  final cells = isLarge ? cell : (bytes - _firstCell) ~/ cell * cell;
+  store64(size + _unused, first);
+  store64(size + _unusedEnd, first + cells);
+  _give(size, cells);
+  // A large one is used up at once.
+  if (isLarge) _give(size, 0);
   return true;
 }
 
@@ -256,16 +291,19 @@ void _scanMarked() {
 ///
 /// The lists of free cells are made anew, without blocks that become unused.
 int _sweep() {
-  _fill(heap + _free, _largestCell ~/ 16 * 8 + 8, 0);
-  _fill(heap + _unused, _stateBytes - _unused, 0);
+  _fill(heap + _free, _stateBytes - _free, 0);
   var kept = 0, link = heap + _blocks;
   while (load64(link) != 0) {
-    final block = load64(link), used = _usedBytes(block);
+    final block = load64(link), used = _sweepBlock(block);
     if (used == 0) {
       store64(link, load64(block + _next));
       unmapMemory(block, load64(block + _blockBytes));
     } else {
-      _sweepBlock(block);
+      if (load64(block + _ownFree) != 0) {
+        final size = heap + _sizeOf(load64(block + _cellBytes)) * 8;
+        store64(block + _nextPartial, load64(size + _partial));
+        store64(size + _partial, block);
+      }
       kept += used;
       link = block + _next;
     }
@@ -273,25 +311,24 @@ int _sweep() {
   return kept;
 }
 
-int _usedBytes(int block) {
+/// Collects the free cells of [block], returning the size of the others.
+int _sweepBlock(int block) {
   final cell = load64(block + _cellBytes);
   final end = block + load64(block + _blockBytes);
-  var used = 0;
-  for (var at = block + _firstCell; at + cell <= end; at += cell) {
-    if (load32(at + _flags) & _marked != 0) used += cell;
-  }
-  return used;
-}
-
-void _sweepBlock(int block) {
-  final cell = load64(block + _cellBytes);
-  final end = block + load64(block + _blockBytes);
+  var used = 0, free = 0, freeBytes = 0;
   for (var at = block + _firstCell; at + cell <= end; at += cell) {
     if (load32(at + _flags) & _marked != 0) {
       store32(at + _flags, _allocated);
+      used += cell;
     } else {
       if (collectsAlways()) _fill(at, cell, _garbage);
-      _giveFree(cell, at);
+      store64(at, 0);
+      store64(at + _nextFree, free);
+      free = at;
+      freeBytes += cell;
     }
   }
+  store64(block + _ownFree, free);
+  store64(block + _freeBytes, freeBytes);
+  return used;
 }

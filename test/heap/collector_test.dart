@@ -29,7 +29,10 @@ void main() {
   group('allocation', () {
     test('gives separate, aligned, zeroed memory', () {
       final found = <int, int>{};
-      for (final bytes in [8, 16, 17, 24, 100, 512, 513, 5000, 300000]) {
+      for (final bytes in [
+        ...[8, 16, 17, 24, 100, 512, 513, 640, 641, 1024, 1025, 5000],
+        ...[32767, 32768, 32769, 300000],
+      ]) {
         for (var i = 0; i < 20; i++) {
           final object = allocate(bytes);
           expect(object % 16, 0);
@@ -45,6 +48,26 @@ void main() {
         }
       }
     });
+
+    // All that is asked for is kept.
+    for (final bytes in [528, 640, 648, 1000, 5000, 20000, 32768]) {
+      test('gives objects of $bytes bytes shared blocks', () {
+        final before = (_machine.mapped, _machine.mappings);
+        const count = 300;
+        for (var i = 0; i < count; i++) {
+          final object = allocate(bytes);
+          _machine.store64(object + bytes - 8, -1);
+          _machine.frames.add([object]);
+        }
+        final (mapped, mappings) = before;
+        expect(_machine.mappings - mappings, lessThan(count ~/ 5));
+        // A quarter more, and the last block.
+        expect(
+          _machine.mapped - mapped,
+          lessThan(count * bytes * 5 ~/ 4 + (1 << 19)),
+        );
+      });
+    }
 
     test('gives 0 where there is no memory', () {
       _start(available: 1 << 21);
@@ -273,7 +296,11 @@ void main() {
     }
 
     test('keeps cells of every size apart', () {
-      for (var bytes = 8; bytes <= 600; bytes += 8) {
+      final sizes = [
+        for (var bytes = 8; bytes <= 600; bytes += 8) bytes,
+        for (var bytes = 608; bytes <= 40000; bytes += bytes ~/ 128 * 8) bytes,
+      ];
+      for (final bytes in sizes) {
         final kept = allocate(bytes);
         _machine.frames.add([kept]);
         allocate(bytes);
@@ -281,7 +308,7 @@ void main() {
       for (var round = 0; round < 3; round++) {
         collect();
         final given = {for (final frame in _machine.frames) frame.single};
-        for (var bytes = 8; bytes <= 600; bytes += 8) {
+        for (final bytes in sizes) {
           for (var i = 0; i < 3; i++) {
             final object = allocate(bytes);
             expect(given.add(object), isTrue);
@@ -295,7 +322,7 @@ void main() {
     });
 
     test('gives each free cell once', () {
-      for (final bytes in [16, 496, 512]) {
+      for (final bytes in [16, 496, 512, 528, 5120, 20000, 32768]) {
         _start();
         final given = {allocate(bytes)};
         _machine.frames.add([given.first]);
@@ -323,7 +350,7 @@ void main() {
 
       // 4 MB each until that much is kept, then as much as is kept.
       expect(collections(100000), 0);
-      expect(collections(140000), 1);
+      expect(collections(150000), 1);
       expect(collections(240000), 1);
       expect(collections(1000000), inInclusiveRange(2, 3));
     });
