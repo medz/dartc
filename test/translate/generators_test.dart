@@ -39,4 +39,22 @@ main() {
   late final late1 = f(0).length; print(late1); double total = 0; Iterable<double> ds(bool b) sync* { double x = 0.5; bool flag = b; for (var i = 0; i < 3; i++) { x *= 2; if (flag) yield x; flag = !flag; } } for (final x in ds(true)) total += x; print(total);
 }
 ''');
+
+  agrees('loops over nothing', r'''
+      Stream<Never> s() async* { throw 's';
+              } Stream<Never> e() async* {} void main() async { try { await for (final x in s()) { print(x);
+              } } catch (e) { print(e);
+              } await for (final x in e()) { print('no');
+              } await for (Never _ in e()) {} for (final x in <Never>[]) { print(x);
+              } for (Never x in const <Never>[]) { print('z');
+              } print([for (final x in <Never>[]) x]);
+              print([await for (final x in e()) x]);
+              l: for (final x in <Never>[]) { continue l;
+              } for (final Never x in <Never>[]) { break;
+              } int k = 0;
+              for (k in <Never>[]) {} print(k);
+              outer: await for (final x in e()) { break outer;
+              } print('end');
+              }
+  ''');
 }

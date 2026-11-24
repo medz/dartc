@@ -189,7 +189,7 @@ final class PatternTranslator(
         // What the first test shows, the second can rely on.
         final own = rightOperand.matchedValueType ?? type;
         _match(rightOperand, (
-          value: _conversions.coerce(value, _valueType(pattern, own)),
+          value: _conversions.narrow(value, _valueType(pattern, own)),
           type: own,
           path: path,
         ), fail);
@@ -247,7 +247,7 @@ final class PatternTranslator(
       _unless(test, fail);
     }
     return (
-      value: _conversions.coerce(value, representation),
+      value: _conversions.narrow(value, representation),
       type: isSure ? type : wanted,
       path: path,
     );

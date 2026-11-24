@@ -119,4 +119,39 @@ line"""); }
       }
     ''');
   });
+
+  agrees('what is no list is not taken for one', r'''
+      void f(Object? o) { if (o is! String) { print('no');
+              return;
+              } print(o.length);
+              } void g(Object? o) { if (o is List<int>) { print(o.length);
+              print(o.isEmpty ? 0 : o[0]);
+              } else if (o is Map) { print(o.length);
+              } else if (o is double) { print(o + 1);
+              } else if (o is bool) { print(!o);
+              } else if (o is int) { print(o + 1);
+              } else { print('z');
+              } }
+      void main() { f(1);
+              f('ab');
+              f(true);
+              f(2.5);
+              f(null);
+              f(#a);
+              f(int);
+              f(main);
+              f((1, 2));
+              for (final x in const [1, 'a', true]) { f(x);
+              } g(1);
+              g('a');
+              g(const [4]);
+              g(1.5);
+              g(false);
+              g(null);
+              g(const {1: 2});
+              g(E.a);
+              g(const <int>[]);
+              }
+      enum E { a }
+  ''');
 }

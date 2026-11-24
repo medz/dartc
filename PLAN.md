@@ -63,6 +63,8 @@ void main() { exit(1 + 2 * 3); }
 
 第 10、11 步留下的限制：
 
+没有做的内容都在 [GitHub issues](https://github.com/medz/dartc/issues)，那里有例子和完成条件。下表只是概要。
+
 | 限制 | 何时解决 |
 | --- | --- |
 | 堆栈的文字是空的 | 第 14 步之后，要有源码位置表 |

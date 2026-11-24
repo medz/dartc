@@ -28,6 +28,13 @@ final class Conversions(
     return _builder.add(HirUnbox(field, value));
   }
 
+  /// What [coerce] gives where a test before shows that [value] is so
+  /// represented, or that this does not run.
+  HirValue narrow(HirValue value, HirType to) =>
+      value.type == to || value.type == .reference || to == .reference
+      ? coerce(value, to)
+      : _builder.placeholder(to);
+
   /// Calls [target] with [arguments], each represented as it takes them.
   HirValue? call(HirFunction target, Iterable<HirValue> arguments) =>
       _builder.call(
@@ -176,6 +183,6 @@ final class Conversions(
         ]),
       );
     });
-    return coerce(value, representation);
+    return narrow(value, representation);
   }
 }

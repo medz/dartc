@@ -323,4 +323,31 @@ void main() {
     dynamic k(bool b) { if (b) return true; }
     void main() { truth(f(0) == null); number(f(2)!.n); show(g(true)); show(g(false)); show(h(3)); show(k(true)); show(k(false)); }
   ''');
+
+  agrees('numbers are no other numbers', r'''
+      void main() { double d = 1.5;
+              Object? r;
+              try { r = d as int;
+              } catch (e) { print(e);
+              } try { r = true as int;
+              } catch (e) { print(e);
+              } try { r = 1 as double;
+              } catch (e) { print(e);
+              } print(r);
+              if (d case int i) print(i);
+              print(d is int);
+              print(1 is double);
+              int n = 1;
+              try { print((n as double) + 1);
+              } catch (e) { print(e);
+              } print(switch (n) { double x => x, _ => 'n' });
+              print(switch (true) { int() => 1, String s => s, bool b => b });
+              if (n case double() && > 3) print('q');
+              print(switch (2.5) { int(isEven: true) => 'e', num(sign: var s) => s });
+              final (a, b) = (1, 2.0);
+              if ((a, b) case (double x, int y)) print((x, y));
+              else print('no');
+              if ([1.5] case [int x]) print(x);
+              }
+  ''');
 }

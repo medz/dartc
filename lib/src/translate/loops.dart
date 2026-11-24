@@ -137,8 +137,7 @@ final class LoopTranslator(
   ) {
     final iterable = parts.iterable;
     each(node, iterable, _iterable(iterable), within: within, (value) {
-      _assign(parts, value, elementType(iterable.staticType!));
-      body();
+      _round(parts, value, elementType(iterable.staticType!), body);
     });
   }
 
@@ -164,17 +163,22 @@ final class LoopTranslator(
       node,
       stream,
       element,
-      (value) {
-        _assign(
-          parts,
-          _conversions.coerce(value, valueType(element)!),
-          element,
-        );
-        body();
-      },
+      (value) => _round(parts, value, element, body),
       within: within,
       protect: protect,
     );
+  }
+
+  /// Does [body] for [value], which is of [type].
+  void _round(
+    ForEachParts parts,
+    HirValue value,
+    DartType type,
+    void Function() body,
+  ) {
+    if (isNever(type)) return _builder.end(HirUnreachable());
+    _assign(parts, _conversions.coerce(value, valueType(type)!), type);
+    body();
   }
 
   /// What [node] gives, as something to iterate over.

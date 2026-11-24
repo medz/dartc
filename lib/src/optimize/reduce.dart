@@ -31,9 +31,9 @@ HirValue reduce(HirInstruction instruction) => switch (instruction) {
   HirUnbox(:final field, object: HirStatic(:final object))
       when object.fields.containsKey(field) =>
     _constant(object.fields[field]!),
-  HirLength(array: HirStatic(:final object)) => HirConst(
-    object.elements!.length,
-  ),
+  // Where a test before shows that it cannot be, others are taken for arrays.
+  HirLength(array: HirStatic(object: HirConstObject(:final elements?))) =>
+    HirConst(elements.length),
   HirLength(array: HirNewArray(:final length)) => length,
   _ => instruction,
 };
