@@ -1,5 +1,6 @@
 import 'package:test/test.dart';
 
+import '../support/compiler.dart';
 import 'support.dart';
 
 const _tools = r'''
@@ -125,6 +126,66 @@ void main() {
   void local() => 9; print(pass(local)); d is Function ? f() : g(3); print(Function.apply(f, []));
 }
 ''');
+
+  test('what has no member is told by one function for all classes', () async {
+    final module = await translate('''
+      class A {}
+      class B {}
+      class C { void foo(int a, int b) {} }
+      class D { void foo(String a, int b) {} }
+      class E extends C {}
+      void main() {
+        for (final dynamic d in [A(), B(), C(), D(), E(), null, () {}]) {
+          d.foo(1);
+          d.foo;
+          d.foo = 1;
+          d.bar();
+        }
+      }
+    ''');
+    int count(String name) =>
+        module.functions.where((f) => f.name == name).length;
+    // A call tells whether there is no foo, or what it takes.
+    expect(count('no foo'), 3 + 2);
+    expect(count('no bar'), 1);
+  });
+
+  agrees('objects of many classes have no such member', r'''
+    class A {}
+    class B { String toString() => 'b'; }
+    class C { void foo(int a, int b) {} }
+    class D { void foo(String a, {int? b}) {} }
+    class E extends C {}
+    class F { dynamic noSuchMethod(Invocation i) => ('F', i.memberName, i.positionalArguments, i.namedArguments, i.typeArguments); }
+    class G extends F { void foo() {} }
+    int one(int a) => a;
+    int two(String a, int b) => b;
+    void go(Object? Function() f) { try { print(f()); } catch (e) { print(e); } }
+    void main() {
+      void inner(int a, int b, int c) {}
+      for (final dynamic d in [A(), B(), C(), D(), E(), F(), G(), null, 1, 2.5, 'text', [1], one, two, inner, C().foo]) {
+        go(() => d.foo(1));
+        go(() => d.foo(1, c: 2));
+        go(() => d.foo<int>(1));
+        go(() => d.bar);
+        if (d is! Function) go(() => d.bar = 1);
+        go(() => d.bar());
+        go(() => d());
+        go(() => d<int>(1));
+        go(() => d(1, 2, 3, 4));
+        go(() => d[0]);
+      }
+      // Only that it throws, as the text is another.
+      void throws(void Function() f) { try { f(); print('ok'); } on NoSuchMethodError { print('N'); } }
+      for (final dynamic d in [(1, 2), (foo: 3), (foo: one)]) {
+        throws(() => d.foo(1));
+        throws(() => d.foo);
+        throws(() => d.bar);
+        throws(() => d.bar());
+        throws(() => d());
+      }
+    }
+  ''');
 
   group('methods of numbers', () {
     agrees('can be used dynamically', r'''

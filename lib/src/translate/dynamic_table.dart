@@ -99,13 +99,26 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
   }
 
   /// A function telling that objects have no such member, or one that takes
-  /// [found] and is called [name].
+  /// [found] and is called [name]. Objects of all classes share it.
   HirFunction _missing(
     HirSelector selector,
     DynamicShape shape, {
     String? name,
     String? found,
-  }) => _make('no ${shape.name}', selector, (builder, _) {
+  }) => _missed[(selector, name, found)] ??= _makeMissing(
+    selector,
+    shape,
+    name,
+    found,
+  );
+  final _missed = <(HirSelector, String?, String?), HirFunction>{};
+
+  HirFunction _makeMissing(
+    HirSelector selector,
+    DynamicShape shape,
+    String? name,
+    String? found,
+  ) => _make('no ${shape.name}', selector, (builder, _) {
     final [receiver, ...all] = builder.inputs;
     final types = shape.types > 0 ? all.first : null;
     final given = types == null ? all : all.sublist(1);
