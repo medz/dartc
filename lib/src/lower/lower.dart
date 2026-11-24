@@ -10,6 +10,8 @@ import 'statics.dart';
 import 'system.dart';
 
 /// The function that starts the program and returns its exit code.
+///
+/// It may take the number of arguments and their address.
 const entrySymbol = '.start';
 
 /// The exit code of a program that throws what nothing catches.
@@ -55,6 +57,12 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
       ...statics.tables,
       if (machine.usesBuffer)
         LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
+      if (machine.usesArguments)
+        LirData(
+          argumentsSymbol,
+          List.filled(argumentsBytes, 0),
+          writable: true,
+        ),
       if (module.allocate != null) statics.classTable(),
     ],
     tables: layout.tables,
@@ -71,8 +79,18 @@ LirFunction _startFunction(
   Map<HirCallable, String> symbols,
   MachineLowering machine,
 ) {
-  final start = LirBlock(), done = LirBlock();
+  final start = LirBlock([
+    if (machine.usesArguments) ...const [LirType.i64, LirType.ptr],
+  ]);
+  final done = LirBlock();
   final blocks = [start, done];
+  if (machine.usesArguments) {
+    final [count, address] = start.parameters;
+    final place = start.add(SymbolAddress(argumentsSymbol));
+    start
+      ..add(Store(.i64, place, count))
+      ..add(Store(.ptr, place, address, offset: 8));
+  }
   if (machine.writesOutput) ignoreBrokenPipes(start);
   if (module.stackOverflow != null) setStackLimit(start);
   final main = Call(symbols[module.main]!, signatureOf(module.main), const []);
@@ -94,5 +112,6 @@ LirFunction _startFunction(
       ..end(Jump(LirEdge(done)));
   }
   done.end(Return(done.add(ConstInt(0))));
-  return LirFunction(entrySymbol, LirSignature([], .i64), blocks);
+  final signature = LirSignature(start.parameters.map((p) => p.type), .i64);
+  return LirFunction(entrySymbol, signature, blocks);
 }

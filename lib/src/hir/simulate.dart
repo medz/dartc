@@ -107,6 +107,9 @@ final class HirMachineState(final HirModule _module) {
         return (_mapped += number(0) + 4096) - number(0);
       case .outputBuffer:
         return 4096;
+      case .arguments:
+        // Nothing is stored there, so there are none.
+        return 16;
       case .load8:
         return _memory[number(0)] ?? 0;
       case .store8:

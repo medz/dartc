@@ -67,6 +67,10 @@ external void localTime(int address);
 /// 32 random bits.
 external int randomBits();
 
+/// Where the number of the program's arguments is, then the address of those,
+/// which are addresses of bytes that a 0 ends.
+external int arguments();
+
 /// Waits for [microseconds].
 external void pause(int microseconds);
 

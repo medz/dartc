@@ -15,6 +15,9 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   load8([.integer], .integer),
   store8([.integer, .integer], null),
   outputBuffer([], .integer),
+
+  /// Where the number of the program's arguments is, then the address of those.
+  arguments([], .integer),
   write([.integer, .integer, .integer], null),
   formatDouble([.float, .integer, .integer], null),
   parseDouble([.integer], .float),

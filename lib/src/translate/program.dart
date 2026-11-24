@@ -105,11 +105,9 @@ final class ProgramTranslator(final SourceProgram program)
         unit.problemAt(0, 'The program has no main function.'),
       ]);
     }
-    if (entry.formalParameters.isNotEmpty) {
-      throw _declarations.unsupported(entry, 'parameters of main');
-    }
     checkImports(program);
     final main = _functions.of(entry);
+    final start = EntryTranslator(this, unit, entry, main)..begin();
     do {
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
@@ -129,7 +127,7 @@ final class ProgramTranslator(final SourceProgram program)
         _typeFunctions.update(_dispatch.classes, _closures.closures) ||
         _pending.isNotEmpty);
     _typeFunctions.finish();
-    final start = startFunction(main, _eventLoop);
+    start.finish(_eventLoop);
     final dispatch = {
       ..._dispatch.result(_classes.classOf, _closures, _functionClass),
       ..._closures.dispatch,
@@ -138,8 +136,8 @@ final class ProgramTranslator(final SourceProgram program)
       ..._applications.dispatch,
     };
     return HirModule(
-      start,
-      [start, ..._allFunctions],
+      start.function,
+      [start.function, ..._allFunctions],
       classes: [
         ..._dispatch.classes.map(_classes.classOf),
         for (final closure in _closures.closures) closure.class_,

@@ -413,7 +413,6 @@ b0():
     });
 
     const what = 'Not supported yet:';
-    reports('void main(List<String> a) {}', '2:6: $what parameters of main.');
     reports(
       "import 'dart:math' deferred as m; void main() {}",
       '2:1: $what deferred imports.',

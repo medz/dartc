@@ -30,8 +30,9 @@ final class LoweredRun(
     int? errorAddress;
     var error = 0, waited = 0;
     int address(LirMemory memory) => errorAddress ??= memory.map(Uint8List(4));
+    final lowered = lowerProgram(module);
     final interpreter = LirInterpreter(
-      lowerProgram(module),
+      lowered,
       maxSteps: maxSteps,
       externals: {
         'exit': (_, arguments) => throw _Exit(arguments.single as int),
@@ -117,7 +118,10 @@ final class LoweredRun(
       },
     );
     try {
-      final result = interpreter.call(entrySymbol);
+      final parameters = lowered.signatures[entrySymbol]!.parameters;
+      final result = interpreter.call(entrySymbol, [
+        for (final _ in parameters) 0,
+      ]);
       if (result != 0) throw StateError('The program ended with $result.');
     } on _Exit catch (exit) {
       code = exit.code;

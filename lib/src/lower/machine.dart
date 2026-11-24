@@ -14,6 +14,9 @@ final class MachineLowering(
   /// Whether the program writes to files.
   bool writesOutput = false;
 
+  /// Whether it uses the arguments at [argumentsSymbol].
+  bool usesArguments = false;
+
   /// Whether it uses the buffer at [bufferSymbol].
   bool usesBuffer = false;
 
@@ -90,6 +93,9 @@ final class MachineLowering(
       case .parseDouble:
         final none = block.add(Convert(.intToPtr, number(0)));
         return block.add(callSystem('strtod', [address(), none]));
+      case .arguments:
+        usesArguments = true;
+        return symbol(argumentsSymbol);
       case .realTime || .steadyTime || .localTime || .randomBits || .pause:
         return _system(block, op, arguments);
       case .classNumber:

@@ -12,6 +12,10 @@ const _interrupted = 4, _brokenPipe = 13, _ignore = 1;
 const bufferSymbol = '.buffer';
 const bufferBytes = 4096;
 
+/// Where the number of the program's arguments is, then their address.
+const argumentsSymbol = '.arguments';
+const argumentsBytes = 16;
+
 /// Prepares output at the start of the program.
 ///
 /// Like the official runtime, a program outlives the reader of its output.
