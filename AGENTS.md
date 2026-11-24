@@ -7,12 +7,15 @@ dartc is an ahead-of-time compiler for Dart, written in Dart. It makes executabl
 ```sh
 dart run bin/dartc.dart hello.dart -o hello     # compile; see --help
 dart run tool/build.dart                        # build/dartc, one program with the SDK inside
+dart run tool/build.dart --with=build/dartc x   # the same, compiled by that dartc
 dart analyze --fatal-infos                      # has to be clean
 dart test                                       # everything; about 10 minutes
 dart test test/translate/closures_test.dart     # one file
 dart test test/translate -N 'part of a name'    # by name; -n takes a regular expression
 dart run tool/measure.dart [names] [-inline] [-devirtualize]  # time against official AOT
 ```
+
+With `DARTC_SELF_HOSTING=1`, `test/driver/build_test.dart` also lets the compiler compile itself, which takes many minutes and gigabytes of memory.
 
 Tests run compiled programs on macOS ARM64. For Linux, give two containers with glibc 2.34 or later and gcc, in which the directory for temporary files has the same path as on the host:
 

@@ -61,7 +61,7 @@
 | `heap` | 运行时的 Dart 源码：回收器、异常展开、数字、类型，随程序一起编译 | 无 |
 | `emit` | LIR → 机器码：`function.dart` 和 `allocate.dart` 与机器无关，`arm64/`、`x64/` 是机器的部分 | `lir` `graph` `native` |
 | `image` | 机器码 → 可执行文件、目标文件、静态库、动态库（Mach-O 和 ELF） | `emit` `native` |
-| `driver` | 把阶段串起来：API、命令行（`command.dart`）、标准库的来源（`sdk.dart`） | 全部 |
+| `driver` | 把阶段串起来：API、命令行（`command.dart`）、包里的标准库（`packaged.dart`，独立的编译器不用） | 全部 |
 
 `lib/compiler.dart` 和 `lib/interop.dart` 是给别的包用的入口：前者只转出 `driver` 等的公开名字，后者只有 `Export`。
 
@@ -165,7 +165,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 常量里比较数字 | analyzer 分开 `0.0` 和 `-0.0`，也算错 `identical` 的 NaN。有这种比较时，把文件改写成等价的写法再分析一次；位置仍按原文件报（`source/corrections.dart`） |
 | `fromEnvironment` | 常量由 analyzer 求值；不是常量的调用查编译时写进 `dart:core` 的一张表 |
 | 类型参数的上限 | 静态知道的不检查；`dynamic` 调用、上限含类的 `T` 的方法，调用时检查 |
-| 独立的编译器 | `tool/build.dart` 生成一个入口，里面有压缩的标准库文字，再用官方编译。标准库总是从内存里的文件读，不管在不在磁盘上 |
+| 独立的编译器 | `tool/build.dart` 生成一个入口，里面有压缩的标准库文字，再用官方编译，或者用 `--with` 给的 dartc。标准库总是从内存里的文件读，不管在不在磁盘上。它只用 dartc 支持的东西：解压自己写（`source/inflate.dart`），改文件的权限直接调用 C，不用 `dart:isolate` |
 | `async`、生成器 | 函数体是另一个函数，在等待处拆开：等待之后还要用的值放在一个帧对象里，再进入时按编号跳到原处（`hir/coroutine.dart`）。运行时用官方的 `_SuspendState` 等类，所以微任务的次序相同 |
 | 事件循环 | `main` 返回后，`sdk/native/async/events.dart` 运行微任务和定时器，直到没有要等的 |
 | `void` | 函数仍然返回值，因为调用者可能不知道它是 `void`。只有返回 `Never` 的函数没有结果 |
