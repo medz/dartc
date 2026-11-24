@@ -55,6 +55,9 @@ final class SdkSources(
       if (path.contains('/_heap/')) 'dart:_heap/${path.split('/').last}',
   ];
 
+  /// Whether the library at [uri], one of [libraries], is part of the runtime.
+  bool isRuntime(String uri) => uri.startsWith('dart:_heap/');
+
   late final Set<String> _names = {
     ..._whole,
     for (final path in files.keys)

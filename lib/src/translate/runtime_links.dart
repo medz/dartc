@@ -41,9 +41,13 @@ final class RuntimeLinks(
     return '${owner.displayName.toLowerCase()}$rest';
   }
 
-  LibraryElement library(String uri) => _program.sdk
-      .firstWhere((library) => '${library.element.uri}' == uri)
-      .element;
+  LibraryElement library(String uri) => _libraryIfReached(uri)!;
+
+  /// The library at [uri], if the program reaches it.
+  LibraryElement? _libraryIfReached(String uri) => _program.sdk
+      .map((library) => library.element)
+      .where((library) => '${library.uri}' == uri)
+      .firstOrNull;
 
   Iterable<LibraryElement> get _heap =>
       _program.sdk.map((library) => library.element).where(isRuntime);
@@ -56,9 +60,11 @@ final class RuntimeLinks(
     async.getTopLevelFunction('_registerEvents')!,
   ];
 
-  /// What sets the code that the program ends with.
-  ExecutableElement get setExitCode =>
-      library('dart:io').getClass('_ProcessUtils')!.getMethod('_setExitCode')!;
+  /// What sets the code that the program ends with, if it can.
+  ExecutableElement? get setExitCode =>
+      _libraryIfReached('dart:io')
+          ?.getClass('_ProcessUtils')!
+          .getMethod('_setExitCode')!;
 
   /// The function type called [name], privately so in one of some libraries.
   FunctionType functionType(String name) =>
@@ -72,7 +78,7 @@ final class RuntimeLinks(
     final found = [
       _core.getTopLevelFunction('_$name'),
       for (final uri in const ['async', 'typed_data', 'ffi', 'io'])
-        library('dart:$uri').getTopLevelFunction('_$name'),
+        _libraryIfReached('dart:$uri')?.getTopLevelFunction('_$name'),
       for (final library in _heap) library.getTopLevelFunction(name),
     ].nonNulls.where((function) => !function.isExternal).toList();
     return found.length == 1
