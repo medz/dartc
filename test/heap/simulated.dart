@@ -26,7 +26,8 @@ final class SimulatedMachine({
   var int available = 1 << 40,
 }) implements Machine {
   final _regions = <int, ByteData>{};
-  int _next = 0x100000, mapped = 0, mostMapped = 0, collections = 0;
+  int _next = 0x100000, mapped = 0, mostMapped = 0, mappings = 0;
+  int collections = 0;
   late final int _frames, _maps, _classes, _globals, _handlers, _native;
 
   /// References held by functions that are running, innermost last.
@@ -139,6 +140,7 @@ final class SimulatedMachine({
     _regions[address] = ByteData(bytes);
     _next = (address + bytes + 0x1fff) & ~0xfff;
     mapped += bytes;
+    mappings++;
     if (mapped > mostMapped) mostMapped = mapped;
     return address;
   }
