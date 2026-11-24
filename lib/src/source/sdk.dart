@@ -22,6 +22,9 @@ final class SdkSources({
   /// The libraries that official code for native programs uses inside.
   static const _hidden = ['_compact_hash', '_vm'];
 
+  /// The libraries that need no more than the official patches.
+  static const _whole = ['collection'];
+
   late final Map<String, String> _overlays = _build();
 
   /// Makes [files] show the libraries as they are compiled.
@@ -31,6 +34,7 @@ final class SdkSources({
 
   /// The libraries that can be compiled, by their URIs.
   List<String> get libraries => [
+    for (final name in _whole) 'dart:$name',
     for (final directory in Directory(
       patches,
     ).listSync().whereType<Directory>())
@@ -50,11 +54,14 @@ final class SdkSources({
     final result = <String, String>{};
     for (final MapEntry(key: name, value: library) in libraries.entries) {
       final directory = Directory('$patches/$name');
-      if (!directory.existsSync()) continue;
+      final isOwn = directory.existsSync();
+      if (!isOwn && !_whole.contains(name)) continue;
       library as Map<String, Object?>;
       result.addAll(
         _library('$_lib/${library['uri']}', _official(library['patches']), [
-          for (final file in directory.listSync().whereType<File>()) file.path,
+          if (isOwn)
+            for (final file in directory.listSync().whereType<File>())
+              file.path,
         ]),
       );
     }

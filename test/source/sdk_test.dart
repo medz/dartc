@@ -6,6 +6,7 @@ import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:dartc/driver.dart';
+import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
 import '../support/new_compiler.dart';
@@ -55,6 +56,27 @@ void main() {
       core.element,
     );
     expect(core.element.getClass('_GrowableList'), isNotNull);
+  });
+
+  test('the libraries are those that files tell', () async {
+    final packaged = await packagedSdk();
+    // Git does not keep directories without files.
+    final copy = Directory.systemTemp.createTempSync('dartc-native-');
+    addTearDown(() => copy.deleteSync(recursive: true));
+    for (final file in Directory(packaged.patches).listSync(recursive: true)) {
+      if (file is! File) continue;
+      final to = file.path.replaceFirst(packaged.patches, '${copy.path}/');
+      File(to)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync(file.readAsBytesSync());
+    }
+    final sdk = SdkSources(
+      root: packaged.root,
+      patches: copy.path,
+      runtime: packaged.runtime,
+    );
+    expect(sdk.libraries.toSet(), packaged.libraries.toSet());
+    expect(sdk.libraries, contains('dart:collection'));
   });
 
   test('the official sources are as they were', () async {
