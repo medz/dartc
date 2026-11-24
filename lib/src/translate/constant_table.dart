@@ -137,14 +137,14 @@ final class ConstantTable(
       class_,
       HirConstObject(
         target,
-        {target.fields.single: names(fieldNames)},
+        {target.fields.single: strings(fieldNames)},
         [for (final element in elements) _boxed(element!.value)],
       ),
     );
   }
 
-  /// The list of [names], of which equal ones are the same.
-  HirConstObject names(List<String> names) {
+  /// A canonical list of [values].
+  HirConstObject strings(List<String> values) {
     final class_ = _core.getClass('_List')!;
     final target = _classes.classOf(class_);
     _instantiate(class_);
@@ -154,7 +154,7 @@ final class ConstantTable(
       HirConstObject(
         target,
         {target.fields.single: types.value},
-        [for (final name in names) text(name)],
+        [for (final value in values) text(value)],
       ),
     );
   }

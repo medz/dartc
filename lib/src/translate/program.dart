@@ -312,7 +312,7 @@ final class ProgramTranslator(
   @override
   HirInstruction names(List<String> names) {
     createdClass(recordClass);
-    return HirStatic(_constants.names(names));
+    return HirStatic(_constants.strings(names));
   }
 
   @override
@@ -334,9 +334,19 @@ final class ProgramTranslator(
   }
 
   @override
-  HirValue? methodType(FunctionBuilder builder, ExecutableElement element) {
+  HirValue? tearOffType(
+    FunctionBuilder builder,
+    ExecutableElement element, {
+    FunctionType? asType,
+    bool instanceMethod = false,
+  }) {
     _prepareTypes();
-    return _types.methodType(builder, element);
+    return _types.tearOffType(
+      builder,
+      element,
+      asType: asType,
+      instanceMethod: instanceMethod,
+    );
   }
 
   @override

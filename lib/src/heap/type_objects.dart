@@ -28,12 +28,26 @@ final class NullableType extends RuntimeType {
 
 final class FunctionType extends RuntimeType {
   final RuntimeType result;
-  final TypeList? required;
-  final TypeList? optional;
 
-  /// In the order of their names.
-  final NamedList? named;
-  const FunctionType(this.result, this.required, this.optional, this.named);
+  /// Positional types followed by named types in alphabetical order.
+  final TypeList? parameters;
+  final FunctionShape shape;
+  const FunctionType(this.result, this.parameters, this.shape);
+}
+
+/// Equal shapes are the same object, including across type instantiations.
+final class FunctionShape {
+  final int required, positional;
+
+  /// Text before each parameter type in print order, then before the result.
+  final List<String> prefixes;
+  final NamedParameter? names;
+  const FunctionShape(
+    this.required,
+    this.positional,
+    this.prefixes,
+    this.names,
+  );
 }
 
 /// A record type, whose last [fields] have [names], in their order.
@@ -78,12 +92,14 @@ final class TypeList {
   const TypeList(this.head, this.tail);
 }
 
-final class NamedList {
-  final int name;
-  final RuntimeType type;
+/// A shared parameter description in name order. [position] is its printed slot.
+final class NamedParameter {
+  /// Equal parameter names are the same string.
+  final String name;
+  final int position;
   final bool isRequired;
-  final NamedList? tail;
-  const NamedList(this.name, this.type, this.isRequired, this.tail);
+  final NamedParameter? tail;
+  const NamedParameter(this.name, this.position, this.isRequired, this.tail);
 }
 
 /// The supertypes of a class, in terms of its parameters.

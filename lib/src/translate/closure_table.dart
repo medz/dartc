@@ -166,7 +166,11 @@ final class ClosureTable(
             builder.add(HirLoad(types!, builder.inputs.single)),
           );
         }
-        return _scope.typeValue(builder, _withoutParameters(element.type))!;
+        return _scope.tearOffType(
+          builder,
+          element,
+          asType: _withoutParameters(element.type),
+        )!;
       },
       types: types,
       name: _qualified(element),
@@ -212,7 +216,8 @@ final class ClosureTable(
             ? null
             : (builder, _) =>
                   given.isEmpty ? null : _scope.typeList(builder, given)!,
-        typeValue: (builder) => _scope.typeValue(builder, type)!,
+        typeValue: (builder) =>
+            _scope.tearOffType(builder, element, asType: type)!,
         name: _qualified(element),
         text: " from Function '${_nameOf(element)}': static.",
       );
@@ -267,7 +272,7 @@ final class ClosureTable(
       bind: bind,
       typeValue: (builder) {
         bind(builder, builder.inputs.single);
-        return _scope.typeValue(builder, element.type)!;
+        return _scope.tearOffType(builder, element)!;
       },
       typeParameters: element.typeParameters,
       name: _qualified(element),
@@ -289,29 +294,34 @@ final class ClosureTable(
     final (typeList, count) = types;
     final key = '$count ${describeType(type)}';
     final closure = _partials[key] ??= _partial(type, count);
-    final [inner, list, own] = closure.class_.fields;
+    final [inner, list] = closure.class_.fields;
     final object = builder.create(closure.class_);
-    final value = _scope.typeValue(builder, type)!;
     builder
       ..add(HirStore(inner, object, function))
-      ..add(HirStore(list, object, typeList))
-      ..add(HirStore(own, object, value));
+      ..add(HirStore(list, object, typeList));
     return object;
   }
 
   Closure _partial(FunctionType type, int count) {
     final inner = HirField('function', .reference, isFinal: true);
     final list = HirField('types', .reference, isFinal: true);
-    final own = HirField('type', .reference, isFinal: true);
     final made = Closure(
-      HirClass('part of ${describeType(type)}', null, [inner, list, own]),
+      HirClass('part of ${describeType(type)}', null, [inner, list]),
       type,
       type.formalParameters,
       () => throw StateError('It has no target.'),
       (_, _) => const [],
       types: list,
       part: (function: inner, types: list, count: count),
-      typeValue: (builder) => builder.add(HirLoad(own, builder.inputs.single)),
+      typeValue: (builder) {
+        final self = builder.inputs.single;
+        return builder.call(
+          HirCall(_scope.runtime('instantiatedFunctionType'), [
+            builder.add(HirLoad(inner, self)),
+            builder.add(HirLoad(list, self)),
+          ]),
+        )!;
+      },
     );
     add(made);
     return made;
@@ -378,7 +388,7 @@ final class ClosureTable(
             builder.add(HirLoad(field, builder.inputs.single)),
             level,
           );
-          return _scope.methodType(builder, viewed)!;
+          return _scope.tearOffType(builder, viewed, instanceMethod: true)!;
         },
         typeParameters: viewed.typeParameters,
         name: _qualified(element),
