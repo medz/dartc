@@ -1,33 +1,46 @@
-# Dart 语言兼容性
+# Dart 语言规范
 
-> **注意：** 本目录写于旧编译器。语言条款和规范依据仍然有效；其中“当前范围”“已支持”“尚未实现”等状态，以及到 `test/` 里文件的链接，说的是已经删除的旧编译器，与现在的编译器无关。现在的限制见 [README](../README.md#know-what-to-expect) 和 [PLAN](../PLAN.md)。
+这里只列规范在哪里、dartc 的目标是什么。现在支持到哪里，见 [README](../README.md#know-what-to-expect) 和 [PLAN](../PLAN.md)。
 
-语言与标准库版本基线为 Dart SDK 3.14.0，标准库固定为 [fa8c1270](https://github.com/dart-lang/sdk/tree/fa8c1270c374c1346931583a17c3b7f278d3822d/sdk/lib)。行为以适用的语言规范、已接受的特性规范和标准库公开契约为准。SDK 是实现对照；与规范冲突的 SDK 行为不自动成为兼容要求。差异须先核查是实现错误、规范尚未更新，还是版本或平台条件不同；已确认结论在对应条款下记录并用独立预期验证。规范未明确的行为再核对 SDK 实现与平台要求。
+## 基线
 
-3.14 没有新增语法。列表、Map 或 record 子模式的类型检查不能把整个被匹配属性提升为子模式的类型；[反例](../test/frontend/analysis/fixtures/patterns/promotion.dart)须在静态分析阶段拒绝。依据为 [3.14 语言变化](https://dart.dev/resources/language/evolution#dart-3-14)。历史 SDK 差异保留当时验证的版本，不代表已在新版本复现。
+语言和标准库是 Dart SDK 3.14.0，标准库固定在 [fa8c1270](https://github.com/dart-lang/sdk/tree/fa8c1270c374c1346931583a17c3b7f278d3822d/sdk/lib)。3.14 没有新增语法，变化见 [3.14 语言变化](https://dart.dev/resources/language/evolution#dart-3-14)。
 
-目标是完整 Dart 语言和所需标准库，明确排除项见下文。当前开发版使用官方 analyzer 的分析结果生成 IR，原生后端可生成整数、浮点和指针函数的目标文件与库，并可执行同步及 async main，包括命令行参数。支持[对象构造与回收](classes.md#原生执行范围)、同模块跨入口托管状态、同步重入和卸载清理；跨线程执行仍待实现，原生范围见[库与导出](libraries.md#原生库)。已发布编译器的支持范围见 [0.5.0](https://github.com/medz/dartc/tree/v0.5.0/specs)。
-
-各页的“当前 IR 范围”说明哪些 Dart 源码可以转换。仅支持手工构造 IR 的条目单独标明。行为对照比较 IR 和 Dart SDK 的返回值、调用顺序、异常或流事件。
-
-| 主题 | 内容 |
-| --- | --- |
-| [词法结构、作用域与错误](lexical-structure.md) | 源码、语言版本、绑定与诊断 |
-| [类型](types.md)和[变量](variables.md) | 值类型、形参、局部变量与赋值 |
-| [表达式](expressions.md)和[语句](statements.md) | 求值顺序、短路、分支、循环与返回 |
-| [函数](functions.md)和[类](classes.md) | 调用、参数、构造与分派 |
-| [库](libraries.md)和[模式](patterns.md) | 导入、part、模式匹配与穷尽性 |
+行为以官方 `dart` 运行的结果为准，见 [ARCHITECTURE](../ARCHITECTURE.md)。规范用来理解原因。
 
 ## 目标范围
 
-Wasm 是后续目标，当前不提供 Wasm 输出。以下能力明确排除，不作为待补齐缺口：
+目标是完整的 Dart 语言和原生程序需要的标准库。以下明确不做：
 
-- 全部 JavaScript 互操作：`dart:js`、`dart:js_util`、`package:js`、`dart:js_interop`、`dart:js_interop_unsafe` 及其兼容实现；此选择也适用于后续 Wasm 目标。
-- 动态反射：`dart:mirrors` 的声明枚举、反射访问和调用。
+- 全部 JavaScript 互操作：`dart:js`、`dart:js_util`、`package:js`、`dart:js_interop`、`dart:js_interop_unsafe`。
+- 动态反射：`dart:mirrors`。`Type`、`runtimeType`、泛型类型信息、`dynamic` 调用、`noSuchMethod` 不在此列，都要支持。
 
-排除反射不排除 `Type`、`runtimeType`、`is`/`as`、泛型类型信息、`dynamic` 调用、`noSuchMethod` 或元数据的语言要求；这些能力的当前缺口仍在对应主题列出。原生 `dart:ffi` 和库导出仍在范围内。这是 dartc 的范围选择；官方现代 JS 互操作仍存在，3.14 的 `dart:mirrors` 是废弃而非移除。
+Wasm 是以后的目标。
 
-## 规范依据
+## analyzer 和官方编译器的差别
 
-- [官方规范入口](https://dart.dev/resources/language/spec)指出 Dart 3 主规范尚未覆盖全部特性。[当前官方草案](https://dart.dev/to/spec-draft)便于查阅条款名和章节编号，但地址内容会更新，不等同于下列固定源码快照；封面的 `Version 2.13-dev` 不是完整 Dart 3 规范。
-- 可追溯的主规范固定为 [dart-lang/language@6a254a68](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)，新特性使用该版本的 [accepted 规范](https://github.com/dart-lang/language/tree/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted)。未接受提案和 `future-releases` 不自动进入兼容目标。
+静态检查和常量求值用 analyzer 14.7，它和官方编译器有时不同。下面几条已在 3.14.0 上试过：
+
+| 例子 | 官方 | analyzer，也就是 dartc |
+| --- | --- | --- |
+| `extension type E<T>(T value) { T get() => value; }` 时，`B extends E<int>` 的值调用 `get()` | 可以 | 报错：接收者可能是 null。先转换成 `E<int>` 就可以 |
+| 明确写出泛型扩展的运算符 `E<int>(box) + 7`，参数的类型是 `T` | 可以 | 报错：`int` 不能给 `T` |
+| `receiver?.method<int>`，不调用 | 报错 | 接受 |
+| 常量 `0.0 == -0.0` | true | false |
+
+## 规范
+
+主规范固定为 [dart-lang/language@6a254a68](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/specification/dartLangSpec.tex)。它还没有写进 Dart 3 的全部特性，新特性看同一版本的 [accepted](https://github.com/dart-lang/language/tree/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted)。没有接受的提案不是目标。[网上的草案](https://dart.dev/to/spec-draft)便于查章节，但内容会变。
+
+| 主题 | 主规范 | 特性规范 |
+| --- | --- | --- |
+| 词法、作用域、错误 | §6、§7、§21 | [语言版本选择](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/feature-specification.md)、[数字分隔符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.6/digit-separators/feature-specification.md) |
+| 变量 | §8 | [空安全与 late](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md)、[通配变量](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/wildcard-variables/feature-specification.md) |
+| 函数 | §9、§17 | [构造器提取](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.15/constructor-tearoffs/feature-specification.md)、[私有命名形参](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.12/private-named-parameters/feature-specification.md) |
+| 类、mixin、枚举 | §10–§16 | [类修饰符](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/class-modifiers/feature-specification.md)、[主构造器](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.13/primary-constructors/feature-specification.md)、[增强枚举](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.17/enhanced-enums/feature-specification.md) |
+| 扩展类型 |  | [extension types](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.3/extension-types/feature-specification.md) |
+| 表达式 | §17 | [空安全](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.12/nnbd/feature-specification.md)、[空感知元素](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.8/null-aware-elements/feature-specification.md)、[点简写](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.10/dot-shorthands/feature-specification.md)、[Records](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/records/feature-specification.md)、[`>>>`](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.14/triple-shift-operator/feature-specification.md) |
+| 语句 | §18 | [流分析](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/flow-analysis.md) |
+| 模式 |  | [模式](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/feature-specification.md)、[穷尽性](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.0/patterns/exhaustiveness.md) |
+| 库 | §19、§6.3 | [包配置](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.8/language-versioning/package-config-file-v2.md) |
+| 类型 | §15、§20 | [类型规范化](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/normalization.md)、[类型推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/resources/type-system/inference.md)、[水平推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.18/horizontal-inference/feature-specification.md)、[基于界限的推断](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/3.7/inference-using-bounds/design-document.md)、[类型别名](https://github.com/dart-lang/language/blob/6a254a68b6ef355ad4559b69dd8ed6893d9f3f3b/accepted/2.13/nonfunction-type-aliases/feature-specification.md) |

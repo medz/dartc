@@ -76,6 +76,7 @@ void main() { exit(1 + 2 * 3); }
 | 变量的类型是 `Never`；返回 `Never` 的 getter | 需要时再做 |
 | 每次编译都读全部标准库，`dart:io` 让编译多约 0.3 秒 | 需要时再做 |
 | 延迟导入（`deferred as`） | 需要时再做 |
+| 常量 `0.0 == -0.0` 是 false；analyzer 和官方的其他差别见 [specs](specs/README.md) | 需要时再做 |
 | `external` 变量（`@Native`）；`列表[i].address` | 需要时再做 |
 
 **11 其余的语法。** 分小步，每小步单独完成和提交：
