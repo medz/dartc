@@ -3,9 +3,9 @@ include: package:lints/recommended.yaml
 analyzer:
   exclude:
     - build/**
-    - .worktrees/**
-    # Checked in their owning SDK libraries by sdk_patches_test.dart and compilation.
-    - sdk/patches/**
+    # Programs that are only compiled.
+    - tool/bench/**
+    # Checked within the libraries they patch, by test/source/sdk_test.dart.
     - sdk/std/**
     - sdk/native/**
 

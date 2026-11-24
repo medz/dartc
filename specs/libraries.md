@@ -1,5 +1,7 @@
 # 库、脚本与并发边界
 
+> **注意：** 本目录写于旧编译器。语言条款和规范依据仍然有效；其中“当前范围”“已支持”“尚未实现”等状态，以及到 `test/` 里文件的链接，说的是已经删除的旧编译器，与现在的编译器无关。现在的限制见 [README](../README.md#know-what-to-expect) 和 [PLAN](../PLAN.md)。
+
 转换以调用方明确提供的库批次为单位，包含每个库的所有 part。`package:dartc/frontend.dart` 的 `AnalysisSession` 复用官方 analyzer 的解析结果；名称与指令解析不由 lowering 重复实现。`includeDependencies: true` 纳入非 SDK 导入和导出库，整个批次完成静态检查后才开始转换。用户库的函数体由输入批次提供；引用的 SDK 普通顶层函数、静态方法、属性、全局存储及构造器和常量所属类按声明身份读取源码，并在转换前检查所在库的全部单元。`Lowering.lower` 返回 `Future<LoweringResult>`，须在分析会话关闭前等待完成。同步或 async main 可作为独立进程入口，支持命令行参数；启动范围见下文。
 
 接入的 SDK 实现片段在所属库内完成静态检查，包括未使用的方法体。原声明保留类型、默认参数、构造器初始化及已有 Dart 方法体；实现可重写已继承的实例成员，签名由 analyzer 检查；不得增添无对应声明的公开 API 或改变公共类的继承关系。已有 Dart 正文仅允许基于明确的目标存储约束或已核实的规范偏差替换；官方文件或内部库身份本身不构成替换依据。签名和返回类型不一致仍是错误。`dart:ffi` 的 Array 注解实现包含官方私有成员，即使未接入 runtime 源码也必须完成该库的检查。见[实现片段检查](../test/frontend/analysis/sdk_patches_test.dart)。

@@ -1,5 +1,7 @@
 # 普通 extension 访问
 
+> **注意：** 本目录写于旧编译器。语言条款和规范依据仍然有效；其中“当前范围”“已支持”“尚未实现”等状态，以及到 `test/` 里文件的链接，说的是已经删除的旧编译器，与现在的编译器无关。现在的限制见 [README](../README.md#know-what-to-expect) 和 [PLAN](../PLAN.md)。
+
 在声明与直接方法调用的 receiver-first 静态 ABI 上，getter、setter、索引和运算符复用现有调用适配器，不增加 IR 指令或伪造接收者类。
 
 ## 已验证范围

@@ -23,7 +23,7 @@ Turn supported Dart code into a program you can distribute or a library another 
 
 The compiler, assembler and linker are implemented in Dart. Building native outputs does not require a separate C compiler or linker.
 
-Dart language and standard-library coverage is incomplete. Check the [language support guide](specs/README.md) before bringing an existing application.
+Most of the language and of the core libraries work; [what does not](#know-what-to-expect) is listed below. A program that uses something unsupported does not compile: dartc reports where it is.
 
 ## Get started
 
@@ -50,55 +50,45 @@ Choose a standalone program or a function you can use from native code.
 <a name="example-executable"></a>
 
 <details open>
-<summary><strong>Executable · Compile and check a calculation</strong></summary>
+<summary><strong>Executable · Compile and run a program</strong></summary>
 
-Save this as `sum.dart`:
+Save this as `hello.dart`:
 
 ```dart
-int sum(int limit) {
-  var result = 0;
-  for (var i = 1; i <= limit; i++) {
-    result += i;
-  }
-  return result;
-}
-
-void main() {
-  if (sum(10) != 55) throw 1;
+void main(List<String> names) {
+  print('Hello ${names.isEmpty ? 'world' : names.join(', ')}!');
 }
 ```
 
 Compile and run it:
 
 ```sh
-dartc sum.dart --kind exe -o sum
-./sum && echo "Sum check passed"
+dartc hello.dart -o hello
+./hello Ada Grace
 ```
 
 ```text
-Sum check passed
+Hello Ada, Grace!
 ```
-
-The executable adds the integers from 1 to 10 and checks the result. It exits successfully when the check passes; the shell prints the confirmation. Use Dart `print` to write from the program itself.
 
 For a Dart project, resolve its dependencies before compiling the entry point:
 
 ```sh
 dart pub get
-dartc bin/main.dart --kind exe -o app
+dartc bin/main.dart -o app
 ```
 
-Assertions are disabled by default. Use `--enable-asserts` or `Compiler.compile(enableAssertions: true)` to retain assertion checks and failure messages.
+Assertions are disabled by default. Use `--enable-asserts` to check those outside the standard libraries.
 
 Entry points can be synchronous or async, with optional command-line arguments. Normal completion uses `dart:io`'s `exitCode` after pending events finish, defaulting to zero; the Dart return value is discarded. `exit(code)` terminates immediately, while `sleep(duration)` blocks event delivery for the requested duration.
 
 Pass compilation declarations for `String.fromEnvironment`, `int.fromEnvironment`, `bool.fromEnvironment` and `bool.hasEnvironment`:
 
 ```sh
-dartc bin/main.dart --kind exe -o app -DAPP_NAME=demo --define DEBUG=false
+dartc bin/main.dart -o app -DAPP_NAME=demo --define DEBUG=false
 ```
 
-Declarations also select conditional imports and exports. They are separate from the program's OS environment. Library callers can pass the same values through `Compiler.compile(environment: {'APP_NAME': 'demo'})`. The compiler supplies reserved `dart.library.*` declarations for its native SDK libraries, including `dart.library.io` and `dart.library.ffi`; callers cannot override them. Reflection and JS interop are excluded.
+Declarations also select conditional imports and exports. They are separate from the program's OS environment. The compiler itself supplies `dart.library.*` and `dart.vm.product`; callers cannot override them.
 
 </details>
 
@@ -189,16 +179,15 @@ An executable is ready to run. Libraries let you bring compiled Dart functions i
 
 Use `.so` for shared-library filenames on Linux. Add `--header math.h` to generate C/C++ declarations for the exported functions.
 
-Native exports accept fixed-width FFI integers, `IntPtr`/`UintPtr`, `Bool`, `Float`/`Double`, typed pointers, structs and unions passed by value, and `Void` results. See the [native library guide](specs/libraries.md#原生库) for supported signatures and function bodies.
+Functions exported by name are top-level, synchronous and not generic, and have required positional parameters. They take and give what `dart:ffi` functions do: integers, `Float`, `Double`, `Bool`, pointers, structs and unions.
 
 ## Supported platforms
 
 | Operating system | CPU architecture | Target |
 | --- | --- | --- |
 | macOS | Apple Silicon / ARM64 | `macos-arm64` |
-| macOS | Intel / x86-64 | `macos-x64` |
-| Linux | ARM64 | `linux-arm64` |
-| Linux | x86-64 | `linux-x64` |
+| Linux, glibc 2.34 or later | ARM64 | `linux-arm64` |
+| Linux, glibc 2.34 or later | x86-64 | `linux-x64` |
 
 The default target matches the host. Select another platform with `--target`:
 
@@ -209,15 +198,19 @@ dartc math.dart --kind shared \
 
 Cross-compilation does not require a matching host. Running or loading the result requires the selected target environment.
 
-Linux executables with explicit shared-library inputs use position-independent code and the target GNU dynamic loader. Static-only inputs run without a dynamic loader. See the [executable support boundaries](specs/libraries.md#独立程序入口) for startup and lifecycle limitations.
-
 ## Know what to expect
 
-Numerical functions, direct calls, branches, loops and native scalar pointer access are useful starting points.
+Programs are compared with the official Dart SDK, whose behavior is what dartc aims at. Programs typically take 1 to 3.5 times as long as those that the official AOT compiler makes.
 
-Object construction, nullable values, type checks and synchronous exceptions have native implementations within a limited scope. Async functions and parameterless async main can run natively. Streams, isolates and complete standard-library support remain incomplete.
+Not supported yet:
 
-The [compatibility guide](specs/README.md) distinguishes source analysis, IR behavior and native execution. A construct accepted by analysis is not necessarily executable.
+- `dart:isolate`, and of `dart:io` the network, subprocesses, signals, compression and watching files.
+- Deferred imports, variables of type `Never`, `external` variables, operations on SIMD values.
+- Stack traces have no text.
+- `Expando`, `WeakReference` and `Finalizer` keep objects alive. Native finalizers run when the program ends.
+- `\p{…}` in regular expressions throws when used.
+
+JavaScript interop and `dart:mirrors` are out of scope.
 
 <details>
 <summary><strong>Command reference</strong></summary>
@@ -229,22 +222,22 @@ dartc <source.dart> -o <output> [options]
 | Option | Purpose |
 | --- | --- |
 | `-o <path>` | Set the required output path. |
-| `--kind <kind>` | Select `object`, `static`, `shared` or `exe`. Defaults to `object`. |
+| `--kind <kind>` | Select `exe`, `object`, `static` or `shared`. Defaults to `exe`. |
 | `--header <path>` | Write C/C++ declarations for native exports. |
-| `--enable-asserts` | Enable assertion conditions and failure messages. |
+| `-D<name>=<value>` | Declare a value for `fromEnvironment`. Also `--define`. |
+| `--enable-asserts` | Check assertions. |
 | `--target <target>` | Select an output platform. Defaults to the host. |
 
-Use `dartc --help` to display command syntax.
+The exit code is 0 if the output was written, 1 if the program cannot be compiled, and 64 if the command is wrong.
 
 </details>
 
 ## Documentation
 
-- [Language support](specs/README.md): supported behavior and compatibility gaps.
-- [Native libraries](specs/libraries.md#原生库): exports, FFI types and linking.
-- [Compiler API](lib/compiler.dart): compile programmatically and retrieve generated bytes and headers.
-- [Testing guide](test/README.md): prepare assets and run relevant checks.
-- [Contributor docs](.agents/docs/README.md): current architecture, tasks, review and development workflows.
+- [Compiler API](lib/compiler.dart): compile from Dart.
+- [Architecture](ARCHITECTURE.md) and [plan](PLAN.md), in Chinese: how the compiler works, and what is next.
+- [Testing guide](test/README.md).
+- [SDK sources](sdk/README.md).
 
 ## Contributing
 
@@ -252,23 +245,20 @@ A small reproducer is one of the most useful contributions you can make.
 
 When [reporting a compiler issue](https://github.com/medz/dartc/issues), include the source, compiler release or commit, target platform, command and expected result.
 
-For code contributions, start with the [repository guidelines](AGENTS.md), [contributor docs](.agents/docs/README.md), compatibility and testing guides:
+With Dart SDK 3.14.0:
 
 ```sh
 dart analyze --fatal-infos
-dart test -P unit
+dart test
+dart run bin/dartc.dart hello.dart -o hello
 ```
 
-Native tests require prepared assets; follow the testing guide for the relevant platform and feature.
-
-Build a standalone development compiler with Dart SDK 3.14.0:
+Build the compiler as one program that needs no other files:
 
 ```sh
 dart run tool/build.dart
 ./build/dartc --help
 ```
-
-Development and Dart package execution read `sdk/std`, `sdk/runtime` and `sdk/patches` directly. The build automatically packages these sources and their shared contracts into the executable; generated archives are not stored in Git. The official standard library is included at a fixed commit, so building and using dartc require no SDK source download. See the [SDK source layout](sdk/README.md) for source ownership and programmatic use.
 
 ---
 

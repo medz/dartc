@@ -1,5 +1,7 @@
 # Dart 语言兼容性
 
+> **注意：** 本目录写于旧编译器。语言条款和规范依据仍然有效；其中“当前范围”“已支持”“尚未实现”等状态，以及到 `test/` 里文件的链接，说的是已经删除的旧编译器，与现在的编译器无关。现在的限制见 [README](../README.md#know-what-to-expect) 和 [PLAN](../PLAN.md)。
+
 语言与标准库版本基线为 Dart SDK 3.14.0，标准库固定为 [fa8c1270](https://github.com/dart-lang/sdk/tree/fa8c1270c374c1346931583a17c3b7f278d3822d/sdk/lib)。行为以适用的语言规范、已接受的特性规范和标准库公开契约为准。SDK 是实现对照；与规范冲突的 SDK 行为不自动成为兼容要求。差异须先核查是实现错误、规范尚未更新，还是版本或平台条件不同；已确认结论在对应条款下记录并用独立预期验证。规范未明确的行为再核对 SDK 实现与平台要求。
 
 3.14 没有新增语法。列表、Map 或 record 子模式的类型检查不能把整个被匹配属性提升为子模式的类型；[反例](../test/frontend/analysis/fixtures/patterns/promotion.dart)须在静态分析阶段拒绝。依据为 [3.14 语言变化](https://dart.dev/resources/language/evolution#dart-3-14)。历史 SDK 差异保留当时验证的版本，不代表已在新版本复现。

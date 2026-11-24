@@ -1,21 +1,3 @@
 tags:
-  assets:
+  # Runs compiled programs.
   native:
-  slow:
-
-presets:
-  unit:
-    exclude_tags: assets || slow
-  slow:
-    include_tags: slow
-  native:
-    paths:
-      - test/abi
-      - test/codegen
-      - test/compiler
-      - test/frontend/lowering/ffi_functions_test.dart
-      - test/image
-      - test/driver
-      - test/linker
-    include_tags: native
-    exclude_tags: assets && !native

@@ -1,20 +1,14 @@
 # SDK sources
 
-These sources are compiled for the user's target platform. They ship with dartc and need no separate installation.
+What programs are compiled with besides their own sources. Nothing here has to be installed or downloaded.
 
 | Directory | Contents |
 | --- | --- |
-| `std/` | Unmodified official Dart SDK library sources, license, version and commit. |
-| `runtime/` | Dart implementations of allocation, collection, finalization, scheduling and other execution support. |
-| `patches/` | Target implementations installed into their owning standard libraries during analysis, and shared library helpers. |
-| `native/` | What the new compiler (`tool/compile.dart`) supplies for the standard libraries after the official patches. |
+| `std/` | The official Dart SDK libraries, unmodified, with their license, version and commit. |
+| `native/` | What completes them for native programs. Each directory patches the library it is named after; directories in it are for one system only. |
 
-The compiler and runtime share the declarations in `lib/runtime/contracts.dart` and the memory layout exposed by `lib/layout/memory.dart`. Those files have one source definition and are included when packaging the SDK.
+The runtime is in `lib/src/heap`, as the library `dart:_heap`.
 
-Unicode 17.0.0 case data and its license are pinned under [patches/unicode](patches/unicode/README.md). The source provider verifies these inputs and derives ordinary Dart constants in its source view. Directories and packaged archives expose the constants and license; the original data files remain repository generation inputs. Native compilation and execution require no network or external Unicode installation.
+The compiler merges the official patches for native programs into `std/`, then those in `native/`, in memory (`lib/src/source/patch.dart`). Running from this package reads the files; `dart run tool/build.dart` packs them into the compiler.
 
-Source execution reads this directory directly. Editing runtime or patches requires no archive regeneration. Standard library contents must match the version, commit and fingerprint in `lib/src/sdk/sdk.dart`; SDK updates replace the official sources and update that pin together. Preserve `std/LICENSE` and the original source headers.
-
-`dart run tool/build.dart` packages the current sources, verifies them and embeds them in the standalone compiler. The archive is a build artifact, not a checked-in input. Native compilation uses the same source interface for directories and embedded archives.
-
-`package:dartc/sdk.dart` exposes `SdkSources.load()` for package execution, `SourceDirectory` for an explicit dartc package directory, and `SourceArchive` for packaged resources. A third-party AOT host supplies either source provider to `Compiler(resources: ...)`; `SourceArchive.encode` creates portable resource bytes. The host owns their delivery and location, so an AOT executable does not depend on package discovery or its working directory.
+To update the SDK, replace `std/` and change the version in `test/source/sdk_test.dart`.

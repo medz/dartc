@@ -1,3 +1,0 @@
-analyzer:
-  errors:
-    return_of_invalid_type: ignore

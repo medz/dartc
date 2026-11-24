@@ -1,5 +1,7 @@
 # Extension type 表示擦除
 
+> **注意：** 本目录写于旧编译器。语言条款和规范依据仍然有效；其中“当前范围”“已支持”“尚未实现”等状态，以及到 `test/` 里文件的链接，说的是已经删除的旧编译器，与现在的编译器无关。现在的限制见 [README](../README.md#know-what-to-expect) 和 [PLAN](../PLAN.md)。
+
 普通与泛型 extension type 的构造器返回表示值，representation getter 使用普通静态 identity 函数。实例成员复用普通 extension 的显式接收者 ABI；不新增 IR 类型、分派指令、对象分配或伪造类。
 
 ## 当前范围

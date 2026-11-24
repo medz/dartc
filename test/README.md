@@ -1,83 +1,28 @@
 # Testing
 
-Run the tests for the changed contract and its affected callers. A frontend change usually needs frontend and IR checks; it does not require running the whole suite on every operating system and CPU.
-
 ```sh
-dart test test/frontend/analysis/pattern_constants_test.dart
-dart test test/ir test/assembler
+dart test                                # everything, on this machine
+dart test test/translate -N 'closures'   # some
 ```
 
-Use the standard runner's concurrency. Override `--concurrency` only when measured resource contention calls for it; Docker or CPU emulation alone is not a reason to force serial execution. Keep failures visible rather than increasing global timeouts or retries.
+The official `dart` is the oracle: each program is run with it, and its output and exit code are compared with what dartc gives at every level. Nothing is expected from memory.
 
-## Test groups
-
-| Command | Coverage | Asset preparation |
-| --- | --- | --- |
-| `dart test <paths>` | The changed contract and affected callers | Only if the selected suites have the `assets` tag |
-| `dart test -P unit` | All suites that need no prebuilt assets | None |
-| `dart test -P native` | Host Compiler/CLI integration, standalone compilation and native execution | Current target and host compiler assets |
-| `dart test` | All suites on the current host, including all-target file-format checks | All targets and host compiler assets |
-
-The `assets` tag marks suites that consume prebuilt files. The `native` tag selects host compilation, output handling and actual FFI calls; the preset lists the participating files and domains. Add new native suites to that preset without including unrelated test files. Keep target-independent assertions outside native suites so they can run without loading a library.
-
-For host execution, build only its assets:
-
-```sh
-dart run tool/build_test_assets.dart macos-arm64
-dart run tool/build_compiler_test_assets.dart
-dart test -P native
-```
-
-The builder also accepts `macos-x64`, `linux-arm64` and `linux-x64`, with multiple targets separated by spaces. Without target names it builds all supported targets, including when selecting fixtures. Sources and FFI clients live in each domain's `fixtures/`; outputs go to `build/test/<target>/`. Each compiler fixture is compiled to an object once per target and binding configuration, then archived and linked through the public object/linker APIs. Compiler and CLI tests separately exercise object, static, shared and executable output requests.
-
-For a compiler fixture, pass `--fixture=<name>`; repeat the option to select more than one. Names match library and executable fixtures in `test/compiler/fixtures/`; `entry` selects the basic executable group and `descriptor_write` both IO variants. Required provider libraries, FFI storage and associated executables are built with the selection. Unknown names fail before building anything. Other domains still use the full target build.
-
-```sh
-dart run tool/build_test_assets.dart macos-arm64 --fixture=pointers
-dart test test/compiler/pointers_test.dart
-```
-
-Prepare CLI and SDK integration assets separately with `dart run tool/build_compiler_test_assets.dart`. This compiles and packages the real `bin/dartc.dart` executable, builds fixed Dart FFI and Compiler API clients with the development SDK, and prepares standalone inputs with explicit package dependencies. Fixture builds do not rebuild these assets. The builder reads `sdk/` and shared contracts directly and packages their current contents without downloading sources. SDK unit tests check directory edits, archive integrity, traversal and symbolic links.
-
-The standalone test invokes the prepared dartc executable with an empty `PATH` and no inherited environment, then uses the prepared FFI client to execute its library output. It also compiles and launches a standalone executable through both the CLI and an AOT Compiler API client supplied with the packaged resources. This compilation is the behavior under test. For full environment isolation, copy only those executables and the prepared input to a container without an SDK, checkout or source caches and run with `--network none`.
-
-Build assets before tests. A missing asset is an error, never a request to compile from a test setup. Rebuild when its source, compiler, dependency or target configuration changes. The same batch of target assets can be copied into matching execution environments; do not rebuild all targets in every container. Host compiler checks still compile source in that host.
-
-For example, execute Linux ARM64 tests using assets built on the current machine. The container uses a separate package configuration and cannot change the checkout:
-
-```sh
-dart run tool/build_test_assets.dart linux-arm64
-docker run --rm --platform linux/arm64 \
-  -e TEST_TARGET=linux-arm64 -v "$PWD:/src:ro" \
-  --tmpfs /work:exec -w /work dart:3.14.0-sdk sh -eu -c '
-    cp -R /src/lib /src/sdk /src/bin /src/test /src/tool /work/
-    cp /src/pubspec.yaml /src/pubspec.lock /src/analysis_options.yaml /src/dart_test.yaml /src/LICENSE /work/
-    mkdir -p build/test
-    cp -R /src/build/test/$TEST_TARGET build/test/
-    dart pub get
-    dart run tool/build_compiler_test_assets.dart
-    dart test -P native
-  '
-```
-
-For Linux x64, use `linux-x64` for the builder and `TEST_TARGET`, and `linux/amd64` for Docker. Reuse an existing build from the same source revision instead of running the builder again.
-
-## Validation scope
-
-| Change | Required checks |
+| Directory | What is tested |
 | --- | --- |
-| Frontend, constants, lowering, IR | Relevant semantic and contract tests on one host; add native cases when emitted behavior changes |
-| Instruction encoding, object records, relocations | All affected target variants on one host; cross-generation is not execution |
-| Calling conventions, register allocation, memory operations, linking/loading | Relevant native tests on every affected OS/CPU; shared rules can affect all targets |
-| Bundled SDK, CLI, filesystem handling | Relevant host integration tests on the affected operating systems |
-| Dependency upgrades, broad integration, release candidates | Full host regression and the platform execution required by the changed dependencies and supported release targets |
+| `lir`, `hir`, `graph` | The intermediate representations: printing, verifying, interpreting |
+| `source` | Finding errors, patching the libraries |
+| `translate` | Dart programs, by the HIR interpreter, the LIR interpreter, optimized, and compiled; also when collecting at every allocation |
+| `world`, `optimize`, `lower`, `heap` | These parts by themselves |
+| `emit` | Encoded instructions, and machine code against the LIR interpreter |
+| `image` | Object files, executables and libraries, checked with the tools of the system |
+| `driver` | Compiled programs, libraries used from C, `dart:ffi`, `dart:io`, random programs, the command |
 
-Do not repeat a passed check unless its inputs changed or a new failure calls its result into question. A commit or push alone is not a reason to rerun it. CI covers required environments that local machines and Docker cannot establish; it is not a per-edit requirement. Record emulated execution separately from real hardware and do not use it for native performance claims.
+Tests that run compiled programs do so on macOS ARM64. For Linux, give containers with glibc 2.34 or later and gcc, in which the directory for temporary files has the same path as here:
 
-## Test ownership
+```sh
+DARTC_TARGETS=linuxArm64,linuxX64 \
+DARTC_LINUX_ARM64=<container> DARTC_LINUX_X64=<container> \
+  dart test test/driver test/translate
+```
 
-Test each domain's public contract. End-to-end tests check the compiler's handoffs and observable behavior, rather than repeating every unit assertion. Remove matrix dimensions that cannot affect the contract, but retain different binary formats, operand constraints and platform calling conventions.
-
-Reuse expensive, read-only analysis within a suite when appropriate. Keep mutable execution state isolated, and open resources in test callbacks or setup hooks, with matching teardown. Registering tests must not load native libraries or read generated assets. Expected language behavior follows the applicable specification and library contracts; investigate SDK differences before adopting their output as an expectation.
-
-Use the runner's [path and tag selection](https://dart.dev/tools/dart-test), [configuration presets](https://github.com/dart-lang/test/blob/master/pkgs/test/doc/configuration.md#configuration-presets) and, when timing needs investigation, its JSON reporter. No separate test orchestration framework is required.
+`tool/measure.dart` compares the time of the programs in `tool/bench/programs` with the official AOT compiler.

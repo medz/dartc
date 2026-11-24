@@ -1,6 +1,0 @@
-name: demo
-publish_to: none
-
-environment:
-  # Exercise package language-version checks before digit separators were added.
-  sdk: ^3.5.0

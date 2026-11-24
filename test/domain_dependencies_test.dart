@@ -27,52 +27,14 @@ void main() {
         'emit',
         'image',
         'native',
+        'hir',
       },
-      'ir': {'interop'},
-      'optimizer': {'ir', 'abi', 'interop', 'layout'},
-      'target': {},
-      'layout': {},
-      'sdk': {},
-      'runtime': {},
-      'assembler': {'target'},
-      'frontend': {'sdk', 'ir', 'interop', 'runtime'},
-      'abi': {'assembler', 'target', 'interop'},
-      'object': {'target', 'assembler'},
+      // What other packages use.
+      'compiler': {'driver', 'native', 'optimize', 'source'},
       'interop': {},
-      'codegen': {
-        'optimizer',
-        'runtime',
-        'abi',
-        'assembler',
-        'object',
-        'ir',
-        'interop',
-        'target',
-        'layout',
-      },
-      'linker': {'object', 'assembler', 'target'},
-      'compiler': {
-        'optimizer',
-        'abi',
-        'runtime',
-        'sdk',
-        'ir',
-        'frontend',
-        'codegen',
-        'interop',
-        'target',
-        'object',
-        'linker',
-      },
     };
     final entries = {
       for (final domain in dependencies.keys) '$domain.dart': domain,
-      'assembler/arm64.dart': 'assembler',
-      'assembler/x64.dart': 'assembler',
-      'layout/memory.dart': 'layout',
-      'runtime/contracts.dart': 'runtime',
-      'object/elf.dart': 'object',
-      'object/mach_o.dart': 'object',
     };
     final lib = Directory('lib').absolute.uri;
     String domain(Uri uri) {
@@ -112,10 +74,8 @@ void main() {
           if (uri.scheme == 'package' && uri.pathSegments.first != 'dartc') {
             expect(
               const {
-                '_fe_analyzer_shared': {'frontend'},
-                'analyzer': {'frontend', 'source', 'translate'},
-                'crypto': {'image', 'linker', 'sdk'},
-                'archive': {'sdk'},
+                'analyzer': {'source', 'translate'},
+                'crypto': {'image'},
               }[uri.pathSegments.first],
               contains(owner),
               reason: file.path,
@@ -133,7 +93,11 @@ void main() {
           links.add(target);
           final dependency = domain(target);
           if (dependency != owner) {
-            expect(directive, isA<ImportDirective>(), reason: file.path);
+            expect(
+              directive is ImportDirective,
+              owner != 'compiler',
+              reason: file.path,
+            );
             expect(
               dependencies[owner],
               contains(dependency),

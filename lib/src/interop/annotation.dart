@@ -1,8 +1,12 @@
-/// Exports a Dart function with the explicit `dart:ffi` signature [T].
+/// Exports a Dart function to C with the `dart:ffi` type [T].
 ///
-/// Native signatures accept fixed-width integers, `Float`, `Double` and pointers
-/// to these scalars; `Void` is also allowed as a result. Functions must be
-/// synchronous, non-generic and top-level, with required positional parameters.
+/// [T] is a function type made of native types, as those of `dart:ffi` are
+/// given elsewhere. Exported functions are synchronous, of a library and not
+/// generic, and have required positional parameters only. They are called
+/// [symbol] in C, or else as in Dart.
 ///
-/// {@example /test/compiler/fixtures/arithmetic.dart}
+/// ```dart
+/// @Export<Int64 Function(Int64, Int64)>(symbol: 'math_add')
+/// int add(int a, int b) => a + b;
+/// ```
 final class const Export<T>({final String? symbol});
