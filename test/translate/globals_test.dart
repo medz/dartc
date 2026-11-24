@@ -283,6 +283,46 @@ int get get => x;''',
     ''');
   });
 
+  agrees('constant numbers are compared as others', r'''
+      class C { final bool z, n; final double v; const C(double a) : v = a, z = a == 0.0, n = a != 0; const C.o(Object a) : v = 0.0, z = a == 0.0, n = a != 0; const C.q(double? a) : v = 0.0, z = a == 0.0, n = a != 0; }
+      class D { final double a; const D(this.a); bool get eq => a == 0.0; static const list = [0.0 == -0.0, -0.0 == 0, 0 == -0.0, 0.0 != -0.0, double.nan == double.nan, double.nan != double.nan]; }
+      enum E { x(-0.0 == 0.0), y(1.5 == 1.5); final bool v; const E(this.v); }
+      const num n1 = 0.0, n2 = -0.0; const Object o1 = 0.0, o2 = -0.0; const double? q1 = 0.0, q2 = -0.0; const dynamic d1 = 0.0, d2 = -0.0;
+      const z = -0.0;
+      void def([bool b = z == 0.0, int c = z == 0.0 ? 1 : 2]) => print((b, c));
+      void main() {
+        print(D.list); print((const C(-0.0).z, const C(-0.0).n, const C(1).z, const C.o(-0.0).z, const C.o(-0.0).n, const C.q(-0.0).z, const C.q(-0.0).n, const C.q(null).z)); print(E.values.map((e) => e.v).toList());
+        const r = [n1 == n2, o1 == o2, q1 == q2, d1 == d2, n1 != n2, o1 != o2]; print(r);
+        const i = [identical(0.0, -0.0), identical(double.nan, double.nan), identical(1, 1.0), identical(n1, n2), identical(1.0, 1), identical(z, -0.0)]; print(i);
+        def(); 
+        print(switch (-0.0) { 0.0 => 'zero', _ => 'other' }); print(switch (0) { 0.0 => 'zero', _ => 'other' });
+        print(const [0.0] == const [-0.0]); print(identical(const [0.0], const [-0.0])); print(identical(const C(0.0), const C(-0.0))); print(identical(const [1], const [1.0]));
+        const t = z == 0.0 && 1 < 2 || false; print(t); const st = '${z == 0.0}'; print(st);
+        const cmp = [z < 0.0, z <= 0.0, z >= 0.0, z > 0, double.nan <= 1, 1 < double.infinity, 1 ~/ 2.0, -7 % 3, 7 ~/ -2, 5.5 % -2, 1 / 0 == double.infinity, 1 << 63, -1 >>> 1, 2 - 3.0, -(-0.0), -0.0 + 0.0]; print(cmp);
+      }
+  ''');
+
+  agrees('constant numbers are compared in all kinds of constants', r'''
+      class const P(final double a, {final bool z = -0.0 == 0.0}) { final bool w = -0.0 == 0.0; final bool q = 1.0 != 1; this : assert(a == 0.0, 'not zero'); }
+      class R { final bool e; const R(double a, double b) : e = a == b && identical(a, a); const R.of(Object? a, Object? b) : e = identical(a, b); factory R.f() => const R(0.0, -0.0); }
+      extension type const X(double v) { static const same = 0.0 == -0.0; }
+      @R(0.0, -0.0)
+      class S<T> { final bool e; const S(T a, T b) : e = a == b; }
+      int calls = 0; double next() { calls++; return 0.0; }
+      class V { final bool a = next() == -0.0; bool get b => next() == -0.0; }
+      void main() {
+        print((const P(-0.0).z, const P(-0.0).w, const P(0.0).q, const R(0.0, -0.0).e, const R.of(1, 1.0).e, const R.of(double.nan, double.nan).e, const R.of(0.0, -0.0).e, const R.of('a', 'a').e, const R.of(null, 1.0).e, R.f().e, X.same));
+        print((const S<double>(0.0, -0.0).e, const S<num>(0, -0.0).e, const S<String>('a', 'a').e, const S<Object>(1, 'a').e, const S(double.nan, double.nan).e));
+        final v = V(); print((v.a, v.b, calls));
+        const x = ((0.0 == -0.0) ? 2.5 : 1.0) == 2.5; print(x);
+        const l = <Object>[if (0.0 == -0.0) 'yes' else 'no', ...[0.0 == -0.0]]; print(l);
+        if (1.0 case == 1 && == 1.0) print('rel'); print(switch (2.0) { const (0.0 == -0.0 ? 2.0 : 3.0) => 'c', _ => 'd' });
+        final f = [(double a, [bool b = 0.0 == -0.0]) => b]; print(f[0](1.0));
+        const s = 'x' == 'y' || 1 == 2 || true == false || null == 0.0; print(s);
+        print(const P(1.0 - 1.0).a);
+      }
+  ''');
+
   group('only what needs it', () {
     test('initializes lazily', () async {
       final module = await translate('''

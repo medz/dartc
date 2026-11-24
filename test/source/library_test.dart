@@ -170,4 +170,22 @@ void main() {
       failsWith(['main.dart:1:1: Not a library that can be compiled.']),
     );
   });
+
+  test(
+    'positions are those in the file where constants are compared',
+    () async {
+      // The analyzer gets another text.
+      const text =
+          'const a = 0.0 == -0.0, b = 1.0 == (a ? 2.0 : 3.0); int c = "x";\n'
+          'const double? q = 1, r = q == 2.0 ? 1 : 2; void main() { d(); }';
+      await expectLater(
+        load(text),
+        failsWith([
+          'main.dart:1:60: A value of type \'String\' can\'t be assigned to a '
+              'variable of type \'int\'.',
+          'main.dart:2:58: Undefined name \'d\'.',
+        ]),
+      );
+    },
+  );
 }

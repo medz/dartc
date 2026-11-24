@@ -13,6 +13,7 @@ import 'package:analyzer/source/line_info.dart';
 import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart'
     show AnalysisContextCollectionImpl;
 
+import 'corrections.dart';
 import 'problem.dart';
 import 'sdk.dart';
 
@@ -20,12 +21,19 @@ import 'sdk.dart';
 final class SourceUnit(
   final String path,
   final CompilationUnit ast,
-  final String content,
-  final LineInfo _lines,
+  final CorrectedText _content,
 ) {
-  /// A problem at [offset] characters into the file.
+  late final _lines = LineInfo.fromContent(_content.original);
+
+  /// The text of [node] in the file.
+  String textOf(AstNode node) => _content.original.substring(
+    _content.originalOffset(node.offset),
+    _content.originalOffset(node.end),
+  );
+
+  /// A problem at [offset] characters into the text that was resolved.
   SourceProblem problemAt(int offset, String message) {
-    final at = _lines.getLocation(offset);
+    final at = _lines.getLocation(_content.originalOffset(offset));
     return SourceProblem(path, at.lineNumber, at.columnNumber, message);
   }
 
@@ -71,25 +79,43 @@ Future<SourceProgram> loadProgram(
   final files = OverlayResourceProvider(PhysicalResourceProvider.INSTANCE);
   sdk.install(files);
   var (libraries, core) = await _resolveAll(resolved, sdk, files);
-  if (_renameUnknown(libraries, files)) {
+  final corrected = _correct(libraries, files);
+  if (corrected.isNotEmpty) {
     (libraries, core) = await _resolveAll(resolved, sdk, files);
   }
+  SourceUnit unitOf(ResolvedUnitResult result) => SourceUnit(
+    result.path,
+    result.unit,
+    corrected[result.path] ?? CorrectedText(result.content, const []),
+  );
   final problems = [
     for (final library in libraries)
       for (final unit in library.units)
         for (final diagnostic in unit.diagnostics)
           if (diagnostic.severity == Severity.error)
-            _unit(unit).problemAt(diagnostic.offset, diagnostic.message),
+            unitOf(unit).problemAt(diagnostic.offset, diagnostic.message),
   ];
   if (problems.isNotEmpty) throw CompileFailure(problems);
-  return SourceProgram(libraries.map(_library), core.map(_library));
+  SourceLibrary library(ResolvedLibraryResult result) =>
+      SourceLibrary(result.element, result.units.map(unitOf));
+  return SourceProgram(libraries.map(library), core.map(library));
 }
 
-SourceLibrary _library(ResolvedLibraryResult result) =>
-    SourceLibrary(result.element, result.units.map(_unit));
-
-SourceUnit _unit(ResolvedUnitResult result) =>
-    SourceUnit(result.path, result.unit, result.content, result.lineInfo);
+/// Overlays the files of [libraries] that have to be analyzed as other text,
+/// and gives that text, by their paths.
+Map<String, CorrectedText> _correct(
+  List<ResolvedLibraryResult> libraries,
+  OverlayResourceProvider files,
+) {
+  final found = <String, CorrectedText>{};
+  for (final unit in libraries.expand((library) => library.units)) {
+    final corrected = correctionsOf(unit.unit, unit.content);
+    if (corrected == null) continue;
+    found[unit.path] = corrected;
+    files.setOverlay(unit.path, content: corrected.text, modificationStamp: 0);
+  }
+  return found;
+}
 
 /// The library at [path], then every library it reaches outside the SDK. Also
 /// the libraries of the SDK that can be compiled.
@@ -152,32 +178,4 @@ Future<ResolvedLibraryResult> _resolve(
   return result is ResolvedLibraryResult
       ? result
       : throw StateError('Unresolved library ${library.uri}.');
-}
-
-/// What the analyzer takes to be unknown, though it is false for programs that
-/// are not compiled to JavaScript.
-final _unknown = RegExp(
-  r'''fromEnvironment\(\s*['"]dart\.library\.js_(?:interop|util)['"]''',
-);
-
-/// Overlays every file that asks for what is [_unknown] with a copy asking for
-/// something of the same length. Returns whether there are any.
-bool _renameUnknown(
-  List<ResolvedLibraryResult> libraries,
-  OverlayResourceProvider files,
-) {
-  var found = false;
-  for (final unit in libraries.expand((library) => library.units)) {
-    if (!unit.content.contains(_unknown)) continue;
-    found = true;
-    files.setOverlay(
-      unit.path,
-      content: unit.content.replaceAllMapped(
-        _unknown,
-        (match) => match[0]!.replaceFirst('dart.library', 'none.library'),
-      ),
-      modificationStamp: 0,
-    );
-  }
-  return found;
 }

@@ -29,11 +29,7 @@ final class AssertionTranslator(
           : Uri.file(unit.path);
       _builder.call(
         HirCall(_scope.runtime('throwAssertion'), [
-          _builder.add(
-            _scope.text(
-              unit.content.substring(condition.offset, condition.end),
-            ),
-          ),
+          _builder.add(_scope.text(unit.textOf(condition))),
           _builder.add(_scope.text('$uri')),
           _builder.add(HirConst(at.line)),
           _builder.add(HirConst(at.column)),

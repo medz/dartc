@@ -26,7 +26,6 @@ Wasm 是以后的目标。
 | `extension type E<T>(T value) { T get() => value; }` 时，`B extends E<int>` 的值调用 `get()` | 可以 | 报错：接收者可能是 null。先转换成 `E<int>` 就可以 |
 | 明确写出泛型扩展的运算符 `E<int>(box) + 7`，参数的类型是 `T` | 可以 | 报错：`int` 不能给 `T` |
 | `receiver?.method<int>`，不调用 | 报错 | 接受 |
-| 常量 `0.0 == -0.0` | true | false |
 
 ## 规范
 

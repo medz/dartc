@@ -160,6 +160,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 记录 | 是引用的数组，另有一个字段存命名字段的名字；运行时类型由各个值的类型组成 |
 | 模式 | 一个 `switch` 里，同一个值的同一个 getter 只计算一次 |
 | `assert` | 默认不检查。`--enable-asserts` 时，标准库以外的都检查（`translate/assertions.dart`） |
+| 常量里比较数字 | analyzer 分开 `0.0` 和 `-0.0`，也算错 `identical` 的 NaN。有这种比较时，把文件改写成等价的写法再分析一次；位置仍按原文件报（`source/corrections.dart`） |
 | `fromEnvironment` | 常量由 analyzer 求值；不是常量的调用查编译时写进 `dart:core` 的一张表 |
 | 类型参数的上限 | 静态知道的不检查；`dynamic` 调用、上限含类的 `T` 的方法，调用时检查 |
 | 独立的编译器 | `tool/build.dart` 生成一个入口，里面有压缩的标准库文字，再用官方编译。标准库总是从内存里的文件读，不管在不在磁盘上 |

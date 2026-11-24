@@ -311,6 +311,8 @@ final class ConstantTable(
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
     if (class_ == null || _declarations[class_] == null) return null;
+    // The analyzer does not know every value.
+    if (plainType(class_) != null) return null;
     final target = _classes.classOf(class_);
     final fields = <HirField, Object?>{};
     DartObject? part = object;

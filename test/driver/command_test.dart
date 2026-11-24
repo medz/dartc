@@ -195,6 +195,7 @@ true
         A(this.v) : assert(v > 0, 'v was $v'), assert(v < 100);
         A.b(int w) : assert(w > 2), v = w;
         const A.c(this.v) : assert(v != 7);
+        const A.e(double d) : assert(d == 0.0, 'not zero'), v = 1;
         factory A.d(int x) { assert(x != 1); return A(x); }
       }
       class B extends A { B(super.v) : assert(v != 5, 'five'), super(); }
@@ -212,7 +213,7 @@ true
         t(() { assert(check(true), msg()); });
         t(() { assert(check(false), msg()); });
         t(() => A(0)); t(() => A(100)); t(() => A(5)); t(() => A.b(1));
-        t(() => A.c(7)); t(() => A.d(1)); t(() => B(5)); t(() => E.pos(0));
+        t(() => A.c(7)); t(() => A.e(calls + 1)); t(() => A.d(1)); t(() => B(5)); t(() => E.pos(0));
         t(() { dynamic d = 'x'; assert(d); });
         t(() { dynamic d = false; assert(d, null); });
         t(() { assert(  false  ,  'spaces'  ); });
