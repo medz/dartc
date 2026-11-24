@@ -1,5 +1,7 @@
-/// Executable files from emitted machine code.
+/// Executable files, libraries and object files from emitted machine code.
 library;
 
-export 'src/image/macho.dart' show linkMacho;
+export 'src/image/archive.dart' show writeArchive;
+export 'src/image/macho.dart' show linkMacho, linkMachoLibrary;
+export 'src/image/macho_object.dart' show writeMachoObject;
 export 'src/image/relocate.dart' show ImageError;

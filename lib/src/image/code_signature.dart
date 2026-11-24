@@ -27,6 +27,7 @@ Uint8List codeSignature(
   Uint8List file, {
   required String identifier,
   required int textBytes,
+  required bool isMain,
 }) {
   final size = codeSignatureSize(file.length, identifier);
   final hashes = _directoryBytes + _identifierBytes(identifier);
@@ -55,7 +56,7 @@ Uint8List codeSignature(
     ..u64(0) // 64-bit code limit, unused.
     ..u64(0) // Executable segment start.
     ..u64(textBytes)
-    ..u64(1) // A main program.
+    ..u64(isMain ? 1 : 0)
     ..text(identifier, _identifierBytes(identifier));
   for (var at = 0; at < file.length; at += 1 << _pageBits) {
     final end = at + (1 << _pageBits);

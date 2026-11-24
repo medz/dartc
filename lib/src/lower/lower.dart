@@ -4,6 +4,7 @@ import 'package:dartc/native.dart';
 
 import 'callbacks.dart';
 import 'dispatch.dart';
+import 'exports.dart';
 import 'function.dart';
 import 'machine.dart';
 import 'output.dart';
@@ -19,7 +20,8 @@ const entrySymbol = '.start';
 /// The exit code of a program that throws what nothing catches.
 const _uncaughtCode = 255;
 
-/// Lowers a program to a closed machine-level module.
+/// Lowers a program, or a library if it exports functions, to a closed
+/// machine-level module.
 ///
 /// If [collectsAlways], its collector runs before every allocation.
 LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
@@ -36,6 +38,8 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
     for (final function in module.functions)
       FunctionLowering(function, symbols, layout, statics, machine).lower(),
   ];
+  final exports = module.exports.isEmpty ? null : _exports(module, symbols);
+  final needsThread = module.callback != null || exports != null;
   final functions = [
     ...bodies,
     ...layout.functions,
@@ -43,7 +47,10 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
     if (machine.writesOutput) writeFunction(),
     if (module.callback case final callback?)
       ...callbackFunctions(symbols[callback]!, signatureOf(callback)),
-    _startFunction(module, symbols, machine),
+    if (exports == null)
+      _startFunction(module, symbols, machine)
+    else
+      ...exports.functions,
   ];
   final called = {
     for (final function in functions)
@@ -65,6 +72,8 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
       ...statics.tables,
       if (machine.usesBuffer)
         LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
+      if (needsThread) mainThread(),
+      if (exports != null) ...exportData(),
       if (module.callback != null) ...[...callbackData(), callbackMessage],
       if (machine.keepsNativeFrame)
         LirData(nativeFrameSymbol, List.filled(8, 0), writable: true),
@@ -87,6 +96,26 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
       ...statics.objects,
       if (module.stackOverflow != null) stackLimit(),
     ],
+    exports: exports?.names ?? const {},
+  );
+}
+
+({List<LirFunction> functions, Map<String, String> names}) _exports(
+  HirModule module,
+  Map<HirCallable, String> symbols,
+) {
+  ({String symbol, LirSignature signature})? find(HirFunction? function) =>
+      function == null
+      ? null
+      : (symbol: symbols[function]!, signature: signatureOf(function));
+  return exportFunctions(
+    {
+      for (final MapEntry(key: name, value: function) in module.exports.entries)
+        name: find(function)!,
+    },
+    uncaught: find(module.uncaught),
+    eventLoop: find(module.eventLoop),
+    checksStack: module.stackOverflow != null,
   );
 }
 

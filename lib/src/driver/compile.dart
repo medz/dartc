@@ -26,6 +26,49 @@ Future<Uint8List> compileProgram(
   return linkMacho(code, entry: entrySymbol, identifier: name);
 }
 
+/// What can be made of a library.
+enum LibraryKind() {
+  object,
+  static,
+  shared,
+}
+
+/// Compiles the library at [path] for macOS ARM64. Also gives a header of C for
+/// the functions that it exports.
+///
+/// [name] is what the file will be called. Programs load a shared library from
+/// where that is.
+///
+/// Throws [CompileFailure] if the library has an error or is not supported yet.
+Future<({Uint8List bytes, String header})> compileLibrary(
+  String path,
+  LibraryKind kind, {
+  required String name,
+  bool collectsAlways = false,
+}) async {
+  final (:module, :header) = translateLibrary(
+    await loadProgram(path, sdk: await packagedSdk()),
+  );
+  final code = emitArm64(lowerProgram(module, collectsAlways: collectsAlways));
+  final file = Uri.file(name).pathSegments.last;
+  return (
+    bytes: switch (kind) {
+      .object => writeMachoObject(code),
+      .static => writeArchive(
+        writeMachoObject(code),
+        '$file.o',
+        code.exports.keys,
+      ),
+      .shared => linkMachoLibrary(
+        code,
+        name: File(name).absolute.path,
+        identifier: file,
+      ),
+    },
+    header: header,
+  );
+}
+
 Future<SdkSources>? _sdk;
 
 /// The standard libraries that come with the compiler.

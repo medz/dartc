@@ -1,4 +1,5 @@
-/// Compilation from Dart source to executable files.
+/// Compilation from Dart source to executable files and libraries.
 library;
 
-export 'src/driver/compile.dart' show compileProgram, packagedSdk, writeProgram;
+export 'src/driver/compile.dart'
+    show LibraryKind, compileLibrary, compileProgram, packagedSdk, writeProgram;

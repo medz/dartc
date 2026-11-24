@@ -21,9 +21,11 @@ const _mutexSignature = 0x32aaaba7, _conditionSignature = 0x3cb0b1bb;
 const postSymbol = '.post', takePostedSymbol = '.takePosted';
 const waitPostedSymbol = '.waitPosted';
 
+LirData mainThread() =>
+    LirData(mainThreadSymbol, List.filled(8, 0), writable: true);
+
 /// The data that calls from C need.
 List<LirData> callbackData() => [
-  LirData(mainThreadSymbol, List.filled(8, 0), writable: true),
   LirData(
     callbackInfoSymbol,
     List.filled(Callbacks.count * Callbacks.infoBytes, 0),

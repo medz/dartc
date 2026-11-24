@@ -1,11 +1,26 @@
+import 'dart:convert';
+
 import 'bytes.dart';
 import 'layout.dart';
+import 'link_tables.dart';
 
 const _loader = '/usr/lib/dyld', _system = '/usr/lib/libSystem.B.dylib';
 const _headerBytes = 32, _segment = 72, _section = 80, _linkedData = 16;
 const _loaderBytes = 32, _systemBytes = 56;
 
-int _commandBytes({
+/// What an image is for.
+sealed class const MachoKind();
+
+/// A program that starts with the function [entry].
+final class const MachoExecutable(final String entry) extends MachoKind;
+
+/// A library that programs load as [name].
+final class const MachoLibrary(final String name) extends MachoKind;
+
+int _libraryBytes(String name) => 24 + (utf8.encode(name).length + 8) ~/ 8 * 8;
+
+int _commandBytes(
+  MachoKind kind, {
   required bool hasConstants,
   required bool hasImports,
   required bool hasConstObjects,
@@ -13,7 +28,10 @@ int _commandBytes({
   required bool hasFixups,
 }) {
   final hasDataConst = hasImports || hasConstObjects;
-  final segments = 3 + (hasDataConst ? 1 : 0) + (hasData ? 1 : 0);
+  final segments =
+      (kind is MachoExecutable ? 3 : 2) +
+      (hasDataConst ? 1 : 0) +
+      (hasData ? 1 : 0);
   final sections = [
     true,
     hasConstants,
@@ -26,8 +44,10 @@ int _commandBytes({
       (hasFixups ? _linkedData : 0) +
       24 +
       80 +
-      _loaderBytes +
-      24 +
+      switch (kind) {
+        MachoExecutable() => _loaderBytes + 24,
+        MachoLibrary(:final name) => _libraryBytes(name) + _linkedData,
+      } +
       24 +
       24 +
       _systemBytes +
@@ -35,7 +55,8 @@ int _commandBytes({
 }
 
 /// The file position after the header and its load commands.
-int commandsEnd({
+int commandsEnd(
+  MachoKind kind, {
   required bool hasConstants,
   required bool hasImports,
   required bool hasConstObjects,
@@ -44,6 +65,7 @@ int commandsEnd({
 }) =>
     _headerBytes +
     _commandBytes(
+      kind,
       hasConstants: hasConstants,
       hasImports: hasImports,
       hasConstObjects: hasConstObjects,
@@ -54,15 +76,17 @@ int commandsEnd({
 /// Writes the header and load commands.
 void writeCommands(
   ByteWriter out,
-  MachoLayout layout, {
+  MachoKind kind,
+  MachoLayout layout,
+  LinkTables links, {
   required int base,
   required int entryOffset,
-  required int tableBytes,
   required int signatureOffset,
   required int signatureBytes,
   required List<int> uuid,
 }) {
   final end = commandsEnd(
+    kind,
     hasConstants: layout.hasConstants,
     hasImports: layout.importCount > 0,
     hasConstObjects: layout.constObjectBytes > 0,
@@ -70,16 +94,19 @@ void writeCommands(
     hasFixups: layout.hasFixups,
   );
   final linkBytes = signatureOffset + signatureBytes - layout.linkOffset;
+  final isLibrary = kind is MachoLibrary;
   out
     ..u32(0xfeedfacf)
     ..u32(0x0100000c) // ARM64.
     ..u32(0)
-    ..u32(2) // An executable.
+    ..u32(isLibrary ? 6 : 2)
     ..u32(layout.segments + 8 + (layout.hasFixups ? 1 : 0))
     ..u32(end - _headerBytes)
-    ..u32(0x200085) // No undefined symbols, dyld, two-level, PIE.
+    // No undefined symbols, dyld, two-level, and position-independent or
+    // without libraries of its own to offer.
+    ..u32(isLibrary ? 0x100085 : 0x200085)
     ..u32(0);
-  _writeSegment(out, '__PAGEZERO', memoryBytes: base);
+  if (layout.hasZeroPage) _writeSegment(out, '__PAGEZERO', memoryBytes: base);
   _writeText(out, layout, base);
   if (layout.hasDataConst) _writeDataConst(out, layout, base);
   if (layout.hasData) _writeData(out, layout, base);
@@ -92,14 +119,57 @@ void writeCommands(
     fileBytes: linkBytes,
     protection: 1,
   );
+  if (kind case MachoLibrary(:final name)) _writeLibrary(out, 0xd, name);
+  final at = layout.linkOffset;
   if (layout.hasFixups) {
-    _writeLinkedData(out, 0x80000034, layout.linkOffset, tableBytes);
+    _writeLinkedData(out, 0x80000034, at, links.fixups.length);
   }
-  _writeLoaderCommands(out, entryOffset, uuid);
+  if (isLibrary) {
+    final bytes = links.exports.length;
+    _writeLinkedData(out, 0x80000033, at + links.exportsOffset, bytes);
+  }
+  _writeSymbolTable(out, links, at);
+  _writeLoaderCommands(out, kind, entryOffset, uuid);
   _writeLinkedData(out, 0x1d, signatureOffset, signatureBytes);
   if (out.length != end) {
     throw StateError('Load commands end at ${out.length}.');
   }
+}
+
+/// A command about the library [name]: this one, or one to load.
+void _writeLibrary(ByteWriter out, int command, String name) {
+  final bytes = _libraryBytes(name);
+  out
+    ..u32(command)
+    ..u32(bytes)
+    ..u32(24)
+    ..u32(2)
+    ..u32(1 << 16)
+    ..u32(1 << 16)
+    ..text(name, bytes - 24);
+}
+
+void _writeSymbolTable(ByteWriter out, LinkTables links, int start) {
+  final count = links.symbolCount;
+  out
+    ..u32(0x2) // LC_SYMTAB.
+    ..u32(24);
+  if (count == 0) {
+    out.zeros(16);
+  } else {
+    out
+      ..u32(start + links.symbolsOffset)
+      ..u32(count)
+      ..u32(start + links.namesOffset)
+      ..u32(links.symbolTable.names.length);
+  }
+  out
+    ..u32(0xb) // LC_DYSYMTAB: only external symbols.
+    ..u32(80)
+    ..zeros(12)
+    ..u32(count)
+    ..u32(count)
+    ..zeros(52);
 }
 
 void _writeText(ByteWriter out, MachoLayout layout, int base) {
@@ -193,18 +263,20 @@ void _writeData(ByteWriter out, MachoLayout layout, int base) {
   );
 }
 
-void _writeLoaderCommands(ByteWriter out, int entryOffset, List<int> uuid) {
+void _writeLoaderCommands(
+  ByteWriter out,
+  MachoKind kind,
+  int entryOffset,
+  List<int> uuid,
+) {
+  if (kind is MachoExecutable) {
+    out
+      ..u32(0xe) // LC_LOAD_DYLINKER.
+      ..u32(_loaderBytes)
+      ..u32(12)
+      ..text(_loader, _loaderBytes - 12);
+  }
   out
-    ..u32(0x2) // LC_SYMTAB, empty.
-    ..u32(24)
-    ..zeros(16)
-    ..u32(0xb) // LC_DYSYMTAB, empty.
-    ..u32(80)
-    ..zeros(72)
-    ..u32(0xe) // LC_LOAD_DYLINKER.
-    ..u32(_loaderBytes)
-    ..u32(12)
-    ..text(_loader, _loaderBytes - 12)
     ..u32(0x1b) // LC_UUID.
     ..u32(24)
     ..bytes(uuid)
@@ -213,18 +285,15 @@ void _writeLoaderCommands(ByteWriter out, int entryOffset, List<int> uuid) {
     ..u32(1)
     ..u32(11 << 16)
     ..u32(11 << 16)
-    ..u32(0)
-    ..u32(0x80000028) // LC_MAIN.
-    ..u32(24)
-    ..u64(entryOffset)
-    ..u64(0)
-    ..u32(0xc) // LC_LOAD_DYLIB.
-    ..u32(_systemBytes)
-    ..u32(24)
-    ..u32(2)
-    ..u32(1 << 16)
-    ..u32(1 << 16)
-    ..text(_system, _systemBytes - 24);
+    ..u32(0);
+  if (kind is MachoExecutable) {
+    out
+      ..u32(0x80000028) // LC_MAIN.
+      ..u32(24)
+      ..u64(entryOffset)
+      ..u64(0);
+  }
+  _writeLibrary(out, 0xc, _system);
 }
 
 /// A command naming a range of the last segment.

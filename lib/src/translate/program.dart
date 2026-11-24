@@ -6,7 +6,9 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'apply_table.dart';
+import 'arrays.dart';
 import 'builder.dart';
+import 'c_header.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'closure.dart';
@@ -17,6 +19,7 @@ import 'dispatch.dart';
 import 'dynamic_shape.dart';
 import 'dynamic_table.dart';
 import 'entry.dart';
+import 'exports.dart';
 import 'expression.dart';
 import 'field_table.dart';
 import 'forwarders.dart';
@@ -26,6 +29,7 @@ import 'levels.dart';
 import 'members.dart';
 import 'native_table.dart';
 import 'runtime_links.dart';
+import 'runtime_needs.dart';
 import 'scope.dart';
 import 'statement.dart';
 import 'test_table.dart';
@@ -36,9 +40,13 @@ import 'types.dart';
 /// Translates everything the program's `main` can reach.
 ///
 /// Throws [CompileFailure] at the first construct not supported yet.
-///
 HirModule translateProgram(SourceProgram program) =>
     ProgramTranslator(program).translate();
+
+/// Translates everything that the functions which the program exports can
+/// reach, and writes a header of C for those.
+({HirModule module, String header}) translateLibrary(SourceProgram program) =>
+    ProgramTranslator(program).translateLibrary();
 
 /// Finds the functions a program needs and translates each once.
 ///
@@ -95,20 +103,44 @@ final class ProgramTranslator(final SourceProgram program)
 
   /// The classes of local functions and variables that are no values.
   final _localClasses = <HirClass>[];
-  HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
-  HirFunction? _eventLoop, _callback;
+  late final _needs = RuntimeNeeds(_links, runtime);
 
   HirModule translate() {
-    final unit = program.main.units.first;
     final entry = program.main.element.entryPoint;
     if (entry == null) {
       throw CompileFailure([
-        unit.problemAt(0, 'The program has no main function.'),
+        _unit.problemAt(0, 'The program has no main function.'),
       ]);
     }
     checkImports(program);
     final main = _functions.of(entry);
-    final start = EntryTranslator(this, unit, entry, main)..begin();
+    final start = EntryTranslator(this, _unit, entry, main)..begin();
+    _translateAll();
+    start.finish(_needs.eventLoop);
+    return _module(start.function, const {});
+  }
+
+  /// The program as a library, and a header for it.
+  ({HirModule module, String header}) translateLibrary() {
+    checkImports(program);
+    final exports = exportsOf(program), table = ExportTable(this);
+    if (exports.isEmpty) {
+      throw CompileFailure([
+        _unit.problemAt(0, 'The library exports no functions.'),
+      ]);
+    }
+    exports.forEach(table.add);
+    _translateAll();
+    final start = HirFunction('start', const [])
+      ..define([HirBlock()..end(HirReturn())]);
+    return (
+      module: _module(start, table.functions),
+      header: HeaderWriter(natives.types).write(exports),
+    );
+  }
+
+  /// Translates all that what is translated already can reach.
+  void _translateAll() {
     do {
       while (_pending.isNotEmpty) {
         _pending.removeLast()();
@@ -128,38 +160,40 @@ final class ProgramTranslator(final SourceProgram program)
         _typeFunctions.update(_dispatch.classes, _closures.closures) ||
         _pending.isNotEmpty);
     _typeFunctions.finish();
-    start.finish(_eventLoop);
-    final dispatch = {
-      ..._dispatch.result(_classes.classOf, _closures, _functionClass),
-      ..._closures.dispatch,
-      ..._dynamics.dispatch,
-      ..._typeFunctions.dispatch,
-      ..._applications.dispatch,
-    };
-    return HirModule(
-      start.function,
-      [start.function, ..._allFunctions],
-      classes: [
-        ..._dispatch.classes.map(_classes.classOf),
-        for (final closure in _closures.closures) closure.class_,
-        ..._localClasses,
-        ..._cells.values,
-      ],
-      dispatch: dispatch,
-      globals: [..._globals.globals, ...natives.globals],
-      tests: _tests.results(
-        _dispatch.classes,
-        _closures.closures,
-        _functionClass,
-      ),
-      allocate: _allocate,
-      raise: _raise,
-      stackOverflow: _stackOverflow,
-      outOfMemory: _outOfMemory,
-      uncaught: _uncaught,
-      callback: _callback,
-    );
   }
+
+  HirModule _module(HirFunction start, Map<String, HirFunction> exports) =>
+      HirModule(
+        start,
+        [start, ...exports.values, ..._allFunctions],
+        classes: [
+          ..._dispatch.classes.map(_classes.classOf),
+          for (final closure in _closures.closures) closure.class_,
+          ..._localClasses,
+          ..._cells.values,
+        ],
+        dispatch: {
+          ..._dispatch.result(_classes.classOf, _closures, _functionClass),
+          ..._closures.dispatch,
+          ..._dynamics.dispatch,
+          ..._typeFunctions.dispatch,
+          ..._applications.dispatch,
+        },
+        globals: [..._globals.globals, ...natives.globals],
+        tests: _tests.results(
+          _dispatch.classes,
+          _closures.closures,
+          _functionClass,
+        ),
+        allocate: _needs.allocate,
+        raise: _needs.raise,
+        stackOverflow: _needs.stackOverflow,
+        outOfMemory: _needs.outOfMemory,
+        uncaught: _needs.uncaught,
+        callback: _needs.callback,
+        exports: exports,
+        eventLoop: _needs.eventLoop,
+      );
 
   Iterable<HirFunction> get _allFunctions => [
     ..._functions.all,
@@ -176,28 +210,11 @@ final class ProgramTranslator(final SourceProgram program)
     ..._forwarders.functions,
   ];
 
-  /// Whether the program throws, or calls what may use up the stack.
-  bool get _canThrow => _allFunctions.any(
-    (function) => function.blocks.any(
-      (block) =>
-          block.terminator is HirInvoke ||
-          block.terminator is HirThrow ||
-          block.instructions.any((instruction) => instruction is HirCalling),
-    ),
-  );
-
   /// Adds what the functions found so far need of the runtime.
   void _addRuntime() {
     if (_closures.closures.isNotEmpty) _dispatch.instantiate(_functionClass);
-    if (_links.schedulers.any(_functions.contains)) {
-      _eventLoop ??= runtime('runEventLoop');
-    }
-    if (!_canThrow) return;
-    _stackOverflow ??= _links.exhaustion('StackOverflowError');
-    _raise ??= runtime('raise');
-    _uncaught ??= runtime('reportUncaught');
-    if (_allocate == null) return;
-    _outOfMemory ??= _links.exhaustion('OutOfMemoryError');
+    if (_links.schedulers.any(_functions.contains)) _needs.addEvents();
+    _needs.update(_allFunctions);
   }
 
   @override
@@ -209,7 +226,7 @@ final class ProgramTranslator(final SourceProgram program)
 
   @override
   HirClass cellClass(HirType type) {
-    _addAllocation();
+    _needs.addAllocation();
     return _cells[type] ??= HirClass('cell of ${type.dartName}', null, [
       HirField('value', type),
     ]);
@@ -218,7 +235,7 @@ final class ProgramTranslator(final SourceProgram program)
   @override
   void addClosure(Closure closure) {
     _closures.add(closure);
-    _addAllocation();
+    _needs.addAllocation();
   }
 
   @override
@@ -227,7 +244,7 @@ final class ProgramTranslator(final SourceProgram program)
   @override
   void addLocalClass(HirClass class_) {
     _localClasses.add(class_);
-    _addAllocation();
+    _needs.addAllocation();
   }
 
   @override
@@ -275,7 +292,7 @@ final class ProgramTranslator(final SourceProgram program)
     }
     final list = _types.listValue(builder, types);
     if (list == null) return null;
-    _addAllocation();
+    _needs.addAllocation();
     final class_ = _closures.static(element).class_;
     final object = builder.create(class_);
     builder.add(HirStore(class_.fields.single, object, list));
@@ -292,7 +309,7 @@ final class ProgramTranslator(final SourceProgram program)
   ClassElement get _functionClass => _core.getClass('_Closure')!;
 
   @override
-  void addCallbacks() => _callback ??= runtime('runCallback');
+  void addCallbacks() => _needs.addCallbacks();
 
   @override
   late final NativeTable natives = NativeTable(this, _unit);
@@ -311,12 +328,16 @@ final class ProgramTranslator(final SourceProgram program)
     FunctionBuilder builder,
     List<String> names,
     List<HirValue> values,
-  ) => _array(builder, recordClass, builder.add(this.names(names)), values);
+  ) => newArray(
+    builder,
+    createdClass(recordClass),
+    builder.add(this.names(names)),
+    values,
+  );
 
   @override
   HirInstruction names(List<String> names) {
-    final record = createdClass(recordClass);
-    assert(record.elements != null);
+    createdClass(recordClass);
     return HirStatic(_constants.names(names));
   }
 
@@ -353,25 +374,8 @@ final class ProgramTranslator(final SourceProgram program)
   @override
   HirValue list(FunctionBuilder builder, DartType type, List<HirValue> values) {
     final types = typeList(builder, [type])!;
-    return _array(builder, _core.getClass('_List')!, types, values);
-  }
-
-  /// An array of [element] that holds [values], and [own] in its field.
-  HirValue _array(
-    FunctionBuilder builder,
-    ClassElement element,
-    HirValue own,
-    List<HirValue> values,
-  ) {
-    final class_ = createdClass(element);
-    final length = builder.add(HirConst(values.length));
-    final array = builder.call(HirNewArray(class_, length))!;
-    builder.add(HirStore(class_.fields.single, array, own));
-    for (final (i, value) in values.indexed) {
-      final index = builder.add(HirConst(i));
-      builder.add(HirStoreElement(.reference, array, index, value));
-    }
-    return array;
+    final class_ = createdClass(_core.getClass('_List')!);
+    return newArray(builder, class_, types, values);
   }
 
   @override
@@ -400,7 +404,7 @@ final class ProgramTranslator(final SourceProgram program)
     HirValue receiver, {
     bool isForwarder = false,
   }) {
-    _addAllocation();
+    _needs.addAllocation();
     return _closures.tearOff(
       builder,
       found,
@@ -416,7 +420,7 @@ final class ProgramTranslator(final SourceProgram program)
     HirValue receiver,
     HirValue? types,
   ) {
-    _addAllocation();
+    _needs.addAllocation();
     return _closures.extensionTearOff(builder, element, receiver, types);
   }
 
@@ -430,7 +434,7 @@ final class ProgramTranslator(final SourceProgram program)
     (HirValue, int) types,
     FunctionType type,
   ) {
-    _addAllocation();
+    _needs.addAllocation();
     return _closures.partial(builder, function, types, type);
   }
 
@@ -559,11 +563,9 @@ final class ProgramTranslator(final SourceProgram program)
   HirClass createdClass(InterfaceElement element) {
     final class_ = _classes.classOf(element);
     _dispatch.instantiate(element);
-    _addAllocation();
+    _needs.addAllocation();
     return class_;
   }
-
-  void _addAllocation() => _allocate ??= runtime('allocate');
 
   @override
   FieldPlace fieldOf(Level level, FieldElement element) =>

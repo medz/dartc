@@ -95,6 +95,11 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('outOfMemory', module.outOfMemory, []);
   final callback = module.callback;
   check('callback', callback, [.integer, .integer, .integer], callback?.result);
+  module.exports.forEach((name, function) {
+    check('export $name', function, [.integer, .integer], function.result);
+  });
+  final loop = module.eventLoop;
+  check('eventLoop', loop, const [], loop?.result);
   // What it gives, if anything, is not used.
   final uncaught = module.uncaught;
   check('uncaught', uncaught, [.reference], uncaught?.result);

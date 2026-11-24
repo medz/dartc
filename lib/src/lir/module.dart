@@ -81,6 +81,10 @@ final class LirModule({
   Iterable<LirData> data = const [],
   Iterable<LirTable> tables = const [],
   Iterable<LirStatic> statics = const [],
+
+  /// Functions of C by their names, and what does their work, which takes the
+  /// addresses of the block of the call and of what is passed on the stack.
+  final Map<String, String> exports = const {},
 }) {
   final List<LirStatic> statics = .unmodifiable(statics);
   final List<LirTable> tables = .unmodifiable(tables);

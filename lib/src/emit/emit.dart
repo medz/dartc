@@ -27,6 +27,10 @@ EmittedCode emitArm64(LirModule module) {
     functions[callbacksSymbol] = assembler.offset;
     emitCallbacks(assembler);
   }
+  for (final MapEntry(key: name, value: target) in module.exports.entries) {
+    functions[_exported(name)] = assembler.offset;
+    emitExport(assembler, target);
+  }
   final externals = {for (final external in module.externals) external.name};
   if (externals.remove(callNativeSymbol)) {
     functions[callNativeSymbol] = assembler.offset;
@@ -58,8 +62,12 @@ EmittedCode emitArm64(LirModule module) {
     },
     stackMaps: maps,
     throwTargets: targets,
+    exports: {for (final name in module.exports.keys) name: _exported(name)},
   );
 }
+
+/// The function that C calls for what is called [name].
+String _exported(String name) => '.exported.$name';
 
 bool _uses(LirModule module, String symbol) => module.functions.any(
   (function) => function.blocks.any(

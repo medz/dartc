@@ -87,8 +87,32 @@ void emitCallbacks(Arm64Assembler assembler) {
       ..movz(number, i, 0)
       ..jump(common);
   }
+  assembler.bind(common);
+  _enterBlock(assembler);
   assembler
-    ..bind(common)
+    ..mov(0, number)
+    ..addImmediate(1, stack, 0)
+    // Above the saved frame and return addresses.
+    ..addImmediate(2, frame, 16)
+    ..call(callbackEntrySymbol);
+  _leaveBlock(assembler);
+}
+
+/// Emits a function of C whose work [target] does.
+void emitExport(Arm64Assembler assembler, String target) {
+  const frame = Arm64Assembler.frame, stack = Arm64Assembler.stack;
+  _enterBlock(assembler);
+  assembler
+    ..addImmediate(0, stack, 0)
+    ..addImmediate(1, frame, 16)
+    ..call(target);
+  _leaveBlock(assembler);
+}
+
+/// Makes a frame with the block of a call, which has what is in registers.
+void _enterBlock(Arm64Assembler assembler) {
+  const frame = Arm64Assembler.frame, stack = Arm64Assembler.stack;
+  assembler
     ..pushFrame()
     ..addImmediate(frame, stack, 0)
     ..constant(_scratch, CallBlock.stack)
@@ -98,13 +122,12 @@ void emitCallbacks(Arm64Assembler assembler) {
       ..store(i, stack, CallBlock.words + i * 8)
       ..store(i, stack, CallBlock.floats + i * 8, float: true);
   }
-  assembler
-    ..store(8, stack, CallBlock.resultAddress)
-    ..mov(0, number)
-    ..addImmediate(1, stack, 0)
-    // Above the saved frame and return addresses.
-    ..addImmediate(2, frame, 16)
-    ..call(callbackEntrySymbol);
+  assembler.store(8, stack, CallBlock.resultAddress);
+}
+
+/// Returns with the results that the block has.
+void _leaveBlock(Arm64Assembler assembler) {
+  const frame = Arm64Assembler.frame, stack = Arm64Assembler.stack;
   for (var i = 0; i < 2; i++) {
     assembler.load(i, stack, CallBlock.resultWords + i * 8);
   }

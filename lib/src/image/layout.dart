@@ -6,7 +6,7 @@ const pageBytes = 0x4000;
 int pageAlign(int value) => (value + pageBytes - 1) & ~(pageBytes - 1);
 int align16(int value) => (value + 15) & ~15;
 
-/// Where each part of an executable is, in the file and from its base address.
+/// Where each part of an image is, in the file and from its base address.
 ///
 /// The first segment holds the commands, code, import stubs and constants. The
 /// second holds import slots and constant objects, and the third writable
@@ -20,6 +20,9 @@ final class MachoLayout({
   required final int constObjectBytes,
   required final int dataBytes,
   required final bool hasFixups,
+
+  /// Whether the first segment is an unmapped one.
+  required final bool hasZeroPage,
 }) {
   bool get hasConstants => constantBytes > 0;
   bool get hasDataConst => importCount > 0 || constObjectBytes > 0;
@@ -45,6 +48,10 @@ final class MachoLayout({
   /// The last segment.
   int get linkOffset => dataOffset + pageAlign(dataBytes);
 
-  /// The number of segments, with the unmapped one before the first.
-  int get segments => 3 + (hasDataConst ? 1 : 0) + (hasData ? 1 : 0);
+  /// The number of the first segment after that with the code.
+  int get firstData => hasZeroPage ? 2 : 1;
+
+  /// The number of segments.
+  int get segments =>
+      firstData + 1 + (hasDataConst ? 1 : 0) + (hasData ? 1 : 0);
 }

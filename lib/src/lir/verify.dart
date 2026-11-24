@@ -48,6 +48,10 @@ void verifyModule(LirModule module) {
       throw LirError('${table.name}: unknown function $function');
     }
   }
+  module.exports.forEach((name, function) {
+    if (module.signatures[function] == LirSignature([.ptr, .ptr])) return;
+    throw LirError('$name: no function $function');
+  });
   for (final function in module.functions) {
     _FunctionVerifier(module, names, objects, function).run();
   }

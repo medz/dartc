@@ -35,6 +35,10 @@ final class HirFunction(
 /// and a class whose objects can receive it; its first parameter is the
 /// receiver, and [tests] the classes that pass a test.
 ///
+/// A library has [exports], which do the work of functions of C by their names,
+/// given the addresses of the block of the call and of what is passed on the
+/// stack, and [eventLoop], which does what those left to be done later.
+///
 /// The remaining functions do the work of the runtime. [allocate] gives the
 /// address of memory for an object, of the size it takes, or 0. [raise] throws
 /// an exception with its trace. [stackOverflow] and [outOfMemory] throw theirs.
@@ -54,7 +58,10 @@ final class HirModule(
   final HirFunction? outOfMemory,
   final HirFunction? uncaught,
   final HirFunction? callback,
+  Map<String, HirFunction> exports = const {},
+  final HirFunction? eventLoop,
 }) {
+  final Map<String, HirFunction> exports = .unmodifiable(exports);
   final Map<HirTypeTest, Set<HirClass>> tests = .unmodifiable(tests);
   final List<HirGlobal> globals = .unmodifiable(globals);
   final List<HirClass> classes = .unmodifiable(classes);

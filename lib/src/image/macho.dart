@@ -5,54 +5,38 @@ import 'package:dartc/emit.dart';
 
 import 'bytes.dart';
 import 'code_signature.dart';
+import 'exports.dart';
 import 'fixups.dart';
 import 'imports.dart';
 import 'layout.dart';
+import 'link_tables.dart';
 import 'macho_commands.dart';
+import 'pack.dart';
 import 'relocate.dart';
+import 'symbols.dart';
 
 const _base = 0x100000000;
 
-/// Joins [data], with the offset of each part.
-({Uint8List bytes, Map<String, int> offsets}) _pack(
-  Map<String, Uint8List> data,
-) {
-  final out = ByteWriter(.little), offsets = <String, int>{};
-  for (final MapEntry(key: name, value: bytes) in data.entries) {
-    out.align(16);
-    offsets[name] = out.length;
-    out.bytes(bytes);
-  }
-  return (bytes: out.finish(), offsets: offsets);
-}
-
-/// The contents of an executable, before addresses are filled in.
-final class _Contents(final EmittedCode code) {
-  late final constants = _pack({
+/// The contents of an image, before addresses are filled in.
+final class _Contents(final EmittedCode code, final MachoKind kind) {
+  late final constants = packParts({
     ...code.data,
     for (final MapEntry(key: name, value: entries) in code.tables.entries)
       name: Uint8List(entries.length * 4),
   });
-  late final constObjects = _objects(writable: false);
-  late final data = _objects(writable: true);
-
-  ({Uint8List bytes, Map<String, int> offsets}) _objects({
-    required bool writable,
-  }) => _pack({
-    for (final MapEntry(key: name, value: object) in code.objects.entries)
-      if (object.writable == writable) name: object.bytes,
-  });
+  late final constObjects = packObjects(code, writable: false);
+  late final data = packObjects(code, writable: true);
 
   late final layout = () {
-    final hasConstObjects = constObjects.bytes.isNotEmpty;
     final hasImports = code.externals.isNotEmpty;
     final hasFixups =
         hasImports ||
         code.objects.values.any((object) => object.references.isNotEmpty);
     final end = commandsEnd(
+      kind,
       hasConstants: constants.bytes.isNotEmpty,
       hasImports: hasImports,
-      hasConstObjects: hasConstObjects,
+      hasConstObjects: constObjects.bytes.isNotEmpty,
       hasData: data.bytes.isNotEmpty,
       hasFixups: hasFixups,
     );
@@ -64,6 +48,7 @@ final class _Contents(final EmittedCode code) {
       constObjectBytes: constObjects.bytes.length,
       dataBytes: data.bytes.length,
       hasFixups: hasFixups,
+      hasZeroPage: kind is MachoExecutable,
     );
   }();
 
@@ -92,7 +77,7 @@ final class _Contents(final EmittedCode code) {
   late final fixed = [
     if (layout.hasDataConst)
       FixedSegment(
-        number: 2,
+        number: layout.firstData,
         offset: layout.dataConstOffset,
         bytes:
             (ByteWriter(.little)
@@ -110,7 +95,7 @@ final class _Contents(final EmittedCode code) {
       )..link(pageBytes),
     if (layout.hasData)
       FixedSegment(
-        number: layout.hasDataConst ? 3 : 2,
+        number: layout.firstData + (layout.hasDataConst ? 1 : 0),
         offset: layout.dataOffset,
         bytes:
             (ByteWriter(.little)
@@ -144,18 +129,26 @@ final class _Contents(final EmittedCode code) {
 
 /// Builds a signed macOS ARM64 executable.
 ///
-/// [entry] takes no arguments; the low 8 bits of its result become the
-/// process exit code. [identifier] names the program in its signature.
-/// External functions are bound to the system library when it starts.
+/// [entry] takes the number of arguments and their address, if anything; the
+/// low 8 bits of its result become the process exit code. [identifier] names
+/// the program in its signature. External functions are bound to the system
+/// library when it starts.
 Uint8List linkMacho(
   EmittedCode code, {
   required String entry,
   required String identifier,
-}) {
-  final contents = _Contents(code);
+}) => _link(code, MachoExecutable(entry), identifier);
+
+/// Builds a signed macOS ARM64 library that programs load as [name].
+Uint8List linkMachoLibrary(
+  EmittedCode code, {
+  required String name,
+  required String identifier,
+}) => _link(code, MachoLibrary(name), identifier);
+
+Uint8List _link(EmittedCode code, MachoKind kind, String identifier) {
+  final contents = _Contents(code, kind);
   final layout = contents.layout, symbols = contents.symbols;
-  final entryOffset =
-      code.functions[entry] ?? (throw ImageError('No entry function $entry.'));
   final (bytes: constants, offsets: constantOffsets) = contents.constants;
   code.tables.forEach((name, entries) {
     fillTable(constants, constantOffsets[name]!, name, entries, symbols);
@@ -165,8 +158,21 @@ Uint8List linkMacho(
     layout.stubsOffset,
     layout.dataConstOffset,
   );
-  final table = contents.table;
-  final signatureOffset = layout.linkOffset + align16(table.length);
+  final base = kind is MachoExecutable ? _base : 0;
+  final exported = {
+    for (final MapEntry(key: name, value: function) in code.exports.entries)
+      '_$name': symbols[function]!,
+  };
+  final links = LinkTables(
+    contents.table,
+    exportTable(exported),
+    encodeSymbols([
+      for (final MapEntry(key: name, value: address) in exported.entries)
+        (name: name, section: 1, address: base + address, isExternal: true),
+    ]),
+    exported.length,
+  );
+  final signatureOffset = layout.linkOffset + align16(links.bytes.length);
   final body = ByteWriter(.little)
     ..bytes(contents.text)
     ..bytes(stubs)
@@ -177,17 +183,22 @@ Uint8List linkMacho(
     body.bytes(segment.bytes);
   }
   body
-    ..bytes(table)
-    ..zeros(signatureOffset - layout.linkOffset - table.length);
+    ..bytes(links.bytes)
+    ..zeros(signatureOffset - layout.linkOffset - links.bytes.length);
   final bytes = body.finish();
 
   final out = ByteWriter(.little);
   writeCommands(
     out,
+    kind,
     layout,
-    base: _base,
-    entryOffset: layout.textOffset + entryOffset,
-    tableBytes: table.length,
+    links,
+    base: base,
+    entryOffset: switch (kind) {
+      MachoExecutable(:final entry) =>
+        symbols[entry] ?? (throw ImageError('No entry function $entry.')),
+      MachoLibrary() => 0,
+    },
     signatureOffset: signatureOffset,
     signatureBytes: codeSignatureSize(signatureOffset, identifier),
     // The identity depends on the program alone, so builds are reproducible.
@@ -201,6 +212,7 @@ Uint8List linkMacho(
     file,
     identifier: identifier,
     textBytes: layout.dataConstOffset,
+    isMain: kind is MachoExecutable,
   );
   return Uint8List.fromList([...file, ...signature]);
 }

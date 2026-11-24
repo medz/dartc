@@ -2,5 +2,6 @@
 library;
 
 export 'src/native/call_block.dart';
+export 'src/native/callbacks.dart';
 export 'src/native/passing.dart';
 export 'src/native/types.dart';
