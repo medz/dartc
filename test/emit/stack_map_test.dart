@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/emit.dart';
 import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/allocate.dart';
-import 'package:dartc/src/emit/arm64/convention.dart';
+import 'package:dartc/src/emit/arm64/registers.dart';
 import 'package:dartc/src/emit/liveness.dart';
 import 'package:dartc/src/emit/stack_maps.dart';
 import 'package:dartc/src/emit/support.dart';
@@ -90,7 +90,7 @@ void main() {
     for (var seed = 0; seed < 60; seed++) {
       for (final made in RandomLir(seed).functions()) {
         final liveness = Liveness(made);
-        final allocation = Allocation(liveness, arm64Registers);
+        final allocation = Allocation(liveness, arm64Registers.values);
         for (final block in made.blocks) {
           for (final call in callsOf(block)) {
             for (final value in liveness.liveAfter(call)) {
@@ -110,7 +110,7 @@ void main() {
     var found = 0;
     for (var seed = 0; seed < 60; seed++) {
       for (final made in RandomLir(seed).functions()) {
-        final allocation = Allocation(Liveness(made), arm64Registers);
+        final allocation = Allocation(Liveness(made), arm64Registers.values);
         for (final block in made.blocks) {
           if (block.terminator case Invoke(:final onThrow)) {
             for (final value in onThrow.arguments) {

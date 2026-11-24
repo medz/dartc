@@ -46,9 +46,6 @@ String _textAt(Pointer<Uint8> pointer) {
   return utf8.decode(bytes, allowMalformed: true);
 }
 
-/// The handle for all libraries of the process.
-const _anyLibrary = -2;
-
 DynamicLibrary _load(String? path) {
   // Like the official runtime: as needed, and where others do not see it.
   const isLazy = 1;

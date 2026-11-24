@@ -142,6 +142,7 @@ final class _ObjectWriter(final EmittedCode code) {
           .call26 => _branch,
           .page21 => _page,
           .pageOffset12 => _pageOffset,
+          _ => throw ImageError('No relocation for ${kind.name}.'),
         },
         length: 2,
         isRelative: kind != .pageOffset12,

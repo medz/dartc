@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/lir.dart';
 
 import 'assembler.dart';
-import 'convention.dart';
+import 'registers.dart';
 
 /// Emits operations whose operands and result are in registers.
 final class Arm64Operations(final Arm64Assembler _assembler) {

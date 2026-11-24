@@ -8,7 +8,8 @@ const _usage = '''
 Usage: dart run tool/compile.dart [options] <source> <output>
 
   --kind <kind>      exe, which is the default, object, static or shared
-  --target <target>  macos_arm64, which is the default, or linux_arm64
+  --target <target>  macos_arm64, which is the default,
+                     linux_arm64 or linux_x64
   --header <path>    where to write declarations for C
 ''';
 
@@ -52,7 +53,12 @@ Future<void> main(List<String> arguments) async {
       writeProgram(await compileProgram(source, target: target), output);
       return;
     }
-    final made = await compileLibrary(source, library, name: output);
+    final made = await compileLibrary(
+      source,
+      library,
+      name: output,
+      target: target,
+    );
     writeProgram(made.bytes, output);
     if (header != null) File(header).writeAsStringSync(made.header);
   } on CompileFailure catch (failure) {

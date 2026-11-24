@@ -54,7 +54,7 @@ void main() {
   print(abs(-7)); print(cosine(0)); final buf = mem<Uint8>(64), f = native('%d %.2f %lld'); print(snprintf(buf, 64, f, -5, 1.005, 1 << 40)); print(text(buf)); final l = p.asTypedList(4); l[1] = 77; print(p[1]); print(Int32List.sublistView(l, 1, 3)); print(l.buffer.asUint8List(4, 4)); print(l.runtimeType); print(sizeOf<Int32>() + sizeOf<Pointer>() + sizeOf<Long>() + sizeOf<Size>() + sizeOf<WChar>() + sizeOf<Char>());
   final ci = lib.lookup<Int>('counter'); print(ci.value); ci.value = 9; print(lib.lookupFunction<Pointer<Int32> Function(), Pointer<Int32> Function()>('counterAddress')()[0]); print(nullptr.address); print(nullptr == Pointer<Int8>.fromAddress(0)); print(Pointer<Int8>.fromAddress(16)); print(Pointer<Int8>.fromAddress(16).hashCode); final pp = mem<Pointer<Int32>>(2); pp[1] = p; pp.value = nullptr; print(pp[1] == p); print(pp.value); print(lib.providesSymbol('add')); print(lib.providesSymbol('nope'));
   final addr = Native.addressOf<NativeFunction<Int32 Function(Int32)>>(abs); print(addr.asFunction<I>()(-9)); print(DynamicLibrary.process().lookupFunction<Int32 Function(Int32), I>('abs')(-11)); print(Abi.current());
-  try { lib.lookup<Void>('nope'); } catch (e) { print('$e'.substring(0, 60)); } try { DynamicLibrary.open('/nope.dylib'); } catch (e) { print('$e'.split(':').take(2).join(':')); } try { noSuchThing(); } catch (e) { print('$e'.split("'")[1]); } try { p.asTypedList(-1); } catch (e) { print(e); } Function af = add; print(Function.apply(af, [4, 5])); dynamic d = add; try { d('x', 1); } catch (e) { print(e); } print(add.runtimeType); print(add is int Function(int, int)); print(lib == lib); print(lib.handle.address != 0); lib.close(); try { lib.lookup<Void>('add'); } catch (e) { print(e); }
+  try { lib.lookup<Void>('nope'); } catch (e) { print('$e'.substring(0, 52)); } try { DynamicLibrary.open('/nope.dylib'); } catch (e) { print('$e'.split(':').take(2).join(':')); } try { noSuchThing(); } catch (e) { print('$e'.split("'")[1]); } try { p.asTypedList(-1); } catch (e) { print(e); } Function af = add; print(Function.apply(af, [4, 5])); dynamic d = add; try { d('x', 1); } catch (e) { print(e); } print(add.runtimeType); print(add is int Function(int, int)); print(lib == lib); print(lib.handle.address != 0); lib.close(); try { lib.lookup<Void>('add'); } catch (e) { print(e); }
 }
 ''';
 
@@ -100,7 +100,7 @@ final class Vec3 extends Struct { @Float() external double a, b; @Float() extern
 final class Quad extends Struct { @Array(4) external Array<Double> d; }
 final class Mixed extends Struct { @Int8() external int a; @Int64() external int b; @Int16() external int c; }
 final class Small extends Struct { @Array(3) external Array<Uint8> bytes; }
-final class Line extends Struct { external Point from, to; @Array(8) external Array<Char> name; }
+final class Line extends Struct { external Point from, to; @Array(8) external Array<Int8> name; }
 final class AnyU extends Union { @Int32() external int i; @Float() external double f; @Array(4) external Array<Uint8> b; }
 @Packed(1) final class Pack extends Struct { @Uint8() external int a; @Uint32() external int b; @Double() external double c; }
 final class Big extends Struct { @Int64() external int a, b, c; }

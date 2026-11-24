@@ -3,42 +3,28 @@
 @Timeout.factor(8)
 library;
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:dartc/driver.dart';
 import 'package:test/test.dart';
 
-import '../image/support.dart' show skipExecution;
+import '../support/hosts.dart';
 import '../support/new_compiler.dart';
 import 'io_files.dart';
 import 'io_system.dart';
 
-/// Runs [command] in the empty directory [place], with [input].
-Future<(int, String, String)> _run(
-  String command,
-  List<String> arguments,
-  String place,
-  String input,
-) async {
-  final directory = Directory(place)..createSync();
-  final process = await Process.start(
-    command,
-    arguments,
-    workingDirectory: place,
-    environment: {'DARTC_TEST': 'é=1'},
-  );
-  final outputs = [
-    for (final stream in [process.stdout, process.stderr])
-      stream.transform(const Utf8Decoder(allowMalformed: true)).join(),
-  ];
-  process.stdin.write(input);
-  await process.stdin.close().catchError((_) {});
-  final [output, errors] = await Future.wait(outputs);
-  final code = await process.exitCode;
-  directory.deleteSync(recursive: true);
-  return (code, output, errors);
-}
+const _environment = {'DARTC_TEST': 'é=1'};
+
+/// What the official runtime does with the program at [path] and [input], in
+/// the empty directory [place].
+Future<Run> _official(String path, String place, String input) =>
+    Host.local!.run(
+      '$hostSdk/bin/dart',
+      arguments: ['run', path],
+      place: place,
+      input: input,
+      environment: _environment,
+    );
 
 /// Checks that the program [source] does with [input] what it does officially.
 ///
@@ -54,6 +40,10 @@ Future<void> _agrees(String source, {String input = ''}) async {
   );
 }
 
+/// What [output] says apart from the numbers of errors, which systems differ in.
+String _told(String output, Host host) =>
+    host.isLinux ? output.replaceAll(RegExp(r'errno = \d+'), 'errno') : output;
+
 Future<void> _compare(
   String source,
   String input, {
@@ -61,20 +51,44 @@ Future<void> _compare(
 }) async {
   final directory = writeSources({'main.dart': source});
   final path = '${directory.path}/main.dart';
-  final place = '${directory.path}/place';
-  final official = await _run('$hostSdk/bin/dart', ['run', path], place, input);
-  expect(official.$2, isNotEmpty, reason: official.$3);
+  final place = Directory('${directory.path}/place')..createSync();
+  void clear() => place
+    ..deleteSync(recursive: true)
+    ..createSync();
+  final official = await _official(path, place.path, input);
+  clear();
+  expect(official.output, isNotEmpty, reason: official.errors);
   final program = '${directory.path}/program';
-  writeProgram(
-    await compileProgram(path, collectsAlways: collectsAlways),
-    program,
-  );
-  final compiled = await _run(program, const [], place, input);
-  final reason = 'collecting always: $collectsAlways\n${compiled.$3}';
-  expect(compiled.$2, official.$2, reason: reason);
-  expect(compiled.$1, official.$1, reason: reason);
-  // The texts of stack traces differ.
-  if (official.$1 == 0) expect(compiled.$3, official.$3, reason: reason);
+  for (final host in Host.all) {
+    writeProgram(
+      await compileProgram(
+        path,
+        target: host.target,
+        collectsAlways: collectsAlways,
+      ),
+      program,
+    );
+    final compiled = await host.run(
+      program,
+      place: place.path,
+      input: input,
+      environment: _environment,
+    );
+    clear();
+    final reason =
+        '${host.target}, collecting always: $collectsAlways\n'
+        '${compiled.errors}';
+    expect(
+      _told(compiled.output, host),
+      _told(official.output, host),
+      reason: reason,
+    );
+    expect(compiled.code, official.code, reason: reason);
+    // The texts of stack traces differ.
+    if (official.code == 0) {
+      expect(compiled.errors, official.errors, reason: reason);
+    }
+  }
 }
 
 void main() {
@@ -83,9 +97,31 @@ void main() {
       test(name, () => _agrees(source));
     });
 
+    test('the environment', () => _agrees(environmentProgram));
+
+    test('what only the system knows', () async {
+      final directory = writeSources({'main.dart': platformProgram});
+      final path = '${directory.path}/main.dart';
+      final program = '${directory.path}/program';
+      for (final host in Host.all) {
+        writeProgram(await compileProgram(path, target: host.target), program);
+        final lines = (await host.run(program)).output.split('\n');
+        final isLinux = host.isLinux;
+        expect(lines[0], host.target.system.name);
+        expect(lines[1], startsWith(isLinux ? 'Linux ' : 'Version '));
+        expect(lines[2], '${!isLinux} $isLinux false false false false');
+        expect(lines[3], isNotEmpty);
+        expect(lines[4], isNotEmpty);
+        expect(lines[5], '"${host.target.label}"');
+        if (isLinux) continue;
+        final official = await _official(path, directory.path, '');
+        expect(official.output.split('\n').take(6), lines.take(6));
+      }
+    });
+
     inputPrograms.forEach((name, given) {
       final (source, input) = given;
       test(name, () => _agrees(source, input: input));
     });
-  }, skip: skipExecution);
+  }, skip: Host.missing);
 }

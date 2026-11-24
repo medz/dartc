@@ -11,10 +11,6 @@ import 'dart:_heap/objects.dart'
         storeDouble,
         storeSingle;
 
-/// The number of macOS on ARM64.
-@patch
-int _abi() => 18;
-
 @patch
 final class Pointer<T extends NativeType> {
   final int _address;
@@ -42,8 +38,7 @@ String _hex(int value) {
 }
 
 @patch
-Pointer<T> _fromAddress<T extends NativeType>(int ptr) =>
-    Pointer<Never>._(ptr);
+Pointer<T> _fromAddress<T extends NativeType>(int ptr) => Pointer<Never>._(ptr);
 
 /// The address of [pointer].
 int _pointerAddress(Pointer pointer) => pointer._address;

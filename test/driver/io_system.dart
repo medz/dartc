@@ -56,41 +56,6 @@ Future<void> main() async {
   try { stdout.write('lost'); } catch (e) { print(e); }
 }
 ''',
-  'environment': r'''
-import 'dart:io';
-
-Future<void> main(List<String> arguments) async {
-  print(Platform.environment['DARTC_TEST']);
-  print(Platform.environment['DARTC_NONE']);
-  print(Platform.environment.containsKey('PATH'));
-  try { Platform.environment['x'] = 'y'; } catch (e) { print(e); }
-  print(Platform.operatingSystem);
-  print(Platform.operatingSystemVersion);
-  print('${Platform.isMacOS} ${Platform.isLinux} ${Platform.isWindows} ${Platform.isAndroid} ${Platform.isIOS} ${Platform.isFuchsia}');
-  print(Platform.numberOfProcessors);
-  print(Platform.pathSeparator);
-  print(Platform.lineTerminator.length);
-  print(Platform.localHostname);
-  print(Platform.localeName);
-  print(Platform.packageConfig);
-  print(Platform.executableArguments);
-  print(Platform.version.split(' ').first);
-  print(Platform.version.split(' ').last);
-  print(Platform.executable.isEmpty);
-  print(File(Platform.resolvedExecutable).existsSync());
-  print(File.fromUri(Platform.script).existsSync());
-  print(pid > 1);
-  final watch = Stopwatch()..start();
-  sleep(const Duration(milliseconds: 30));
-  print(watch.elapsedMilliseconds >= 30);
-  try { sleep(const Duration(milliseconds: -1)); } catch (e) { print(e); }
-  print(systemEncoding.name);
-  print(systemEncoding.decode(systemEncoding.encode('é')));
-  print(exitCode);
-  exitCode = 7;
-  print(exitCode);
-}
-''',
   'exit at once': r'''
 import 'dart:async';
 import 'dart:io';
@@ -144,6 +109,49 @@ void main() {
 }
 ''',
 };
+
+/// What systems agree on.
+const environmentProgram = r'''
+import 'dart:io';
+
+Future<void> main(List<String> arguments) async {
+  print(Platform.environment['DARTC_TEST']);
+  print(Platform.environment['DARTC_NONE']);
+  print(Platform.environment.containsKey('PATH'));
+  try { Platform.environment['x'] = 'y'; } catch (e) { print(e); }
+  print(Platform.numberOfProcessors > 0);
+  print(Platform.pathSeparator);
+  print(Platform.lineTerminator.length);
+  print(Platform.packageConfig);
+  print(Platform.executableArguments);
+  print(Platform.version.split(' ').first);
+  print(Platform.executable.isEmpty);
+  print(File(Platform.resolvedExecutable).existsSync());
+  print(File.fromUri(Platform.script).existsSync());
+  print(pid > 1);
+  final watch = Stopwatch()..start();
+  sleep(const Duration(milliseconds: 30));
+  print(watch.elapsedMilliseconds >= 30);
+  try { sleep(const Duration(milliseconds: -1)); } catch (e) { print(e); }
+  print(systemEncoding.name);
+  print(systemEncoding.decode(systemEncoding.encode('é')));
+  print(exitCode);
+  exitCode = 7;
+  print(exitCode);
+}
+''';
+
+const platformProgram = r'''
+import 'dart:io';
+void main() {
+  print(Platform.operatingSystem);
+  print(Platform.operatingSystemVersion);
+  print('${Platform.isMacOS} ${Platform.isLinux} ${Platform.isWindows} ${Platform.isAndroid} ${Platform.isIOS} ${Platform.isFuchsia}');
+  print(Platform.localHostname);
+  print(Platform.localeName);
+  print(Platform.version.split(' ').last);
+}
+''';
 
 /// Programs that read what they are given.
 final inputPrograms = {

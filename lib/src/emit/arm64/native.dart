@@ -1,6 +1,7 @@
 import 'package:dartc/lir.dart';
 import 'package:dartc/native.dart';
 
+import '../backend.dart';
 import 'assembler.dart';
 
 /// A register that calls keep, for the block.
@@ -139,9 +140,6 @@ void _leaveBlock(Arm64Assembler assembler) {
     ..popFrame()
     ..ret();
 }
-
-/// What runs a program on Linux, given its function and what it starts with.
-const linuxMainSymbol = '__libc_start_main';
 
 /// Emits what Linux starts, where the stack has the program's arguments. It
 /// runs [main].

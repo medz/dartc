@@ -60,6 +60,45 @@ final class const Host._(final Target target, final String? _container) {
     );
   }
 
+  /// Runs the C compiler in the directory [place].
+  ProcessResult compileC(
+    List<String> arguments,
+    String place, {
+    bool isCpp = false,
+  }) {
+    final container = _container;
+    return container == null
+        ? Process.runSync(
+            isCpp ? 'clang++' : 'clang',
+            arguments,
+            workingDirectory: place,
+          )
+        : Process.runSync('docker', [
+            'exec',
+            '-w',
+            place,
+            container,
+            isCpp ? 'g++' : 'gcc',
+            ...arguments,
+          ]);
+  }
+
+  /// Builds a library of [c] at [path].
+  void buildLibrary(String c, String path) {
+    final source = '$path.c';
+    File(source).writeAsStringSync(c);
+    final built = compileC([
+      '-shared',
+      '-fPIC',
+      // Compilers differ in whether they do without rounding.
+      '-ffp-contract=off',
+      '-o',
+      path,
+      source,
+    ], File(path).parent.path);
+    if (built.exitCode != 0) throw StateError('${built.stderr}');
+  }
+
   /// Runs the program at [path], for [limit] at most. The code is negative if a
   /// signal ends it.
   Future<Run> run(

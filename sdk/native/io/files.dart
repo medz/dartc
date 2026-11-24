@@ -1,14 +1,11 @@
 const _readOnly = 0, _writeOnly = 1, _readWrite = 2;
-const _createFlag = 0x200, _truncateFlag = 0x400, _exclusiveFlag = 0x800;
-const _closeOnExec = 0x1000000;
 const _fromStart = 0, _fromCurrent = 1, _fromEnd = 2;
-const _allOfFile = 15;
 
 /// Opens the file at [path]. Returns a negative number if it cannot.
 int _openFileAt(Uint8List path, int flags) {
   final file = _openPath(dataAddress(path), flags | _closeOnExec, 0x1b6);
   if (file < 0) return file;
-  if (_statFile(file, _buffer) == 0 && _typeOf(_statMode) != _typeDirectory) {
+  if (_statFile(file) == 0 && _typeOf(_statMode) != _typeDirectory) {
     return file;
   }
   _closeFile(file);
@@ -114,9 +111,7 @@ class _File {
   static _copy(_Namespace namespace, Uint8List oldPath, String newPath) =>
       _withFile(oldPath, () {
         final target = FileSystemEntity._toUtf8Array(newPath);
-        return _succeeded(
-          _copyFile(dataAddress(oldPath), dataAddress(target), 0, _allOfFile),
-        );
+        return _succeeded(_copyFile(oldPath, target));
       });
 
   @patch
@@ -271,22 +266,18 @@ class _SystemFile implements _RandomAccessFileOps {
 
   truncate(int length) => _succeeded(_truncateFile(fd, length));
 
-  length() => _statFile(fd, _buffer) < 0 ? _failure() : _statSize;
+  length() => _statFile(fd) < 0 ? _failure() : _statSize;
 
   flush() => _succeeded(_syncFile(fd));
 
   lock(int lock, int start, int end) {
-    const set = 8, setWaiting = 9, shared = 1, none = 2, exclusive = 3;
-    store64(_buffer, start);
-    store64(_buffer + 8, end == -1 ? 0 : end - start);
-    store32(_buffer + 16, 0);
     final type = switch (lock) {
-      0 => none,
-      1 || 3 => shared,
-      _ => exclusive,
+      0 => _noLock,
+      1 || 3 => _sharedLock,
+      _ => _exclusiveLock,
     };
-    store16(_buffer + 20, type);
-    store16(_buffer + 22, _fromStart);
-    return _succeeded(_controlFile(fd, lock > 2 ? setWaiting : set, _buffer));
+    _storeLock(type, start, end == -1 ? 0 : end - start);
+    final request = lock > 2 ? _setLockWaiting : _setLock;
+    return _succeeded(_controlFile(fd, request, _buffer));
   }
 }

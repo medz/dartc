@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/lir.dart';
 
 import '../code.dart';
+import '../machine.dart';
 
 /// ARM64 condition codes, by encoding.
 enum Condition(final int code) {
@@ -20,7 +21,7 @@ enum Condition(final int code) {
 }
 
 /// A branch destination inside the code being assembled.
-final class Label() {
+final class Label() implements CodeLabel {
   int? _offset;
   final _uses = <(int, {bool conditional})>[];
 }

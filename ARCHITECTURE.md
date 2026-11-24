@@ -60,8 +60,8 @@
 | `lower` | HIR → LIR | `hir` `lir` `graph` `native` |
 | `native` | C 的类型、布局、函数怎么传值 | 无 |
 | `heap` | 运行时的 Dart 源码：回收器、异常展开、数字、类型，随程序一起编译 | 无 |
-| `emit` | LIR → 机器码 | `lir` `graph` `native` |
-| `image` | 机器码 → 可执行文件、目标文件、静态库、动态库 | `emit` |
+| `emit` | LIR → 机器码：`function.dart` 和 `allocate.dart` 与机器无关，`arm64/`、`x64/` 是机器的部分 | `lir` `graph` `native` |
+| `image` | 机器码 → 可执行文件、目标文件、静态库、动态库（Mach-O 和 ELF） | `emit` `native` |
 | `driver` | 把阶段串起来，CLI 和 API 共用 | 全部 |
 
 名字都和旧目录不同，所以新旧能并存，最后不用改名。
@@ -163,6 +163,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 退出码 | 程序设过 `exitCode` 时，事件循环结束后用它退出 |
 | 目标平台 | `native` 的 `Target`。传值规则、系统函数、文件格式按它选；`sdk/native/<库>/<系统>/` 里的补丁只给那个系统 |
 | Linux | 只依赖 libc 和 libm，不带符号版本。`.linuxEntry` 调用 `__libc_start_main`。所有导入在启动时绑定，之后只读 |
+| x64 | 约定和系统的相同；没有调用后保留的浮点寄存器，所以跨过调用的浮点数都在栈上。栈帧的样子和 ARM64 一样，回收器和异常不用区分 |
 | 栈里有 C | 每次调用 C 时把自己的栈帧连成一串；回收器走到 C 时，从这一串跳到外面那一段。异常不越过 C |
 | `NativeFinalizer` | 程序结束时才调用 |
 | C 的内存 | `Pointer` 只有地址；结构体是（所在的对象，偏移），字段直接读写内存。对象不移动，所以类型化数据也能给 C |
@@ -197,7 +198,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 
 未捕获异常：比较退出码和异常文字，堆栈格式不比较。
 
-Linux 的程序在 Docker 容器里运行：`DARTC_TARGETS=linuxArm64 DARTC_LINUX_ARM64=<容器名> dart test`。容器里临时目录的路径要和本机相同。官方结果仍然来自本机的 `dart`。
+Linux 的程序在 Docker 容器里运行：`DARTC_TARGETS=linuxArm64,linuxX64 DARTC_LINUX_ARM64=<容器名> DARTC_LINUX_X64=<容器名> dart test`。容器里临时目录的路径要和本机相同，FFI 和库的测试要有 gcc。官方结果仍然来自本机的 `dart`。
 
 ## 7. 代码规则
 

@@ -1,12 +1,13 @@
 import 'package:dartc/lir.dart';
 import 'package:dartc/native.dart';
 
-import 'arm64/assembler.dart';
-import 'arm64/function.dart';
-import 'arm64/native.dart';
+import 'arm64/backend.dart';
+import 'backend.dart';
 import 'code.dart';
+import 'function.dart';
 import 'stack_maps.dart';
 import 'support.dart';
+import 'x64/backend.dart';
 
 /// What Linux starts in programs.
 const linuxEntrySymbol = '.linuxEntry';
@@ -25,37 +26,41 @@ EmittedCode emitCode(
 }) {
   verifyModule(module);
   checkSupported(module);
-  final assembler = Arm64Assembler();
+  final externals = {for (final external in module.externals) external.name};
+  final backend = switch (target.architecture) {
+    .arm64 => Arm64Backend(),
+    .x64 => X64Backend(Set.of(externals)),
+  };
+  final machine = backend.machine;
   final functions = <String, int>{textSymbol: 0};
   final maps = <StackMap>[], targets = <ThrowTarget>[];
   for (final function in module.functions) {
-    functions[function.name] = assembler.offset;
-    final emitter = Arm64Function(function, assembler)..emit();
+    functions[function.name] = machine.offset;
+    final emitter = FunctionEmitter(function, machine)..emit();
     maps.addAll(emitter.stackMaps);
     targets.addAll(emitter.throwTargets);
   }
   if (functions.containsKey(callbackEntrySymbol)) {
-    functions[callbacksSymbol] = assembler.offset;
-    emitCallbacks(assembler);
+    functions[callbacksSymbol] = machine.offset;
+    backend.emitCallbacks();
   }
   for (final MapEntry(key: name, value: target) in module.exports.entries) {
-    functions[_exported(name)] = assembler.offset;
-    emitExport(assembler, target);
+    functions[_exported(name)] = machine.offset;
+    backend.emitExport(target);
   }
-  final externals = {for (final external in module.externals) external.name};
   if (entry != null && target.system == .linux) {
-    functions[linuxEntrySymbol] = assembler.offset;
-    emitLinuxEntry(assembler, entry);
+    functions[linuxEntrySymbol] = machine.offset;
+    backend.emitLinuxEntry(entry);
     externals.add(linuxMainSymbol);
   }
   if (externals.remove(callNativeSymbol)) {
-    functions[callNativeSymbol] = assembler.offset;
-    emitNativeCall(assembler);
+    functions[callNativeSymbol] = machine.offset;
+    backend.emitNativeCall();
   }
   return EmittedCode(
-    assembler.finish(),
+    backend.finish(),
     functions,
-    assembler.relocations,
+    backend.relocations,
     externals: externals,
     data: {
       for (final data in module.data)
@@ -79,6 +84,7 @@ EmittedCode emitCode(
     stackMaps: maps,
     throwTargets: targets,
     exports: {for (final name in module.exports.keys) name: _exported(name)},
+    architecture: target.architecture,
   );
 }
 

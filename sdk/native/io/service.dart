@@ -205,8 +205,7 @@ class _IOService {
     final isByte = request == fileWriteByte;
     final bytes = isByte ? (Uint8List(1)..[0] = data[1]) : data[1];
     final int start = isByte ? 0 : data[2], end = isByte ? 1 : data[3];
-    if (_statFile(open.fd, _buffer) == 0 &&
-        _statMode & _modeType != _modeFile) {
+    if (_statFile(open.fd) == 0 && _statMode & _modeType != _modeFile) {
       final copy = Uint8List.fromList(bytes);
       return _WriteTask(completer, open, copy, start, end, isByte ? 1 : null);
     }

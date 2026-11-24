@@ -1,0 +1,34 @@
+import 'dart:typed_data';
+
+import '../backend.dart';
+import '../code.dart';
+import '../machine.dart';
+import 'assembler.dart';
+import 'machine.dart';
+import 'native.dart' as native;
+
+/// Makes code for ARM64.
+final class Arm64Backend() implements Backend {
+  final _assembler = Arm64Assembler();
+
+  @override
+  late final Machine machine = Arm64Machine(_assembler);
+
+  @override
+  List<Relocation> get relocations => _assembler.relocations;
+
+  @override
+  void emitNativeCall() => native.emitNativeCall(_assembler);
+
+  @override
+  void emitCallbacks() => native.emitCallbacks(_assembler);
+
+  @override
+  void emitExport(String target) => native.emitExport(_assembler, target);
+
+  @override
+  void emitLinuxEntry(String main) => native.emitLinuxEntry(_assembler, main);
+
+  @override
+  Uint8List finish() => _assembler.finish();
+}

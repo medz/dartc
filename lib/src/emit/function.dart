@@ -1,44 +1,36 @@
 import 'package:dartc/lir.dart';
 
-import '../allocate.dart';
-import '../liveness.dart';
-import '../moves.dart';
-import '../stack_maps.dart';
-import '../support.dart';
-import 'assembler.dart';
-import 'convention.dart';
-import 'operations.dart';
-
-/// Holds the frame to continue in, like an argument.
-const _resumedFrame = 9;
+import 'allocate.dart';
+import 'liveness.dart';
+import 'machine.dart';
+import 'moves.dart';
+import 'stack_maps.dart';
+import 'support.dart';
 
 /// Emits one function.
-///
-/// From the stack pointer up, a frame holds outgoing arguments, spilled
-/// values, preserved registers and the saved frame and return addresses.
-final class Arm64Function(
+final class FunctionEmitter(
   final LirFunction function,
-  final Arm64Assembler _assembler,
+  final Machine _machine,
 ) {
-  final _labels = <LirBlock, Label>{};
+  final _labels = <LirBlock, CodeLabel>{};
+  late final _registers = _machine.registers;
 
   /// What the calls keep alive, and where they continue if they throw.
   final List<StackMap> stackMaps = [];
   final List<ThrowTarget> throwTargets = [];
   late final _liveness = Liveness(function);
-  late final _allocation = Allocation(_liveness, arm64Registers);
-  late final _operations = Arm64Operations(_assembler);
+  late final _allocation = Allocation(_liveness, _registers.values);
   late final int _outgoing = _outgoingWords();
   late final List<InRegister> _saved = _savedRegisters();
 
   /// Adds the code.
   void emit() {
     for (final block in _liveness.order) {
-      _labels[block] = Label();
+      _labels[block] = _machine.label();
     }
     _prologue();
     for (final block in _liveness.order) {
-      _assembler.bind(_labels[block]!);
+      _machine.bind(_labels[block]!);
       block.instructions.forEach(_instruction);
       _terminator(block.terminator!);
     }
@@ -51,7 +43,7 @@ final class Arm64Function(
     final used = _allocation.locations.values.toSet();
     final catches = function.blocks.any((block) => block.terminator is Invoke);
     return [
-      for (final MapEntry(key: bank, value: set) in arm64Registers.entries)
+      for (final MapEntry(key: bank, value: set) in _registers.values.entries)
         for (final number in set.preserved)
           if (InRegister(bank, number) case final register
               when catches || used.contains(register))
@@ -63,10 +55,10 @@ final class Arm64Function(
     var words = 0;
     for (final block in function.blocks) {
       for (final call in callsOf(block)) {
-        final extra = argumentLocations(
-          call.signature,
-          .outgoing,
-        ).whereType<OnStack>().length;
+        final extra = _registers
+            .argumentLocations(call.signature, .outgoing)
+            .whereType<OnStack>()
+            .length;
         if (extra > words) words = extra;
       }
     }
@@ -79,82 +71,47 @@ final class Arm64Function(
   late final int _frameBytes = (_savedOffset(_saved.length) + 15) & ~15;
 
   void _prologue() {
-    _assembler
-      ..pushFrame()
-      ..addImmediate(Arm64Assembler.frame, Arm64Assembler.stack, 0);
-    final bytes = _frameBytes;
-    if (function.checksStack) _checkStack(bytes);
-    if (bytes > 0) {
-      _assembler
-        ..constant(rightScratch, bytes)
-        ..subStack(rightScratch);
-    }
+    _machine.enter(
+      _frameBytes,
+      checksStack: function.checksStack,
+      onCheck: () => stackMaps.add(StackMap(_machine.offset, const [])),
+    );
     for (final (i, register) in _saved.indexed) {
-      _access(register, Arm64Assembler.stack, _savedOffset(i), store: true);
+      _accessSaved(i, register, store: true);
     }
-    final incoming = argumentLocations(function.signature, .incoming);
+    final incoming = _registers.argumentLocations(
+      function.signature,
+      .incoming,
+    );
     _move([
       for (final (i, parameter) in function.entry.parameters.indexed)
         _between(incoming[i], _place(parameter), parameter.type),
     ]);
   }
 
-  /// Calls a function that throws unless the stack has [bytes] left.
-  void _checkStack(int bytes) {
-    final enough = Label();
-    _assembler
-      ..constant(rightScratch, bytes)
-      ..sub(rightScratch, Arm64Assembler.frame, rightScratch)
-      ..address(farScratch, stackLimitSymbol)
-      ..load(farScratch, farScratch, 0)
-      ..cmp(rightScratch, farScratch)
-      ..cset(rightScratch, .lo)
-      ..jumpIfZero(rightScratch, enough)
-      ..call(stackOverflowSymbol);
-    stackMaps.add(StackMap(_assembler.offset, const []));
-    _assembler
-      ..breakpoint()
-      ..bind(enough);
-  }
-
   void _epilogue() {
     for (final (i, register) in _saved.indexed) {
-      _access(register, Arm64Assembler.stack, _savedOffset(i), store: false);
+      _accessSaved(i, register, store: false);
     }
-    _assembler
-      ..addImmediate(Arm64Assembler.stack, Arm64Assembler.frame, 0)
-      ..popFrame()
-      ..ret();
+    _machine.leave();
   }
 
-  /// Loads or stores [register] at any frame offset.
-  void _access(
-    InRegister register,
-    int base,
-    int offset, {
-    required bool store,
-  }) {
-    final number = register.number, float = register.bank == .float;
-    if (offset <= Arm64Assembler.maxOffset) {
-      store
-          ? _assembler.store(number, base, offset, float: float)
-          : _assembler.load(number, base, offset, float: float);
-      return;
-    }
-    _assembler.constant(farScratch, offset);
-    store
-        ? _assembler.storeIndexed(number, base, farScratch, float: float)
-        : _assembler.loadIndexed(number, base, farScratch, float: float);
-  }
+  void _accessSaved(int index, InRegister register, {required bool store}) =>
+      _machine.access(
+        register,
+        _savedOffset(index),
+        fromFrame: false,
+        store: store,
+      );
 
   void _accessStack(InRegister register, OnStack word, {required bool store}) {
-    final (base, index) = switch (word.area) {
+    final (fromFrame, index) = switch (word.area) {
       // Above the saved frame and return addresses.
-      .incoming => (Arm64Assembler.frame, word.index + 2),
-      .outgoing => (Arm64Assembler.stack, word.index),
-      .spill => (Arm64Assembler.stack, _outgoing + word.index),
+      .incoming => (true, word.index + 2),
+      .outgoing => (false, word.index),
+      .spill => (false, _outgoing + word.index),
     };
-    _access(register, base, index * 8, store: store);
+    _machine.access(register, index * 8, fromFrame: fromFrame, store: store);
   }
 
   Location _place(LirValue value) => _allocation.locations[value]!;
@@ -169,14 +126,7 @@ final class Arm64Function(
         return number;
       case final OnStack word:
         final bank = RegisterBank.of(value.type!);
-        final number = switch (bank) {
-          .word => const [leftScratch, rightScratch, calleeScratch][slot],
-          .float => const [
-            leftFloatScratch,
-            rightFloatScratch,
-            leftFloatScratch,
-          ][slot],
-        };
+        final number = _registers.operands[bank]![slot];
         _accessStack(InRegister(bank, number), word, store: false);
         return number;
     }
@@ -189,24 +139,23 @@ final class Arm64Function(
         compute(number);
       case final OnStack word:
         final bank = RegisterBank.of(value.type!);
-        final number = bank == .word ? leftScratch : leftFloatScratch;
+        final number = _registers.operands[bank]!.first;
         compute(number);
         _accessStack(InRegister(bank, number), word, store: true);
     }
   }
 
   void _move(Iterable<Move> moves) {
-    const temporaries = {
-      RegisterBank.word: InRegister(.word, rightScratch),
-      RegisterBank.float: InRegister(.float, rightFloatScratch),
+    final temporaries = {
+      for (final MapEntry(key: bank, value: number)
+          in _registers.cycles.entries)
+        bank: InRegister(bank, number),
     };
-    const carrier = InRegister(.word, leftScratch);
+    final carrier = InRegister(.word, _registers.carrier);
     for (final move in sequentialize(moves, temporaries)) {
       switch ((move.source, move.destination)) {
         case (InRegister source, InRegister destination):
-          move.bank == .word
-              ? _assembler.mov(destination.number, source.number)
-              : _assembler.fmov(destination.number, source.number);
+          _machine.copy(source, destination);
         case (InRegister source, OnStack destination):
           _accessStack(source, destination, store: true);
         case (OnStack source, InRegister destination):
@@ -223,39 +172,48 @@ final class Arm64Function(
       case final LirCall call:
         _transfer(call);
         if (call.type case final type?) {
-          _move([_between(resultLocation(type), _place(call), type)]);
+          _move([
+            _between(_registers.resultLocation(type), _place(call), type),
+          ]);
         }
       case Resume(:final frame, :final code, :final exception, :final trace):
-        const address = InRegister(.word, _resumedFrame);
-        const target = InRegister(.word, calleeScratch);
+        final [first, second] = _caught;
         _move([
-          _between(_place(exception), const InRegister(.word, 0), .ref),
-          _between(_place(trace), const InRegister(.word, 1), .ref),
-          _between(_place(frame), address, .i64),
-          _between(_place(code), target, .i64),
+          _between(_place(exception), first, .ref),
+          _between(_place(trace), second, .ref),
+          _between(
+            _place(frame),
+            InRegister(.word, _registers.resumedFrame),
+            .i64,
+          ),
+          _between(_place(code), _callee, .i64),
         ]);
-        _assembler
-          ..mov(Arm64Assembler.frame, _resumedFrame)
-          ..jumpRegister(calleeScratch);
+        _machine.resume();
       case Store(:final base, :final index, :final value):
         final at = _use(base, 0);
         final by = index == null ? null : _use(index, 1);
-        _operations.store(instruction, at, by, _use(value, 2));
+        _machine.store(instruction, at, by, _use(value, 2));
       default:
         final operands = [
           for (final (i, input) in instruction.inputs.indexed) _use(input, i),
         ];
         _define(
           instruction,
-          (result) => _operations.emit(instruction, result, operands),
+          (result) => _machine.operation(instruction, result, operands),
         );
     }
   }
 
+  List<InRegister> get _caught => [
+    for (final number in _registers.caught) InRegister(.word, number),
+  ];
+
+  InRegister get _callee => InRegister(.word, _registers.callee);
+
   /// Makes [call], leaving its result where calls leave it, and records what
   /// it keeps alive.
   void _transfer(LirCall call) {
-    final outgoing = argumentLocations(call.signature, .outgoing);
+    final outgoing = _registers.argumentLocations(call.signature, .outgoing);
     final (arguments, address) = switch (call) {
       Call(:final arguments) => (arguments, null),
       CallIndirect(:final arguments, :final address) => (arguments, address),
@@ -264,18 +222,17 @@ final class Arm64Function(
     _move([
       for (final (i, argument) in arguments.indexed)
         _between(_place(argument), outgoing[i], argument.type!),
-      if (address != null)
-        _between(_place(address), const InRegister(.word, calleeScratch), .ptr),
+      if (address != null) _between(_place(address), _callee, .ptr),
     ]);
     switch (call) {
       case Call(:final symbol):
-        _assembler.call(symbol);
+        _machine.call(symbol, call.signature);
       case CallIndirect():
-        _assembler.callRegister(calleeScratch);
+        _machine.callRegister(_registers.callee);
       case Alloc():
-        _assembler.call(allocateSymbol);
+        _machine.call(allocateSymbol, call.signature);
     }
-    stackMaps.add(StackMap(_assembler.offset, _references(call)));
+    stackMaps.add(StackMap(_machine.offset, _references(call)));
   }
 
   /// Where references alive across [call] are, from the frame address.
@@ -293,27 +250,30 @@ final class Arm64Function(
       case Return(:final value):
         if (value != null) {
           final type = value.type!;
-          _move([_between(_place(value), resultLocation(type), type)]);
+          _move([
+            _between(_place(value), _registers.resultLocation(type), type),
+          ]);
         }
         _epilogue();
       case Jump(:final edge):
         _follow(edge);
       case Branch(:final condition, :final ifTrue, :final ifFalse):
-        final otherwise = Label();
-        _assembler.jumpIfZero(_use(condition, 0), otherwise);
+        final otherwise = _machine.label();
+        _machine.jumpIfZero(_use(condition, 0), otherwise);
         _follow(ifTrue);
-        _assembler.bind(otherwise);
+        _machine.bind(otherwise);
         _follow(ifFalse);
       case Unreachable():
-        _assembler.breakpoint();
+        _machine.breakpoint();
       case Throw(:final exception, :final trace):
+        final [first, second] = _caught;
         _move([
-          _between(_place(exception), const InRegister(.word, 0), .ref),
-          _between(_place(trace), const InRegister(.word, 1), .ref),
+          _between(_place(exception), first, .ref),
+          _between(_place(trace), second, .ref),
         ]);
-        _assembler.call(throwSymbol);
-        stackMaps.add(StackMap(_assembler.offset, const []));
-        _assembler.breakpoint();
+        _machine.call(throwSymbol, LirSignature([.ref, .ref]));
+        stackMaps.add(StackMap(_machine.offset, const []));
+        _machine.breakpoint();
       case final Invoke invoke:
         _invoke(invoke);
     }
@@ -323,15 +283,14 @@ final class Arm64Function(
   void _invoke(Invoke invoke) {
     final Invoke(:call, :onReturn, :onThrow) = invoke;
     _transfer(call);
-    final returnOffset = _assembler.offset;
-    _follow(onReturn, [if (call.type case final type?) resultLocation(type)]);
+    final returnOffset = _machine.offset;
+    _follow(onReturn, [
+      if (call.type case final type?) _registers.resultLocation(type),
+    ]);
     // The frame is found here again, without the stack it reached down to.
-    throwTargets.add(ThrowTarget(returnOffset, _assembler.offset));
-    _assembler
-      ..constant(rightScratch, _frameBytes)
-      ..sub(rightScratch, Arm64Assembler.frame, rightScratch)
-      ..addImmediate(Arm64Assembler.stack, rightScratch, 0);
-    _follow(onThrow, const [InRegister(.word, 0), InRegister(.word, 1)]);
+    throwTargets.add(ThrowTarget(returnOffset, _machine.offset));
+    _machine.restoreStack(_frameBytes);
+    _follow(onThrow, _caught);
   }
 
   /// Continues on [edge], whose target first receives what is at [supplied].
@@ -347,6 +306,6 @@ final class Arm64Function(
           argument.type!,
         ),
     ]);
-    _assembler.jump(_labels[edge.target]!);
+    _machine.jump(_labels[edge.target]!);
   }
 }

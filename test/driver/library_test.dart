@@ -9,7 +9,7 @@ import 'package:dartc/driver.dart';
 import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
-import '../image/support.dart' show skipExecution;
+import '../support/hosts.dart';
 import '../support/new_compiler.dart';
 
 const _library = r'''
@@ -91,48 +91,61 @@ Directory _sources(Map<String, String> files) {
   });
 }
 
+Future<void> _used(
+  Host host,
+  LibraryKind kind, {
+  required bool collectsAlways,
+}) async {
+  final directory = _sources({'lib.dart': _library, 'main.c': _main});
+  final path = '${directory.path}/lib.dart';
+  final name = switch (kind) {
+    .object => 'lib.o',
+    .static => 'lib.a',
+    .shared => host.isLinux ? 'lib.so' : 'lib.dylib',
+  };
+  final output = '${directory.path}/$name';
+  final (:bytes, :header) = await compileLibrary(
+    path,
+    kind,
+    name: output,
+    target: host.target,
+    collectsAlways: collectsAlways,
+  );
+  writeProgram(bytes, output);
+  File('${directory.path}/lib.h').writeAsStringSync(header);
+  for (final isCpp in [false, true]) {
+    final built = host.compileC(
+      [
+        '-Wall',
+        '-o',
+        'main',
+        if (isCpp) ...const ['-x', 'c++', 'main.c', '-x', 'none'] else 'main.c',
+        name,
+        if (host.isLinux) ...const ['-Wl,-rpath,\$ORIGIN', '-lm'],
+      ],
+      directory.path,
+      isCpp: isCpp,
+    );
+    expect(built.exitCode, 0, reason: '${built.stderr}');
+    expect(built.stderr, isEmpty);
+    final result = await host.run('${directory.path}/main');
+    expect(result.output, _expected, reason: result.errors);
+    expect(result.code, 0);
+  }
+  final failed = await host.run('${directory.path}/main', arguments: ['x']);
+  expect(failed.errors, contains('Bad state: bad'));
+  expect(failed.code, -ProcessSignal.sigabrt.signalNumber);
+}
+
 void main() {
   for (final kind in LibraryKind.values) {
     for (final collectsAlways in [false, true]) {
-      test('C uses a library: ${kind.name}, $collectsAlways', () async {
-        final directory = _sources({'lib.dart': _library, 'main.c': _main});
-        final path = '${directory.path}/lib.dart';
-        final name = switch (kind) {
-          .object => 'lib.o',
-          .static => 'lib.a',
-          .shared => 'lib.dylib',
-        };
-        final output = '${directory.path}/$name';
-        final (:bytes, :header) = await compileLibrary(
-          path,
-          kind,
-          name: output,
-          collectsAlways: collectsAlways,
+      for (final host in Host.all) {
+        test(
+          'C uses a library: ${kind.name}, $collectsAlways, ${host.target}',
+          () => _used(host, kind, collectsAlways: collectsAlways),
         );
-        writeProgram(bytes, output);
-        File('${directory.path}/lib.h').writeAsStringSync(header);
-        ProcessResult run(String tool, List<String> arguments) =>
-            Process.runSync(tool, arguments, workingDirectory: directory.path);
-        for (final (compiler, extra) in [
-          ('clang', const <String>[]),
-          ('clang++', const ['-x', 'c++', 'main.c', '-x', 'none']),
-        ]) {
-          final built = run(compiler, [
-            '-Wall',
-            '-o',
-            'main',
-            if (extra.isEmpty) 'main.c' else ...extra,
-            name,
-          ]);
-          expect(built.exitCode, 0, reason: '${built.stderr}');
-          final result = run('${directory.path}/main', const []);
-          expect(result.stdout, _expected, reason: '${result.stderr}');
-          expect(result.exitCode, 0);
-        }
-        final failed = run('${directory.path}/main', const ['x']);
-        expect(failed.stderr, contains('Bad state: bad'));
-        expect(failed.exitCode, -ProcessSignal.sigabrt.signalNumber);
-      }, skip: skipExecution);
+      }
     }
   }
 
@@ -168,7 +181,7 @@ void main() {
       'now 3',
       'timer 3',
     ], reason: '${result.stderr}');
-  }, skip: skipExecution);
+  }, skip: Host.missing);
 
   group('problems', () {
     void reports(String source, String problem) => test(problem, () async {

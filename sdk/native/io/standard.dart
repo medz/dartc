@@ -114,7 +114,7 @@ class _StdIOUtils {
 
   @patch
   static _getStdioHandleType(int fd) {
-    if (_statFile(fd, _buffer) < 0) return _failure();
+    if (_statFile(fd) < 0) return _failure();
     return switch (_statMode & _modeType) {
       _modePipe => _stdioHandleTypePipe,
       _modeSocket => _stdioHandleTypeSocket,
@@ -154,18 +154,13 @@ StdioType stdioType(object) {
   return isFile ? StdioType.file : StdioType.other;
 }
 
-/// Where the modes of terminals are, and their bits.
-const _localModes = 24;
-const _echoBit = 8, _echoNewlineBit = 0x10, _lineBit = 0x100;
-
-Object _terminalMode(int file, int bit) => _terminalModes(file, _buffer) < 0
-    ? _failure()
-    : load64(_buffer + _localModes) & bit != 0;
+Object _terminalMode(int file, int bit) =>
+    _terminalModes(file, _buffer) < 0 ? _failure() : _loadModes() & bit != 0;
 
 Object _setTerminalMode(int file, int bit, bool enabled) {
   if (_terminalModes(file, _buffer) < 0) return _failure();
-  final modes = load64(_buffer + _localModes);
-  store64(_buffer + _localModes, enabled ? modes | bit : modes & ~bit);
+  final modes = _loadModes();
+  _storeModes(enabled ? modes | bit : modes & ~bit);
   return _succeeded(_setTerminalModes(file, 0, _buffer));
 }
 
@@ -211,8 +206,7 @@ class Stdin {
 class Stdout {
   @patch
   static _getTerminalSize(int fd) {
-    const sizeOfWindow = 0x40087468;
-    if (_controlDevice(fd, sizeOfWindow, _buffer) < 0) return _failure();
+    if (_controlDevice(fd, _sizeOfWindow, _buffer) < 0) return _failure();
     final lines = load16(_buffer), columns = load16(_buffer + 2);
     return lines == 0 && columns == 0 ? _failure() : [columns, lines];
   }

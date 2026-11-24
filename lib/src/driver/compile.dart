@@ -47,41 +47,64 @@ enum LibraryKind() {
   shared,
 }
 
-/// Compiles the library at [path] for macOS ARM64. Also gives a header of C for
-/// the functions that it exports.
+/// Compiles the library at [path] for [target]. Also gives a header of C for the
+/// functions that it exports.
 ///
-/// [name] is what the file will be called. Programs load a shared library from
-/// where that is.
+/// [name] is what the file will be called. On macOS, programs load a shared
+/// library from where that is.
 ///
 /// Throws [CompileFailure] if the library has an error or is not supported yet.
 Future<({Uint8List bytes, String header})> compileLibrary(
   String path,
   LibraryKind kind, {
   required String name,
+  Target target = .macosArm64,
   bool collectsAlways = false,
 }) async {
   final (:module, :header) = translateLibrary(
-    await loadProgram(path, sdk: await packagedSdk()),
+    await loadProgram(path, sdk: await packagedSdk(target)),
+    target: target,
   );
-  final code = emitCode(lowerProgram(module, collectsAlways: collectsAlways));
+  final lowered = lowerProgram(
+    module,
+    system: target.system,
+    collectsAlways: collectsAlways,
+  );
+  final code = emitCode(lowered, target: target);
+  final bytes = switch (target.system) {
+    .macos => _macosLibrary(code, kind, name),
+    .linux => _linuxLibrary(code, kind, Uri.file(name).pathSegments.last),
+  };
+  return (bytes: bytes, header: header);
+}
+
+Uint8List _macosLibrary(EmittedCode code, LibraryKind kind, String name) {
   final file = Uri.file(name).pathSegments.last;
-  return (
-    bytes: switch (kind) {
-      .object => writeMachoObject(code),
-      .static => writeArchive(
-        writeMachoObject(code),
-        '$file.o',
+  return switch (kind) {
+    .object => writeMachoObject(code),
+    .static => writeArchive(
+      writeMachoObject(code),
+      '$file.o',
+      code.exports.keys,
+    ),
+    .shared => linkMachoLibrary(
+      code,
+      name: File(name).absolute.path,
+      identifier: file,
+    ),
+  };
+}
+
+Uint8List _linuxLibrary(EmittedCode code, LibraryKind kind, String name) =>
+    switch (kind) {
+      .object => writeElfObject(code),
+      .static => writeElfArchive(
+        writeElfObject(code),
+        '$name.o',
         code.exports.keys,
       ),
-      .shared => linkMachoLibrary(
-        code,
-        name: File(name).absolute.path,
-        identifier: file,
-      ),
-    },
-    header: header,
-  );
-}
+      .shared => linkElfLibrary(code, name: name),
+    };
 
 final _sdks = <Target, Future<SdkSources>>{};
 

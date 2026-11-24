@@ -25,6 +25,7 @@ void relocate(
       .call26 => _signed((target - at) >> 2, 26, symbol),
       .page21 => pageField(at, target, symbol),
       .pageOffset12 => (target & 0xfff) << 10,
+      .call32 || .relative32 => _signed(target - (at + 4), 32, symbol),
     };
     final word = words.getUint32(offset, .little);
     words.setUint32(offset, word | bits, .little);

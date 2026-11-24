@@ -2,13 +2,7 @@
 import 'dart:_heap/machine.dart' show load32, load64, load8, store32, store64;
 import 'dart:_heap/machine.dart' show store8;
 import 'dart:_heap/objects.dart' show dataAddress, load16, store16;
-import 'dart:ffi' show Int32, Int64, Native, Uint16, VarArgs, Void;
-
-@Native<Int64 Function()>(symbol: '__error')
-external int _errorAddress();
-
-@Native<Int32 Function(Int32, Int64, Int64)>(symbol: 'strerror_r')
-external int _errorText(int code, int buffer, int size);
+import 'dart:ffi' show Int32, Int64, Native, Uint16, Uint32, VarArgs, Void;
 
 @Native<Int64 Function(Int64)>(symbol: 'malloc')
 external int _allocateBytes(int bytes);
@@ -40,15 +34,6 @@ external int _controlFile(int file, int request, int address);
 @Native<Int32 Function(Int64)>(symbol: 'pipe')
 external int _makePipe(int files);
 
-@Native<Int32 Function(Int32, Int64)>(symbol: 'fstat')
-external int _statFile(int file, int result);
-
-@Native<Int32 Function(Int64, Int64)>(symbol: 'stat')
-external int _statPath(int path, int result);
-
-@Native<Int32 Function(Int64, Int64)>(symbol: 'lstat')
-external int _statLink(int path, int result);
-
 @Native<Int32 Function(Int64, Int64)>(symbol: 'utimes')
 external int _setTimes(int path, int times);
 
@@ -57,9 +42,6 @@ external int _unlink(int path);
 
 @Native<Int32 Function(Int64, Int64)>(symbol: 'rename')
 external int _renamePath(int from, int to);
-
-@Native<Int32 Function(Int64, Int64, Int64, Int32)>(symbol: 'copyfile')
-external int _copyFile(int from, int to, int state, int flags);
 
 @Native<Int32 Function(Int64, Int64)>(symbol: 'symlink')
 external int _makeLink(int target, int path);
@@ -139,15 +121,6 @@ Uint8List _bytesAt(int address, int length) {
 String _textAt(int address) =>
     utf8.decode(_bytesAt(address, _lengthAt(address)), allowMalformed: true);
 
-/// The type and mode of what [_statPath] and the like found.
-int get _statMode => load16(_buffer + 4);
-int get _statDevice => load32(_buffer);
-int get _statNumber => load64(_buffer + 8);
-int get _statAccessed => _microseconds(_buffer + 32);
-int get _statModified => _microseconds(_buffer + 48);
-int get _statChanged => _microseconds(_buffer + 64);
-int get _statSize => load64(_buffer + 96);
-
 int _microseconds(int address) =>
     load64(address) * 1000000 + load64(address + 8) ~/ 1000;
 
@@ -179,9 +152,7 @@ int _typeAt(Uint8List path, bool followLinks) =>
 /// What is at [path], which can be a link only if [followLinks] is false.
 int _anyTypeAt(Uint8List path, bool followLinks) {
   final address = dataAddress(path);
-  final result = followLinks
-      ? _statPath(address, _buffer)
-      : _statLink(address, _buffer);
+  final result = followLinks ? _statPath(address) : _statLink(address);
   return result == 0 ? _typeOf(_statMode) : _typeNone;
 }
 

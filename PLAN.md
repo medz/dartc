@@ -18,8 +18,8 @@
 | 10 | 官方 `dart:core`：字符串、集合、`print` | 完成 |
 | 11 | 记录、模式、枚举、扩展、生成器、async | 完成 |
 | 12 | FFI、导出函数、库和目标文件、`dart:io` | 完成 |
-| 13 | Linux，x64 | 下一步 |
-| 14 | 优化 | |
+| 13 | Linux，x64 | 完成 |
+| 14 | 优化 | 下一步 |
 | 15 | 换掉旧编译器 | |
 
 ## 每一步的完成条件
@@ -99,9 +99,9 @@ void main() { exit(1 + 2 * 3); }
 **13 Linux，x64。** 目标是 `linux-arm64` 和 `linux-x64`。`macos-x64` 不做：macOS 27 不支持 Intel，没法验证。分小步：
 
 - 13a（完成）：`Target`；ELF 可执行文件；系统函数按系统分开（`lower/system_calls.dart`）；Linux ARM64 的程序。
-- 13b：Linux 的 FFI 传值、`dart:io`、目标文件、静态库、动态库。
-- 13c：发码的公共部分和机器有关的部分分开；x64 的汇编和发码。
-- 13d：Linux x64 的完整程序。
+- 13b（完成）：Linux 的 FFI 传值、`dart:io`、目标文件、静态库、动态库。
+- 13c（完成）：发码的公共部分（`emit/function.dart`）和机器有关的部分（`Machine`、`Backend`）分开；x64 的汇编和发码。
+- 13d（完成）：Linux x64 的完整程序，包括 FFI、`dart:io` 和库。
 
 Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `test/support/hosts.dart`。
 
@@ -116,7 +116,7 @@ Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `t
 | 旧领域 | 何时删 |
 | --- | --- |
 | `optimizer` 流分析部分 | 第 15 步；旧编译器在用，新代码不碰它 |
-| `assembler` `object` `linker` | 第 12–13 步，`emit` 和 `image` 覆盖它们之后 |
+| `assembler` `object` `linker` | 第 15 步，旧编译器还在用 |
 | `ir` `codegen` `layout` `abi` | 第 15 步 |
 | `frontend` `sdk` `interop` | 第 15 步 |
 | `compiler` | 第 15 步 |

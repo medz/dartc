@@ -99,6 +99,10 @@ final class Allocation(
         locations[current.value] = InRegister(bank, free);
         continue;
       }
+      if (usable.isEmpty) {
+        _spill(current);
+        continue;
+      }
       final victim = usable.reduce(
         (a, b) => active[a]!.end >= active[b]!.end ? a : b,
       );

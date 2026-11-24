@@ -88,8 +88,7 @@ void main() {
       final zero = block.add(ConstInt(0));
       return block.add(Call('dartc_no_such_function', _unary, [zero]));
     });
-    // The loader of Linux ends it without a signal.
-    expect(await execute(module), anyOf(isNegative, 127));
+    expect(await execute(module), isNegative);
   }, skip: skipExecution);
 
   test('the system tools read the imports', () {

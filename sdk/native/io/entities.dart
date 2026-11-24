@@ -17,7 +17,7 @@ class FileStat {
   @patch
   static _statSync(_Namespace namespace, String path) {
     final bytes = FileSystemEntity._toUtf8Array(path);
-    if (_statPath(dataAddress(bytes), _buffer) < 0) return _failure();
+    if (_statPath(dataAddress(bytes)) < 0) return _failure();
     return Int64List(6)
       ..[_type] = _told(_typeOf(_statMode))
       ..[_changedTime] = _statChanged
@@ -40,9 +40,9 @@ class FileSystemEntity {
   @patch
   static _identicalNative(_Namespace namespace, String path1, String path2) {
     final bytes1 = _toUtf8Array(path1), bytes2 = _toUtf8Array(path2);
-    if (_statLink(dataAddress(bytes1), _buffer) < 0) return _failure();
+    if (_statLink(dataAddress(bytes1)) < 0) return _failure();
     final device = _statDevice, number = _statNumber;
-    if (_statLink(dataAddress(bytes2), _buffer) < 0) return _failure();
+    if (_statLink(dataAddress(bytes2)) < 0) return _failure();
     return device == _statDevice && number == _statNumber;
   }
 
@@ -67,16 +67,13 @@ Uint8List _joined(Uint8List path, Uint8List name) {
 
 const _slash = 0x2f, _dot = 0x2e;
 
-/// What [_readDirectory] gives.
-const _entryLength = 18, _entryName = 21;
-
 /// The name of the next entry of [directory], if there is another one.
 Uint8List? _nextName(int directory) {
   while (true) {
     _setErrno(0);
     final entry = _readDirectory(directory);
     if (entry == 0) return null;
-    final name = _bytesAt(entry + _entryName, load16(entry + _entryLength));
+    final name = _bytesAt(entry + _entryName, _lengthAt(entry + _entryName));
     final isOwn =
         name.length == 1 && name[0] == _dot ||
         name.length == 2 && name[0] == _dot && name[1] == _dot;
@@ -107,7 +104,7 @@ bool _deleteAll(Uint8List path) {
 
 /// 1 if there is a directory at [path], 0 if not, or an error.
 Object _directoryAt(Uint8List path) {
-  const unknown = [9, 12, _eAccess, 14, 84];
+  const unknown = [9, 12, _eAccess, 14, _eOverflow];
   final type = _anyTypeAt(path, true);
   if (type == _typeDirectory) return 1;
   if (type != _typeNone) {
@@ -140,7 +137,9 @@ class _Directory {
 
   @patch
   static String _systemTemp(_Namespace namespace) {
-    final path = Platform.environment['TMPDIR'] ?? '/tmp';
+    final path = _temporaryVariables
+        .map((name) => Platform.environment[name])
+        .firstWhere((path) => path != null, orElse: () => '/tmp')!;
     return path.length > 1 && path.endsWith('/')
         ? path.substring(0, path.length - 1)
         : path;

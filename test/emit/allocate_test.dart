@@ -1,6 +1,6 @@
 import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/allocate.dart';
-import 'package:dartc/src/emit/arm64/convention.dart';
+import 'package:dartc/src/emit/arm64/registers.dart';
 import 'package:dartc/src/emit/liveness.dart';
 import 'package:dartc/src/emit/moves.dart';
 import 'package:test/test.dart';
@@ -70,7 +70,7 @@ void main() {
       }
       return value;
     });
-    final allocation = Allocation(Liveness(made), arm64Registers);
+    final allocation = Allocation(Liveness(made), arm64Registers.values);
     expect(allocation.spillCount, 0);
     expect(allocation.locations.values.toSet(), hasLength(2));
   });
@@ -87,7 +87,7 @@ void main() {
       }
       return block.add(IntBinary(.add, sum, longest));
     });
-    final allocation = Allocation(Liveness(made), arm64Registers);
+    final allocation = Allocation(Liveness(made), arm64Registers.values);
     expect(allocation.spillCount, 1);
     expect(allocation.locations[longest], const OnStack(.spill, 0));
   });
@@ -106,14 +106,14 @@ void main() {
       }
       return block.add(IntBinary(.add, sum, newest));
     });
-    final allocation = Allocation(Liveness(made), arm64Registers);
+    final allocation = Allocation(Liveness(made), arm64Registers.values);
     expect(allocation.spillCount, 1);
     expect(allocation.locations[newest], const OnStack(.spill, 0));
   });
 
   test('scratch, system and frame registers hold no values', () {
     void check(RegisterBank bank, List<int> reserved, List<int> preserved) {
-      final set = arm64Registers[bank]!;
+      final set = arm64Registers.values[bank]!;
       final values = [...set.volatile, ...set.preserved, ...reserved];
       // Every register has exactly one role.
       expect(values.toSet(), hasLength(values.length));
@@ -151,7 +151,7 @@ void main() {
         FloatBinary(.add, float, block.add(Convert(.intToFloat, word))),
       );
     });
-    final allocation = Allocation(Liveness(made), arm64Registers);
+    final allocation = Allocation(Liveness(made), arm64Registers.values);
     expect(allocation.spillCount, 0);
     for (final MapEntry(key: value, value: place)
         in allocation.locations.entries) {
@@ -163,7 +163,7 @@ void main() {
     final signature = LirSignature([
       for (var i = 0; i < 10; i++) ...[LirType.f64, i == 3 ? .ptr : .i64],
     ]);
-    final places = argumentLocations(signature, .incoming);
+    final places = arm64Registers.argumentLocations(signature, .incoming);
     for (var i = 0; i < 8; i++) {
       expect(places[2 * i], InRegister(.float, i));
       expect(places[2 * i + 1], InRegister(.word, i));
@@ -178,7 +178,7 @@ void main() {
     for (var seed = 0; seed < 60; seed++) {
       for (final function in RandomLir(seed).functions()) {
         final liveness = Liveness(function);
-        final allocation = Allocation(liveness, arm64Registers);
+        final allocation = Allocation(liveness, arm64Registers.values);
         spills += allocation.spillCount;
         final intervals = liveness.intervals.values.toList();
         for (final (i, a) in intervals.indexed) {
@@ -186,7 +186,7 @@ void main() {
           if (a.crossesCall) {
             crossings++;
             if (place case InRegister(:final bank, :final number)) {
-              expect(arm64Registers[bank]!.preserved, contains(number));
+              expect(arm64Registers.values[bank]!.preserved, contains(number));
             }
           }
           for (final b in intervals.skip(i + 1)) {

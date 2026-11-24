@@ -116,6 +116,13 @@ void main() {
     }
   });
 
+  test('no segment is empty', () {
+    final code = EmittedCode(Uint8List(8), const {'f': 0}, const []);
+    final elf = _Elf(linkElf(code, entry: 'f'));
+    expect(elf.loaded, hasLength(3));
+    expect(elf.loaded.map((s) => s.fileBytes), everyElement(isPositive));
+  });
+
   test('what only relocations change is protected', () {
     final elf = _Elf(linkElf(_code(), entry: 'f'));
     final protected = elf.segments.singleWhere((s) => s.type == 0x6474e552);
@@ -132,8 +139,6 @@ void main() {
     final code = elf.loaded.firstWhere((s) => s.flags & 1 != 0);
     expect(elf.entry, code.address + 8);
     expect(elf.dynamic[1]!.map(elf.text), ['libc.so.6', 'libm.so.6']);
-    final plain = _Elf(linkElf(_code(externals: ['puts']), entry: 'g'));
-    expect(plain.dynamic[1]!.map(plain.text), ['libc.so.6']);
     final interpreter = elf.segments.singleWhere((s) => s.type == 3);
     expect(
       elf.data.buffer.asUint8List(interpreter.offset, interpreter.fileBytes),

@@ -10,11 +10,8 @@ import 'elf_symbols.dart';
 import 'pack.dart';
 import 'relocate.dart';
 
-/// The functions of the C library that a library of their own has.
-const _mathFunctions = {
-  'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', //
-  'exp', 'log', 'pow', 'fmod',
-};
+/// What programs can find functions of C in, like with the official runtime.
+const _libraries = ['libc.so.6', 'libm.so.6'];
 
 /// Builds a Linux executable.
 ///
@@ -48,11 +45,6 @@ final class _ElfImage(
   late final _references = [
     for (final object in code.objects.values) ...object.references.keys,
   ].length;
-
-  late final _libraries = [
-    'libc.so.6',
-    if (_imported.any(_mathFunctions.contains)) 'libm.so.6',
-  ];
 
   /// The sections that the file tells about, in order.
   late final _sections = [
@@ -120,7 +112,9 @@ final class _ElfImage(
     dataBytes: data.bytes.length,
   );
 
-  int get _segmentCount => entry == null ? 7 : 9;
+  bool get _hasData => data.bytes.isNotEmpty;
+
+  int get _segmentCount => (entry == null ? 6 : 8) + (_hasData ? 1 : 0);
 
   late final Map<String, int> addresses = {
     for (final (i, name) in _imported.indexed)
@@ -288,7 +282,8 @@ final class _ElfImage(
     segment(load, read, layout.headers);
     segment(load, read | execute, layout.code);
     segment(load, read | write, layout.constant, memory: constantBytes);
-    segment(load, read | write, layout.data);
+    // Nothing loads a segment without bytes.
+    if (_hasData) segment(load, read | write, layout.data);
     segment(dynamic, read | write, layout['dynamic'], align: 8);
     segment(stack, read | write, ElfPart(0, 0, 0), align: 16);
     segment(

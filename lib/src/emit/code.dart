@@ -11,16 +11,20 @@ final class EmitUnsupported(final String function, final String what)
   String toString() => 'EmitUnsupported: $function: $what';
 }
 
-/// How a symbol's address enters an ARM64 instruction.
-enum RelocationKind() {
-  /// A 26-bit word displacement in `bl`.
-  call26,
+/// How a symbol's address enters an instruction.
+enum RelocationKind({final bool isCall = false}) {
+  /// A 26-bit word displacement in `bl` of ARM64.
+  call26(isCall: true),
 
-  /// A page displacement in `adrp`.
-  page21,
+  /// A page displacement in `adrp` of ARM64.
+  page21(),
 
-  /// The low 12 address bits in `add`.
-  pageOffset12,
+  /// The low 12 address bits in `add` of ARM64.
+  pageOffset12(),
+
+  /// The distance from the end of an x64 instruction, at its end.
+  call32(isCall: true),
+  relative32(),
 }
 
 /// An instruction at [offset] awaiting the address of [symbol].
