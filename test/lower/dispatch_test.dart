@@ -50,6 +50,36 @@ void main() {
     );
   });
 
+  test('each row is where it fits first', () {
+    final random = Random(6);
+    for (var round = 0; round < 200; round++) {
+      final rows = [
+        for (var i = 1 + random.nextInt(30); i > 0; i--)
+          {
+            for (var j = random.nextInt(12); j > 0; j--)
+              random.nextInt(40): '$i.$j',
+          },
+      ];
+      final (:offsets, :entries) = packRows(rows);
+      final order = [for (var i = 0; i < rows.length; i++) i]
+        ..sort((a, b) {
+          final size = rows[b].length.compareTo(rows[a].length);
+          return size != 0 ? size : a.compareTo(b);
+        });
+      final taken = <int>{};
+      for (final i in order) {
+        if (rows[i].isEmpty) continue;
+        var offset = -rows[i].keys.reduce(min);
+        while (rows[i].keys.any((c) => taken.contains(offset + c))) {
+          offset++;
+        }
+        expect(offsets[i], offset);
+        taken.addAll(rows[i].keys.map((c) => offset + c));
+      }
+      expect(entries, hasLength(taken.isEmpty ? 0 : taken.reduce(max) + 1));
+    }
+  });
+
   test('random rows', () {
     final random = Random(5);
     for (var round = 0; round < 300; round++) {

@@ -31,8 +31,8 @@ void verifyModule(LirModule module) {
       if (offset < 0 || offset % 8 != 0 || offset + 8 > bytes.length) {
         fail('no reference fits at $offset');
       }
-      if (bytes.skip(offset).take(8).any((byte) => byte != 0)) {
-        fail('bytes where a reference belongs');
+      for (var i = offset; i < offset + 8; i++) {
+        if (bytes[i] != 0) fail('bytes where a reference belongs');
       }
     });
   }
@@ -52,8 +52,14 @@ void verifyModule(LirModule module) {
     if (module.signatures[function] == LirSignature([.ptr, .ptr])) return;
     throw LirError('$name: no function $function');
   });
+  final hasStackLimit = module.statics.any(
+    (object) =>
+        object.name == stackLimitSymbol &&
+        object.writable &&
+        object.bytes.length >= 8,
+  );
   for (final function in module.functions) {
-    _FunctionVerifier(module, names, objects, function).run();
+    _FunctionVerifier(module, names, objects, hasStackLimit, function).run();
   }
 }
 
@@ -61,6 +67,7 @@ final class _FunctionVerifier(
   final LirModule module,
   final Set<String> symbols,
   final Set<String> objects,
+  final bool hasStackLimit,
   final LirFunction function,
 ) {
   final _blockOf = <LirValue, LirBlock>{};
@@ -92,13 +99,7 @@ final class _FunctionVerifier(
       if (module.signatures[stackOverflowSymbol] != LirSignature([])) {
         _fail('nothing to call when the stack overflows');
       }
-      final hasLimit = module.statics.any(
-        (object) =>
-            object.name == stackLimitSymbol &&
-            object.writable &&
-            object.bytes.length >= 8,
-      );
-      if (!hasLimit) _fail('no stack limit to check');
+      if (!hasStackLimit) _fail('no stack limit to check');
     }
     if (function.blocks.isEmpty) _fail('no blocks');
     if (function.blocks.toSet().length != function.blocks.length) {
