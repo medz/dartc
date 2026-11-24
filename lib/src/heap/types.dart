@@ -119,7 +119,7 @@ bool _isSubclass(InterfaceType a, InterfaceType b) {
   for (var at = superTypesOf(a.number); at != null; at = at.tail) {
     if (at.number == b.number) {
       return _areSubtypes(
-        _substituteAll(at.arguments, a.arguments),
+        _substituteAll(at.arguments, a.arguments, -1),
         b.arguments,
       );
     }
@@ -170,66 +170,97 @@ bool _isSubfunction(FunctionType a, FunctionType b) {
 }
 
 bool _areNamed(NamedList? a, NamedList? b) {
-  while (a != null) {
-    if (b != null && a.name == b.name) {
-      if (a.isRequired && !b.isRequired || !isSubtype(b.type, a.type)) {
-        return false;
-      }
-      b = b.tail;
-    } else if (a.isRequired) {
-      return false;
-    }
-    a = a.tail;
+  for (var at = a; at != null; at = at.tail) {
+    if (at.isRequired && _named(b, at.name)?.isRequired != true) return false;
   }
-  return b == null;
+  for (var at = b; at != null; at = at.tail) {
+    final takes = _named(a, at.name);
+    if (takes == null || !isSubtype(at.type, takes.type)) return false;
+  }
+  return true;
 }
 
-TypeList? _substituteAll(TypeList? list, TypeList? own) => list == null
-    ? null
-    : TypeList(_substitute(list.head, own), _substituteAll(list.tail, own));
+NamedList? _named(NamedList? list, int name) {
+  for (var at = list; at != null; at = at.tail) {
+    if (at.name == name) return at;
+  }
+  return null;
+}
 
-/// [type] with the parameters of its class replaced by [own].
-RuntimeType _substitute(RuntimeType type, TypeList? own) {
-  if (type is VariableType) {
-    var at = own;
-    for (var i = type.index; i > 0 && at != null; i--) {
-      at = at.tail;
-    }
-    return at == null ? const BasicType(dynamicKind) : at.head;
+/// The signature of [function] after it takes its type arguments.
+RuntimeType instantiatedFunctionType(Object function, TypeList arguments) {
+  final generic = typeOf(function) as GenericType;
+  return _substitute(generic.inner, arguments, 0);
+}
+
+TypeList? _substituteAll(TypeList? list, TypeList? own, int depth) =>
+    list == null
+    ? null
+    : TypeList(
+        _substitute(list.head, own, depth),
+        _substituteAll(list.tail, own, depth),
+      );
+
+/// Replaces class parameters when [depth] is negative, or function parameters
+/// outside [depth] nested binders otherwise.
+RuntimeType _substitute(RuntimeType type, TypeList? own, int depth) {
+  if (type is VariableType && depth < 0) return _argument(own, type.index);
+  if (type is BoundType && depth >= 0 && type.index >= depth) {
+    return _argument(own, type.index - depth);
   }
-  if (type is NullableType) return nullable(_substitute(type.inner, own));
+  if (type is NullableType) {
+    return nullable(_substitute(type.inner, own, depth));
+  }
   if (type is InterfaceType) {
-    return InterfaceType(type.number, _substituteAll(type.arguments, own));
+    return InterfaceType(
+      type.number,
+      _substituteAll(type.arguments, own, depth),
+    );
   }
-  if (type is FutureOrType) return futureOr(_substitute(type.inner, own));
+  if (type is FutureOrType) {
+    return futureOr(_substitute(type.inner, own, depth));
+  }
   if (type is RecordType) {
-    return RecordType(_substituteAll(type.fields, own), type.names);
+    return RecordType(_substituteAll(type.fields, own, depth), type.names);
   }
   if (type is GenericType) {
-    final inner = _substitute(type.inner, own);
-    final bounds = _substituteAll(type.bounds, own);
+    if (depth >= 0) {
+      for (TypeList? at = type.bounds; at != null; at = at.tail) {
+        depth++;
+      }
+    }
+    final inner = _substitute(type.inner, own, depth);
+    final bounds = _substituteAll(type.bounds, own, depth);
     return inner is FunctionType && bounds != null
         ? GenericType(bounds, inner)
         : type;
   }
   if (type is FunctionType) {
     return FunctionType(
-      _substitute(type.result, own),
-      _substituteAll(type.required, own),
-      _substituteAll(type.optional, own),
-      _substituteNamed(type.named, own),
+      _substitute(type.result, own, depth),
+      _substituteAll(type.required, own, depth),
+      _substituteAll(type.optional, own, depth),
+      _substituteNamed(type.named, own, depth),
     );
   }
   return type;
 }
 
-NamedList? _substituteNamed(NamedList? list, TypeList? own) => list == null
+RuntimeType _argument(TypeList? at, int index) {
+  for (var i = index; i > 0 && at != null; i--) {
+    at = at.tail;
+  }
+  return at == null ? const BasicType(dynamicKind) : at.head;
+}
+
+NamedList? _substituteNamed(NamedList? list, TypeList? own, int depth) =>
+    list == null
     ? null
     : NamedList(
         list.name,
-        _substitute(list.type, own),
+        _substitute(list.type, own, depth),
         list.isRequired,
-        _substituteNamed(list.tail, own),
+        _substituteNamed(list.tail, own, depth),
       );
 
 /// Whether [a] and [b] are the same type.

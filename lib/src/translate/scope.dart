@@ -170,8 +170,13 @@ abstract interface class ProgramScope() {
   /// The object that [type] is as a value, or null if it is not closed.
   HirConstObject? typeObject(DartType type);
 
-  /// The type of the method [element] as a function, or null if it is generic.
-  HirValue? methodType(FunctionBuilder builder, ExecutableElement element);
+  /// The runtime signature of a function or method taken as a value.
+  HirValue? tearOffType(
+    FunctionBuilder builder,
+    ExecutableElement element, {
+    FunctionType? asType,
+    bool instanceMethod = false,
+  });
 
   /// The list of [types], or null if one of them is generic.
   HirValue? typeList(FunctionBuilder builder, List<DartType> types);

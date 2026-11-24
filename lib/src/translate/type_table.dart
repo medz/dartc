@@ -92,7 +92,7 @@ final class TypeTable(
         if (arguments == null) return null;
         return _object('InterfaceType', [numberOf(element), arguments.value]);
       case FunctionType():
-        return _constantFunction(type, owner);
+        return _constantFunction(type, owner, type.formalParameters);
       case RecordType():
         final fields = list(fieldTypes(type), owner: owner);
         if (fields == null) return null;
@@ -123,17 +123,18 @@ final class TypeTable(
   HirConstObject? _constantFunction(
     FunctionType type,
     InterfaceElement? owner,
+    List<FormalParameterElement> parameters,
   ) {
-    final parameters = type.typeParameters;
-    if (parameters.isNotEmpty) {
-      return _within(parameters, () {
-        final bounds = list(_boundsOf(parameters), owner: owner);
-        final inner = _constantPlainFunction(type, owner);
+    final binders = type.typeParameters;
+    if (binders.isNotEmpty) {
+      return _within(binders, () {
+        final bounds = list(_boundsOf(binders), owner: owner);
+        final inner = _constantPlainFunction(type, owner, parameters);
         if (bounds == null || inner == null) return null;
         return _object('GenericType', [bounds.value, inner]);
       });
     }
-    return _constantPlainFunction(type, owner);
+    return _constantPlainFunction(type, owner, parameters);
   }
 
   /// The type parameters of the function types around, innermost last.
@@ -165,14 +166,20 @@ final class TypeTable(
   HirConstObject? _constantPlainFunction(
     FunctionType type,
     InterfaceElement? owner,
+    List<FormalParameterElement> parameters,
   ) {
-    final (:required, :optional, :named) = _parameters(type);
     final result = constant(type.returnType, owner: owner);
-    final first = list(required, owner: owner);
-    final second = list(optional, owner: owner);
+    final first = list([
+      for (final p in parameters)
+        if (p.isRequiredPositional) p.type,
+    ], owner: owner);
+    final second = list([
+      for (final p in parameters)
+        if (p.isOptionalPositional) p.type,
+    ], owner: owner);
     if (result == null || first == null || second == null) return null;
     HirConstObject? names;
-    for (final parameter in named.reversed) {
+    for (final parameter in parameters.reversed.where((p) => p.isNamed)) {
       final own = constant(parameter.type, owner: owner);
       if (own == null) return null;
       names = _object('NamedList', [
@@ -183,26 +190,6 @@ final class TypeTable(
       ]);
     }
     return _object('FunctionType', [result, first.value, second.value, names]);
-  }
-
-  static ({
-    List<DartType> required,
-    List<DartType> optional,
-    List<FormalParameterElement> named,
-  })
-  _parameters(FunctionType type) {
-    final all = type.formalParameters;
-    return (
-      required: [
-        for (final p in all)
-          if (p.isRequiredPositional) p.type,
-      ],
-      optional: [
-        for (final p in all)
-          if (p.isOptionalPositional) p.type,
-      ],
-      named: _byName(all),
-    );
   }
 
   /// The list of [types], if all are closed or made of the parameters of
@@ -279,19 +266,8 @@ final class TypeTable(
           builder.add(HirConst(numberOf(element))),
           arguments,
         ]);
-      case FunctionType(:final typeParameters) when typeParameters.isNotEmpty:
-        return _within(typeParameters, () {
-          final bounds = listValue(builder, _boundsOf(typeParameters));
-          final inner = _function(
-            builder,
-            type.returnType,
-            type.formalParameters,
-          );
-          if (bounds == null || inner == null) return null;
-          return _create(builder, 'GenericType', [bounds, inner]);
-        });
       case FunctionType():
-        return _function(builder, type.returnType, type.formalParameters);
+        return _functionValue(builder, type, type.formalParameters);
       case RecordType():
         final fields = listValue(builder, fieldTypes(type));
         if (fields == null) return null;
@@ -302,16 +278,33 @@ final class TypeTable(
     }
   }
 
+  HirValue? _functionValue(
+    FunctionBuilder builder,
+    FunctionType type,
+    List<FormalParameterElement> parameters, {
+    bool instanceMethod = false,
+  }) {
+    HirValue? inner() => _function(builder, type, parameters, instanceMethod);
+    final binders = type.typeParameters;
+    if (binders.isEmpty) return inner();
+    return _within(binders, () {
+      final bounds = listValue(builder, _boundsOf(binders));
+      final function = inner();
+      if (bounds == null || function == null) return null;
+      return _create(builder, 'GenericType', [bounds, function]);
+    });
+  }
+
   HirValue? _function(
     FunctionBuilder builder,
-    DartType returnType,
-    List<FormalParameterElement> parameters, {
-
-    /// The type of a parameter.
-    DartType Function(FormalParameterElement parameter)? typeOf,
-  }) {
-    DartType own(FormalParameterElement p) => typeOf?.call(p) ?? p.type;
-    final result = value(builder, returnType);
+    FunctionType type,
+    List<FormalParameterElement> parameters,
+    bool instanceMethod,
+  ) {
+    DartType own(FormalParameterElement p) => instanceMethod && isUnchecked(p)
+        ? builder.library.typeProvider.objectQuestionType
+        : p.type;
+    final result = value(builder, type.returnType);
     final required = listValue(builder, [
       for (final p in parameters)
         if (p.isRequiredPositional) own(p),
@@ -322,7 +315,7 @@ final class TypeTable(
     ]);
     if (result == null || required == null || optional == null) return null;
     HirValue names = builder.add(HirNull());
-    for (final parameter in _byName(parameters).reversed) {
+    for (final parameter in parameters.reversed.where((p) => p.isNamed)) {
       final type = value(builder, own(parameter));
       if (type == null) return null;
       names = _create(builder, 'NamedList', [
@@ -340,38 +333,37 @@ final class TypeTable(
     ]);
   }
 
-  static List<FormalParameterElement> _byName(
-    List<FormalParameterElement> parameters,
-  ) =>
-      parameters.where((p) => p.isNamed).toList()
-        ..sort((a, b) => a.name!.compareTo(b.name!));
-
-  /// The type of the method [element] of an object as a function, which takes
-  /// anything where it checks what it is given.
-  HirValue? methodType(FunctionBuilder builder, ExecutableElement element) {
-    final any = builder.library.typeProvider.objectQuestionType;
-    final parameters = element.typeParameters;
-    if (parameters.isNotEmpty) {
-      return _within(parameters, () {
-        final bounds = listValue(builder, _boundsOf(parameters));
-        final inner = _method(builder, element, any);
-        if (bounds == null || inner == null) return null;
-        return _create(builder, 'GenericType', [bounds, inner]);
-      });
-    }
-    return _method(builder, element, any);
-  }
-
-  HirValue? _method(
+  /// A tear-off keeps its declaration's parameter order.
+  HirValue? tearOffType(
     FunctionBuilder builder,
-    ExecutableElement element,
-    DartType any,
-  ) {
-    return _function(
+    ExecutableElement element, {
+    FunctionType? asType,
+    bool instanceMethod = false,
+  }) {
+    final type = asType ?? element.type;
+    final declared = element.formalParameters;
+    var parameters = declared;
+    if (!identical(type, element.type)) {
+      // Instantiation can change the types and puts names in alphabetical order.
+      final typed = type.formalParameters;
+      final byName = {
+        for (final p in typed)
+          if (p.isNamed) p.name: p,
+      };
+      parameters = [
+        for (final (i, p) in declared.indexed)
+          p.isNamed ? byName[p.name]! : typed[i],
+      ];
+    }
+    if (!instanceMethod) {
+      final constant = _constantFunction(type, null, parameters);
+      if (constant != null) return builder.add(HirStatic(constant));
+    }
+    return _functionValue(
       builder,
-      element.returnType,
-      element.formalParameters,
-      typeOf: (parameter) => isUnchecked(parameter) ? any : parameter.type,
+      type,
+      parameters,
+      instanceMethod: instanceMethod,
     );
   }
 

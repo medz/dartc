@@ -31,7 +31,7 @@ final class FunctionType extends RuntimeType {
   final TypeList? required;
   final TypeList? optional;
 
-  /// In the order of their names.
+  /// In declaration order for tear-offs, in name order for type annotations.
   final NamedList? named;
   const FunctionType(this.result, this.required, this.optional, this.named);
 }
