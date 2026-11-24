@@ -172,10 +172,10 @@ enum Conversion(final LirType from, final LirType to) {
   intToPtr(.i64, .ptr),
   ptrToInt(.ptr, .i64),
 
-  /// An object where the runtime has put one.
+  /// An object where the runtime has put one, or what stands for an odd number.
   intToRef(.i64, .ref),
 
-  /// Where an object is.
+  /// Where an object is, which is even, or the odd number.
   refToInt(.ref, .i64),
 }
 

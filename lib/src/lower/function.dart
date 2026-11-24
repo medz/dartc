@@ -2,6 +2,7 @@ import 'package:dartc/graph.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'boxes.dart';
 import 'dispatch.dart';
 import 'machine.dart';
 import 'operators.dart';
@@ -36,6 +37,10 @@ final class FunctionLowering(
   final _values = <HirValue, LirValue>{};
   final _blocks = <HirBlock, LirBlock>{};
   final _added = <LirBlock>[];
+  late final _boxes = BoxLowering(layout, _added.add);
+
+  /// The block that code is added to.
+  late LirBlock _block;
 
   LirFunction lower() {
     for (final block in function.blocks) {
@@ -51,12 +56,12 @@ final class FunctionLowering(
       (block) => block.terminator!.edges.map((edge) => edge.target),
     );
     for (final block in order) {
-      final lowered = _blocks[block]!;
+      _block = _blocks[block]!;
       for (final instruction in block.instructions) {
-        final value = _instruction(lowered, instruction);
+        final value = _instruction(instruction);
         if (value != null) _values[instruction] = value;
       }
-      lowered.end(_terminator(lowered, block.terminator!));
+      _terminate(block.terminator!);
     }
     final overflow = layout.module.stackOverflow;
     return LirFunction(
@@ -70,7 +75,14 @@ final class FunctionLowering(
 
   LirValue _value(HirValue value) => _values[value]!;
 
-  LirValue? _instruction(LirBlock block, HirInstruction instruction) {
+  /// Goes on with the block of [made], and gives its value.
+  LirValue _continue((LirBlock, LirValue) made) {
+    _block = made.$1;
+    return made.$2;
+  }
+
+  LirValue? _instruction(HirInstruction instruction) {
+    final block = _block;
     final operators = OperatorLowering(block);
     switch (instruction) {
       case HirConst(:final Object value):
@@ -111,7 +123,10 @@ final class FunctionLowering(
       case HirClassNumber(:final target):
         return block.add(ConstInt(layout.numberOf(target) ?? -1));
       case HirStatic(:final object):
-        return block.add(StaticObject(statics.constant(object)));
+        final bits = statics.bitsOf(object);
+        return bits == null
+            ? block.add(StaticObject(statics.constant(object)))
+            : block.add(Convert(.intToRef, block.add(ConstInt(bits))));
       case HirLoadGlobal(:final global):
         return block.add(
           Load(
@@ -130,6 +145,8 @@ final class FunctionLowering(
           ),
         );
         return null;
+      case HirMachine(op: .classNumber, :final arguments):
+        return _classNumber(_value(arguments.single));
       case HirMachine(:final op, :final arguments):
         return machine.lower(block, op, arguments.map(_value).toList());
       case HirLoad(:final field, :final object):
@@ -137,10 +154,20 @@ final class FunctionLowering(
       case HirStore(:final field, :final object, :final value):
         layout.store(block, field, _value(object), _value(value));
         return null;
+      case HirBox(:final target, :final value):
+        return _continue(
+          _boxes.box(block, target, _value(value), (block) {
+            return (block, block.add(layout.allocation(block, target)));
+          }),
+        );
+      case HirUnbox(:final field, :final object):
+        return _continue(_boxes.unbox(block, field, _value(object)));
       case HirVirtualCall() || HirCall():
-        return block.add(_call(block, instruction as HirCalling));
+        final call = _call(instruction as HirCalling);
+        return _block.add(call);
       case HirIsInstance(:final test, :final object):
-        return layout.isInstance(block, statics.test(test), _value(object));
+        final number = _classNumber(_value(object));
+        return layout.isInstance(_block, statics.test(test), number);
     }
   }
 
@@ -159,17 +186,27 @@ final class FunctionLowering(
     }
   }
 
-  /// The call that [calling] makes, not yet part of [block].
-  LirCall _call(LirBlock block, HirCalling calling) {
+  LirValue _classNumber(LirValue object, {bool mayBeInteger = true}) =>
+      _continue(_boxes.classNumber(_block, object, mayBeInteger: mayBeInteger));
+
+  /// The call that [calling] makes, not yet part of a block.
+  LirCall _call(HirCalling calling) {
+    final block = _block;
     switch (calling) {
+      case HirBox(:final target):
+        return layout.allocation(block, target);
       case HirNew(:final target):
         return layout.allocation(block, target);
       case HirNewArray(:final target, :final length):
         return layout.allocation(block, target, _value(length));
       case HirVirtualCall(:final selector, :final receiver, :final arguments):
         final object = _value(receiver);
+        final number = _classNumber(
+          object,
+          mayBeInteger: layout.canReceive(selector),
+        );
         return CallIndirect(
-          layout.lookUp(block, selector, object),
+          layout.lookUp(_block, selector, number),
           _selectorSignature(selector),
           [object, ...arguments.map(_value)],
         );
@@ -182,37 +219,53 @@ final class FunctionLowering(
     }
   }
 
-  Invoke _invoke(LirBlock block, HirInvoke invoke) {
+  void _invoke(HirInvoke invoke) {
     final HirInvoke(:call, :onReturn, :onThrow) = invoke;
-    var normal = _edge(onReturn);
-    final created = switch (call) {
-      HirNew(:final target) || HirNewArray(:final target) => target,
-      _ => null,
-    };
-    if (created != null) {
-      // Objects get their class before they are used.
+    (LirBlock, LirValue) allocate(LirBlock block, LirCall allocation) {
       final made = LirBlock([.ref]);
       _added.add(made);
-      layout.setClass(
-        made,
-        made.parameters.single,
-        created,
-        call is HirNewArray ? _value(call.length) : null,
-      );
-      made.end(
-        Jump(
-          LirEdge(normal.target, [made.parameters.single, ...normal.arguments]),
-        ),
-      );
-      normal = LirEdge(made);
+      block.end(Invoke(allocation, LirEdge(made), _edge(onThrow)));
+      return (made, made.parameters.single);
     }
-    return Invoke(_call(block, call), normal, _edge(onThrow));
+
+    LirValue? result;
+    switch (call) {
+      case HirNew(:final target) || HirNewArray(:final target):
+        // Objects get their class before they are used.
+        final object = _continue(allocate(_block, _call(call)));
+        result = layout.setClass(
+          _block,
+          object,
+          target,
+          call is HirNewArray ? _value(call.length) : null,
+        );
+      case HirBox(:final target, :final value):
+        result = _continue(
+          _boxes.box(
+            _block,
+            target,
+            _value(value),
+            (block) => allocate(block, layout.allocation(block, target)),
+          ),
+        );
+      default:
+        final made = _call(call);
+        _block.end(Invoke(made, _edge(onReturn), _edge(onThrow)));
+        return;
+    }
+    final LirEdge(:target, :arguments) = _edge(onReturn);
+    _block.end(Jump(LirEdge(target, [result, ...arguments])));
   }
 
   LirEdge _edge(HirEdge edge) =>
       LirEdge(_blocks[edge.target]!, edge.arguments.map(_value));
 
-  LirTerminator _terminator(LirBlock block, HirTerminator end) {
+  void _terminate(HirTerminator end) {
+    if (end is HirInvoke) return _invoke(end);
+    _block.end(_terminator(end));
+  }
+
+  LirTerminator _terminator(HirTerminator end) {
     switch (end) {
       case HirJump(:final edge):
         return Jump(_edge(edge));
@@ -222,12 +275,10 @@ final class FunctionLowering(
         return Return(value == null ? null : _value(value));
       case HirThrow(:final exception, :final trace):
         return Throw(_value(exception), _value(trace));
-      case final HirInvoke invoke:
-        return _invoke(block, invoke);
       case HirExit(:final code):
-        block.add(callSystem('exit', [_value(code)]));
+        _block.add(callSystem('exit', [_value(code)]));
         return Unreachable();
-      case HirUnreachable():
+      case HirInvoke() || HirUnreachable():
         return Unreachable();
     }
   }

@@ -88,6 +88,20 @@ void main() {
       }),
     );
     expect(() => LirInterpreter(module).call('f', [0]), fault);
+    expect(LirInterpreter(module).call('f', [5]), const LirNumber(5));
+  });
+
+  test('odd numbers become references and integers again', () {
+    final module = _module(
+      function('f', [.i64, .i64], .i64, (block, p) {
+        final [a, b] = [for (final x in p) block.add(Convert(.intToRef, x))];
+        final same = block.add(Compare(.eq, a, b));
+        final back = block.add(Convert(.refToInt, a));
+        return block.add(IntBinary(.add, back, same));
+      }),
+    );
+    expect(LirInterpreter(module).call('f', [5, 7]), 5);
+    expect(LirInterpreter(module).call('f', [-9, -9]), -8);
   });
 
   group('rejects', () {

@@ -41,6 +41,26 @@ final class HirNew(final HirClass target) extends HirCalling {
   List<HirValue> get inputs => const [];
 }
 
+/// An object of [target], whose only field has [value].
+///
+/// It never changes. An integer may be in the reference itself.
+final class HirBox(final HirClass target, final HirValue value)
+    extends HirCalling {
+  @override
+  HirType get type => .reference;
+  @override
+  List<HirValue> get inputs => [value];
+}
+
+/// What [object], which is never null and that [HirBox] gives, has in [field].
+final class HirUnbox(final HirField field, final HirValue object)
+    extends HirInstruction {
+  @override
+  HirType get type => field.type;
+  @override
+  List<HirValue> get inputs => [object];
+}
+
 /// An array of [target] with [length] elements, which is not negative.
 ///
 /// They are null or 0.

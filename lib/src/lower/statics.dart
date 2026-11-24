@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
+import 'boxes.dart';
 import 'dispatch.dart';
 
 /// The object holding the program's global variables.
@@ -66,6 +67,12 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
 
   int offsetOf(HirGlobal global) => _offsets[global]!;
 
+  /// The bits of the reference that [object] is, if it is an integer that needs
+  /// no object.
+  int? bitsOf(HirConstObject object) => object.target == module.integers
+      ? BoxLowering.bitsOf(object.fields.values.single! as int)
+      : null;
+
   /// The symbol of [object].
   String constant(HirConstObject object) => _constants.putIfAbsent(object, () {
     final HirConstObject(:target, :fields, :elements) = object;
@@ -98,7 +105,11 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
   void _set(_Words words, int offset, Object? value) {
     switch (value) {
       case HirConstObject():
-        words.references[offset] = constant(value);
+        if (bitsOf(value) case final bits?) {
+          words.data.setInt64(offset, bits, .little);
+        } else {
+          words.references[offset] = constant(value);
+        }
       case int():
         words.data.setInt64(offset, value, .little);
       case double():

@@ -271,7 +271,13 @@ final class _FunctionVerifier(
       case HirNew(:final target):
         if (!classes.contains(target)) _fail('unlisted class ${target.name}');
         if (target.elements != null) _fail('${target.name} has elements');
-      case HirLoad(:final object):
+      case HirBox(:final target, :final value):
+        if (!classes.contains(target)) _fail('unlisted class ${target.name}');
+        if (target.fields.length != 1 || target.elements != null) {
+          _fail('${target.name} is no box');
+        }
+        _expect(value, target.fields.single.type, target.name);
+      case HirLoad(:final object) || HirUnbox(:final object):
         _expect(object, .reference, 'object');
       case HirStore(:final field, :final object, :final value):
         _expect(object, .reference, 'object');

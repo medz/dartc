@@ -8,10 +8,18 @@ final class LirFault(final String message) implements Exception {
   String toString() => 'LirFault: $message';
 }
 
+/// A reference that stands for an odd number instead of an object.
+final class const LirNumber(final int value) {
+  @override
+  bool operator ==(Object other) => other is LirNumber && other.value == value;
+  @override
+  int get hashCode => value.hashCode;
+}
+
 /// A managed object, whose references are kept apart from its plain bytes.
 final class LirObject(int size, {final bool writable = true}) {
   final Uint8List bytes = Uint8List(size);
-  final Map<int, LirObject> references = {};
+  final Map<int, Object> references = {};
 
   bool _holdsReference(int offset, int length) => references.keys.any(
     (slot) => slot < offset + length && offset < slot + Width.ref.bytes,
@@ -47,9 +55,7 @@ final class LirMemory() {
     }
     _checkBounds(base, offset, width);
     if (width == .ref) {
-      final found = base.references[offset];
-      if (found == null) _checkNoReferenceBits(base, offset);
-      return found;
+      return base.references[offset] ?? _numberAt(base, offset);
     }
     if (base._holdsReference(offset, width.bytes)) {
       throw LirFault('A reference is read as plain bytes.');
@@ -69,12 +75,13 @@ final class LirMemory() {
     if (!base.writable) throw LirFault('Write to a constant object.');
     if (width == .ref) {
       if (!base.references.containsKey(offset)) {
-        _checkNoReferenceBits(base, offset);
+        _numberAt(base, offset);
+        base.bytes.fillRange(offset, offset + Width.ref.bytes, 0);
       }
       if (value == null) {
         base.references.remove(offset);
       } else {
-        base.references[offset] = value as LirObject;
+        base.references[offset] = value;
       }
       return;
     }
@@ -84,9 +91,11 @@ final class LirMemory() {
     _encode(width, ByteData.sublistView(base.bytes), offset, value);
   }
 
-  int _address(Object? base, int offset) => base == null
-      ? throw LirFault('Null dereference.')
-      : (base as int) + offset;
+  int _address(Object? base, int offset) => switch (base) {
+    null => throw LirFault('Null dereference.'),
+    LirNumber() => throw LirFault('A number is used as an object.'),
+    _ => (base as int) + offset,
+  };
 
   (ByteData, int) _native(int address, int length, {required bool write}) {
     // The last region that starts before it, as they are in order.
@@ -112,16 +121,16 @@ final class LirMemory() {
     }
   }
 
-  /// A reference slot without a reference must hold null's zero bytes.
-  void _checkNoReferenceBits(LirObject object, int offset) {
+  /// The odd number where an object has no reference, or null where there are
+  /// only zeros.
+  LirNumber? _numberAt(LirObject object, int offset) {
     if (offset % Width.ref.bytes != 0) {
       throw LirFault('Unaligned reference at $offset.');
     }
-    for (var i = offset; i < offset + Width.ref.bytes; i++) {
-      if (object.bytes[i] != 0) {
-        throw LirFault('Plain bytes are used as a reference.');
-      }
-    }
+    final bits = ByteData.sublistView(object.bytes).getInt64(offset, .little);
+    if (bits.isOdd) return LirNumber(bits);
+    if (bits == 0) return null;
+    throw LirFault('Plain bytes are used as a reference.');
   }
 
   Object _decode(Width width, ByteData data, int at) => switch (width) {

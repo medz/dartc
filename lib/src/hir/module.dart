@@ -26,6 +26,12 @@ final class HirFunction(
     if (_blocks != null) throw StateError('$name already has a body.');
     _blocks = .unmodifiable(blocks);
   }
+
+  /// Replaces the body by one that does the same.
+  void redefine(Iterable<HirBlock> blocks) {
+    if (_blocks == null) throw StateError('$name has no body.');
+    _blocks = .unmodifiable(blocks);
+  }
 }
 
 /// A whole program, started by [main], which takes no arguments.
@@ -38,6 +44,8 @@ final class HirFunction(
 /// A library has [exports], which do the work of functions of C by their names,
 /// given the addresses of the block of the call and of what is passed on the
 /// stack, and [eventLoop], which does what those left to be done later.
+///
+/// Integers are boxed in objects of [integers], or in references themselves.
 ///
 /// The remaining functions do the work of the runtime. [allocate] gives the
 /// address of memory for an object, of the size it takes, or 0. [raise] throws
@@ -52,6 +60,7 @@ final class HirModule(
   Map<HirSelector, Map<HirClass, HirFunction>> dispatch = const {},
   Iterable<HirGlobal> globals = const [],
   Map<HirTypeTest, Set<HirClass>> tests = const {},
+  final HirClass? integers,
   final HirFunction? allocate,
   final HirFunction? raise,
   final HirFunction? stackOverflow,

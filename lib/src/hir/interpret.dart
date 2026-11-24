@@ -184,6 +184,8 @@ final class HirInterpreter(
         return module.tests[test]!.contains(object.target);
       case HirNew(:final target):
         return HirObject(target);
+      case HirBox(:final target):
+        return HirObject(target)..fields[target.fields.single] = inputs.single;
       case HirNewArray(:final target):
         return HirObject(target, length: inputs.single as int);
       case HirLength():
@@ -197,7 +199,7 @@ final class HirInterpreter(
         throw UnsupportedError('The C function $name.');
       case HirClassNumber(:final target):
         return module.classes.indexOf(target);
-      case HirLoad(:final field):
+      case HirLoad(:final field) || HirUnbox(:final field):
         return _object(inputs[0], field).fields[field] ??
             (throw StateError('${field.name} is not set.'));
       case HirStore(:final field):

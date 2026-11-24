@@ -28,6 +28,7 @@ HirInstruction copyInstruction(
     HirStoreElement(element, of(array), of(index), of(value)),
   HirMachine(:final op, :final arguments) => HirMachine(op, arguments.map(of)),
   HirLoad(:final field, :final object) => HirLoad(field, of(object)),
+  HirUnbox(:final field, :final object) => HirUnbox(field, of(object)),
   HirStore(:final field, :final object, :final value) => HirStore(
     field,
     of(object),
@@ -62,6 +63,7 @@ HirCalling _copyCalling(
   HirValue Function(HirValue value) of,
 ) => switch (given) {
   HirNew(:final target) => HirNew(target),
+  HirBox(:final target, :final value) => HirBox(target, of(value)),
   HirNewArray(:final target, :final length) => HirNewArray(target, of(length)),
   HirVirtualCall(:final selector, :final receiver, :final arguments) =>
     HirVirtualCall(selector, of(receiver), arguments.map(of)),

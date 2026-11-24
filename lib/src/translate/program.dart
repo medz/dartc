@@ -177,6 +177,7 @@ final class ProgramTranslator(
           _closures.closures,
           _functionClass,
         ),
+        integers: _integers,
         allocate: _needs.allocate,
         raise: _needs.raise,
         stackOverflow: _needs.stackOverflow,
@@ -186,6 +187,14 @@ final class ProgramTranslator(
         exports: exports,
         eventLoop: _needs.eventLoop,
       );
+
+  /// The class of boxed integers, if there are any.
+  HirClass? get _integers {
+    final element = boxElement(.integer);
+    return _dispatch.classes.contains(element)
+        ? _classes.classOf(element)
+        : null;
+  }
 
   Iterable<HirFunction> get _allFunctions => [
     ..._functions.all,

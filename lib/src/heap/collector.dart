@@ -153,7 +153,8 @@ void _markStack() {
 
 /// Marks [object], if it is one, to be scanned.
 void _mark(int object) {
-  if (object == 0) return;
+  // Odd ones are numbers.
+  if (object == 0 || object & 1 != 0) return;
   final flags = load32(object + _flags);
   if (flags & (_marked | _fixed) != 0) return;
   store32(object + _flags, flags | _marked);

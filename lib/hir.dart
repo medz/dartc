@@ -3,6 +3,7 @@ library;
 
 export 'src/hir/block.dart';
 export 'src/hir/class.dart';
+export 'src/hir/copy.dart';
 export 'src/hir/coroutine.dart';
 export 'src/hir/global.dart' show HirConstObject, HirGlobal;
 export 'src/hir/instruction.dart';

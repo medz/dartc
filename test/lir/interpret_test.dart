@@ -214,9 +214,10 @@ void main() {
       expect(() => memory.load(.i8, object, 15), fault);
       expect(() => memory.store(.i8, object, 8, 1), fault);
       memory.store(.ref, object, 8, null);
-      memory.store(.i8, object, 8, 1);
+      memory.store(.i8, object, 8, 2);
       expect(() => memory.load(.ref, object, 8), fault);
       expect(() => memory.store(.ref, object, 8, object), fault);
+      expect(() => memory.load(.i64, const LirNumber(1), 0), fault);
       final native = memory.map(Uint8List(8));
       expect(() => memory.load(.i64, native, 1), fault);
       expect(() => memory.load(.ref, native, 0), fault);
@@ -224,6 +225,19 @@ void main() {
       final constant = memory.map(Uint8List(8), writable: false);
       expect(memory.load(.i64, constant, 0), 0);
       expect(() => memory.store(.i64, constant, 0, 1), fault);
+    });
+
+    test('odd numbers are references', () {
+      final memory = LirMemory(), object = LirObject(16);
+      memory.store(.i64, object, 8, -3);
+      expect(memory.load(.ref, object, 8), const LirNumber(-3));
+      memory.store(.ref, object, 8, object);
+      expect(memory.load(.ref, object, 8), object);
+      memory.store(.ref, object, 8, const LirNumber(7));
+      expect(memory.load(.ref, object, 8), const LirNumber(7));
+      expect(() => memory.load(.i64, object, 8), fault);
+      memory.store(.ref, object, 8, null);
+      expect(memory.load(.ref, object, 8), isNull);
     });
 
     test('host code reads native bytes', () {

@@ -189,17 +189,19 @@ final class ObjectLayout(
   /// A field of a class without objects is only used by code that never runs.
   int offsetOf(HirField field) => _fieldOffsets[field] ?? _headerBytes;
 
-  /// Reads the byte for the class of [object] in the table at [symbol].
-  LirValue isInstance(LirBlock block, String symbol, LirValue object) {
-    final number = block.add(Load(.u32, object, offset: classOffset));
+  /// Whether integers without an object can receive calls of [selector].
+  bool canReceive(HirSelector selector) =>
+      module.dispatch[selector]!.containsKey(module.integers);
+
+  /// Reads the byte for the class with [number] in the table at [symbol].
+  LirValue isInstance(LirBlock block, String symbol, LirValue number) {
     final table = block.add(SymbolAddress(symbol));
     return block.add(Load(.u8, table, index: number));
   }
 
-  /// The address of what the class of [receiver] has for [selector].
-  LirValue lookUp(LirBlock block, HirSelector selector, LirValue receiver) {
+  /// The address of what the class with [number] has for [selector].
+  LirValue lookUp(LirBlock block, HirSelector selector, LirValue number) {
     final table = block.add(SymbolAddress(_tableSymbol));
-    final number = block.add(Load(.u32, receiver, offset: classOffset));
     final index = block.add(IntBinary(.shl, number, block.add(ConstInt(2))));
     final offset = block.add(
       Load(.i32, table, offset: _selectorOffsets[selector]! * 4, index: index),

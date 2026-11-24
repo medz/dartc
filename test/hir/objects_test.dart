@@ -173,6 +173,16 @@ void main() {
         return HirReturn();
       }, classes: [_base, _derived]);
     });
+    rejects('Base is no box', () {
+      return with_((block, _) {
+        block.add(HirBox(_base, block.add(HirConst(1))));
+      });
+    });
+    rejects('object: expected reference', () {
+      return with_(
+        (block, _) => block.add(HirUnbox(_x, block.add(HirConst(1)))),
+      );
+    });
     rejects('object: expected reference', () {
       return with_(
         (block, _) => block.add(HirLoad(_x, block.add(HirConst(1)))),

@@ -15,13 +15,13 @@ typedef LirExternalBody = Object? Function(
 );
 
 /// A throw in the interpreted program that reached the caller.
-final class LirException(final LirObject? exception, final LirObject? trace)
+final class LirException(final Object? exception, final Object? trace)
     implements Exception;
 
 /// Executes a verified module, checking every LIR precondition.
 ///
 /// Integers and addresses are Dart ints, doubles are doubles and references
-/// are a nullable [LirObject]. A program exceeding [maxSteps] faults.
+/// are a [LirObject], a [LirNumber] or null. A program exceeding [maxSteps] faults.
 final class LirInterpreter(
   final LirModule module, {
   final Map<String, LirExternalBody> externals = const {},
@@ -111,10 +111,7 @@ final class LirInterpreter(
         case Return(:final value):
           return value == null ? null : values[value];
         case Throw(:final exception, :final trace):
-          throw LirException(
-            values[exception] as LirObject?,
-            values[trace] as LirObject?,
-          );
+          throw LirException(values[exception], values[trace]);
         case Unreachable():
           throw LirFault('Unreachable code in ${function.name}.');
         case Jump(:final edge):
@@ -252,7 +249,7 @@ final class LirInterpreter(
 
   bool _compare(Relation relation, Object? left, Object? right) {
     if (left is! num || right is! num) {
-      final same = identical(left, right);
+      final same = left == right;
       return relation == .eq ? same : !same;
     }
     const sign = 1 << 63;
@@ -289,9 +286,14 @@ final class LirInterpreter(
         bits.setFloat64(0, value as double);
         return bits.getInt64(0);
       case .intToRef:
+        if ((value as int).isOdd) return LirNumber(value);
         throw LirFault('Objects are not integers here.');
       case .refToInt:
-        return _places[value!] ??= ++_placed * 16;
+        return switch (value) {
+          null => 0,
+          LirNumber(:final value) => value,
+          _ => _places[value] ??= ++_placed * 16,
+        };
       case .intToPtr || .ptrToInt:
         return value as int;
     }

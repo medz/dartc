@@ -24,7 +24,7 @@ final class Conversions(
       throw StateError('A ${value.type} is no $to.');
     }
     final field = _scope.boxClass(to).fields.single;
-    return _builder.add(HirLoad(field, value));
+    return _builder.add(HirUnbox(field, value));
   }
 
   HirValue _box(HirValue value) {
@@ -39,10 +39,7 @@ final class Conversions(
         () => _builder.add(HirStatic(_scope.boxOf(false))),
       );
     }
-    final class_ = _scope.boxClass(value.type!);
-    final box = _builder.create(class_);
-    _builder.add(HirStore(class_.fields.single, box, value));
-    return box;
+    return _builder.call(HirBox(_scope.boxClass(value.type!), value))!;
   }
 
   /// [left], or what [right] gives if that is null, represented as [type].

@@ -93,6 +93,9 @@ final class _Printer(final HirFunction function) {
       '${operator.symbol}${_name(operand)}',
     HirNull() => 'null',
     HirNew(:final target) => 'new ${target.name}',
+    HirBox(:final target, :final value) => '${target.name} ${_name(value)}',
+    HirUnbox(:final field, :final object) =>
+      'unbox ${_name(object)}.${field.name}',
     HirStatic(:final object) => 'const $object',
     HirLoadGlobal(:final global) => global.name,
     HirStoreGlobal(:final global, :final value) =>
