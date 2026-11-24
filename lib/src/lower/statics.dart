@@ -22,10 +22,8 @@ const _fixedFlag = 4;
 final class StaticData(final HirModule module, final ObjectLayout _layout) {
   final _constants = <HirConstObject, String>{};
   final _objects = <LirStatic>[];
-  final _tests = <HirTypeTest, String>{};
-
-  /// The tables that tests read.
-  final List<LirData> tables = [];
+  final _tests = <HirTypeTest, TestBit>{};
+  final _testBytes = <Uint8List>[];
   final _offsets = <HirGlobal, int>{};
 
   late final List<HirGlobal> _globals = [
@@ -46,17 +44,24 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
     }
   }
 
-  /// The symbol of [test]: a byte for each class, 1 for those that pass.
-  String test(HirTypeTest test) => _tests.putIfAbsent(test, () {
+  /// Where it is found which classes pass [test].
+  TestBit test(HirTypeTest test) => _tests.putIfAbsent(test, () {
     final passing = module.tests[test]!;
-    final symbol = '.is.${_tests.length}';
-    tables.add(
-      LirData(symbol, [
-        for (final class_ in module.classes) passing.contains(class_) ? 1 : 0,
-      ]),
-    );
-    return symbol;
+    final number = _tests.length, bit = number % 8;
+    if (bit == 0) _testBytes.add(Uint8List(module.classes.length));
+    final bytes = _testBytes.last;
+    for (final (i, class_) in module.classes.indexed) {
+      if (passing.contains(class_)) bytes[i] |= 1 << bit;
+    }
+    return (table: _testSymbol(number ~/ 8), bit: bit);
   });
+
+  static String _testSymbol(int number) => '.is.$number';
+
+  /// The tables that tests read, once the program's functions are lowered.
+  List<LirData> get tables => [
+    for (final (i, bytes) in _testBytes.indexed) LirData(_testSymbol(i), bytes),
+  ];
 
   /// Every object, once the program's functions are lowered.
   List<LirStatic> get objects => _objects;
