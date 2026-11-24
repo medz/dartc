@@ -190,7 +190,7 @@ void main() {
 
   test('the same program gives the same bytes', () {
     Uint8List link(int value) =>
-        linkMacho(emitArm64(_returning(value)), entry: 'main', identifier: 'x');
+        linkMacho(emitCode(_returning(value)), entry: 'main', identifier: 'x');
     expect(link(1), link(1));
     expect(link(1), isNot(link(2)));
   });
@@ -220,7 +220,7 @@ void main() {
 
   test('the signature marks a main program', () {
     final file = ByteData.sublistView(
-      linkMacho(emitArm64(_returning(0)), entry: 'main', identifier: 'x'),
+      linkMacho(emitCode(_returning(0)), entry: 'main', identifier: 'x'),
     );
     // Offsets come from the system's code directory structure.
     final at = 16384 + 20;

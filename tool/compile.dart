@@ -1,12 +1,14 @@
 import 'dart:io';
 
 import 'package:dartc/driver.dart';
+import 'package:dartc/native.dart';
 import 'package:dartc/source.dart';
 
 const _usage = '''
 Usage: dart run tool/compile.dart [options] <source> <output>
 
   --kind <kind>      exe, which is the default, object, static or shared
+  --target <target>  macos_arm64, which is the default, or linux_arm64
   --header <path>    where to write declarations for C
 ''';
 
@@ -19,11 +21,18 @@ Never _fail() {
 Future<void> main(List<String> arguments) async {
   final paths = <String>[];
   var kind = 'exe';
+  var target = Target.macosArm64;
   String? header;
   for (var i = 0; i < arguments.length; i++) {
     switch (arguments[i]) {
       case '--kind' when i + 1 < arguments.length:
         kind = arguments[++i];
+      case '--target' when i + 1 < arguments.length:
+        final label = arguments[++i];
+        target = Target.values.firstWhere(
+          (target) => target.label == label,
+          orElse: _fail,
+        );
       case '--header' when i + 1 < arguments.length:
         header = arguments[++i];
       case final option when option.startsWith('-'):
@@ -40,7 +49,7 @@ Future<void> main(List<String> arguments) async {
   final [source, output] = paths;
   try {
     if (library == null) {
-      writeProgram(await compileProgram(source), output);
+      writeProgram(await compileProgram(source, target: target), output);
       return;
     }
     final made = await compileLibrary(source, library, name: output);

@@ -1,7 +1,7 @@
 import 'package:dartc/hir.dart';
 import 'package:dartc/lir.dart';
 
-import 'system.dart';
+import 'system_calls.dart';
 
 /// Bytes at the end of the stack for code that does not check it.
 const _reservedBytes = 128 << 10;
@@ -28,12 +28,9 @@ LirStatic stackLimit() =>
     LirStatic(stackLimitSymbol, List.filled(8, 0), writable: true);
 
 /// Finds out how far the stack may reach.
-void setStackLimit(LirBlock block) {
+void setStackLimit(LirBlock block, SystemCalls system) {
   final reserved = block.add(ConstInt(_reservedBytes));
-  final thread = block.add(callSystem('pthread_self', []));
-  final end = block.add(callSystem('pthread_get_stackaddr_np', [thread]));
-  final size = block.add(callSystem('pthread_get_stacksize_np', [thread]));
-  final start = block.add(IntBinary(.sub, end, size));
+  final start = system.stackStart(block);
   block.add(
     Store(
       .i64,

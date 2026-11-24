@@ -11,6 +11,7 @@ import 'output.dart';
 import 'runtime.dart';
 import 'statics.dart';
 import 'system.dart';
+import 'system_calls.dart';
 
 /// The function that starts the program and returns its exit code.
 ///
@@ -21,10 +22,14 @@ const entrySymbol = '.start';
 const _uncaughtCode = 255;
 
 /// Lowers a program, or a library if it exports functions, to a closed
-/// machine-level module.
+/// machine-level module for [system].
 ///
 /// If [collectsAlways], its collector runs before every allocation.
-LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
+LirModule lowerProgram(
+  HirModule module, {
+  bool collectsAlways = false,
+  OperatingSystem system = .macos,
+}) {
   verifyHir(module);
   // Numbers keep functions apart, and apart from system functions.
   final symbols = <HirCallable, String>{
@@ -33,22 +38,29 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
   };
   final layout = ObjectLayout(module, symbols);
   final statics = StaticData(module, layout);
-  final machine = MachineLowering(statics, collectsAlways: collectsAlways);
+  final calls = SystemCalls.of(system);
+  final machine = MachineLowering(
+    statics,
+    calls,
+    collectsAlways: collectsAlways,
+  );
   final bodies = [
     for (final function in module.functions)
       FunctionLowering(function, symbols, layout, statics, machine).lower(),
   ];
-  final exports = module.exports.isEmpty ? null : _exports(module, symbols);
+  final exports = module.exports.isEmpty
+      ? null
+      : _exports(module, symbols, calls);
   final needsThread = module.callback != null || exports != null;
   final functions = [
     ...bodies,
     ...layout.functions,
     ...runtimeFunctions(module, symbols),
-    if (machine.writesOutput) writeFunction(),
+    if (machine.writesOutput) writeFunction(calls),
     if (module.callback case final callback?)
-      ...callbackFunctions(symbols[callback]!, signatureOf(callback)),
+      ...callbackFunctions(symbols[callback]!, signatureOf(callback), calls),
     if (exports == null)
-      _startFunction(module, symbols, machine)
+      _startFunction(module, symbols, machine, calls)
     else
       ...exports.functions,
   ];
@@ -74,7 +86,8 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
         LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
       if (needsThread) mainThread(),
       if (exports != null) ...exportData(),
-      if (module.callback != null) ...[...callbackData(), callbackMessage],
+      ...calls.data,
+      if (module.callback != null) ...[...callbackData(calls), callbackMessage],
       if (machine.keepsNativeFrame)
         LirData(nativeFrameSymbol, List.filled(8, 0), writable: true),
       if (machine.callsNative)
@@ -103,6 +116,7 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
 ({List<LirFunction> functions, Map<String, String> names}) _exports(
   HirModule module,
   Map<HirCallable, String> symbols,
+  SystemCalls system,
 ) {
   ({String symbol, LirSignature signature})? find(HirFunction? function) =>
       function == null
@@ -116,6 +130,7 @@ LirModule lowerProgram(HirModule module, {bool collectsAlways = false}) {
     uncaught: find(module.uncaught),
     eventLoop: find(module.eventLoop),
     checksStack: module.stackOverflow != null,
+    system: system,
   );
 }
 
@@ -124,6 +139,7 @@ LirFunction _startFunction(
   HirModule module,
   Map<HirCallable, String> symbols,
   MachineLowering machine,
+  SystemCalls system,
 ) {
   final start = LirBlock([
     if (machine.usesArguments) ...const [LirType.i64, LirType.ptr],
@@ -139,7 +155,7 @@ LirFunction _startFunction(
   }
   if (module.callback != null) setMainThread(start);
   if (machine.writesOutput) ignoreBrokenPipes(start);
-  if (module.stackOverflow != null) setStackLimit(start);
+  if (module.stackOverflow != null) setStackLimit(start, system);
   final main = Call(symbols[module.main]!, signatureOf(module.main), const []);
   if (module.uncaught case final uncaught?) {
     final failed = LirBlock([.ref, .ref]);

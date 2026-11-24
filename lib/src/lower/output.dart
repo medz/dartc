@@ -1,6 +1,7 @@
 import 'package:dartc/lir.dart';
 
 import 'system.dart';
+import 'system_calls.dart';
 
 /// Writes bytes to a descriptor, given their address and count.
 const writeSymbol = '.write';
@@ -34,7 +35,7 @@ void ignoreBrokenPipes(LirBlock block) => block.add(
 ///
 /// It continues after partial and interrupted writes. Any other error ends it,
 /// as the official `print` ignores them.
-LirFunction writeFunction() {
+LirFunction writeFunction(SystemCalls system) {
   final entry = LirBlock([.i64, .ptr, .i64]), loop = LirBlock([.ptr, .i64]);
   final attempt = LirBlock(), advance = LirBlock(), failed = LirBlock();
   final done = LirBlock(), retry = LirBlock();
@@ -53,7 +54,7 @@ LirFunction writeFunction() {
   advance.end(Jump(LirEdge(loop, [next, rest])));
   final negative = failed.add(Compare(.lt, written, zero));
   failed.end(Branch(negative, LirEdge(retry), LirEdge(done)));
-  final error = retry.add(Load(.i32, retry.add(callSystem('__error', []))));
+  final error = retry.add(Load(.i32, system.errorAddress(retry)));
   final interrupted = retry.add(
     Compare(.eq, error, retry.add(ConstInt(_interrupted))),
   );

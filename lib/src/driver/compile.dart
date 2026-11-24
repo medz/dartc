@@ -5,10 +5,11 @@ import 'dart:typed_data';
 import 'package:dartc/emit.dart';
 import 'package:dartc/image.dart';
 import 'package:dartc/lower.dart';
+import 'package:dartc/native.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 
-/// Compiles the program at [path] to a macOS ARM64 executable.
+/// Compiles the program at [path] to an executable for [target].
 ///
 /// Throws [CompileFailure] if the program has an error or is not supported
 /// yet.
@@ -16,14 +17,27 @@ import 'package:dartc/translate.dart';
 /// If [collectsAlways], the program collects before every allocation.
 Future<Uint8List> compileProgram(
   String path, {
+  Target target = .macosArm64,
   bool collectsAlways = false,
 }) async {
   final program = translateProgram(
-    await loadProgram(path, sdk: await packagedSdk()),
+    await loadProgram(path, sdk: await packagedSdk(target)),
+    target: target,
   );
-  final code = emitArm64(lowerProgram(program, collectsAlways: collectsAlways));
-  final name = Uri.file(path).pathSegments.last;
-  return linkMacho(code, entry: entrySymbol, identifier: name);
+  final lowered = lowerProgram(
+    program,
+    system: target.system,
+    collectsAlways: collectsAlways,
+  );
+  final code = emitCode(lowered, target: target, entry: entrySymbol);
+  return switch (target.system) {
+    .macos => linkMacho(
+      code,
+      entry: entrySymbol,
+      identifier: Uri.file(path).pathSegments.last,
+    ),
+    .linux => linkElf(code, entry: linuxEntrySymbol),
+  };
 }
 
 /// What can be made of a library.
@@ -49,7 +63,7 @@ Future<({Uint8List bytes, String header})> compileLibrary(
   final (:module, :header) = translateLibrary(
     await loadProgram(path, sdk: await packagedSdk()),
   );
-  final code = emitArm64(lowerProgram(module, collectsAlways: collectsAlways));
+  final code = emitCode(lowerProgram(module, collectsAlways: collectsAlways));
   final file = Uri.file(name).pathSegments.last;
   return (
     bytes: switch (kind) {
@@ -69,10 +83,13 @@ Future<({Uint8List bytes, String header})> compileLibrary(
   );
 }
 
-Future<SdkSources>? _sdk;
+final _sdks = <Target, Future<SdkSources>>{};
 
-/// The standard libraries that come with the compiler.
-Future<SdkSources> packagedSdk() => _sdk ??= () async {
+/// The standard libraries that come with the compiler, for [target].
+Future<SdkSources> packagedSdk([Target target = .macosArm64]) =>
+    _sdks[target] ??= _findSdk(target);
+
+Future<SdkSources> _findSdk(Target target) async {
   final package = Uri.parse('package:dartc/heap.dart');
   final file = await Isolate.resolvePackageUri(package);
   if (file == null) throw StateError('$package is missing.');
@@ -80,8 +97,9 @@ Future<SdkSources> packagedSdk() => _sdk ??= () async {
     root: file.resolve('../sdk/std').toFilePath(),
     patches: file.resolve('../sdk/native').toFilePath(),
     runtime: file.resolve('src/heap').toFilePath(),
+    systems: [target.system.name, target.label],
   );
-}();
+}
 
 /// Writes an executable file, replacing [output] only once it is complete.
 void writeProgram(Uint8List program, String output) {

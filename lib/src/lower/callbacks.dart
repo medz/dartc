@@ -2,6 +2,7 @@ import 'package:dartc/lir.dart';
 import 'package:dartc/native.dart';
 
 import 'system.dart';
+import 'system_calls.dart';
 
 /// Where the thread that programs run on is.
 const mainThreadSymbol = '.mainThread';
@@ -15,9 +16,6 @@ const _postedSymbol = '.posted';
 const _mutex = 0, _condition = 64, _first = 128, _last = 136, _time = 144;
 const _postedBytes = 160;
 
-/// What locks of the system start with.
-const _mutexSignature = 0x32aaaba7, _conditionSignature = 0x3cb0b1bb;
-
 const postSymbol = '.post', takePostedSymbol = '.takePosted';
 const waitPostedSymbol = '.waitPosted';
 
@@ -25,7 +23,7 @@ LirData mainThread() =>
     LirData(mainThreadSymbol, List.filled(8, 0), writable: true);
 
 /// The data that calls from C need.
-List<LirData> callbackData() => [
+List<LirData> callbackData(SystemCalls system) => [
   LirData(
     callbackInfoSymbol,
     List.filled(Callbacks.count * Callbacks.infoBytes, 0),
@@ -34,9 +32,9 @@ List<LirData> callbackData() => [
   LirData(_postedSymbol, [
     for (var i = 0; i < _postedBytes; i++)
       switch (i) {
-        < 4 => _mutexSignature >> i * 8 & 255,
+        < 4 => system.mutexSignature >> i * 8 & 255,
         >= _condition && < _condition + 4 =>
-          _conditionSignature >> (i - _condition) * 8 & 255,
+          system.conditionSignature >> (i - _condition) * 8 & 255,
         _ => 0,
       },
   ], writable: true),
@@ -50,12 +48,11 @@ void setMainThread(LirBlock block) {
 
 /// The functions for calls from C, which the function [symbol] of [signature]
 /// handles.
-List<LirFunction> callbackFunctions(String symbol, LirSignature signature) => [
-  _enter(symbol, signature),
-  _post(),
-  _take(),
-  _wait(),
-];
+List<LirFunction> callbackFunctions(
+  String symbol,
+  LirSignature signature,
+  SystemCalls system,
+) => [_enter(symbol, signature), _post(), _take(), _wait(system)];
 
 const _message = 'Cannot invoke native callback outside an isolate.\n';
 
@@ -204,7 +201,7 @@ LirFunction _take() {
 
 /// Waits until there is a call to be done later, for some microseconds at most
 /// unless that is negative.
-LirFunction _wait() {
+LirFunction _wait(SystemCalls system) {
   final entry = LirBlock([.i64]), none = LirBlock(), long = LirBlock();
   final short = LirBlock(), done = LirBlock();
   _lock(entry);
@@ -221,24 +218,14 @@ LirFunction _wait() {
       ]),
     )
     ..end(Jump(LirEdge(done)));
-  final million = short.add(ConstInt(1000000));
-  final seconds = short.add(IntBinary(.div, time, million));
-  final rest = short.add(IntBinary(.rem, time, million));
-  final nanoseconds = short.add(
-    IntBinary(.mul, rest, short.add(ConstInt(1000))),
+  system.waitFor(
+    short,
+    _posted(short, _condition),
+    _posted(short, _mutex),
+    time,
+    _posted(short, _time),
   );
-  final at = _posted(short, _time);
-  short
-    ..add(Store(.i64, at, seconds))
-    ..add(Store(.i64, at, nanoseconds, offset: 8))
-    ..add(
-      callSystem('pthread_cond_timedwait_relative_np', [
-        _posted(short, _condition),
-        _posted(short, _mutex),
-        at,
-      ]),
-    )
-    ..end(Jump(LirEdge(done)));
+  short.end(Jump(LirEdge(done)));
   _lock(done, isOver: true);
   done.end(Return());
   return LirFunction(waitPostedSymbol, LirSignature([.i64]), [

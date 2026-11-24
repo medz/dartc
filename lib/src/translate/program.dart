@@ -3,6 +3,7 @@ import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
+import 'package:dartc/native.dart';
 import 'package:dartc/source.dart';
 
 import 'apply_table.dart';
@@ -37,22 +38,13 @@ import 'type_functions.dart';
 import 'type_table.dart';
 import 'types.dart';
 
-/// Translates everything the program's `main` can reach.
-///
-/// Throws [CompileFailure] at the first construct not supported yet.
-HirModule translateProgram(SourceProgram program) =>
-    ProgramTranslator(program).translate();
-
-/// Translates everything that the functions which the program exports can
-/// reach, and writes a header of C for those.
-({HirModule module, String header}) translateLibrary(SourceProgram program) =>
-    ProgramTranslator(program).translateLibrary();
-
 /// Finds the functions a program needs and translates each once.
 ///
 /// Functions, classes and selectors only grow and are bounded by the source.
-final class ProgramTranslator(final SourceProgram program)
-    implements ProgramScope {
+final class ProgramTranslator(
+  final SourceProgram program,
+  @override final Target target,
+) implements ProgramScope {
   SourceUnit get _unit => program.main.units.first;
   LibraryElement get _core =>
       program.main.element.typeProvider.objectElement.library;

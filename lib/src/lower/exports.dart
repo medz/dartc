@@ -3,6 +3,7 @@ import 'package:dartc/lir.dart';
 import 'callbacks.dart';
 import 'runtime.dart';
 import 'system.dart';
+import 'system_calls.dart';
 
 /// How many calls of functions that a library exports are running.
 const _depthSymbol = '.depth';
@@ -28,10 +29,11 @@ typedef Uncaught = ({String symbol, LirSignature signature});
   required Uncaught? uncaught,
   required ({String symbol, LirSignature signature})? eventLoop,
   required bool checksStack,
+  required SystemCalls system,
 }) {
   final names = <String, String>{};
   final functions = [
-    _enter(checksStack: checksStack),
+    _enter(system, checksStack: checksStack),
     _leave(eventLoop, uncaught),
   ];
   for (final MapEntry(key: name, value: handler) in handlers.entries) {
@@ -89,7 +91,7 @@ List<LirBlock> _guard(
 
 /// Prepares what depends on the thread, at the first of the calls that are
 /// running. The others have to be on the same one.
-LirFunction _enter({required bool checksStack}) {
+LirFunction _enter(SystemCalls system, {required bool checksStack}) {
   final entry = LirBlock(), first = LirBlock(), other = LirBlock();
   final done = LirBlock(), wrong = LirBlock();
   final place = entry.add(SymbolAddress(_depthSymbol));
@@ -99,7 +101,7 @@ LirFunction _enter({required bool checksStack}) {
     ..add(Store(.i64, place, entry.add(IntBinary(.add, depth, one))))
     ..end(Branch(depth, LirEdge(other), LirEdge(first)));
   setMainThread(first);
-  if (checksStack) setStackLimit(first);
+  if (checksStack) setStackLimit(first, system);
   first.end(Jump(LirEdge(done)));
   final thread = other.add(callSystem('pthread_self', []));
   final main = other.add(

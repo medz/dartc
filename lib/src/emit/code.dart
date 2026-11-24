@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:dartc/native.dart';
+
 import 'stack_maps.dart';
 
 /// LIR that this version cannot translate yet.
@@ -67,6 +69,9 @@ final class EmittedCode(
 
   /// The functions that others see, by what they call them.
   Map<String, String> exports = const {},
+
+  /// What runs it.
+  final Architecture architecture = .arm64,
 }) {
   final Map<String, String> exports = .unmodifiable(exports);
   final List<ThrowTarget> throwTargets = .unmodifiable(throwTargets);

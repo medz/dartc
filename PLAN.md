@@ -96,7 +96,14 @@ void main() { exit(1 + 2 * 3); }
 
 网络、子进程、`dart:isolate` 不在这一步。
 
-**13。** 到时按功能再分小步，每小步同样对照 `dart`。
+**13 Linux，x64。** 目标是 `linux-arm64` 和 `linux-x64`。`macos-x64` 不做：macOS 27 不支持 Intel，没法验证。分小步：
+
+- 13a（完成）：`Target`；ELF 可执行文件；系统函数按系统分开（`lower/system_calls.dart`）；Linux ARM64 的程序。
+- 13b：Linux 的 FFI 传值、`dart:io`、目标文件、静态库、动态库。
+- 13c：发码的公共部分和机器有关的部分分开；x64 的汇编和发码。
+- 13d：Linux x64 的完整程序。
+
+Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `test/support/hosts.dart`。
 
 **14 优化。** 每个优化能单独关闭；关和开结果相同；没有可量的收益就不留。
 

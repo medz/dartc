@@ -6,10 +6,12 @@ import 'callbacks.dart';
 import 'output.dart';
 import 'statics.dart';
 import 'system.dart';
+import 'system_calls.dart';
 
 /// Lowers the operations of the runtime.
 final class MachineLowering(
-  final StaticData _statics, {
+  final StaticData _statics,
+  final SystemCalls _calls, {
   required final bool collectsAlways,
 }) {
   /// Whether the program writes to files.
@@ -115,7 +117,7 @@ final class MachineLowering(
       case .formatDouble:
         final [value, digits, to] = arguments;
         final start = block.add(Convert(.intToPtr, to));
-        block.add(callSystem('gcvt', [value, digits, start]));
+        _calls.formatDouble(block, value, digits, start, bufferBytes);
         return null;
       case .parseDouble:
         final none = block.add(Convert(.intToPtr, number(0)));
@@ -175,17 +177,13 @@ final class MachineLowering(
   }
 
   /// Asks the system for times and random bits.
-  static LirValue? _system(
-    LirBlock block,
-    HirMachineOp op,
-    List<LirValue> arguments,
-  ) {
+  LirValue? _system(LirBlock block, HirMachineOp op, List<LirValue> arguments) {
     LirValue number(int value) => block.add(ConstInt(value));
     switch (op) {
       case .realTime:
-        return block.add(callSystem('clock_gettime_nsec_np', [number(0)]));
+        return _calls.realTime(block);
       case .steadyTime:
-        return block.add(callSystem('clock_gettime_nsec_np', [number(8)]));
+        return _calls.steadyTime(block);
       case .localTime:
         final from = block.add(Convert(.intToPtr, arguments.single));
         final to = block.add(PtrAdd(from, number(8)));
@@ -195,21 +193,21 @@ final class MachineLowering(
         block.add(callSystem('usleep', arguments));
         return null;
       default:
-        final bits = block.add(callSystem('arc4random', []));
+        final bits = _calls.randomBits(block);
         return block.add(IntBinary(.and, bits, number(0xffffffff)));
     }
   }
 
   /// Private, anonymous memory that can be read and written, or 0.
-  static LirValue _map(LirBlock block, LirValue bytes) {
-    const readWrite = 3, privateAnonymous = 0x1002, failed = -1;
+  LirValue _map(LirBlock block, LirValue bytes) {
+    const readWrite = 3, failed = -1;
     LirValue number(int value) => block.add(ConstInt(value));
     final found = block.add(
       callSystem('mmap', [
         number(0),
         bytes,
         number(readWrite),
-        number(privateAnonymous),
+        number(_calls.anonymousMemory),
         number(-1),
         number(0),
       ]),

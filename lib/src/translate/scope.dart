@@ -3,6 +3,7 @@ import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
+import 'package:dartc/native.dart';
 
 import 'builder.dart';
 import 'captures.dart';
@@ -136,6 +137,9 @@ abstract interface class ProgramScope() {
 
   /// The functions of C that the program calls.
   NativeScope get natives;
+
+  /// What the program is compiled for.
+  Target get target;
 
   /// The class `Future`.
   ClassElement get futureClass;

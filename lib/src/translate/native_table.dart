@@ -18,7 +18,7 @@ import 'types.dart';
 final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
     implements NativeScope {
   @override
-  final types = NativeTypes();
+  late final types = NativeTypes(_scope.target);
   final _counts = <String, int>{};
   final _addresses = <Element, HirGlobal>{};
 
@@ -108,7 +108,7 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
         final made = builder.call(
           HirCall(_scope.runtime('staticCallback'), [
             callback,
-            builder.add(HirConst(passingOf(signature).stackBytes)),
+            builder.add(HirConst(this.types.passing(signature).stackBytes)),
           ]),
         )!;
         builder.add(HirStoreGlobal(global, made));
@@ -139,7 +139,7 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
       HirCall(_scope.runtime(name), [
         list,
         callback,
-        builder.add(HirConst(passingOf(signature).stackBytes)),
+        builder.add(HirConst(this.types.passing(signature).stackBytes)),
       ]),
     );
   }

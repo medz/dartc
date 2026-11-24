@@ -139,3 +139,25 @@ void _leaveBlock(Arm64Assembler assembler) {
     ..popFrame()
     ..ret();
 }
+
+/// What runs a program on Linux, given its function and what it starts with.
+const linuxMainSymbol = '__libc_start_main';
+
+/// Emits what Linux starts, where the stack has the program's arguments. It
+/// runs [main].
+void emitLinuxEntry(Arm64Assembler assembler, String main) {
+  const frame = Arm64Assembler.frame, stack = Arm64Assembler.stack;
+  const atEnd = 5, stackEnd = 6;
+  assembler
+    ..constant(frame, 0)
+    ..constant(30, 0)
+    ..mov(atEnd, 0)
+    ..address(0, main)
+    ..load(1, stack, 0)
+    ..addImmediate(2, stack, 8)
+    ..constant(3, 0)
+    ..constant(4, 0)
+    ..addImmediate(stackEnd, stack, 0)
+    ..call(linuxMainSymbol)
+    ..breakpoint();
+}

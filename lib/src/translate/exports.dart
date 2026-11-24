@@ -132,7 +132,7 @@ final class ExportTable(final ProgramScope _scope) {
 
   HirFunction _make(Export export, NativeSignature signature) {
     final (:name, :element, native: _, :unit, node: _) = export;
-    final passing = passingOf(signature);
+    final passing = _scope.natives.types.passing(signature);
     final function = HirFunction('export $name', const [.integer, .integer]);
     final target = _scope.functionOf(element)!;
     _scope.schedule(() {

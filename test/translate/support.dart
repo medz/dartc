@@ -1,16 +1,14 @@
 import 'dart:io';
 
 import 'package:dartc/driver.dart';
-import 'package:dartc/emit.dart';
 import 'package:dartc/hir.dart';
-import 'package:dartc/image.dart';
 import 'package:dartc/lower.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
 
-import '../image/support.dart' show skipExecution;
 import '../lower/support.dart';
+import '../support/hosts.dart';
 import '../support/new_compiler.dart';
 
 /// The official runtime has shown that programs end.
@@ -46,21 +44,21 @@ void agrees(
   expect(lowered.code ?? 0, official.exitCode);
   expect(lowered.output, official.stdout);
   expect(lowered.errors, errors);
-  if (skipExecution != null) return;
-  for (final collectsAlways in [false, if (!isLong) true]) {
-    final program = '${directory.path}/program-$collectsAlways';
-    final code = emitArm64(
-      lowerProgram(module, collectsAlways: collectsAlways),
-    );
-    writeProgram(
-      linkMacho(code, entry: entrySymbol, identifier: 'dartc-test'),
-      program,
-    );
-    final result = await Process.run(program, const []);
-    final reason = 'collecting always: $collectsAlways';
-    expect(result.exitCode, official.exitCode, reason: reason);
-    expect(result.stdout, official.stdout, reason: reason);
-    expect(result.stderr, errors, reason: reason);
+  for (final host in Host.all) {
+    for (final collectsAlways in [false, if (!isLong) true]) {
+      final program = '${directory.path}/program-$collectsAlways';
+      final lowered = lowerProgram(
+        module,
+        system: host.target.system,
+        collectsAlways: collectsAlways,
+      );
+      host.write(lowered, program, entry: entrySymbol);
+      final result = await host.run(program);
+      final reason = '${host.target}, collecting always: $collectsAlways';
+      expect(result.code, official.exitCode, reason: reason);
+      expect(result.output, official.stdout, reason: reason);
+      expect(result.errors, errors, reason: reason);
+    }
   }
 }, timeout: const Timeout.factor(6));
 

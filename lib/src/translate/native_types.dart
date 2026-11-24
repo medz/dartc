@@ -15,12 +15,16 @@ typedef NativeField = ({
 });
 
 /// What the types of `dart:ffi` are in C.
-final class NativeTypes() {
+final class NativeTypes(final Target target) {
   final _compounds = <InterfaceElement, NativeCompound>{};
   final _fields = <InterfaceElement, List<NativeField>>{};
 
   static bool isFfi(Element? element) =>
       '${element?.library?.uri}' == 'dart:ffi';
+
+  /// How functions with [signature] are called.
+  CallPassing passing(NativeSignature signature) =>
+      passingOf(signature, target);
 
   /// What [type] is, or null if it is no type of a value in C.
   NativeType? of(DartType type) {
@@ -68,7 +72,8 @@ final class NativeTypes() {
       for (final MapEntry(:key, value: integer) in mapping.entries) {
         String? part(String name) =>
             key?.getField(name)?.getField('_name')?.toStringValue();
-        if (part('_os') == 'macos' && part('_architecture') == 'arm64') {
+        if (part('_os') == target.system.name &&
+            part('_architecture') == target.architecture.name) {
           return integer?.type == null ? null : of(integer!.type!);
         }
       }

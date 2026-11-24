@@ -30,7 +30,7 @@ final class NativeCalls(
     List<DartType> types,
     DartType resultType,
   ) {
-    final passing = passingOf(signature);
+    final passing = _scope.natives.types.passing(signature);
     // Nothing is created once the block is being filled in.
     final ready = [
       for (final (i, type) in signature.parameters.indexed)

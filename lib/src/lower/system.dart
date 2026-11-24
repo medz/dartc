@@ -11,6 +11,9 @@ final systemFunctions = {
   /// gcvt(value, digits, address), the address.
   'gcvt': LirSignature([.f64, .i64, .ptr], .ptr),
 
+  /// snprintf(address, size, format, digits, value), the number of bytes.
+  'snprintf': LirSignature([.ptr, .i64, .ptr, .i64, .f64], .i64),
+
   /// strtod(address, end).
   'strtod': LirSignature([.ptr, .ptr], .f64),
 
@@ -40,8 +43,21 @@ final systemFunctions = {
   /// 32 random bits; others are unknown.
   'arc4random': LirSignature([], .i64),
 
-  /// The address of the 32-bit error number.
+  /// The address of the 32-bit error number, on macOS and on Linux.
   '__error': LirSignature([], .ptr),
+  '__errno_location': LirSignature([], .ptr),
+
+  /// clock_gettime(clock, seconds and nanoseconds).
+  'clock_gettime': LirSignature([.i64, .ptr], .i64),
+
+  /// getrandom(address, bytes, flags).
+  'getrandom': LirSignature([.ptr, .i64, .i64], .i64),
+
+  /// pthread_getattr_np(thread, attributes), then the start and size of the
+  /// stack that those tell.
+  'pthread_getattr_np': LirSignature([.i64, .ptr], .i64),
+  'pthread_attr_getstack': LirSignature([.ptr, .ptr, .ptr], .i64),
+  'pthread_attr_destroy': LirSignature([.ptr], .i64),
 
   /// mmap(address, bytes, protection, flags, descriptor, offset).
   'mmap': LirSignature(List.filled(6, .i64), .i64),
@@ -62,6 +78,7 @@ final systemFunctions = {
 
   /// pthread_cond_wait(condition, mutex), and with a time.
   'pthread_cond_wait': LirSignature([.ptr, .ptr]),
+  'pthread_cond_timedwait': LirSignature([.ptr, .ptr, .ptr]),
   'pthread_cond_timedwait_relative_np': LirSignature([.ptr, .ptr, .ptr]),
 
   /// The end of a thread's stack, and its size.

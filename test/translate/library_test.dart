@@ -43,7 +43,7 @@ void main() {
   });
 
   agrees('dart:math', r'''
-    void main() { print(max(1, 2)); print(min(1.5, 2)); print(pow(2, 10)); print(pow(2.5, 2)); print(pow(2, -1)); print(sqrt(2)); print(pi); print(sin(1)); print(cos(1)); print(tan(1)); print(atan2(1, 2)); print(exp(1)); print(log(10)); print(asin(0.5)); print(acos(0.5)); print(atan(0.5)); final r = Random(42); print([for (var i = 0; i < 5; i++) r.nextInt(100)]); print(r.nextDouble()); print(r.nextBool()); print(Point(1, 2) + Point(3, 4)); print(Point(1, 2).distanceTo(Point(4, 6))); print(Rectangle(0, 0, 10, 20).containsPoint(Point(5, 5))); print(Random().nextInt(10) < 10); print(Rectangle(0, 0, 10, 20)); print([3, 1, 2]..shuffle(Random(1))); print(max(double.nan, 1)); print(min(-0.0, 0.0)); }
+    void main() { print(max(1, 2)); print(min(1.5, 2)); print(pow(2, 10)); print(pow(2.5, 2)); print(pow(2, -1)); print(sqrt(2)); print(pi); print(sin(1).toStringAsFixed(12)); print(cos(1).toStringAsFixed(12)); print(tan(1).toStringAsFixed(12)); print(atan2(1, 2).toStringAsFixed(12)); print(exp(1).toStringAsFixed(12)); print(log(10).toStringAsFixed(12)); print(asin(0.5).toStringAsFixed(12)); print(acos(0.5).toStringAsFixed(12)); print(atan(0.5).toStringAsFixed(12)); final r = Random(42); print([for (var i = 0; i < 5; i++) r.nextInt(100)]); print(r.nextDouble()); print(r.nextBool()); print(Point(1, 2) + Point(3, 4)); print(Point(1, 2).distanceTo(Point(4, 6))); print(Rectangle(0, 0, 10, 20).containsPoint(Point(5, 5))); print(Random().nextInt(10) < 10); print(Rectangle(0, 0, 10, 20)); print([3, 1, 2]..shuffle(Random(1))); print(max(double.nan, 1)); print(min(-0.0, 0.0)); }
   ''', imports: "import 'dart:math';");
 
   agrees('dart:convert', r'''

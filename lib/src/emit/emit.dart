@@ -1,4 +1,5 @@
 import 'package:dartc/lir.dart';
+import 'package:dartc/native.dart';
 
 import 'arm64/assembler.dart';
 import 'arm64/function.dart';
@@ -7,11 +8,21 @@ import 'code.dart';
 import 'stack_maps.dart';
 import 'support.dart';
 
-/// Translates a module to ARM64, throwing [EmitUnsupported] where it cannot.
+/// What Linux starts in programs.
+const linuxEntrySymbol = '.linuxEntry';
+
+/// Translates a module to machine code, throwing [EmitUnsupported] where it
+/// cannot.
+///
+/// [entry] is the function that a program starts with.
 ///
 /// External functions are C functions taking and returning 64-bit words; their
 /// convention agrees with the one used between functions here.
-EmittedCode emitArm64(LirModule module) {
+EmittedCode emitCode(
+  LirModule module, {
+  Target target = .macosArm64,
+  String? entry,
+}) {
   verifyModule(module);
   checkSupported(module);
   final assembler = Arm64Assembler();
@@ -32,6 +43,11 @@ EmittedCode emitArm64(LirModule module) {
     emitExport(assembler, target);
   }
   final externals = {for (final external in module.externals) external.name};
+  if (entry != null && target.system == .linux) {
+    functions[linuxEntrySymbol] = assembler.offset;
+    emitLinuxEntry(assembler, entry);
+    externals.add(linuxMainSymbol);
+  }
   if (externals.remove(callNativeSymbol)) {
     functions[callNativeSymbol] = assembler.offset;
     emitNativeCall(assembler);

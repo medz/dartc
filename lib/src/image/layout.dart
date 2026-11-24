@@ -29,7 +29,7 @@ final class MachoLayout({
   bool get hasData => dataBytes > 0;
 
   int get stubsOffset => textOffset + codeBytes;
-  int get textEnd => stubsOffset + importCount * stubBytes;
+  int get textEnd => stubsOffset + importCount * arm64StubBytes;
 
   int get constantsOffset => hasConstants ? align16(textEnd) : textEnd;
   int get constantsEnd => constantsOffset + constantBytes;

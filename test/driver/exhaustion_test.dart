@@ -78,7 +78,7 @@ Future<ProcessResult> _runLimited(String source, int limit) async {
     ],
   );
   final path = '${directory.path}/program';
-  final code = emitArm64(limited);
+  final code = emitCode(limited);
   writeProgram(
     linkMacho(code, entry: entrySymbol, identifier: 'dartc-test'),
     path,

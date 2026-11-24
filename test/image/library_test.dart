@@ -133,7 +133,7 @@ void main() {
       File('${directory.path}/$name').writeAsBytesSync(bytes);
 
   test('object files can be linked', () {
-    write('lib.o', writeMachoObject(emitArm64(_module())));
+    write('lib.o', writeMachoObject(emitCode(_module())));
     run('clang', ['-o', 'main', 'main.c', 'lib.o']);
     expect(run('./main', []), _expected);
     final names = run('nm', ['-g', 'lib.o']);
@@ -142,7 +142,7 @@ void main() {
   }, skip: skipExecution);
 
   test('archives can be linked', () {
-    final code = emitArm64(_module());
+    final code = emitCode(_module());
     write(
       'liblib.a',
       writeArchive(writeMachoObject(code), 'lib.o', code.exports.keys),
@@ -155,7 +155,7 @@ void main() {
   test('libraries can be linked and loaded', () {
     final path = '${directory.path}/liblib.dylib';
     final bytes = linkMachoLibrary(
-      emitArm64(_module()),
+      emitCode(_module()),
       name: path,
       identifier: 'lib',
     );

@@ -7,9 +7,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartc/driver.dart';
-import 'package:dartc/emit.dart';
 import 'package:dartc/hir.dart';
-import 'package:dartc/image.dart';
 import 'package:dartc/lower.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
@@ -17,6 +15,7 @@ import 'package:test/test.dart';
 
 import '../image/support.dart' show skipExecution;
 import '../lower/support.dart';
+import '../support/hosts.dart';
 import '../support/new_compiler.dart';
 import 'random_async.dart';
 import 'random_dart.dart';
@@ -27,11 +26,15 @@ Future<(int, int)> _both(String source) async {
   final directory = writeSources({'main.dart': source});
   final path = '${directory.path}/main.dart';
   final program = '${directory.path}/program';
-  writeProgram(await compileProgram(path), program);
   final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
-  final compiled = await Process.run(program, const []);
-  expect(compiled.stdout, official.stdout);
-  return (official.exitCode, compiled.exitCode);
+  var code = official.exitCode;
+  for (final host in Host.all) {
+    writeProgram(await compileProgram(path, target: host.target), program);
+    final compiled = await host.run(program);
+    expect(compiled.output, official.stdout, reason: '${host.target}');
+    if (code == official.exitCode) code = compiled.code;
+  }
+  return (official.exitCode, code);
 }
 
 /// Runs [body], telling what it throws.
@@ -70,17 +73,18 @@ Future<void> _compareRandom(String source, String reason) async {
   expect(machineLevel.code, isNull, reason: reason);
   expect(machineLevel.output, official.stdout, reason: reason);
   final program = '${directory.path}/program';
-  for (final collectsAlways in [false, true]) {
-    final code = emitArm64(
-      lowerProgram(module, collectsAlways: collectsAlways),
-    );
-    writeProgram(
-      linkMacho(code, entry: entrySymbol, identifier: 'random'),
-      program,
-    );
-    final native = await Process.run(program, const []);
-    expect(native.exitCode, 0, reason: reason);
-    expect(native.stdout, official.stdout, reason: reason);
+  for (final host in Host.all) {
+    for (final collectsAlways in [false, true]) {
+      final lowered = lowerProgram(
+        module,
+        system: host.target.system,
+        collectsAlways: collectsAlways,
+      );
+      host.write(lowered, program, entry: entrySymbol);
+      final native = await host.run(program);
+      expect(native.code, 0, reason: '${host.target}: $reason');
+      expect(native.output, official.stdout, reason: '${host.target}: $reason');
+    }
   }
 }
 

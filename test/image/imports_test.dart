@@ -88,7 +88,8 @@ void main() {
       final zero = block.add(ConstInt(0));
       return block.add(Call('dartc_no_such_function', _unary, [zero]));
     });
-    expect(await execute(module), isNegative);
+    // The loader of Linux ends it without a signal.
+    expect(await execute(module), anyOf(isNegative, 127));
   }, skip: skipExecution);
 
   test('the system tools read the imports', () {
@@ -137,22 +138,22 @@ void main() {
   test('stubs on both sides of a page boundary reach their slots', () {
     const address = 0x100003ff4, slots = 0x100007ff8;
     final names = ['a', 'b', 'c'];
-    final code = ByteData.sublistView(importStubs(names, address, slots));
+    final code = ByteData.sublistView(arm64Stubs(names, address, slots));
     for (var i = 0; i < names.length; i++) {
-      final at = address + i * stubBytes;
-      final adrp = code.getUint32(i * stubBytes, .little);
-      final load = code.getUint32(i * stubBytes + 4, .little);
+      final at = address + i * arm64StubBytes;
+      final adrp = code.getUint32(i * arm64StubBytes, .little);
+      final load = code.getUint32(i * arm64StubBytes + 4, .little);
       final pages = ((adrp >> 5 & 0x7ffff) << 2 | adrp >> 29 & 3).toSigned(21);
       final offset = (load >> 10 & 0xfff) * 8;
       expect(((at >> 12) + pages << 12) + offset, slots + i * 8);
-      expect(code.getUint32(i * stubBytes + 8, .little), 0xd61f0200);
+      expect(code.getUint32(i * arm64StubBytes + 8, .little), 0xd61f0200);
     }
   });
 
   test('slots follow code that fills its pages', () {
     // The stubs end just before, at and after the end of the first page.
     for (var extra = -4; extra <= 4; extra += 4) {
-      final text = Uint8List(0x4000 - 0x300 - stubBytes + extra);
+      final text = Uint8List(0x4000 - 0x300 - arm64StubBytes + extra);
       final image = ByteData.sublistView(
         linkMacho(
           EmittedCode(text, {'f': 0}, [], externals: ['labs']),
@@ -163,7 +164,7 @@ void main() {
       const section = 32 + 72 + 72;
       final size = image.getUint64(section + 40, .little);
       final offset = image.getUint32(section + 48, .little);
-      expect(size, text.length + stubBytes);
+      expect(size, text.length + arm64StubBytes);
       final end = offset + size;
       // The first stub instruction and the first slot are where they belong.
       expect(image.getUint32(end - 4, .little), 0xd61f0200);
@@ -174,7 +175,7 @@ void main() {
 
   test('a function here cannot also be external', () {
     expect(
-      () => emitArm64(
+      () => emitCode(
         LirModule(
           functions: [function('f', [], null, (_, _) => null)],
           externals: [LirExternal('f', LirSignature([]))],
@@ -186,7 +187,7 @@ void main() {
 
   test('programs with imports are reproducible', () {
     Uint8List link() => linkMacho(
-      emitArm64(_calling({'labs': _unary}, (block) => block.add(ConstInt(0)))),
+      emitCode(_calling({'labs': _unary}, (block) => block.add(ConstInt(0)))),
       entry: 'main',
       identifier: 'x',
     );

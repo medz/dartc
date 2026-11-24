@@ -125,12 +125,10 @@ final class NativeValues(
     HirValue value,
   ) {
     final ready = prepare(value, type, isByAddress: false);
-    if (passing case ByAddress(:final place)) {
-      _call('copyBytes', [
-        _machine(.load64, [_at(block, place)]),
-        addressOf(ready),
-        _number(type.size),
-      ]);
+    if (passing case ByAddress(:final place, :final returned)) {
+      final to = _machine(.load64, [_at(block, place)]);
+      _call('copyBytes', [to, addressOf(ready), _number(type.size)]);
+      if (returned != null) _machine(.store64, [_at(block, returned), to]);
       return;
     }
     store(block, passing, type, ready);

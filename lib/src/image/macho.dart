@@ -55,7 +55,7 @@ final class _Contents(final EmittedCode code, final MachoKind kind) {
   /// Where each symbol is, from the base address.
   late final symbols = {
     for (final (i, name) in code.externals.indexed)
-      name: layout.stubsOffset + i * stubBytes,
+      name: layout.stubsOffset + i * arm64StubBytes,
     for (final (offsets, start) in [
       (code.functions, layout.textOffset),
       (constants.offsets, layout.constantsOffset),
@@ -153,7 +153,7 @@ Uint8List _link(EmittedCode code, MachoKind kind, String identifier) {
   code.tables.forEach((name, entries) {
     fillTable(constants, constantOffsets[name]!, name, entries, symbols);
   });
-  final stubs = importStubs(
+  final stubs = arm64Stubs(
     code.externals,
     layout.stubsOffset,
     layout.dataConstOffset,

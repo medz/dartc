@@ -12,12 +12,15 @@ import 'patch.dart';
 ///
 /// They are the official sources at [root] with the official patches for
 /// native programs, then those at [patches]. There each directory holds the
-/// files patching the library it is named after. The files at [runtime] are
-/// the library `dart:_heap`.
+/// files patching the library it is named after, and directories with those for
+/// some [systems] only. The files at [runtime] are the library `dart:_heap`.
 final class SdkSources({
   required final String root,
   required final String patches,
   required final String runtime,
+
+  /// What the directories are called that are for the system compiled for.
+  final List<String> systems = const [],
 }) {
   /// The libraries that official code for native programs uses inside.
   static const _hidden = ['_compact_hash', '_vm'];
@@ -60,8 +63,12 @@ final class SdkSources({
       result.addAll(
         _library('$_lib/${library['uri']}', _official(library['patches']), [
           if (isOwn)
-            for (final file in directory.listSync().whereType<File>())
-              file.path,
+            for (final path in [
+              directory.path,
+              for (final system in systems) '${directory.path}/$system',
+            ])
+              if (Directory(path) case final own when own.existsSync())
+                for (final file in own.listSync().whereType<File>()) file.path,
         ]),
       );
     }

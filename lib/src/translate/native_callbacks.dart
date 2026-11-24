@@ -95,7 +95,7 @@ final class NativeCallbackTable(
     HirValue Function()? exceptional, {
     required bool isLater,
   }) {
-    final passing = passingOf(signature);
+    final passing = _scope.natives.types.passing(signature);
     final values = NativeValues(_scope, builder);
     final conversions = Conversions(_scope, builder);
     final [_, block, stack] = builder.inputs;

@@ -140,7 +140,7 @@ void main() {
     );
     normal.end(Return());
     handler.end(Return());
-    final code = emitArm64(
+    final code = emitCode(
       LirModule(
         functions: [
           function(allocateSymbol, [.i64], .ref, (block, _) {
@@ -163,7 +163,7 @@ void main() {
       block.add(Store(.i64, second, p[2]));
       return p[0];
     });
-    final maps = emitArm64(module).stackMaps;
+    final maps = emitCode(module).stackMaps;
     expect(maps, hasLength(2));
     final [first, second] = maps;
     expect(first.returnOffset, lessThan(second.returnOffset));
@@ -181,7 +181,7 @@ void main() {
   });
 
   test('return addresses are those of the calls', () {
-    final code = emitArm64(
+    final code = emitCode(
       _module([.ref], (block, p) {
         final address = block.add(SymbolAddress('g'));
         final first = block.add(Call('g', _pair, [p[0], p[0]]));
@@ -208,7 +208,7 @@ void main() {
         }),
       ],
     );
-    expect(emitArm64(module).stackMaps.single.offsets, hasLength(1));
+    expect(emitCode(module).stackMaps.single.offsets, hasLength(1));
   });
 
   test('allocation needs its function', () {
@@ -216,7 +216,7 @@ void main() {
       return block.add(Alloc(block.add(ConstInt(16))));
     });
     expect(
-      () => emitArm64(module),
+      () => emitCode(module),
       throwsA(
         isA<EmitUnsupported>().having(
           (e) => '$e',
@@ -251,7 +251,7 @@ void main() {
   });
 
   test('the runtime can find both tables', () {
-    final code = emitArm64(
+    final code = emitCode(
       LirModule(
         functions: [
           function('f', [], null, (block, _) {
@@ -266,6 +266,6 @@ void main() {
     expect(code.functions[textSymbol], 0);
     expect(code.data[stackMapSymbol], encodeStackMaps(code.stackMaps));
     // Programs without a collector do not carry them.
-    expect(emitArm64(_module([.ref], (_, p) => p[0])).data, isEmpty);
+    expect(emitCode(_module([.ref], (_, p) => p[0])).data, isEmpty);
   });
 }

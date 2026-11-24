@@ -7,7 +7,7 @@ import '../lir/support.dart';
 void main() {
   void rejects(String what, LirModule module) => test('reports $what', () {
     expect(
-      () => emitArm64(module),
+      () => emitCode(module),
       throwsA(
         isA<EmitUnsupported>().having((e) => '$e', 'text', contains(what)),
       ),
@@ -58,6 +58,6 @@ void main() {
     final module = LirModule(
       functions: [LirFunction('f', LirSignature([]), [])],
     );
-    expect(() => emitArm64(module), throwsA(isA<LirError>()));
+    expect(() => emitCode(module), throwsA(isA<LirError>()));
   });
 }
