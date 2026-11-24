@@ -4,7 +4,7 @@ import 'package:dartc/driver.dart';
 import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 void main() {
   Future<SourceProgram> loadFiles(Map<String, String> files) async {
@@ -96,16 +96,6 @@ void main() {
       'main.dart': 'void main() {}\n$error',
       'analysis_options.yaml': 'analyzer:\n  exclude:\n    - "**"\n',
     }, 2);
-  });
-
-  test('disabling ignore comments changes nothing else', () async {
-    const text =
-        '// ignore: unused_local_variable\n'
-        'void main() { var s = "// ignore: x"; } /* ignore */ // é ignore';
-    final program = await load(text);
-    final changed = program.main.units.single.ast.toSource();
-    expect(changed, contains('"// ignore: x"'));
-    expect(program.main.units.single.ast.end, text.length);
   });
 
   test('warnings do not stop compilation', () async {

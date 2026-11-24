@@ -7,8 +7,12 @@ import 'type_objects.dart';
 abstract interface class Program() {
   RuntimeType typeOf(Object object);
 
-  /// The object whose method [function] is, if it is one.
+  /// The object whose method [function] is, or the generic function that it is
+  /// with type arguments, if it is one.
   Object? receiverOf(Object function);
+
+  /// The types that [function] has been given, if it is generic.
+  TypeList? typesOf(Object function);
 
   /// What else the text of [function] says.
   String functionName(Object function);
@@ -34,6 +38,7 @@ late Program program;
 
 RuntimeType typeOf(Object object) => program.typeOf(object);
 Object? receiverOf(Object function) => program.receiverOf(function);
+TypeList? typesOf(Object function) => program.typesOf(function);
 String functionName(Object function) => program.functionName(function);
 SuperList? superTypesOf(int number) => program.superTypesOf(number);
 int functionNumber() => program.functionNumber;

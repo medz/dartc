@@ -33,6 +33,14 @@ final class RuntimeLinks(
         _ => null,
       };
 
+  /// What the runtime calls what [element] does, if it asks the environment.
+  static String? environmentFunction(ConstructorElement element) {
+    final name = element.name!, owner = element.enclosingElement;
+    if (!owner.library.isDartCore || !name.endsWith('Environment')) return null;
+    final rest = '${name[0].toUpperCase()}${name.substring(1)}';
+    return '${owner.displayName.toLowerCase()}$rest';
+  }
+
   LibraryElement library(String uri) => _program.sdk
       .firstWhere((library) => '${library.element.uri}' == uri)
       .element;

@@ -1,3 +1,5 @@
+import 'package:test/test.dart';
+
 import 'support.dart';
 
 void main() {
@@ -181,4 +183,85 @@ void main() {
   if (Noisy(3) case Noisy(value: 2) || Noisy(value: 3)) print('yes');
 }
 ''');
+
+  group('operators of patterns', () {
+    agrees('can be of classes, extensions and unknown', r'''
+      class Base { final int v; Base(this.v); }
+      extension BaseOps on Base { bool operator >(int o) => v > o; bool operator <=(int o) => v <= o; }
+      extension NOps on String? { bool operator <(String? o) => (this?.length ?? 0) < (o?.length ?? 0); }
+      class Money implements Comparable<Money> { final int c; const Money(this.c); bool operator >(Money o) => c > o.c; bool operator <(Object o) => o is Money && c < o.c; @override int compareTo(Money o) => c - o.c; }
+      class NE { final int n; const NE(this.n); @override bool operator ==(Object o) => o is NE && n == o.n; @override int get hashCode => n; }
+      String f(Object? o) => switch (o) {
+        Base() && > 3 => 'big',
+        Base() && <= 1 => 'small',
+        Base() => 'mid',
+        Money() && > const Money(5) => 'rich',
+        Money() && < const Money(2) => 'poor',
+        int() && > 10 && < 20 => 'teen',
+        double() && >= 2 => 'd',
+        == const NE(3) => 'ne',
+        != null => 'other',
+        _ => 'null',
+      };
+      String g(String? s) => switch (s) { < 'ab' => 'short', _ => 'long' };
+      String h(num n) => switch (n) { < 2 => 'a', >= 2.5 => 'b', _ => 'c' };
+      String k(dynamic n) => switch (n) { < 2 => 'a', >= 2.5 => 'b', _ => 'c' };
+      T id<T extends num>(T x) { if (x case > 3) print('gt'); return x; }
+      String m(int? n) => switch (n) { int() && > 3 => 'y', null => 'n', _ => 'z' };
+      void main() {
+        for (final o in [Base(4), Base(1), Base(2), const Money(6), const Money(1), const Money(3), 15, 30, 2.5, 1.0, const NE(3), const NE(4), null]) print(f(o));
+        print((g(null), g('abc'), h(1), h(2), h(3), k(1), k(2.2), k(9), id(5), id(2.5), m(4), m(null), m(1)));
+      }
+    ''');
+  });
+
+  agrees('patterns read only what they look at', r'''
+      class P { Object? get seen { print('seen'); return 1; } int get n { print('n'); return 2; } }
+      class L2 implements List<int> { noSuchMethod(i) { print(i.memberName); return 5; } int get length { print('length'); return 2; } int operator [](int i) { print('[$i]'); return i; } List<int> sublist(int a, [int? b]) { print('sublist $a $b'); return [7]; } }
+      class M2 implements Map<String, int> { noSuchMethod(i) { print(i.memberName); return 5; } bool containsKey(Object? k) { print('has $k'); return true; } int? operator [](Object? k) { print('[$k]'); return 1; } }
+      void t(String n, Object? Function() f) { print('-- $n'); try { print(f()); } catch (e) { print(e.runtimeType); } }
+      void main() {
+        Object l = L2(); List<int> li = L2(); Object m = M2(); Map<String, int> mi = M2(); Object o = P();
+        t('l int _', () => switch (l) { [int _, int _] => 1, _ => 2 });
+        t('li int _', () => switch (li) { [int _, int _] => 1, _ => 2 });
+        t('li _', () => switch (li) { [_, _] => 1, _ => 2 });
+        t('li var', () => switch (li) { [var a, _] => a, _ => 2 });
+        t('&&', () => switch (li) { [(_ && _), (_ || 3)] => 1, _ => 2 });
+        t('or', () => switch (li) { [(3 || _), ((_))] => 1, _ => 2 });
+        t('q', () => switch (li) { [_?, _!] => 1, _ => 2 });
+        t('as', () => switch (li) { [_ as int, _ as num] => 1, _ => 2 });
+        t('rest', () => switch (li) { [_, ...] => 1, _ => 2 });
+        t('rest2', () => switch (li) { [..._, _] => 1, _ => 2 });
+        t('rest3', () => switch (li) { [..., 1] => 1, _ => 2 });
+        t('rest4', () => switch (li) { [...List<int> _] => 1, _ => 2 });
+        t('rest5', () => switch (li) { [...[_]] => 1, _ => 2 });
+        t('rest6', () => switch (li) { [...(_ || [1])] => 1, _ => 2 });
+        t('obj', () => switch (l) { [...] => 1, _ => 2 });
+        t('decl', () { var [_, _] = li; return 1; });
+        t('decl2', () { var [a, ..._] = li; return a; });
+        t('decl3', () { var [...] = li; return 1; });
+        t('m _', () => switch (m) { {'a': _} => 1, _ => 2 });
+        t('mi _', () => switch (mi) { {'a': _} => 1, _ => 2 });
+        t('mi int _', () => switch (mi) { {'a': int _} => 1, _ => 2 });
+        t('mi var', () => switch (mi) { {'a': var x} => x, _ => 2 });
+        t('mi or', () => switch (mi) { {'a': (_ || 3)} => 1, _ => 2 });
+        t('mi 2', () => switch (mi) { {'a': 2} => 1, {'a': _} => 3, _ => 2 });
+        t('m decl', () { var {'a': _} = mi; return 1; });
+        t('m decl2', () { var {'a': b} = mi; return b; });
+        t('P or2', () => switch (o) { P(seen: ((_) || 3)) => 1, _ => 2 });
+        t('P or3', () => switch (o) { P(seen: (var _ || 3)) => 1, _ => 2 });
+        t('P or4', () => switch (o) { P(seen: (Object? _ || 3)) => 1, _ => 2 });
+        t('P or5', () => switch (o) { P(n: (int _ || 3)) => 1, _ => 2 });
+        t('P or6', () => switch (o) { P(n: (_ || 3) && 2) => 1, _ => 2 });
+        t('P or7', () => switch (o) { P(n: ((_ && _) || 3)) => 1, _ => 2 });
+        t('P or8', () => switch (o) { P(n: ((_ || 4) || 3)) => 1, _ => 2 });
+        t('P or9', () => switch (o) { P(n: (_ || 4) && (_ || 5)) => 1, _ => 2 });
+        t('P cast', () => switch (o) { P(n: (_ as int) || 5) => 1, _ => 2 });
+        t('P q', () => switch (o) { P(n: (_? || 5)) => 1, _ => 2 });
+        t('P obj2', () => switch (o) { P(n: int()) => 1, _ => 2 });
+        t('P if', () { if (o case P(seen: _)) return 1; return 2; });
+        t('P in list', () => switch ([o]) { [P(seen: _)] => 1, _ => 2 });
+        t('dup', () => switch (o) { P(seen: 5) => 1, P(seen: _) => 3, _ => 2 });
+      }
+  ''');
 }

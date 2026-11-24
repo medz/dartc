@@ -1,8 +1,9 @@
+import 'dart:ffi' show Abi;
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:dartc/emit.dart';
+import 'package:dartc/hir.dart';
 import 'package:dartc/image.dart';
 import 'package:dartc/lower.dart';
 import 'package:dartc/native.dart';
@@ -10,32 +11,51 @@ import 'package:dartc/optimize.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 
-/// Compiles the program at [path] to an executable for [target].
+import 'sdk.dart';
+
+/// How to compile.
+final class const CompileOptions({
+  final Target target = .macosArm64,
+
+  /// What is done to make programs fast.
+  final Set<Optimization> optimizations = const {...Optimization.values},
+
+  /// What `String.fromEnvironment` and the like know.
+  final Map<String, String> environment = const {},
+
+  /// Whether programs check assertions.
+  final bool checksAssertions = false,
+
+  /// Whether programs collect before every allocation.
+  final bool collectsAlways = false,
+
+  /// The sources of the SDK, if not those that come with this package.
+  final SdkFiles? sdk,
+});
+
+/// What this machine runs, if it is supported.
+Target? get hostTarget => switch (Abi.current()) {
+  .macosArm64 => .macosArm64,
+  .linuxArm64 => .linuxArm64,
+  .linuxX64 => .linuxX64,
+  _ => null,
+};
+
+/// Compiles the program at [path] to an executable.
 ///
 /// Throws [CompileFailure] if the program has an error or is not supported
 /// yet.
-///
-/// If [collectsAlways], the program collects before every allocation.
-/// [optimizations] are done.
 Future<Uint8List> compileProgram(
-  String path, {
-  Target target = .macosArm64,
-  Set<Optimization> optimizations = const {...Optimization.values},
-  bool collectsAlways = false,
-}) async {
-  final program = optimizeProgram(
-    translateProgram(
-      await loadProgram(path, sdk: await packagedSdk(target)),
-      target: target,
-    ),
-    enabled: optimizations,
+  String path, [
+  CompileOptions options = const CompileOptions(),
+]) async {
+  final target = options.target;
+  final module = translateProgram(
+    await _load(path, options),
+    target: target,
+    checksAssertions: options.checksAssertions,
   );
-  final lowered = lowerProgram(
-    program,
-    system: target.system,
-    collectsAlways: collectsAlways,
-  );
-  final code = emitCode(lowered, target: target, entry: entrySymbol);
+  final code = _emit(module, options, entry: entrySymbol);
   return switch (target.system) {
     .macos => linkMacho(
       code,
@@ -53,8 +73,8 @@ enum LibraryKind() {
   shared,
 }
 
-/// Compiles the library at [path] for [target]. Also gives a header of C for the
-/// functions that it exports.
+/// Compiles the library at [path]. Also gives a header of C for the functions
+/// that it exports.
 ///
 /// [name] is what the file will be called. On macOS, programs load a shared
 /// library from where that is.
@@ -64,26 +84,42 @@ Future<({Uint8List bytes, String header})> compileLibrary(
   String path,
   LibraryKind kind, {
   required String name,
-  Target target = .macosArm64,
-  Set<Optimization> optimizations = const {...Optimization.values},
-  bool collectsAlways = false,
+  CompileOptions options = const CompileOptions(),
 }) async {
   final (:module, :header) = translateLibrary(
-    await loadProgram(path, sdk: await packagedSdk(target)),
-    target: target,
+    await _load(path, options),
+    target: options.target,
+    checksAssertions: options.checksAssertions,
   );
-  final lowered = lowerProgram(
-    optimizeProgram(module, enabled: optimizations),
-    system: target.system,
-    collectsAlways: collectsAlways,
-  );
-  final code = emitCode(lowered, target: target);
-  final bytes = switch (target.system) {
+  final code = _emit(module, options);
+  final bytes = switch (options.target.system) {
     .macos => _macosLibrary(code, kind, name),
     .linux => _linuxLibrary(code, kind, Uri.file(name).pathSegments.last),
   };
   return (bytes: bytes, header: header);
 }
+
+Future<SourceProgram> _load(String path, CompileOptions options) async {
+  final CompileOptions(:target, :sdk, :environment) = options;
+  final isUsual = sdk == null && environment.isEmpty;
+  return loadProgram(
+    path,
+    sdk: await (isUsual
+        ? packagedSdk(target)
+        : sdkFor(target, files: sdk, environment: environment)),
+  );
+}
+
+EmittedCode _emit(HirModule module, CompileOptions options, {String? entry}) =>
+    emitCode(
+      lowerProgram(
+        optimizeProgram(module, enabled: options.optimizations),
+        system: options.target.system,
+        collectsAlways: options.collectsAlways,
+      ),
+      target: options.target,
+      entry: entry,
+    );
 
 Uint8List _macosLibrary(EmittedCode code, LibraryKind kind, String name) {
   final file = Uri.file(name).pathSegments.last;
@@ -113,35 +149,23 @@ Uint8List _linuxLibrary(EmittedCode code, LibraryKind kind, String name) =>
       .shared => linkElfLibrary(code, name: name),
     };
 
-final _sdks = <Target, Future<SdkSources>>{};
-
-/// The standard libraries that come with the compiler, for [target].
-Future<SdkSources> packagedSdk([Target target = .macosArm64]) =>
-    _sdks[target] ??= _findSdk(target);
-
-Future<SdkSources> _findSdk(Target target) async {
-  final package = Uri.parse('package:dartc/heap.dart');
-  final file = await Isolate.resolvePackageUri(package);
-  if (file == null) throw StateError('$package is missing.');
-  return SdkSources(
-    root: file.resolve('../sdk/std').toFilePath(),
-    patches: file.resolve('../sdk/native').toFilePath(),
-    runtime: file.resolve('src/heap').toFilePath(),
-    systems: [target.system.name, target.label],
-  );
-}
-
-/// Writes an executable file, replacing [output] only once it is complete.
-void writeProgram(Uint8List program, String output) {
+/// Writes a file, replacing [output] only once it is complete.
+void writeOutput(Uint8List bytes, String output, {required bool isExecutable}) {
   final staged = File('$output.tmp-$pid');
   try {
-    staged.writeAsBytesSync(program, flush: true);
-    final result = Process.runSync('/bin/chmod', ['+x', staged.path]);
-    if (result.exitCode != 0) {
-      throw FileSystemException('${result.stderr}', staged.path);
+    staged.writeAsBytesSync(bytes, flush: true);
+    if (isExecutable) {
+      final result = Process.runSync('/bin/chmod', ['+x', staged.path]);
+      if (result.exitCode != 0) {
+        throw FileSystemException('${result.stderr}', staged.path);
+      }
     }
     staged.renameSync(output);
   } finally {
     if (staged.existsSync()) staged.deleteSync();
   }
 }
+
+/// Writes an executable file, replacing [output] only once it is complete.
+void writeProgram(Uint8List program, String output) =>
+    writeOutput(program, output, isExecutable: true);

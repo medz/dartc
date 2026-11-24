@@ -10,8 +10,10 @@ import 'types.dart';
 
 /// How functions are called with lists of arguments and names.
 final class ApplyTable(final ProgramScope _scope, final SourceUnit _unit) {
-  /// Takes the arguments, after something else, and the names of the last.
+  /// Takes the arguments, after something else, the names of the last, and
+  /// the type arguments, or null for their bounds.
   final HirSelector selector = HirSelector('apply', const [
+    .reference,
     .reference,
     .reference,
   ], .reference);
@@ -37,7 +39,7 @@ final class ApplyTable(final ProgramScope _scope, final SourceUnit _unit) {
     for (final closure in closures.toList()) {
       _entries.putIfAbsent(
         closure.class_,
-        () => _Application(_scope, _unit, closure).build(),
+        () => _Application(_scope, _unit, closure, selector).build(),
       );
     }
     return _entries.length > before;
@@ -49,8 +51,10 @@ final class _Application(
   final ProgramScope _scope,
   final SourceUnit _unit,
   final Closure _closure,
+  final HirSelector _selector,
 ) {
   final _function = HirFunction('apply ${_closure.class_.name}', const [
+    .reference,
     .reference,
     .reference,
     .reference,
@@ -71,7 +75,7 @@ final class _Application(
   );
 
   HirFunction build() {
-    final [self, arguments, names] = _builder.inputs;
+    final [self, arguments, names, _] = _builder.inputs;
     final all = _closure.parameters;
     final positional = all.where((p) => p.isPositional).toList();
     final fits = _call('applyFits', [
@@ -98,39 +102,36 @@ final class _Application(
   }
 
   HirValue _apply(List<FormalParameterElement> positional) {
-    final [self, arguments, names] = _builder.inputs;
-    if (_closure.forward case final forward?) {
-      // Which arguments there are is known only here.
-      final required = positional.where((p) => p.isRequired).length;
-      return forward(
-        _builder,
-        self,
-        [
-          for (var i = 0; i < required; i++)
-            _call('applyArgument', [arguments, _number(i)]),
-        ],
-        required,
-        const [],
-      );
+    final [self, arguments, names, given] = _builder.inputs;
+    if (_closure.part case (:final function, :final types, count: _)) {
+      return _builder.call(
+        HirVirtualCall(_selector, _builder.add(HirLoad(function, self)), [
+          arguments,
+          names,
+          _builder.add(HirLoad(types, self)),
+        ]),
+      )!;
     }
     _closure.bindTypes(_builder, self);
     final types = _closure.typeParameters;
     HirValue? list;
     if (types.isNotEmpty) {
-      list = _scope.typeList(_builder, [
-        for (final parameter in types)
-          parameter.bound ?? _conversions.types.dynamicType,
-      ]);
-      _builder.bindTypes(types.first.enclosingElement!, list!);
+      final defaults = defaultTypesOf(types, _builder.library);
+      final all = _builder.choose(
+        _conversions.isNull(given),
+        .reference,
+        () => _scope.typeList(_builder, defaults)!,
+        () => given,
+      );
+      list = _closure.bindGiven(_builder, all);
+      _conversions.checkBounds(types);
     }
-    final result = _builder.call(
-      HirCall(_closure.target(), [
-        ..._closure.leading(_builder, self),
-        ?list,
-        for (final parameter in _closure.parameters)
-          _argument(parameter, positional, arguments, names),
-      ]),
-    );
+    final result = _conversions.call(_closure.target(), [
+      ..._closure.leading(_builder, self),
+      ?list,
+      for (final parameter in _closure.parameters)
+        _argument(parameter, positional, arguments, names),
+    ]);
     final value = result ?? _builder.add(HirNull());
     return _conversions.coerce(value, .reference);
   }

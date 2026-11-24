@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:dartc/src/compiler/cli/command.dart';
+import 'package:dartc/driver.dart';
 
 Future<void> main(List<String> arguments) async {
-  exitCode = await CompilerCommand(stdout, stderr).run(arguments);
+  exitCode = await runCommand(arguments, output: stdout, errors: stderr);
 }

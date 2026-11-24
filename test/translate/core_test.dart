@@ -92,4 +92,31 @@ line"""); }
     class G<T> { G(); G.x(); T? m(T t) => t; }
     void main() { int local() => 1; print(local); print(top); print(A.s); print(A().m); print(A.new); print(A.n); print(A.f); int Function(int) g = gen; print(g); print(G<int>.new); print(G<int>().m); print((int x, {required String y}) => x); print([1].add); print('a'.substring); print(identical); print(A().m.toString); print((A().m).call); print(print); }
   ''');
+
+  group('limits', () {
+    agrees('of lengths', r'''
+      void t(void Function() f) { try { f(); print('ok'); } on OutOfMemoryError catch (e) { print(e); } catch (e) { print('${e.runtimeType} $e'); } }
+      void main() {
+        for (final n in [0x4000000000000000, -1]) {
+          t(() => List<int>.filled(n, 1)); t(() => List<int>.generate(n, (i) => i)); t(() => List<int?>.filled(n, null, growable: true)); t(() => Uint8List(n)); t(() => Float64List(n)); 
+          t(() => List.filled(n, 0).length);
+        }
+      }
+    ''', imports: "import 'dart:typed_data';");
+    agrees('of types as objects', r'''
+      class P<T> { Type get t => T; Type get l => List<T>; }
+      Type reify<T>() => T;
+      void main() {
+        print(identical(1.runtimeType, 2.runtimeType));
+        print(identical(1.runtimeType, int));
+        print(identical([1].runtimeType, [2].runtimeType));
+        print(identical([1].runtimeType, <int>[2].runtimeType));
+        print(identical(P<int>().runtimeType, P<int>().runtimeType));
+        print(identical(reify<int>(), int));
+        print(identical(reify<List<int>>(), const [List<int>][0]));
+        print(identical((1, 2).runtimeType, (3, 4).runtimeType));
+        print({P<int>().t, int, reify<int>()}.length);
+      }
+    ''');
+  });
 }

@@ -149,6 +149,16 @@ final class FunctionBuilder(
 
   void bindTypes(Element owner, HirValue list) => typeLists[owner] = list;
 
+  /// The lists that tell the type parameters of function types, which belong to
+  /// nothing, and their places there.
+  final typePlaces = <TypeParameterElement, (HirValue, int)>{};
+
+  void bindParameters(List<TypeParameterElement> parameters, HirValue list) {
+    for (final (i, parameter) in parameters.indexed) {
+      typePlaces[parameter] = (list, i);
+    }
+  }
+
   /// Where the function can be left, if it can.
   Coroutine? coroutine;
 

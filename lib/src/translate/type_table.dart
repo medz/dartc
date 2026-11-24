@@ -376,6 +376,9 @@ final class TypeTable(
   }
 
   HirValue? _parameter(FunctionBuilder builder, TypeParameterElement element) {
+    if (builder.typePlaces[element] case (final list, final index)?) {
+      return _elementOf(builder, list, index);
+    }
     final owner = element.enclosingElement;
     final parameters = switch (owner) {
       TypeParameterizedElement(:final typeParameters) => typeParameters,
@@ -395,11 +398,17 @@ final class TypeTable(
         list = field == null ? null : builder.add(HirLoad(field, receiver));
       }
     }
-    if (list == null) return null;
-    for (var i = parameters.indexOf(element); i > 0; i--) {
-      list = builder.add(HirLoad(_field('TypeList', 'tail'), list!));
+    return list == null
+        ? null
+        : _elementOf(builder, list, parameters.indexOf(element));
+  }
+
+  HirValue _elementOf(FunctionBuilder builder, HirValue list, int index) {
+    var rest = list;
+    for (var i = 0; i < index; i++) {
+      rest = builder.add(HirLoad(_field('TypeList', 'tail'), rest));
     }
-    return builder.add(HirLoad(_field('TypeList', 'head'), list!));
+    return builder.add(HirLoad(_field('TypeList', 'head'), rest));
   }
 
   /// The list of [types], or null if one of them is generic.

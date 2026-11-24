@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/dart/element/type_provider.dart';
 import 'package:dartc/hir.dart';
@@ -26,6 +27,15 @@ final class Conversions(
     final field = _scope.boxClass(to).fields.single;
     return _builder.add(HirUnbox(field, value));
   }
+
+  /// Calls [target] with [arguments], each represented as it takes them.
+  HirValue? call(HirFunction target, Iterable<HirValue> arguments) =>
+      _builder.call(
+        HirCall(target, [
+          for (final (i, argument) in arguments.indexed)
+            coerce(argument, target.parameters[i]),
+        ]),
+      );
 
   HirValue _box(HirValue value) {
     if (value is HirConst) {
@@ -110,6 +120,26 @@ final class Conversions(
       type is InterfaceType &&
       classOf(type) != null &&
       type.typeArguments.every(isTop);
+
+  /// Throws unless those of [parameters] that can be anything else are within
+  /// their bounds. What is given for them has to be known.
+  ///
+  /// If [owner] is given, only its type arguments can be others.
+  void checkBounds(List<TypeParameterElement> parameters, {Element? owner}) {
+    for (final parameter in parameters) {
+      final bound = parameter.bound;
+      if (bound == null || isTop(bound)) continue;
+      if (owner != null && !mentions(bound, owner)) continue;
+      final type = parameter.instantiate(nullabilitySuffix: .none);
+      _builder.call(
+        HirCall(_scope.runtime('checkBound'), [
+          _scope.typeValue(_builder, type)!,
+          _scope.typeValue(_builder, bound)!,
+          _builder.add(_scope.text(parameter.name!)),
+        ]),
+      );
+    }
+  }
 
   /// [value], of type [from], as one of type [to], or null if that cannot be
   /// tested yet.

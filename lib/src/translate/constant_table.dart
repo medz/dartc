@@ -3,6 +3,10 @@ import 'dart:typed_data';
 import 'package:analyzer/dart/constant/value.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
+// Only this tells the type arguments of functions.
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/constant/value.dart'
+    show DartObjectImpl, FunctionState;
 import 'package:dartc/hir.dart';
 
 import 'classes.dart';
@@ -28,7 +32,14 @@ final class ConstantTable(
 
   /// A library of the SDK.
   final LibraryElement Function(String uri) _library,
-  final HirConstObject? Function(ExecutableElement element, DartType type)
+
+  /// The object that a function is as one of a type, given its type arguments
+  /// if they are known.
+  final HirConstObject? Function(
+    ExecutableElement element,
+    DartType type,
+    List<DartType>? types,
+  )
   _functionObject,
 
   /// The object for a list of types.
@@ -98,9 +109,11 @@ final class ConstantTable(
 
   HirConstObject? _function(DartObject object) {
     final element = object.toFunctionValue();
-    return element == null
-        ? null
-        : _functionObject(element.baseElement, object.type!);
+    if (element == null) return null;
+    final state = (object as DartObjectImpl).state as FunctionState;
+    // For constructors they can be those of an alias.
+    final types = element is ConstructorElement ? null : state.typeArguments;
+    return _functionObject(element.baseElement, object.type, types);
   }
 
   HirConstObject? _text(DartObject object) {
@@ -326,6 +339,8 @@ final class ConstantTable(
       for (final field in ClassTable.instanceFields(element)) {
         // Mixins cannot declare fields for constants.
         if (level.isMixin) return null;
+        // The analyzer puts the name of an enum's constant in its place.
+        if (class_ is EnumElement && field.name == '_name') return null;
         final place = _classes.fieldOf(level, field).value;
         final value = of(place.type, part?.getField(field.name!));
         if (value == null) return null;

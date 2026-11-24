@@ -9,7 +9,7 @@ import 'package:dartc/driver.dart';
 import 'package:test/test.dart';
 
 import '../support/hosts.dart';
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 import 'io_files.dart';
 import 'io_system.dart';
 
@@ -63,8 +63,7 @@ Future<void> _compare(
     writeProgram(
       await compileProgram(
         path,
-        target: host.target,
-        collectsAlways: collectsAlways,
+        CompileOptions(target: host.target, collectsAlways: collectsAlways),
       ),
       program,
     );
@@ -104,7 +103,10 @@ void main() {
       final path = '${directory.path}/main.dart';
       final program = '${directory.path}/program';
       for (final host in Host.all) {
-        writeProgram(await compileProgram(path, target: host.target), program);
+        writeProgram(
+          await compileProgram(path, CompileOptions(target: host.target)),
+          program,
+        );
         final lines = (await host.run(program)).output.split('\n');
         final isLinux = host.isLinux;
         expect(lines[0], host.target.system.name);

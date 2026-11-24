@@ -17,7 +17,7 @@ import 'package:test/test.dart';
 import '../image/support.dart' show skipExecution;
 import '../lower/support.dart';
 import '../support/hosts.dart';
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 import 'random_async.dart';
 import 'random_dart.dart';
 import 'random_patterns.dart';
@@ -30,7 +30,10 @@ Future<(int, int)> _both(String source) async {
   final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
   var code = official.exitCode;
   for (final host in Host.all) {
-    writeProgram(await compileProgram(path, target: host.target), program);
+    writeProgram(
+      await compileProgram(path, CompileOptions(target: host.target)),
+      program,
+    );
     final compiled = await host.run(program);
     expect(
       compiled.output,
@@ -225,29 +228,4 @@ void main() {
     );
     expect(directory.listSync(), hasLength(2));
   });
-
-  test('the command line reports problems and its usage', () async {
-    final directory = writeSources({
-      'good.dart': "import 'dart:io';\nvoid main() { exit(9); }",
-      'bad.dart': 'external void f();\nvoid main() {\n  f();\n}',
-    });
-    Future<ProcessResult> run(List<String> arguments) => Process.run(
-      '$hostSdk/bin/dart',
-      ['run', 'tool/compile.dart', ...arguments],
-    );
-    final output = '${directory.path}/program';
-    final good = await run(['${directory.path}/good.dart', output]);
-    expect(good.exitCode, 0, reason: '${good.stderr}');
-    expect(Process.runSync(output, const []).exitCode, 9);
-    File(output).deleteSync();
-    final bad = await run(['${directory.path}/bad.dart', output]);
-    expect(bad.exitCode, 1);
-    expect(
-      bad.stderr,
-      '${directory.path}/bad.dart:1:18: '
-      'Not supported yet: a function without a body.\n',
-    );
-    expect(File(output).existsSync(), isFalse);
-    expect((await run([])).exitCode, 64);
-  }, skip: skipExecution);
 }

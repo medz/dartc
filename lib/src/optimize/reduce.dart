@@ -15,7 +15,10 @@ HirValue reduce(HirInstruction instruction) => switch (instruction) {
   HirBoolBinary() => _boolean(instruction),
   HirUnary() => _unary(instruction),
   HirCompare() => _compare(instruction),
-  HirUnbox(object: HirBox(:final value)) => value,
+  // Where a test before shows that it cannot be, boxes of others are unboxed.
+  HirUnbox(:final field, object: HirBox(:final target, :final value))
+      when target.fields.single == field =>
+    value,
   HirBox(:final target, value: HirUnbox(:final field, :final object))
       when target.fields.single == field =>
     object,

@@ -99,7 +99,11 @@ final class FunctionTable(
       element.formalParameters,
       ownLevel: level,
       returnType: element.returnType,
-      thisType: isExtensionMember(element) ? extendedType(element) : null,
+      thisType: switch (owner) {
+        _ when !isExtensionMember(element) => null,
+        ExtensionTypeElement(:final thisType) => thisType,
+        _ => extendedType(element),
+      },
       typeOwners: [?takesExtensionTypes(element), ?takesTypes(element)],
       captures: _scope.capturesOf(declarationOf(node)),
       cellClass: _scope.cellClass,

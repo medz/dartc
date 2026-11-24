@@ -36,11 +36,6 @@ final class CoroutineBody(
 
   HirValue _truth(bool value) => _object(_builder.add(HirConst(value)));
 
-  /// Ends where a generator is not to start.
-  void begin(void Function() end) {
-    if (_coroutine.kind == .asyncStar) _endIf(_coroutine.first, end);
-  }
-
   /// Does [end] if [given], which the runtime gave, is true.
   void _endIf(HirValue given, void Function() end) {
     final isOver = _conversions.coerce(given, .boolean);

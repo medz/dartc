@@ -65,6 +65,7 @@ final class OperationTranslator(
           HirVirtualCall(_scope.applySelector, argument(0, .reference), [
             argument(1, .reference),
             argument(2, .reference),
+            argument(3, .reference),
           ]),
         );
       case 'dataAddress' || 'registerEvents':
@@ -92,7 +93,15 @@ final class OperationTranslator(
         final class_ = _coreClass(arguments.first);
         return _newArray(node, class_, argument(1, .integer));
     }
+    return _machine(name, argument);
+  }
+
+  HirValue? _machine(
+    String name,
+    HirValue Function(int index, HirType type) argument,
+  ) {
     final op = HirMachineOp.values.byName(name);
+    if (_forCallbacks.contains(op)) _scope.addCallbacks();
     final call = _builder.add(
       HirMachine(op, [
         for (final (i, type) in op.parameters.indexed) argument(i, type),
@@ -101,6 +110,14 @@ final class OperationTranslator(
     if (op == .trap || op == .resume) _builder.end(HirUnreachable());
     return call.type == null ? null : call;
   }
+
+  /// What makes or waits for calls from C.
+  static const _forCallbacks = <HirMachineOp>{
+    .callbacks,
+    .callbackInfo,
+    .takePosted,
+    .waitPosted,
+  };
 
   ClassElement _coreClass(Argument name) {
     final text = (name.argumentExpression as StringLiteral).stringValue!;

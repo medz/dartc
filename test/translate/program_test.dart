@@ -4,7 +4,7 @@ import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 Future<HirModule> _files(Map<String, String> files) async {
   final directory = writeSources(files);

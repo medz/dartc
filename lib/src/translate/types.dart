@@ -1,5 +1,8 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
+// Only this tells what type parameters are by default.
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type_system.dart' show TypeSystemImpl;
 import 'package:dartc/hir.dart';
 
 /// The representation of values of [declared], or null if not supported yet.
@@ -96,8 +99,13 @@ bool mentions(DartType type, Element? owner, {bool isTaken = false}) =>
       InterfaceType(:final typeArguments) => typeArguments.any(
         (argument) => mentions(argument, owner, isTaken: isTaken),
       ),
-      FunctionType(:final returnType, :final formalParameters) =>
-        mentions(returnType, owner, isTaken: isTaken) ||
+      FunctionType(
+        :final returnType,
+        :final formalParameters,
+        :final typeParameters,
+      ) =>
+        boundsMention(typeParameters, owner) ||
+            mentions(returnType, owner, isTaken: isTaken) ||
             formalParameters.any(
               (p) => mentions(p.type, owner, isTaken: !isTaken),
             ),
@@ -106,6 +114,23 @@ bool mentions(DartType type, Element? owner, {bool isTaken = false}) =>
       ).any((field) => mentions(field, owner, isTaken: isTaken)),
       _ => false,
     };
+
+/// Whether functions with [parameters] have other bounds if type arguments of
+/// [owner] are others than those known.
+bool boundsMention(List<TypeParameterElement> parameters, Element? owner) =>
+    parameters.any(
+      (parameter) => switch (parameter.bound) {
+        final bound? =>
+          mentions(bound, owner) || mentions(bound, owner, isTaken: true),
+        null => false,
+      },
+    );
+
+/// Whether [type] is [parameter].
+bool isParameter(DartType type, TypeParameterElement parameter) =>
+    type is TypeParameterType &&
+    type.element == parameter &&
+    type.nullabilitySuffix == .none;
 
 /// The types of the fields of [type].
 Iterable<DartType> fieldsOf(RecordType type) => [
@@ -282,6 +307,14 @@ List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
       found[parameter] ?? element.library.typeProvider.dynamicType,
   ];
 }
+
+/// What [parameters] of generic functions are where a call does not tell.
+List<DartType> defaultTypesOf(
+  List<TypeParameterElement> parameters,
+  LibraryElement library,
+) => (library.typeSystem as TypeSystemImpl).instantiateTypeFormalsToBounds(
+  parameters.cast(),
+);
 
 /// Whether objects of [sub] are objects of [superclass] too.
 bool isSubclass(InterfaceElement sub, InterfaceElement superclass) =>

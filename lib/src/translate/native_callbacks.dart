@@ -34,7 +34,6 @@ final class NativeCallbackTable(
     FunctionType type,
     NativeCallback callback,
   ) {
-    _scope.addCallbacks();
     final (:function, :exceptional, :isLater) = callback;
     final target = HirField('function', .reference);
     final other = HirField('exceptional', .reference);

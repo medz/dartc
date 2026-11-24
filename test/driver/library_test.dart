@@ -10,7 +10,7 @@ import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
 import '../support/hosts.dart';
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 const _library = r'''
 import 'dart:async';
@@ -108,8 +108,10 @@ Future<void> _used(
     path,
     kind,
     name: output,
-    target: host.target,
-    collectsAlways: collectsAlways,
+    options: CompileOptions(
+      target: host.target,
+      collectsAlways: collectsAlways,
+    ),
   );
   writeProgram(bytes, output);
   File('${directory.path}/lib.h').writeAsStringSync(header);

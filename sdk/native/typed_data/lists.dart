@@ -190,11 +190,8 @@ class _Int8ArrayView {
 @patch
 class _UnmodifiableInt8ArrayView {
   @patch
-  _UnmodifiableInt8ArrayView._(
-    _TypedList buffer,
-    int offsetInBytes,
-    int length,
-  ) : super._(buffer, offsetInBytes, length);
+  _UnmodifiableInt8ArrayView._(_TypedList buffer, int offsetInBytes, int length)
+    : super._(buffer, offsetInBytes, length);
 }
 
 @patch
@@ -645,9 +642,8 @@ void _checkRead(int index, int length) {
 
 void _checkLength(int length, int size) {
   final most = 0x3fffffffffffffff ~/ size;
-  if (length < 0 || length > most) {
-    throw RangeError.range(length, 0, most, 'length');
-  }
+  if (length < 0) throw RangeError.range(length, 0, most, 'length');
+  if (length > most) throw const OutOfMemoryError();
 }
 
 @patch
@@ -677,11 +673,8 @@ class _ByteDataView {
 @patch
 class _UnmodifiableByteDataView {
   @patch
-  _UnmodifiableByteDataView._(
-    _TypedList buffer,
-    int offsetInBytes,
-    int length,
-  ) : super._(buffer, offsetInBytes, length);
+  _UnmodifiableByteDataView._(_TypedList buffer, int offsetInBytes, int length)
+    : super._(buffer, offsetInBytes, length);
 }
 
 @patch

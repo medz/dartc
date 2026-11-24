@@ -191,31 +191,31 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     }
     return _make(selector.name, selector, (builder, conversions) {
       final self = builder.inputs.first;
-      if (closure.forward case final forward?) {
-        final (positional, named) = (shape.positional, shape.named);
-        final given = builder.inputs.sublist(1);
-        return forward(builder, self, given, positional, named);
+      if (closure.part case final part?) {
+        return builder.call(
+          HirVirtualCall(
+            selectorOf(shape.withTypes(part.count)),
+            builder.add(HirLoad(part.function, self)),
+            [
+              builder.add(HirLoad(part.types, self)),
+              ...builder.inputs.sublist(1),
+            ],
+          ),
+        );
       }
       closure.bindTypes(builder, self);
-      return builder.call(
-        HirCall(closure.target(), [
-          ...closure.leading(builder, self),
-          if (count > 0)
-            _typesFor(
-              builder,
-              closure.typeParameters.first.enclosingElement!,
-              closure.typeParameters,
-              shape,
-            ),
-          ..._arguments(
+      return conversions.call(closure.target(), [
+        ...closure.leading(builder, self),
+        if (count > 0)
+          ?_typesFor(
             builder,
             conversions,
-            closure.parameters,
+            closure.typeParameters,
             shape,
-            closure,
+            (list) => closure.bindGiven(builder, list),
           ),
-        ]),
-      );
+        ..._arguments(builder, conversions, closure.parameters, shape, closure),
+      ]);
     });
   }
 
@@ -268,7 +268,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     return _make(selector.name, selector, (builder, conversions) {
       final receiver = builder.inputs.first;
       builder.setReceiver(receiver, level);
-      final types = _typeArguments(builder, element, shape);
+      final types = _typeArguments(builder, conversions, element, shape);
       return builder.call(
         HirCall(_scope.memberOf(level, element), [
           _own(conversions, receiver, level),
@@ -282,31 +282,37 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
   /// The type arguments of a call of [method] that gives none.
   HirValue? _typeArguments(
     FunctionBuilder builder,
+    Conversions conversions,
     ExecutableElement method,
     DynamicShape shape,
   ) {
     final parameters = method.typeParameters;
     return parameters.isEmpty
         ? null
-        : _typesFor(builder, method, parameters, shape);
+        : _typesFor(builder, conversions, parameters, shape, (list) {
+            builder
+              ..bindTypes(method.baseElement, list)
+              ..bindParameters(parameters, list);
+            return list;
+          });
   }
 
-  /// The type arguments that a call gives for [parameters], or their bounds.
-  HirValue _typesFor(
+  /// The type arguments that a call gives for [parameters], or their bounds,
+  /// as [bind] gives them.
+  HirValue? _typesFor(
     FunctionBuilder builder,
-    Element owner,
+    Conversions conversions,
     List<TypeParameterElement> parameters,
     DynamicShape shape,
+    HirValue? Function(HirValue list) bind,
   ) {
     final list = shape.types > 0
         ? builder.inputs[1]
-        : _scope.typeList(builder, [
-            for (final parameter in parameters)
-              parameter.bound ?? builder.library.typeProvider.dynamicType,
-          ]);
+        : _scope.typeList(builder, defaultTypesOf(parameters, builder.library));
     if (list == null) shape.reject('these bounds in a dynamic call');
-    builder.bindTypes(owner, list);
-    return list;
+    final bound = bind(list);
+    conversions.checkBounds(parameters);
+    return bound;
   }
 
   HirValue? _useAccessor(
@@ -368,13 +374,11 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
       return _make(selector.name, selector, (builder, conversions) {
         final receiver = builder.inputs.first;
         builder.setReceiver(receiver, level);
-        return builder.call(
-          HirCall(_scope.forwarderOf(level, method), [
-            receiver,
-            ?_typeArguments(builder, method, shape),
-            ..._arguments(builder, conversions, parameters, shape),
-          ]),
-        );
+        return conversions.call(_scope.forwarderOf(level, method), [
+          receiver,
+          ?_typeArguments(builder, conversions, viewed, shape),
+          ..._arguments(builder, conversions, parameters, shape),
+        ]);
       });
     }
     return null;

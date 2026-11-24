@@ -4,7 +4,7 @@ import 'dart:_heap/objects.dart' show applyFunction;
 class Function {
   @patch
   static _apply(List<dynamic> arguments, List<dynamic> names) =>
-      applyFunction(arguments[0], arguments, names);
+      applyFunction(arguments[0], arguments, names, null);
 }
 
 /// Whether a function takes [arguments], of which the first is itself and the

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:analyzer/dart/analysis/features.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
@@ -7,20 +6,23 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
 
 import 'patch.dart';
+import 'sdk_files.dart';
 
 /// The standard libraries that programs are compiled with.
 ///
-/// They are the official sources at [root] with the official patches for
-/// native programs, then those at [patches]. There each directory holds the
+/// They are the official sources among [files] with the official patches for
+/// native programs, then those that are ours. Of these each directory holds the
 /// files patching the library it is named after, and directories with those for
-/// some [systems] only. The files at [runtime] are the library `dart:_heap`.
-final class SdkSources({
-  required final String root,
-  required final String patches,
-  required final String runtime,
+/// some [systems] only. The runtime is the library `dart:_heap`.
+final class SdkSources(
+  final SdkFiles files, {
 
   /// What the directories are called that are for the system compiled for.
   final List<String> systems = const [],
+
+  /// What programs are told about where they are compiled, besides what they
+  /// can import.
+  final Map<String, String> declared = const {},
 }) {
   /// The libraries that official code for native programs uses inside.
   static const _hidden = ['_compact_hash', '_vm'];
@@ -28,54 +30,69 @@ final class SdkSources({
   /// The libraries that need no more than the official patches.
   static const _whole = ['collection'];
 
+  /// Where [install] makes the files be found. The analyzer takes them from
+  /// there.
+  static const _place = '/dartc-sdk';
+  String get root => '$_place/std';
+
   late final Map<String, String> _overlays = _build();
 
-  /// Makes [files] show the libraries as they are compiled.
-  void install(OverlayResourceProvider files) => _overlays.forEach(
-    (path, text) => files.setOverlay(path, content: text, modificationStamp: 0),
-  );
+  /// Makes [to] show the libraries as they are compiled.
+  void install(OverlayResourceProvider to) =>
+      {
+        for (final MapEntry(key: path, value: text) in files.entries)
+          if (path.startsWith('std/')) '$_place/$path': text,
+        ..._overlays,
+      }.forEach(
+        (path, text) =>
+            to.setOverlay(path, content: text, modificationStamp: 0),
+      );
 
   /// The libraries that can be compiled, by their URIs.
   List<String> get libraries => [
-    for (final name in _whole) 'dart:$name',
-    for (final directory in Directory(
-      patches,
-    ).listSync().whereType<Directory>())
-      'dart:${directory.path.split('/').last}',
+    for (final name in _names) 'dart:$name',
     for (final path in _overlays.keys)
       if (path.contains('/_heap/')) 'dart:_heap/${path.split('/').last}',
   ];
 
+  late final Set<String> _names = {
+    ..._whole,
+    for (final path in files.keys)
+      if (path.startsWith('native/')) path.split('/')[1],
+  };
+
+  /// What `fromEnvironment` knows.
+  late final Map<String, String> environment = {
+    for (final name in _names)
+      if (!name.startsWith('_')) 'dart.library.$name': 'true',
+    'dart.vm.product': 'true',
+    ...declared,
+  };
+
   String get _lib => '$root/lib';
 
+  String _read(String path) => files[path.substring(_place.length + 1)]!;
+
   Map<String, String> _build() {
-    final manifest = jsonDecode(
-      File('$_lib/libraries.json').readAsStringSync(),
-    ) as Map<String, Object?>;
-    final common = manifest['vm_common'] as Map<String, Object?>;
-    final libraries = common['libraries'] as Map<String, Object?>;
+    final manifest = jsonDecode(_read('$_lib/libraries.json')) as Map;
+    final libraries =
+        (manifest['vm_common'] as Map)['libraries'] as Map<String, Object?>;
     final result = <String, String>{};
     for (final MapEntry(key: name, value: library) in libraries.entries) {
-      final directory = Directory('$patches/$name');
-      final isOwn = directory.existsSync();
-      if (!isOwn && !_whole.contains(name)) continue;
+      if (!_names.contains(name)) continue;
       library as Map<String, Object?>;
       result.addAll(
-        _library('$_lib/${library['uri']}', _official(library['patches']), [
-          if (isOwn)
-            for (final path in [
-              directory.path,
-              for (final system in systems) '${directory.path}/$system',
-            ])
-              if (Directory(path) case final own when own.existsSync())
-                for (final file in own.listSync().whereType<File>()) file.path,
-        ]),
+        _library('$_lib/${library['uri']}', _official(library['patches']), {
+          for (final path in files.keys)
+            if (_isOwn(path, name)) '$_place/$path': files[path]!,
+          if (name == 'core') ..._environmentFile,
+        }),
       );
     }
-    for (final file in Directory(runtime).listSync().whereType<File>()) {
-      if (!file.path.endsWith('.dart')) continue;
-      final name = file.uri.pathSegments.last;
-      result['$_lib/_heap/$name'] = file.readAsStringSync();
+    for (final MapEntry(key: path, value: text) in files.entries) {
+      if (path.startsWith('heap/') && path.endsWith('.dart')) {
+        result['$_lib/_$path'] = text;
+      }
     }
     final names = result.keys.where((path) => path.contains('/_heap/'));
     result['$_lib/_heap/heap.dart'] = [
@@ -83,6 +100,30 @@ final class SdkSources({
     ].join();
     result.addAll(_register(libraries));
     return result;
+  }
+
+  /// Whether the file at [path] patches the library [name] for [systems].
+  bool _isOwn(String path, String name) =>
+      path.endsWith('.dart') &&
+      switch (path.split('/')) {
+        ['native', final library, _] => library == name,
+        ['native', final library, final system, _] =>
+          library == name && systems.contains(system),
+        _ => false,
+      };
+
+  Map<String, String> get _environmentFile {
+    // What has no other meaning in strings.
+    String text(String value) =>
+        "'${[for (final unit in value.codeUnits) '\\u${unit.toRadixString(16).padLeft(4, '0')}'].join()}'";
+    return {
+      '$_place/native/core/environment_values.dart': [
+        'const _environment = <String, String>{',
+        for (final MapEntry(:key, :value) in environment.entries)
+          '  ${text(key)}: ${text(value)},',
+        '};\n',
+      ].join('\n'),
+    };
   }
 
   /// The official patches given as one path or as a list, and their parts.
@@ -100,57 +141,42 @@ final class SdkSources({
   Map<String, String> _library(
     String main,
     List<String> official,
-    List<String> own,
+    Map<String, String> own,
   ) {
-    Map<String, String> read(List<String> paths) => {
-      for (final path in paths) path: File(path).readAsStringSync(),
-    };
     final directory = main.substring(0, main.lastIndexOf('/') + 1);
     String relative(String path) => path.startsWith(directory)
         ? path.substring(directory.length)
         : throw StateError('$path is not in $directory.');
     final files = {
-      for (final MapEntry(key: path, value: text) in read([
-        main,
-        ..._partsOf(main),
-      ]).entries)
-        relative(path): text,
+      for (final path in [main, ..._partsOf(main)]) relative(path): _read(path),
     };
-    final first = patchLibrary(
-      files,
-      relative(main),
-      read(official),
-      added: 'official',
-    );
-    final second = patchLibrary(
-      first,
-      relative(main),
-      read(own..sort()),
-      added: 'native',
-    );
+    final first = patchLibrary(files, relative(main), {
+      for (final path in official) path: _read(path),
+    }, added: 'official');
+    final second = patchLibrary(first, relative(main), own, added: 'native');
     return {
       for (final MapEntry(key: path, value: text) in second.entries)
         '$directory$path': text,
     };
   }
 
-  static List<String> _partsOf(String path) {
+  List<String> _partsOf(String path) {
     final unit = parseString(
-      content: File(path).readAsStringSync(),
+      content: _read(path),
       path: path,
       featureSet: FeatureSet.latestLanguageVersion(),
       throwIfDiagnostics: false,
     ).unit;
     return [
       for (final part in unit.directives.whereType<PartDirective>())
-        File(path).uri.resolve(part.uri.stringValue!).toFilePath(),
+        Uri.file(path).resolve(part.uri.stringValue!).toFilePath(),
     ];
   }
 
   /// Adds the libraries that the analyzer does not know to its list.
   Map<String, String> _register(Map<String, Object?> libraries) {
     final path = '$_lib/_internal/sdk_library_metadata/lib/libraries.dart';
-    final text = File(path).readAsStringSync();
+    final text = _read(path);
     const start = 'const Map<String, LibraryInfo> libraries = const {';
     final uris = {
       for (final name in _hidden)

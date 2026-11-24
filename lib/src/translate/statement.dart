@@ -3,6 +3,7 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'assigned.dart';
+import 'assertions.dart';
 import 'builder.dart';
 import 'coroutine_body.dart';
 import 'describe.dart';
@@ -16,6 +17,7 @@ final class StatementTranslator(
   final FunctionBuilder _builder,
 ) {
   final expressions = ExpressionTranslator(_scope, _builder);
+  late final assertions = AssertionTranslator(_scope, _builder, expressions);
   late final _tries = TryTranslator(_scope, _builder, statement);
   late final _coroutine = CoroutineBody(_scope, _builder, expressions);
 
@@ -28,10 +30,8 @@ final class StatementTranslator(
       throw _builder.unit.unsupported(node, what);
 
   void body(FunctionBody body) {
-    final isCoroutine = _builder.coroutine != null;
-    if (isCoroutine) _coroutine.begin(_end);
     _body(body);
-    if (isCoroutine) _end();
+    if (_builder.coroutine != null) _end();
   }
 
   /// Ends a function that can be left in the middle.
@@ -55,9 +55,10 @@ final class StatementTranslator(
     switch (node) {
       case Block(:final statements):
         statements.forEach(statement);
-      case EmptyStatement() || AssertStatement():
-        // Like the official runtime by default, assertions do nothing.
+      case EmptyStatement():
         break;
+      case AssertStatement():
+        assertions.check(node);
       case ExpressionStatement(:final expression):
         expressions.effect(expression);
       case VariableDeclarationStatement(:final variables):

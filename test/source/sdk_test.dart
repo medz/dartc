@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/diagnostic/diagnostic.dart';
@@ -10,7 +8,7 @@ import 'package:dartc/native.dart';
 import 'package:dartc/source.dart';
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 void main() {
   for (final target in Target.values) {
@@ -61,29 +59,15 @@ void main() {
     expect(core.element.getClass('_GrowableList'), isNotNull);
   });
 
-  test('the libraries are those that files tell', () async {
-    final packaged = await packagedSdk();
-    // Git does not keep directories without files.
-    final copy = Directory.systemTemp.createTempSync('dartc-native-');
-    addTearDown(() => copy.deleteSync(recursive: true));
-    for (final file in Directory(packaged.patches).listSync(recursive: true)) {
-      if (file is! File) continue;
-      final to = file.path.replaceFirst(packaged.patches, '${copy.path}/');
-      File(to)
-        ..parent.createSync(recursive: true)
-        ..writeAsBytesSync(file.readAsBytesSync());
-    }
-    final sdk = SdkSources(
-      root: packaged.root,
-      patches: copy.path,
-      runtime: packaged.runtime,
-    );
-    expect(sdk.libraries.toSet(), packaged.libraries.toSet());
-    expect(sdk.libraries, contains('dart:collection'));
+  test('the files can be packed as one text', () async {
+    final files = await packagedSdkFiles();
+    final again = unpackSdkFiles(packSdkFiles(files));
+    expect(again, files);
+    expect(packSdkFiles(again), packSdkFiles(files));
   });
 
   test('the official sources are as they were', () async {
-    final sdk = await packagedSdk();
-    expect(File('${sdk.root}/version').readAsStringSync().trim(), '3.14.0');
+    final files = await packagedSdkFiles();
+    expect(files['std/version']!.trim(), '3.14.0');
   });
 }

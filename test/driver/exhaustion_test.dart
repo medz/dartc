@@ -15,7 +15,7 @@ import 'package:dartc/translate.dart';
 import 'package:test/test.dart';
 
 import '../image/support.dart' show skipExecution;
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 const _given = '.given';
 

@@ -178,4 +178,101 @@ void main() {
   ]) {
     shows('end the program: $name', "void main() { print('a'); $body }");
   }
+
+  group('bounds', () {
+    agrees('are checked where calls do not know them', r'''
+      class A<T> { void m<S extends T>() => print(S); void n<S extends List<T>>(S a) => print(S); }
+      class B { void m<T extends Comparable<T>, S extends List<T>>() => print((T, S)); }
+      void g<T extends num, S extends List<T>>([Object? a]) => print((T, S, a));
+      void main() {
+        A<num> a = A<int>();
+        try { a.m<double>(); } catch (e) { print(e); }
+        try { a.m<int>(); } catch (e) { print(e); }
+        try { a.n<List<double>>([]); } catch (e) { print(e); }
+        dynamic f = g;
+        try { f<int, List<int>>(); } catch (e) { print(e); }
+        try { f<String, List<String>>(); } catch (e) { print(e); }
+        try { f<int, List<double>>(); } catch (e) { print(e); }
+        dynamic b = B();
+        try { b.m<int, List<int>>(); } catch (e) { print(e); }
+        try { b.m<num, List<num>>(); } catch (e) { print(e); }
+        Function h = g;
+        try { Function.apply(h, [1]); } catch (e) { print(e); }
+        try { h<String, List<String>>(2); } catch (e) { print(e); }
+        dynamic t = (a as dynamic).m;
+        try { t<double>(); } catch (e) { print(e); }
+        dynamic c = <T extends num>(T x) => print((T, x));
+        try { c<String>('a'); } catch (e) { print(e); }
+        try { c('a'); } catch (e) { print(e); }
+        c(1); part();
+      }
+      T opt<T extends num>(T a, [T? b, int c = 5]) { print((T, a, b, c)); return a; }
+      T nam<T>(T a, {T? b, int c = 5}) { print((T, a, b, c)); return a; }
+      void part() {
+        int Function(int, [int?, int]) p = opt;
+        dynamic q = p;
+        Function f = p;
+        p(1); p(1, 2); p(1, 2, 3);
+        q(1); q(1, 2, 3);
+        try { q('a'); } catch (e) { print(e.runtimeType); }
+        Function.apply(f, [1]); Function.apply(f, [1, 2]); Function.apply(f, [1, 2, 3]);
+        try { Function.apply(f, ['a']); } catch (e) { print(e.runtimeType); }
+        try { Function.apply(f, [1, 2, 3, 4]); } catch (e) { print(e.runtimeType); }
+        String g<S>(S a, {S? b}) { print((S, a, b)); return '$a'; }
+        final h = g<int>;
+        Function.apply(h, [1], {#b: 2});
+        dynamic k = h;
+        try { k(1, b: 'x'); } catch (e) { print(e.runtimeType); }
+        k(1, b: 7);
+        int Function(int, {int? b, int c}) n = nam;
+        Function.apply(n, [1], {#c: 2});
+        Function.apply(nam, [1], {#c: 2});
+        Function.apply(opt, [1]);
+        print(1.compareTo); final z = 1.5.compareTo; print(z == 1.5.compareTo); print(identical(z, z)); print(z(2));
+      }
+    ''');
+    agrees('are what generic functions are given without them', r'''
+      void main<T>([List<String>? arguments]) {
+        print((T, arguments));
+        dynamic f = g;
+        f(1);
+        f(2, 3);
+        f<int, List<int>, List<List<int>>>(2, 3);
+        dynamic o = C();
+        try { o.m(); } catch (e) { print(e); }
+        print(Code.values);
+        print(const [Code.first, Code.second, FixedName.item]);
+        print((Code.second.own, Code.second.name, FixedName.item.own, FixedName.item.name, FixedName.item.index, Named.a.own));
+      }
+      class C { void m<T extends Comparable<T>, S extends List<T>>() => print((T, S)); }
+      void g<T extends num, S extends List<T>, R extends Iterable<S>>([Object? a, Object? b]) => print((T, S, R, a, b));
+      enum Code {
+        first(7),
+        second.named(value: -3);
+        const new(this._own);
+        const new named({required int value}) : _own = value;
+        final int _own;
+        int get own => _own;
+      }
+      enum const FixedName() {
+        item;
+        final String _own = 'own';
+        String get own => _own;
+      }
+      enum Named { a, b; final int _index = 4; const Named(); int get own => _index; }
+    ''');
+    agrees('are checked where methods are taken', r'''
+      class A<T> { void m<S extends T>() => print(S); void Function(T) f() => (T x) => print(x); void g(T x) => print((T, x)); void h(void Function(T) k) {}}
+      class Trace { String log = ''; int v = 1; int first() { log += 'A'; return v; } S second() { log += 'B'; return S(this); } }
+      class S { final Trace t; S(this.t); String toString() { t.log += 'S'; return '7'; } }
+      void main() {
+        A<num> a = A<int>();
+        try { final t = a.m; t<double>(); } catch (e) { print(e); }
+        try { final t = a.f; t(); } catch (e) { print(e); }
+        try { final t = a.g; t(1); t(1.5); } catch (e) { print(e); }
+        try { final t = a.h; t((num x) {}); } catch (e) { print(e); }
+        try { final t = a.g; print(t.runtimeType); } catch (e) { print(e); }
+      }
+    ''');
+  });
 }

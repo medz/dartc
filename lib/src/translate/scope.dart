@@ -39,6 +39,9 @@ abstract interface class ProgramScope() {
   /// stands for, if it is one.
   String? operationOf(ExecutableElement element);
 
+  /// Whether the program checks assertions.
+  bool get checksAssertions;
+
   /// The class of objects that values of [type] are without boxes.
   ClassElement boxElement(HirType type);
 
@@ -88,8 +91,9 @@ abstract interface class ProgramScope() {
     FunctionType type,
   );
 
-  /// The object that [element] is, if the program declares it.
-  HirConstObject? functionObject(ExecutableElement element);
+  /// The object that [element], as a function of [type], is, if the program
+  /// declares it.
+  HirConstObject? functionObject(ExecutableElement element, FunctionType type);
 
   /// How to get the method [element] of objects of [receiver].
   HirSelector tearOffSelector(
@@ -235,6 +239,9 @@ abstract interface class ProgramScope() {
 
     /// Whether the receiver may be taken as it is.
     bool isUnboxed = false,
+
+    /// Whether to give a forwarder rather than null.
+    bool orForwarder = false,
   });
 
   /// The level of [class_] itself.

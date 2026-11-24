@@ -194,4 +194,95 @@ void main() {
   agrees('constants of functions around', r'''
     void main() { const a = 3, b = [1, 2]; final f = () => a + b.last; print(f()); int g(int n) { const c = a * 2; return (() => c + n)(); } print(g(4)); Iterable<int> h() sync* { const d = 5; yield* [1].map((x) => x + d + a); } print(h().toList()); }
   ''');
+
+  group('functions with type arguments', () {
+    agrees('are equal if these are', r'''
+      R id<R>(R a) => a;
+      bool phantom<T>(Object c) => c is T;
+      class Container<T>(final T value);
+      typedef PA<A, B> = Container<A>;
+      const concrete = id<int>;
+      const gen = id;
+      const through = gen<int>;
+      const sel = phantom<int>;
+      const fb = phantom<String>;
+      const m1 = PA<int, String>.new;
+      const raw = PA.new;
+      const m2 = raw<int, String>;
+      void main() async {
+        print(concrete == through);
+        print(identical(concrete, through));
+        print(sel == (phantom<int>));
+        print(sel != (phantom<String>));
+        print(fb == (phantom<String>));
+        print(sel(1)); print(fb(1)); print(fb('a'));
+        print(m1 == Container<int>.new);
+        final x = m1(3); print(x.runtimeType);
+        print(Container<int>.new == Container<int>.new);
+        print((id<int>) == (id<int>));
+        T f<T>() { return (id<T>) == (id<T>) ? 1 as T : 2 as T; }
+        print(f<int>());
+        int Function(int) p = id; int Function(int) q = id; print(p == q);
+        T loc<T>(T a) => a;
+        final l1 = loc<int>, l2 = loc<int>; print((l1 == l2, l1.hashCode == l2.hashCode, identical(l1, l2), l1 == (loc<String>)));
+        final o = Q(); print(((o.m<int>) == (o.m<int>), (o.m<int>) == (o.m<num>), (o.m<int>) == (Q().m<int>)));
+      }
+      class Q { T m<T>(T a) => a; }
+    ''', imports: "import 'dart:async';");
+    agrees('are given to constructors and what aliases name', r'''
+      extension type const Box<T>(T value) { const Box.two(T a, int b) : value = a; }
+      typedef Bounded<T extends num> = Box<T>;
+      typedef Fixed<T> = Box<int>;
+      extension type Number._(int value) {
+        factory([int value]) = Number.destination;
+        factory again([int value]) = Number;
+        new destination([int value = 7]) : value = value;
+      }
+      extension type P<A, B>((A, B) v) { new fields(A a, B b) : v = (a, b); }
+      typedef Flip<A, B> = P<B, A>;
+      void main() {
+        const bounded = Bounded.new;
+        print(bounded<int>(6).value);
+        final b2 = Box.new; print(b2<int>(3).value); print(b2('a').value);
+        final make = Number.again;
+        print(make().value); print(make(2).value);
+        final f = Flip.fields; print(f<int, String>('x', 3).v);
+        dynamic d = f; print(d('x', 4)); try { d<int, String>(1, 1); } catch (e) { print(e); }
+        print(Function.apply(b2, [4]));
+        Box<int> Function(int) k = Box.new; print(k(5));
+        print(Box.two.runtimeType);  more();
+      }
+      class D<T> { final T? a; final int b; D([this.a, this.b = 7]); D.n({this.a, this.b = 8}); }
+      typedef DI<X> = D<List<X>>;
+      typedef DF<X> = D<int>;
+      void more() {
+        final f = D.new; print((f<int>().b, f<int>(3).a, f(1, 2).b));
+        final g = D.n; print((g<int>().b, g<int>(a: 3).a, g(b: 2).b));
+        const h = DI.n; print((h<int>().b, h<int>(a: [3]).a, h(b: 2).runtimeType));
+        const k = DF.new; print((k<String>().b, k<String>(5).a)); 
+        dynamic d = k; print((d().b, d(4).a, d<String>(4, 6).b)); try { d('x'); } catch (e) { print(e); }
+        print(Function.apply(h, [], {#b: 3}).b); print(Function.apply(k, [3]).a);
+        final D<int> Function([int?]) p = D.new; print(p().b);
+        T id<T>([T? x, int y = 3]) { print((T, x, y)); return x as T; }
+        id<int?>(); dynamic i2 = id; i2(4); Function.apply(id, [1]);
+        final int Function([int?]) q = id; q(5);
+      }
+    ''');
+    agrees('have the members of objects', r'''
+      int top(int x) => x;
+      extension FX on int Function(int) { int twice(int x) => this(this(x)); }
+      void main() {
+        int Function(int) f = top; int Function(int)? g = top; Function h = top;
+        print(f.toString()); print(f.hashCode == top.hashCode); print(f.runtimeType); print(g?.toString()); print(h.toString()); print(f.twice(2)); print(g?.hashCode == f.hashCode);
+        print((1, 2).toString()); print((1, 2).hashCode == (1, 2).hashCode); (int, int)? r = (1, 2); print(r?.toString()); print(r.runtimeType); print(r.toString());
+        final t = f.toString; print(t()); final u = (1, a: 2).toString; print(u()); print(null.toString()); int? n; print(n.toString()); print(n.hashCode == null.hashCode); final nt = n.toString; print(nt());
+        more();  Object o = f; print(o.toString());
+        try { (f as dynamic).foo(); } on NoSuchMethodError catch (e) { print('nsm'); }
+        print(f.call.toString());
+        print([1].toString().length.toString().hashCode == 1);
+      }
+      extension OnN on Object? { String s() => toString(); int h() => this.hashCode; String Function() t() => toString; String u() { return '${this}$runtimeType'; } }
+      void more() { print(null.s()); print(1.s()); print(null.h() == null.hashCode); print(null.t()()); print(2.t()()); print(null.u()); print('a'.u()); int? x; print(x.s()); Object? y; print((y.toString)()); dynamic z; print((z.toString)()); print(z.hashCode == null.hashCode); print((z.noSuchMethod).runtimeType); print(y.noSuchMethod.runtimeType); print(identical(y.toString, y.toString)); }
+    ''');
+  });
 }

@@ -48,7 +48,10 @@ final class ReferenceTranslator(
             !isInstanceMember(element);
     if (isKnown) {
       element as ExecutableElement;
-      return _instantiate(node, element.baseElement, node.staticType!);
+      final known = element is ConstructorElement
+          ? null
+          : node.typeArgumentTypes;
+      return _instantiate(node, element.baseElement, node.staticType!, known);
     }
     final types = node.typeArgumentTypes ?? const [];
     return withTypes(node, valueOf(name), types, node.staticType!);
@@ -73,14 +76,19 @@ final class ReferenceTranslator(
   HirValue _instantiate(
     Expression node,
     ExecutableElement element,
-    DartType type,
-  ) {
-    if (type is! FunctionType || type.typeParameters.isNotEmpty) {
-      _unsupported(node, 'generic functions as values');
+    DartType type, [
+    List<DartType>? known,
+  ]) {
+    if (type is! FunctionType) _unsupported(node, describe(node));
+    if (type.typeParameters.isNotEmpty) {
+      final object =
+          _scope.functionObject(element, type) ??
+          _unsupported(node, describe(node));
+      return _builder.add(HirStatic(object));
     }
     final types = takesTypes(element) == null
         ? const <DartType>[]
-        : typeArgumentsOf(element, type);
+        : known ?? typeArgumentsOf(element, type);
     return _scope.instantiate(_builder, element, types) ??
         _unsupported(node, describe(node));
   }

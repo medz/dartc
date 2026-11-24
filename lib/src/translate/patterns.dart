@@ -284,7 +284,13 @@ final class PatternTranslator(
       matched.value,
       matched.type,
     ), right);
-    _unless(result, fail);
+    final types = _conversions.types;
+    _unless(
+      result.type == .reference
+          ? _conversions.cast(result, types.dynamicType, types.boolType)!
+          : result,
+      fail,
+    );
   }
 
   /// What [compute] gives, of [type], which is the same wherever it is got as
@@ -365,6 +371,7 @@ final class PatternTranslator(
     final type = pattern.type.type!;
     final matched = _testFor(pattern, given, type, fail);
     for (final field in pattern.fields) {
+      if (ignoresField(field.pattern)) continue;
       final found = _field(field, (
         value: matched.value,
         type: type,
@@ -430,22 +437,25 @@ final class PatternTranslator(
     for (final (i, element) in elements.indexed) {
       if (element is RestPatternElement) {
         final inner = element.pattern;
-        if (inner == null) continue;
+        if (inner == null || ignoresValue(inner)) continue;
         final after = elements.length - i - 1;
         final key = listKey(elements, i, rest);
         final found = _read(element, list, key, type, () {
-          final end = _builder.add(
-            HirIntBinary(.subtract, length(), integer(after)),
+          HirValue end() => _conversions.coerce(
+            _builder.add(HirIntBinary(.subtract, length(), integer(after))),
+            .reference,
           );
           final method = _listMember.getMethod('sublist')!;
           return _use(element, list, method, [
             integer(i),
-            if (after > 0) _conversions.coerce(end, .reference),
+            if (after > 0) end(),
           ]);
         });
         _match(inner, found, fail);
         continue;
       }
+      element as DartPattern;
+      if (ignoresValue(element)) continue;
       final isLate = rest >= 0 && i > rest;
       final fromEnd = elements.length - i;
       final key = listKey(elements, i, rest);
@@ -455,7 +465,7 @@ final class PatternTranslator(
             : integer(i);
         return _use(element, list, _listMember.getMethod('[]')!, [at]);
       });
-      _match(element as DartPattern, found, fail);
+      _match(element, found, fail);
     }
   }
 

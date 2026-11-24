@@ -56,7 +56,7 @@ final class ConstructorTranslator(
         case SuperConstructorInvocation():
           explicit = initializer;
         case AssertInitializer():
-          break;
+          _statements.assertions.check(initializer);
         default:
           throw _builder.unit.unsupported(initializer, 'this initializer');
       }

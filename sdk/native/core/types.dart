@@ -23,6 +23,7 @@ class _Type {
 
   String toString() => typeName(_own);
   int get hashCode => hashOfType(_own);
+  int get _identityHashCode => hashCode;
   @patch
   bool operator ==(other) => other is _Type && isSameType(_own, other._own);
 }

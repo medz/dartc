@@ -103,7 +103,7 @@ bool isSubtype(RuntimeType a, RuntimeType b) {
   }
   if (a is GenericType) {
     if (b is GenericType) {
-      return _areSame(a.bounds, b.bounds) && isSubtype(a.inner, b.inner);
+      return areSameTypes(a.bounds, b.bounds) && isSubtype(a.inner, b.inner);
     }
     return b is InterfaceType && b.number == functionNumber();
   }
@@ -242,7 +242,7 @@ bool isSameType(RuntimeType a, RuntimeType b) {
   if (a is InterfaceType) {
     return b is InterfaceType &&
         a.number == b.number &&
-        _areSame(a.arguments, b.arguments);
+        areSameTypes(a.arguments, b.arguments);
   }
   if (a is BoundType) return b is BoundType && a.index == b.index;
   if (a is FutureOrType) {
@@ -251,22 +251,23 @@ bool isSameType(RuntimeType a, RuntimeType b) {
   if (a is RecordType) {
     return b is RecordType &&
         isSame(a.names, b.names) &&
-        _areSame(a.fields, b.fields);
+        areSameTypes(a.fields, b.fields);
   }
   if (a is GenericType) {
     return b is GenericType &&
-        _areSame(a.bounds, b.bounds) &&
+        areSameTypes(a.bounds, b.bounds) &&
         isSameType(a.inner, b.inner);
   }
   return a is FunctionType &&
       b is FunctionType &&
       isSameType(a.result, b.result) &&
-      _areSame(a.required, b.required) &&
-      _areSame(a.optional, b.optional) &&
+      areSameTypes(a.required, b.required) &&
+      areSameTypes(a.optional, b.optional) &&
       _areSameNamed(a.named, b.named);
 }
 
-bool _areSame(TypeList? a, TypeList? b) {
+/// Whether [a] and [b] are equal, one by one.
+bool areSameTypes(TypeList? a, TypeList? b) {
   while (a != null && b != null) {
     if (!isSameType(a.head, b.head)) return false;
     a = a.tail;
@@ -293,26 +294,27 @@ int hashOfType(RuntimeType type) {
   if (type is BasicType) return type.kind + 1;
   if (type is NullableType) return hashOfType(type.inner) * 7 + 1;
   if (type is InterfaceType) {
-    return (_hashOfList(type.arguments) * 31 + type.number) & 0x3fffffff;
+    return (hashOfTypes(type.arguments) * 31 + type.number) & 0x3fffffff;
   }
   if (type is BoundType) return type.index + 11;
   if (type is FutureOrType) return hashOfType(type.inner) * 19 + 5;
   if (type is RecordType) {
-    return (_hashOfList(type.fields) * 17 + type.names.length) & 0x3fffffff;
+    return (hashOfTypes(type.fields) * 17 + type.names.length) & 0x3fffffff;
   }
   if (type is GenericType) {
-    return (_hashOfList(type.bounds) * 13 + hashOfType(type.inner)) &
+    return (hashOfTypes(type.bounds) * 13 + hashOfType(type.inner)) &
         0x3fffffff;
   }
   if (type is! FunctionType) return 0;
-  var hash = hashOfType(type.result) + _hashOfList(type.required) * 5;
+  var hash = hashOfType(type.result) + hashOfTypes(type.required) * 5;
   for (var at = type.named; at != null; at = at.tail) {
     hash = (hash * 31 + at.name) & 0x3fffffff;
   }
-  return (hash + _hashOfList(type.optional) * 3) & 0x3fffffff;
+  return (hash + hashOfTypes(type.optional) * 3) & 0x3fffffff;
 }
 
-int _hashOfList(TypeList? list) {
+/// A number that is equal for lists of equal types.
+int hashOfTypes(TypeList? list) {
   var hash = 0;
   for (var at = list; at != null; at = at.tail) {
     hash = (hash * 31 + hashOfType(at.head)) & 0x3fffffff;

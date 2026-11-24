@@ -6,8 +6,18 @@ import 'package:dartc/source.dart';
 import 'builder.dart';
 import 'classes.dart';
 import 'closure.dart';
+import 'conversions.dart';
 import 'scope.dart';
 import 'type_table.dart';
+
+/// The functions for closures of each class that the runtime calls [name].
+final class _ClosureTable(
+  final String name,
+  final HirValue Function(FunctionBuilder builder, Closure closure) build,
+) {
+  late final selector = HirSelector(name, const [], .reference);
+  final entries = <HirClass, HirFunction>{};
+}
 
 /// Makes the functions that tell the runtime about the program's types.
 final class TypeFunctions(
@@ -21,31 +31,28 @@ final class TypeFunctions(
   final _typeOf = <HirClass, HirFunction>{};
   final _named = <String, HirFunction>{};
 
-  /// Gives the object whose method a function is.
-  final HirSelector receiverOf = HirSelector(
-    'receiverOf',
-    const [],
-    .reference,
-  );
-  final _receiverOf = <HirClass, HirFunction>{};
-
-  /// Gives what the text of a function ends with.
-  final HirSelector nameOf = HirSelector('functionName', const [], .reference);
-  final _nameOfFunction = <HirClass, HirFunction>{};
+  /// What tells something about functions that are values.
+  late final _ofFunctions = [
+    _ClosureTable('receiverOf', _receiverOf),
+    _ClosureTable('typesOf', _typesOf),
+    _ClosureTable(
+      'functionName',
+      (builder, closure) => builder.add(_scope.text(closure.text)),
+    ),
+  ];
 
   /// What the selectors call, by class.
   Map<HirSelector, Map<HirClass, HirFunction>> get dispatch => {
     if (isUsed) typeOf: _typeOf,
-    if (isUsed) receiverOf: _receiverOf,
-    if (isUsed) nameOf: _nameOfFunction,
+    if (isUsed)
+      for (final table in _ofFunctions) table.selector: table.entries,
   };
 
   bool get isUsed => _named.isNotEmpty;
 
   Iterable<HirFunction> get functions => [
     ..._typeOf.values,
-    ..._receiverOf.values,
-    ..._nameOfFunction.values,
+    for (final table in _ofFunctions) ...table.entries.values,
     for (final function in _named.values)
       if (_isDefined.contains(function)) function,
   ];
@@ -53,8 +60,9 @@ final class TypeFunctions(
 
   /// The function that the runtime calls [name].
   HirFunction named(String name) => _named.putIfAbsent(name, () {
+    final table = _ofFunctions.where((table) => table.name == name);
     final function = switch (name) {
-      'typeOf' || 'receiverOf' || 'functionName' => HirFunction(
+      _ when name == 'typeOf' || table.isNotEmpty => HirFunction(
         name,
         const [.reference],
         .reference,
@@ -67,11 +75,7 @@ final class TypeFunctions(
       _ => HirFunction(name, const [.integer], .reference, false),
     };
     if (function.parameters case [.reference]) {
-      final selector = switch (name) {
-        'typeOf' => typeOf,
-        'receiverOf' => receiverOf,
-        _ => nameOf,
-      };
+      final selector = name == 'typeOf' ? typeOf : table.single.selector;
       _define(function, (builder) {
         final [object] = builder.inputs;
         final result = builder.call(HirVirtualCall(selector, object, const []));
@@ -115,23 +119,32 @@ final class TypeFunctions(
           return closure.typeValue(builder);
         }),
       );
-      _receiverOf.putIfAbsent(
-        closure.class_,
-        () => _entry('receiver of ${closure.class_.name}', (builder) {
-          return closure.isTearOff
-              ? closure.leading(builder, builder.inputs.single).single
-              : builder.add(HirNull());
-        }),
-      );
-      _nameOfFunction.putIfAbsent(
-        closure.class_,
-        () => _entry('text of ${closure.class_.name}', (builder) {
-          return builder.add(_scope.text(closure.text));
-        }),
-      );
+      for (final table in _ofFunctions) {
+        table.entries.putIfAbsent(closure.class_, () {
+          return _entry('${table.name} ${closure.class_.name}', (builder) {
+            return table.build(builder, closure);
+          });
+        });
+      }
     }
     return _typeOf.length > before;
   }
+
+  HirValue _receiverOf(FunctionBuilder builder, Closure closure) {
+    final object = builder.inputs.single;
+    if (closure.part case final part?) {
+      return builder.add(HirLoad(part.function, object));
+    }
+    if (!closure.isTearOff) return builder.add(HirNull());
+    final receiver = closure.leading(builder, object).single;
+    return Conversions(_scope, builder).coerce(receiver, .reference);
+  }
+
+  HirValue _typesOf(FunctionBuilder builder, Closure closure) => builder.add(
+    closure.types == null
+        ? HirNull()
+        : HirLoad(closure.types!, builder.inputs.single),
+  );
 
   /// The type of objects of [class_], which can be the only class of those of
   /// another one that programs know.

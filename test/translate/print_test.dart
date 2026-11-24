@@ -1,7 +1,7 @@
 import 'package:dartc/hir.dart';
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 void main() {
   void prints(String name, String source, String output) =>

@@ -139,12 +139,7 @@ final class HirInterpreter(
       case HirFloatBinary(:final operator):
         return _float(operator, inputs[0] as double, inputs[1] as double);
       case HirBoolBinary(:final operator):
-        final left = inputs[0] as bool, right = inputs[1] as bool;
-        return switch (operator) {
-          .and => left & right,
-          .or => left | right,
-          .xor => left ^ right,
-        };
+        return _bool(operator, inputs[0] as bool, inputs[1] as bool);
       case HirUnary(:final operator):
         final operand = inputs.single;
         return switch (operator) {
@@ -204,21 +199,40 @@ final class HirInterpreter(
       case HirClassNumber(:final target):
         return module.classes.indexOf(target);
       case HirLoad(:final field) || HirUnbox(:final field):
-        return _object(inputs[0], field).fields[field] ??
-            (throw StateError('${field.name} is not set.'));
+        return _load(field, inputs.single);
       case HirStore(:final field):
-        final object = _object(inputs[0], field);
-        object.checkWritable();
-        object.fields[field] = inputs[1];
+        _store(field, inputs[0], inputs[1]);
         return null;
-      case HirVirtualCall(:final selector, :final bound):
-        if (bound != null && !_passes(bound, inputs[0])) {
-          throw StateError('${inputs[0]} is no ${bound.name}.');
-        }
-        return _call(_implementation(selector, inputs[0]), inputs);
+      case HirVirtualCall():
+        return _callVirtual(instruction, inputs);
       case HirCall(:final target):
         return _call(target as HirFunction, inputs);
     }
+  }
+
+  static bool _bool(HirBoolOperator operator, bool left, bool right) =>
+      switch (operator) {
+        .and => left & right,
+        .or => left | right,
+        .xor => left ^ right,
+      };
+
+  Object _load(HirField field, Object object) =>
+      _object(object, field).fields[field] ??
+      (throw StateError('${field.name} is not set.'));
+
+  void _store(HirField field, Object given, Object value) {
+    final object = _object(given, field);
+    object.checkWritable();
+    object.fields[field] = value;
+  }
+
+  Object? _callVirtual(HirVirtualCall call, List<Object> inputs) {
+    final HirVirtualCall(:selector, :bound) = call;
+    if (bound != null && !_passes(bound, inputs[0])) {
+      throw StateError('${inputs[0]} is no ${bound.name}.');
+    }
+    return _call(_implementation(selector, inputs[0]), inputs);
   }
 
   bool _passes(HirTypeTest test, Object object) =>

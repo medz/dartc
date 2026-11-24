@@ -38,7 +38,10 @@ Future<void> main(List<String> arguments) async {
     if (names.isNotEmpty && !names.contains(name)) continue;
     final program = '${directory.path}/$name';
     final watch = Stopwatch()..start();
-    final bytes = await compileProgram(path, optimizations: optimizations);
+    final bytes = await compileProgram(
+      path,
+      CompileOptions(optimizations: optimizations),
+    );
     final compiling = watch.elapsedMilliseconds;
     writeProgram(bytes, program);
     Process.runSync(Platform.resolvedExecutable, [

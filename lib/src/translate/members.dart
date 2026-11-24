@@ -142,9 +142,28 @@ Implementation? memberNamed(
   return null;
 }
 
-/// Whether calls may give [parameter] of a method values that are not of its
+/// What [class_] or its supertypes declare that is called like [member].
+ExecutableElement declaredFor(
+  InterfaceElement class_,
+  ExecutableElement member,
+) {
+  final owner = member.enclosingElement;
+  if (owner is InterfaceElement && isSubclass(class_, owner)) return member;
+  for (final type in [class_.thisType, ...class_.allSupertypes]) {
+    final found = switch (member) {
+      GetterElement() => type.element.getGetter(member.name!),
+      SetterElement() => type.element.getSetter(member.name!),
+      _ => type.element.getMethod(member.name!),
+    };
+    if (found != null && !found.isStatic) return found;
+  }
+  return member;
+}
+
+/// Whether calls may give the parameter [declared] of a method values that are not of its
 /// type.
-bool isUnchecked(FormalParameterElement parameter) {
+bool isUnchecked(FormalParameterElement declared) {
+  final parameter = declared.baseElement;
   final method = parameter.enclosingElement;
   final owner = method?.enclosingElement;
   if (parameter.isCovariant || mentions(parameter.type, owner)) return true;

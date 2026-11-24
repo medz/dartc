@@ -1,10 +1,12 @@
 import 'dart:_heap/machine.dart' show addressOf, classNumber, isSame;
 import 'dart:_heap/numbers.dart' show sameObjects;
-import 'dart:_heap/program.dart' show functionName, receiverOf;
-import 'dart:_heap/types.dart' show objectClassName, objectTypeName;
+import 'dart:_heap/program.dart' show functionName, receiverOf, typesOf;
+import 'dart:_heap/types.dart'
+    show areSameTypes, hashOfTypes, objectClassName, objectTypeName;
 
 @patch
-bool identical(Object? a, Object? b) => sameObjects(a, b);
+bool identical(Object? a, Object? b) =>
+    sameObjects(a, b) || a is _Type && a == b;
 
 @patch
 int _getHash(obj) => addressOf(obj) >> 4;
@@ -38,19 +40,30 @@ class _Closure {
   @patch
   bool operator ==(Object other) {
     if (isSame(this, other)) return true;
-    final receiver = receiverOf(this);
-    return receiver != null &&
-        other is _Closure &&
-        classNumber(this) == classNumber(other) &&
-        isSame(receiver, receiverOf(other));
+    final receiver = receiverOf(this), types = typesOf(this);
+    if (receiver == null && types == null ||
+        other is! _Closure ||
+        classNumber(this) != classNumber(other)) {
+      return false;
+    }
+    final otherReceiver = receiverOf(other);
+    // The function that is given types can be a tear-off itself.
+    return (types == null
+            ? sameObjects(receiver, otherReceiver)
+            : receiver == otherReceiver) &&
+        areSameTypes(types, typesOf(other));
   }
 
   @patch
   int get hashCode {
     final receiver = receiverOf(this);
-    return receiver == null
-        ? addressOf(this) >> 4
-        : (addressOf(receiver) >> 4) + classNumber(this);
+    final types = typesOf(this);
+    if (types == null) {
+      return receiver == null
+          ? addressOf(this) >> 4
+          : identityHashCode(receiver) + classNumber(this);
+    }
+    return receiver.hashCode + classNumber(this) + hashOfTypes(types);
   }
 }
 

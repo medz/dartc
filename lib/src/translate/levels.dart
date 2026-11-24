@@ -41,9 +41,17 @@ final class LevelTable() {
     Level? found = superclass is ClassElement
         ? of(class_ is EnumElement ? _enum(superclass) : superclass)
         : null;
-    for (final mixin in class_.mixins) {
+    for (final mixin in class_.mixins.expand(_declaring)) {
       found = Level._(class_, mixin, found);
     }
     return Level._(class_, class_.thisType, found);
+  }
+
+  /// What declares the members of [mixin], which can be a name for others.
+  static Iterable<InterfaceType> _declaring(InterfaceType mixin) {
+    final element = mixin.element;
+    return element is ClassElement && element.isMixinApplication
+        ? mixin.mixins.expand(_declaring)
+        : [mixin];
   }
 }

@@ -9,7 +9,7 @@ import 'package:dartc/driver.dart';
 import 'package:test/test.dart';
 
 import '../image/support.dart' show skipExecution;
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 /// Checks that [source] prints for each of [commands] what it does officially.
 void _agrees(String name, String source, List<List<String>> commands) =>

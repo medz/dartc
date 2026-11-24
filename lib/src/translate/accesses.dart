@@ -3,11 +3,37 @@ import 'package:analyzer/dart/element/element.dart';
 
 /// What tells the member that [field] reads apart from others.
 String accessKey(PatternField field) {
-  final owner = field.element?.enclosingElement;
-  final isExtension = owner is ExtensionElement;
-  final name = field.effectiveName;
-  return isExtension ? '.${owner.hashCode} $name' : '.$name';
+  final owner = field.element?.enclosingElement, name = field.effectiveName;
+  if (owner is! ExtensionElement && owner is! ExtensionTypeElement) {
+    return '.$name';
+  }
+  final isGeneric = (owner as InstanceElement).typeParameters.isNotEmpty;
+  final pattern = field.parent;
+  // They can do different things for different types.
+  final type = isGeneric && pattern is ObjectPattern ? pattern.type.type : null;
+  return '.${owner.hashCode} ${type ?? ''} $name';
 }
+
+/// Whether [pattern] matches anything without looking at it.
+bool ignoresValue(DartPattern pattern) => switch (pattern.unParenthesized) {
+  WildcardPattern(:final type) => type == null,
+  LogicalAndPattern(:final leftOperand, :final rightOperand) =>
+    ignoresValue(leftOperand) && ignoresValue(rightOperand),
+  LogicalOrPattern(:final leftOperand) => ignoresValue(leftOperand),
+  _ => false,
+};
+
+/// Whether a property that [pattern] is for is not read. Unlike elements of
+/// lists, properties are read where nothing but any value is allowed.
+bool ignoresField(DartPattern pattern) =>
+    ignoresValue(pattern) && _hasOr(pattern);
+
+bool _hasOr(DartPattern pattern) => switch (pattern.unParenthesized) {
+  LogicalOrPattern() => true,
+  LogicalAndPattern(:final leftOperand, :final rightOperand) =>
+    _hasOr(leftOperand) && _hasOr(rightOperand),
+  _ => false,
+};
 
 /// What more than one of [patterns], or of their parts, get from the same
 /// value, as keys made of how they get there.

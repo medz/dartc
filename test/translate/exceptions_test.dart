@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 import 'support.dart';
 
 /// Classes to throw, and ways to do so.

@@ -10,7 +10,7 @@ import 'package:test/test.dart';
 
 import '../lower/support.dart';
 import '../support/hosts.dart';
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 /// The official runtime has shown that programs end.
 const _steps = 1 << 40;

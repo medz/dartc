@@ -47,7 +47,13 @@ final class TextTranslator(
             case InterpolationString(:final value):
               if (value.isNotEmpty) yield value;
             case InterpolationExpression(:final expression):
-              yield expression;
+              // Those inside are no values of their own.
+              final inner = expression.unParenthesized;
+              if (inner is StringLiteral) {
+                yield* _partsOf(inner);
+              } else {
+                yield expression;
+              }
           }
         }
     }

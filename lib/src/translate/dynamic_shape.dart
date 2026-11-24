@@ -22,4 +22,7 @@ final class DynamicShape(
 
   /// The type arguments given first.
   final int types = 0,
-});
+}) {
+  DynamicShape withTypes(int types) =>
+      DynamicShape(use, name, library, positional, named, reject, types: types);
+}

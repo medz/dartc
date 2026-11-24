@@ -56,6 +56,15 @@ final class _Assigned() extends RecursiveAstVisitor<void> {
   }
 
   @override
+  void visitForEachPartsWithIdentifier(ForEachPartsWithIdentifier node) {
+    final element = node.identifier.element;
+    if (element is VariableElement) {
+      variables.add(variableOf(element) as VariableElement);
+    }
+    super.visitForEachPartsWithIdentifier(node);
+  }
+
+  @override
   void visitAssignmentExpression(AssignmentExpression node) {
     _add(node);
     super.visitAssignmentExpression(node);

@@ -7,6 +7,7 @@ import 'builder.dart';
 import 'classes.dart';
 import 'closure_table.dart';
 import 'conversions.dart';
+import 'forwarders.dart' show viewedAt;
 import 'levels.dart';
 import 'members.dart';
 import 'scope.dart';
@@ -115,11 +116,14 @@ final class DispatchBuilder(
     List<String> named,
     Reject reject, {
     bool isUnboxed = false,
+    bool orForwarder = false,
   }) {
     final found = implementationIn(level, member);
-    if (found == null) return null;
+    if (found == null && !orForwarder) return null;
     final selector = _selector(member, positional, named, reject);
-    return _function(level, found, selector, isUnboxed: isUnboxed);
+    return found == null
+        ? _forwarder(level, member, selector)
+        : _function(level, found, selector, isUnboxed: isUnboxed);
   }
 
   /// How to get the method [member] of objects of [receiver].
@@ -238,7 +242,8 @@ final class DispatchBuilder(
     final shape = _shapes[selector]!;
     final own = implementationIn(level, shape.member);
     // Members that are not there are forwarded.
-    final found = own ?? (element: shape.member, level: level);
+    final found =
+        own ?? (element: declaredFor(class_, shape.member), level: level);
     if (_tearOffs.contains(selector)) {
       return _make(selector.name, selector, found.level, (builder, _) {
         final receiver = builder.inputs.first;
@@ -250,17 +255,27 @@ final class DispatchBuilder(
         );
       });
     }
-    if (own == null) {
-      return _adapt(
-        found,
-        selector,
-        shape,
-        _checkedParameters(class_, shape.member, shape),
-        isUnboxed: false,
-        isForwarder: true,
-      );
-    }
-    return _function(level, found, selector);
+    return own == null
+        ? _forwarder(level, found.element, selector)
+        : _function(level, found, selector);
+  }
+
+  /// What calls the `noSuchMethod` of objects of [level] for [member], which
+  /// they have.
+  HirFunction _forwarder(
+    Level level,
+    ExecutableElement member,
+    HirSelector selector,
+  ) {
+    final shape = _shapes[selector]!;
+    return _adapt(
+      (element: member, level: level),
+      selector,
+      shape,
+      _checkedParameters(level.class_, member, shape),
+      isUnboxed: false,
+      isForwarder: true,
+    );
   }
 
   /// What does the work of [found] for objects whose class is at [level].
@@ -360,6 +375,8 @@ final class DispatchBuilder(
     final isGeneric = found.typeParameters.isNotEmpty;
     final given = _given(found, shape.positional, shape.named);
     final parameters = found.formalParameters;
+    // What is not implemented here is declared by a supertype.
+    final viewed = isForwarder ? viewedAt(level, found) : found;
     HirValue argument(
       FunctionBuilder builder,
       Conversions conversions,
@@ -368,9 +385,10 @@ final class DispatchBuilder(
       final at = given.indexOf(parameter);
       if (at < 0) return builder.add(_scope.defaultOf(parameter));
       final value = builder.inputs[at + (isGeneric ? 2 : 1)];
-      final type = parameter.type;
-      if (!checked.contains(parameters.indexOf(parameter))) {
-        return conversions.coerce(value, valueType(type)!);
+      final place = parameters.indexOf(parameter);
+      final type = viewed.formalParameters[place].type;
+      if (!checked.contains(place)) {
+        return conversions.coerce(value, valueType(parameter.type)!);
       }
       return conversions.cast(
             value,
@@ -395,8 +413,18 @@ final class DispatchBuilder(
     final target = isForwarder
         ? _scope.forwarderOf(level, found)
         : _scope.memberOf(level, found);
+    // Objects with other type arguments may be used as having these.
+    final isBound =
+        !shape.isOwn &&
+        found.typeParameters.any(
+          (parameter) => switch (parameter.bound) {
+            final bound? => mentions(bound, found.enclosingElement),
+            null => false,
+          },
+        );
     final isSame =
         checked.isEmpty &&
+        !isBound &&
         (isUnboxed || target.parameters.first == .reference) &&
         given.length == parameters.length &&
         given.indexed.every((e) => e.$2 == parameters[e.$1]) &&
@@ -411,15 +439,23 @@ final class DispatchBuilder(
       builder,
       conversions,
     ) {
-      if (isGeneric) builder.bindTypes(found, builder.inputs[1]);
-      return builder.call(
-        HirCall(target, [
-          conversions.coerce(builder.inputs.first, target.parameters.first),
-          if (isGeneric) builder.inputs[1],
-          for (final parameter in parameters)
-            argument(builder, conversions, parameter),
-        ]),
-      );
+      if (isGeneric) {
+        builder
+          ..bindTypes(found, builder.inputs[1])
+          ..bindParameters(viewed.typeParameters, builder.inputs[1]);
+      }
+      if (isBound) {
+        conversions.checkBounds(
+          viewed.typeParameters,
+          owner: isForwarder ? null : found.enclosingElement,
+        );
+      }
+      return conversions.call(target, [
+        builder.inputs.first,
+        if (isGeneric) builder.inputs[1],
+        for (final parameter in parameters)
+          argument(builder, conversions, parameter),
+      ]);
     });
   }
 

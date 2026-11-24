@@ -6,6 +6,7 @@ import 'package:dartc/source.dart';
 import 'builder.dart';
 import 'conversions.dart';
 import 'scope.dart';
+import 'types.dart';
 
 /// Throws [CompileFailure] if [program] imports something in a way that is not
 /// supported yet.
@@ -35,9 +36,12 @@ final class EntryTranslator(
   /// Adds the call of `main`.
   void begin() {
     final conversions = Conversions(_scope, _builder);
+    final typeParameters = _element.typeParameters;
+    final isGeneric = typeParameters.isNotEmpty;
     var position = 0;
     HirValue argument(FormalParameterElement parameter) {
-      if (parameter.isNamed || position > 1) {
+      // Official programs pass nothing to a generic one.
+      if (parameter.isNamed || position > 1 || isGeneric) {
         return _builder.add(_scope.defaultOf(parameter));
       }
       final value = position++ == 0
@@ -53,7 +57,13 @@ final class EntryTranslator(
           (throw StateError('No test for ${parameter.type}.'));
     }
 
-    _builder.call(HirCall(_main, _element.formalParameters.map(argument)));
+    final types = defaultTypesOf(typeParameters, _element.library);
+    _builder.call(
+      HirCall(_main, [
+        if (isGeneric) _scope.typeList(_builder, types)!,
+        ..._element.formalParameters.map(argument),
+      ]),
+    );
   }
 
   /// Does what `main` left to be done later with [eventLoop], if there is

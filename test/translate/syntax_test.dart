@@ -122,4 +122,55 @@ void main() {
     String g(int n) => switch (n) { < 0 => 'neg', 0 || 1 => 'small', >= 10 && < 20 => 'teen', int x => 'other $x' };
     void main() { int? a = 5; if (a case final x?) print(x); a = null; if (a case final x?) { print(x); } else { print('null'); } Object o = 'text'; if (o case String s when s.length > 2) print(s); if (o case int n) print(n); else print('no'); for (final n in [-1, 0, 1, 15, 30]) print(g(n)); var t = 0; if (3 case var q when (t = q) > 2) t++; print(t); switch (o) { case String s when s.isEmpty: print('e'); case String _: print("s"); default: print('d'); } switch (7) { case > 5: print('big'); case 3: print('three'); } final fs = <int Function()>[]; for (var i = 0; i < 3; i++) { if (i case var k when k != 1) fs.add(() => k * 10); } print(fs.map((f) => f()).toList()); print(switch (o) { 'a' => 1, 'text' => 2, _ => 3 }); switch ('b') { case 'a': case 'b': print('ab'); case _: print('x'); } }
   ''');
+
+  group('collections and loops', () {
+    agrees('assign captured variables', r'''
+      Future<void> main() async {
+        var v = 0;
+        final read = () => v;
+        for (v in <int>[1, 2, 3]) {}
+        print((read(), v));
+        var w = 0;
+        var n = 0;
+        while (n++ < 2) { for (w in [n, n * 2]) { if (w == 4) break; } }
+        print(w);
+        var u = 'a'; final r2 = () => u;
+        await for (u in Stream.fromIterable(['x', 'y'])) { print(r2()); }
+        print((u, r2()));
+        late int z; final r3 = () => z;
+        for (z in [5]) {} print(r3());
+        num k = 0; void f() { for (k in <int>[4, 9]) {} } f(); print(k);
+        void g(int p) { final q = () => p; for (p in [8]) {} print(q()); } g(1);
+        final l = [for (v in [10, 11]) read()]; print(l);
+        final fs = <int Function()>[]; int m = 0; for (m in [1, 2]) { fs.add(() => m); } print(fs.map((f) => f()).toList());
+      }
+    ''');
+    agrees('spread all kinds of collections', r'''
+      class It extends Iterable<int> { final String n; It(this.n); Iterator<int> get iterator { print('$n iterator'); return [1, 2].iterator; } int get length { print('$n length'); return 2; } }
+      class EL implements List<int> { noSuchMethod(i) { print(i.memberName); if (i.memberName == #length) return 2; if (i.memberName == #iterator) return [5, 6].iterator; return null; } int operator [](int i) { print('[$i]'); return i; } }
+      class M implements Map<int, int> { noSuchMethod(i) { print(i.memberName); return null; } void forEach(void f(int a, int b)) { print('each'); f(1, 2); } Iterable<MapEntry<int, int>> get entries { print('entries'); return [MapEntry(3, 4)]; } }
+      void main() {
+        print([...It('a')]); print([0, ...It('b')]); print([...It('c'), 9]); List<num> l = [...It('d')]; print(l);
+        print({...It('e')}); print({0, ...It('f')}); 
+        Iterable? n; print([1, ...?n]); Iterable<int>? m = It('g'); print([...?m]);
+        dynamic d = It('h'); print(<int>[...d]); Iterable<Object> o = It('i'); print(<int>[...o.cast<int>()]);
+        print(<Object>[...o]);
+        try { Iterable<Object> bad = ['x']; print(<int>[...(bad as dynamic)]); } catch (e) { print(e); }
+        print({...M()}); print({0: 1, ...M()}); dynamic dm = M(); print(<int, int>{...dm}); 
+        print([...EL()]); print({...EL()});
+        final self = [1, 2]; print([...self, ...self]);
+        print([for (var i = 0; i < 2; i++) ...[i, i]]); print([if (self.length > 1) ...It('j') else 4]);
+      }
+    ''');
+  });
+
+  agrees('evaluates all parts before any is a string', r'''
+      class Trace { String log = ''; int v = 1; int first() { log += 'A'; return v; } S second() { log += 'B'; return S(this); } }
+      class S { final Trace t; S(this.t); String toString() { t.log += 'S'; t.v = 2; return '7'; } }
+      void main() {
+        final t = Trace();
+        print('${'${t.first()}'}${t.second()}${("x${t.first()}" 'y${t.second()}')}z'); print(t.log);
+        print('${'a'}'); print('${'a' 'b${1}'}'); print('${''}');
+      }
+  ''');
 }

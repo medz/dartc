@@ -1,16 +1,17 @@
 import 'dart:io';
 
-import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/session.dart';
 import 'package:analyzer/dart/ast/ast.dart';
-import 'package:analyzer/dart/ast/token.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/diagnostic/diagnostic.dart';
-import 'package:analyzer/file_system/file_system.dart' show ResourceProvider;
 import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:analyzer/source/line_info.dart';
+// Only this can be told about the environment.
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/analysis/analysis_context_collection.dart'
+    show AnalysisContextCollectionImpl;
 
 import 'problem.dart';
 import 'sdk.dart';
@@ -19,6 +20,7 @@ import 'sdk.dart';
 final class SourceUnit(
   final String path,
   final CompilationUnit ast,
+  final String content,
   final LineInfo _lines,
 ) {
   /// A problem at [offset] characters into the file.
@@ -69,8 +71,7 @@ Future<SourceProgram> loadProgram(
   final files = OverlayResourceProvider(PhysicalResourceProvider.INSTANCE);
   sdk.install(files);
   var (libraries, core) = await _resolveAll(resolved, sdk, files);
-  // Comments may hide errors from the analyzer, but they are errors still.
-  if (_disableIgnores(libraries, files)) {
+  if (_renameUnknown(libraries, files)) {
     (libraries, core) = await _resolveAll(resolved, sdk, files);
   }
   final problems = [
@@ -88,19 +89,28 @@ SourceLibrary _library(ResolvedLibraryResult result) =>
     SourceLibrary(result.element, result.units.map(_unit));
 
 SourceUnit _unit(ResolvedUnitResult result) =>
-    SourceUnit(result.path, result.unit, result.lineInfo);
+    SourceUnit(result.path, result.unit, result.content, result.lineInfo);
 
 /// The library at [path], then every library it reaches outside the SDK. Also
 /// the libraries of the SDK that can be compiled.
 Future<(List<ResolvedLibraryResult>, List<ResolvedLibraryResult>)> _resolveAll(
   String path,
   SdkSources sdk,
-  ResourceProvider files,
+  OverlayResourceProvider files,
 ) async {
-  final contexts = AnalysisContextCollection(
+  // Neither comments nor the options of a project hide errors.
+  final options = '${File(path).parent.path}/.dartc_options.yaml';
+  files.setOverlay(
+    options,
+    content: 'analyzer:\n  cannot-ignore: [error]\n',
+    modificationStamp: 0,
+  );
+  final contexts = AnalysisContextCollectionImpl(
     includedPaths: [path],
     sdkPath: sdk.root,
     resourceProvider: files,
+    optionsFile: options,
+    declaredVariables: sdk.environment,
   );
   try {
     final session = contexts.contextFor(path).currentSession;
@@ -144,32 +154,30 @@ Future<ResolvedLibraryResult> _resolve(
       : throw StateError('Unresolved library ${library.uri}.');
 }
 
-/// Overlays every file having ignore comments with a copy where they say
-/// something else of the same length. Returns whether there are any.
-bool _disableIgnores(
+/// What the analyzer takes to be unknown, though it is false for programs that
+/// are not compiled to JavaScript.
+final _unknown = RegExp(
+  r'''fromEnvironment\(\s*['"]dart\.library\.js_(?:interop|util)['"]''',
+);
+
+/// Overlays every file that asks for what is [_unknown] with a copy asking for
+/// something of the same length. Returns whether there are any.
+bool _renameUnknown(
   List<ResolvedLibraryResult> libraries,
   OverlayResourceProvider files,
 ) {
   var found = false;
   for (final unit in libraries.expand((library) => library.units)) {
-    final text = StringBuffer();
-    var copied = 0;
-    Token? token = unit.unit.beginToken;
-    while (token != null) {
-      Token? comment = token.precedingComments;
-      for (; comment != null; comment = comment.next) {
-        if (!comment.lexeme.contains('ignore')) continue;
-        text
-          ..write(unit.content.substring(copied, comment.offset))
-          ..write(comment.lexeme.replaceAll('ignore', 'IGNORE'));
-        copied = comment.end;
-      }
-      token = token.isEof ? null : token.next;
-    }
-    if (copied == 0) continue;
+    if (!unit.content.contains(_unknown)) continue;
     found = true;
-    text.write(unit.content.substring(copied));
-    files.setOverlay(unit.path, content: '$text', modificationStamp: 0);
+    files.setOverlay(
+      unit.path,
+      content: unit.content.replaceAllMapped(
+        _unknown,
+        (match) => match[0]!.replaceFirst('dart.library', 'none.library'),
+      ),
+      modificationStamp: 0,
+    );
   }
   return found;
 }

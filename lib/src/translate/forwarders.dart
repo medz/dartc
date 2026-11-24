@@ -27,7 +27,7 @@ final class ForwarderTable(
   HirFunction _make(Level level, ExecutableElement member) {
     Never reject(String what) => throw _declarations.unsupported(member, what);
     final isGeneric = member.typeParameters.isNotEmpty;
-    final resultType = viewedAt(level, member).returnType;
+    final viewed = viewedAt(level, member), resultType = viewed.returnType;
     final hasResult = !hasNoResult(resultType);
     final function = HirFunction(
       '${level.element.displayName}.${member.displayName}',
@@ -50,7 +50,11 @@ final class ForwarderTable(
       ownLevel: level,
       typeOwners: [if (isGeneric) member],
     );
-    final result = _call(builder, member, viewedAt(level, member));
+    if (builder.typesOf(member) case final types?) {
+      // As seen there, it has its own type parameters.
+      builder.bindParameters(viewed.typeParameters, types);
+    }
+    final result = _call(builder, member, viewed);
     if (hasResult) {
       final conversions = Conversions(_scope, builder);
       final dynamic = conversions.types.dynamicType;

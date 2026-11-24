@@ -24,6 +24,7 @@ import 'exports.dart';
 import 'expression.dart';
 import 'field_table.dart';
 import 'forwarders.dart';
+import 'function_objects.dart';
 import 'function_table.dart';
 import 'global_table.dart';
 import 'levels.dart';
@@ -43,8 +44,9 @@ import 'types.dart';
 /// Functions, classes and selectors only grow and are bounded by the source.
 final class ProgramTranslator(
   final SourceProgram program,
-  @override final Target target,
-) implements ProgramScope {
+  @override final Target target, {
+  @override required final bool checksAssertions,
+}) implements ProgramScope {
   SourceUnit get _unit => program.main.units.first;
   LibraryElement get _core =>
       program.main.element.typeProvider.objectElement.library;
@@ -60,7 +62,7 @@ final class ProgramTranslator(
     _core,
     boxElement,
     (uri) => _links.library(uri),
-    _functionConstant,
+    (element, type, given) => _objects.constant(element, type, given),
     (types) => _types.list(types),
     typeObject,
     _dispatch.instantiate,
@@ -253,25 +255,13 @@ final class ProgramTranslator(
           : element] !=
       null;
 
-  @override
-  HirConstObject? functionObject(ExecutableElement element) =>
-      !_declares(element)
-      ? null
-      : element.typeParameters.isEmpty
-      ? _closures.constant(element, null)
-      : _closures.generic(element);
+  late final _objects = FunctionObjects(_closures, _types, _declares);
 
-  /// The function [element] as a constant of [type].
-  HirConstObject? _functionConstant(ExecutableElement element, DartType type) {
-    if (!_declares(element) || type is! FunctionType) return null;
-    if (takesTypes(element) == null || type.typeParameters.isNotEmpty) {
-      return functionObject(element);
-    }
-    final types = _types.list(typeArgumentsOf(element, type));
-    return types == null
-        ? null
-        : _closures.constant(element, types.value as HirConstObject?);
-  }
+  @override
+  HirConstObject? functionObject(
+    ExecutableElement element,
+    FunctionType type,
+  ) => _objects.of(element, type);
 
   @override
   HirValue? instantiate(
@@ -279,19 +269,8 @@ final class ProgramTranslator(
     ExecutableElement element,
     List<DartType> types,
   ) {
-    if (!_declares(element)) return null;
-    if (_types.list(types) case final found?) {
-      return builder.add(
-        HirStatic(_closures.constant(element, found.value as HirConstObject?)),
-      );
-    }
-    final list = _types.listValue(builder, types);
-    if (list == null) return null;
     _needs.addAllocation();
-    final class_ = _closures.static(element).class_;
-    final object = builder.create(class_);
-    builder.add(HirStore(class_.fields.single, object, list));
-    return object;
+    return _objects.instantiate(builder, element, types);
   }
 
   @override
@@ -531,6 +510,7 @@ final class ProgramTranslator(
     List<String> named,
     Reject reject, {
     bool isUnboxed = false,
+    bool orForwarder = false,
   }) => _dispatch.functionAt(
     level,
     member,
@@ -538,6 +518,7 @@ final class ProgramTranslator(
     named,
     reject,
     isUnboxed: isUnboxed,
+    orForwarder: orForwarder,
   );
 
   @override
@@ -548,7 +529,10 @@ final class ProgramTranslator(
       _functions.of(element);
 
   @override
-  HirFunction factoryOf(ConstructorElement element) => _functions.of(element);
+  HirFunction factoryOf(ConstructorElement element) {
+    final name = RuntimeLinks.environmentFunction(element);
+    return name == null ? _functions.of(element) : runtime(name);
+  }
 
   @override
   HirClass createdClass(InterfaceElement element) {

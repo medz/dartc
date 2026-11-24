@@ -1,3 +1,5 @@
+import 'package:test/test.dart';
+
 import 'support.dart';
 
 const _tools = r'''
@@ -123,4 +125,32 @@ void main() {
   void local() => 9; print(pass(local)); d is Function ? f() : g(3); print(Function.apply(f, []));
 }
 ''');
+
+  group('methods of numbers', () {
+    agrees('can be used dynamically', r'''
+      Future<void> main() async {
+        dynamic n = 255;
+        print(n.toRadixString(16));
+        print(n.toString());
+        dynamic d = 2.5;
+        print(d.toStringAsFixed(2));
+        print((n.compareTo(3), d.compareTo(3), n.remainder(4), n.gcd(5), n.bitLength, n.isEven));
+        final c = n.compareTo; print(c(3));
+        dynamic b = true; print(b.toString());
+        print(n.modPow(3, 7));
+        print(n.toRadixString);
+        print(sync().runtimeType);
+        print(sync2() is Iterable<int>);
+        Iterable<Object> o = sync2(); print(o is Iterable<int>);
+        Iterable x = sync3(); print((x is Iterable<int>, x.runtimeType));
+        dynamic y = sync4(); print((y is Iterable<int>, ));
+        try { n.toRadixString('a'); } catch (e) { print(e.runtimeType); }
+      }
+      Iterable<int> sync2() sync* { yield 1; }
+      Iterable<T> gen<T>(T a) sync* { yield a; }
+      Iterable sync3() sync* { yield 1; }
+      sync4() sync* { yield 1; }
+      Object sync() sync* { yield 1; }
+    ''');
+  });
 }

@@ -42,9 +42,8 @@ class _List<E> {
   @patch
   factory _List(length) {
     final int count = length;
-    if (count < 0 || count > _maxLength) {
-      throw RangeError.range(count, 0, _maxLength, 'length');
-    }
+    if (count < 0) throw RangeError.range(count, 0, _maxLength, 'length');
+    if (count > _maxLength) throw const OutOfMemoryError();
     return newArray<_List<E>>(count);
   }
 
@@ -128,6 +127,10 @@ void _addElement(_GrowableList list, Object? value) {
   list._setIndexed(length, value);
 }
 
+void _addAllToList(List list, Iterable values) {
+  list.addAll(values);
+}
+
 Map<K, V> _newMap<K, V>() => LinkedHashMap<K, V>();
 Set<E> _newSet<E>() => LinkedHashSet<E>();
 
@@ -137,6 +140,14 @@ void _addToMap(Map map, Object? key, Object? value) {
 
 void _addToSet(Set set, Object? value) {
   set.add(value);
+}
+
+void _addAllToMap(Map map, Map values) {
+  map.addAll(values);
+}
+
+void _addAllToSet(Set set, Iterable values) {
+  set.addAll(values);
 }
 
 Iterable<MapEntry> _entriesOf(Map map) => map.entries;

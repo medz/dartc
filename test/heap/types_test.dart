@@ -6,7 +6,7 @@ import 'package:dartc/heap.dart';
 import 'package:dartc/src/translate/types.dart' show describeType;
 import 'package:test/test.dart';
 
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 const _classes = '''
 import 'dart:async';
@@ -128,6 +128,9 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   RuntimeType typeOf(Object object) => throw UnimplementedError();
   @override
   Object? receiverOf(Object function) => throw UnimplementedError();
+
+  @override
+  TypeList? typesOf(Object function) => throw UnimplementedError();
   @override
   String functionName(Object function) => throw UnimplementedError();
   @override

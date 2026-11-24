@@ -108,7 +108,12 @@ external bool isSubclassOfError(Object object);
 
 /// Calls [function] with [arguments], of which the first is itself and the last
 /// have [names].
-external Object? applyFunction(Object function, List arguments, List names);
+external Object? applyFunction(
+  Object function,
+  List arguments,
+  List names,
+  Object? types,
+);
 
 /// The `Uri` of the directory that paths start at.
 external Object currentUri();

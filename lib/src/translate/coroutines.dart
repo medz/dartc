@@ -61,7 +61,10 @@ final class CoroutineTranslator(
     if (owner == null) {
       return _builder.library.typeSystem.futureValueType(declared);
     }
-    final found = boundOf(declared);
+    final bound = boundOf(declared);
+    final found = bound.isDartAsyncFutureOr
+        ? boundOf((bound as InterfaceType).typeArguments.single)
+        : bound;
     return found is InterfaceType
         ? found.asInstanceOf(owner)?.typeArguments.single ?? types.dynamicType
         : types.dynamicType;

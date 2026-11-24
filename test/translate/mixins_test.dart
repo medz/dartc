@@ -1,3 +1,5 @@
+import 'package:test/test.dart';
+
 import 'support.dart';
 
 const _tools = r'''
@@ -62,4 +64,35 @@ void main() {
     class A { int f(int a) => a; int g({int x = 1}) => x; } mixin M on A { @override int f(int a, [int b = 2]) => super.f(a) + b; @override int g({int x = 2, int y = 3}) => super.g(x: x) * y; } mixin N on A { @override int f(int a, [int b = 5, int c = 7]) => super.f(a) + b * c; } class B extends A with M, N {}
     void main() { number(B().f(1)); number(B().f(1, 2, 3)); number(B().g()); number(B().g(y: 5)); A a = B(); number(a.f(4)); number(a.g(x: 9)); }
   ''');
+
+  group('members of other classes', () {
+    agrees('come from named mixins and noSuchMethod', r'''
+      mixin Box<T> { late T item; Type get kind => T; T echo(T x) => item = x; }
+      mixin class Nested<T> = Object with Box<T>;
+      mixin class Twice<T> = Object with Nested<List<T>>;
+      class Application<T>() with Twice<T>;
+      class Plain extends Nested<int> {}
+      abstract class Contract<T> { T value(T x, {int k = 3}); R generic<R extends T>(R x); Future<R> later<R>(FutureOr<R> f(T x)); set w(T x); T operator [](int i); }
+      class Missing implements Contract<int> { dynamic noSuchMethod(Invocation i) { print((i.memberName == #later, i.positionalArguments.length, i.namedArguments.length, i.typeArguments)); return i.isSetter ? null : i.memberName == #later ? Future<String>.value('x') : 5; } }
+      class Child extends Missing { int a() => super.value(1); int b() { final f = super.value; return f(2, k: 9); } int c() => super.generic<int>(7); int d() => super[3]; void e() { super.w = 8; } }
+      class Wide implements Map<int, int> { dynamic noSuchMethod(i) => 0; int get length => 1; }
+      class Other implements List<int> { dynamic noSuchMethod(i) => null; int get length => 2; }
+      Stream<int> events(int count) async* {
+        print('start');
+        try { for (var i = 0; i < count; i++) { try { yield i; } finally { print('inner $i'); } } } finally { print('outer'); }
+      }
+      FutureOr<Iterable<int>> union() sync* { yield 1; }
+      void main() async {
+        final a = Application<String>(); a.item = ['a']; print((a.item, a.kind, a.echo(['b']), a is Nested<List<String>>, a is Box<List<String>>, a is Twice<String>));
+        final p = Plain()..item = 4; print((p.item, p.kind));
+        final c = Child(); print((c.a(), c.b(), c.c(), c.d())); c.e();
+        Contract<num> n = Missing(); print(n.value(3)); try { n.value(1.5); } catch (e) { print(e); } try { n.w = 1.5; } catch (e) { print(e); }
+        print(await n.later<String>((x) => 'y')); dynamic d = n; print(await d.later<String>((int x) => 'y')); try { d.value('x'); } catch (e) { print(e); }
+        final t = n.value; print(t(4)); print(t is int Function(int)); try { (t as dynamic)('a'); } catch (e) { print(e); }
+        dynamic w = Wide(); try { w.addAll({1: 2}); w.addAll([1]); } catch (e) { print(e.runtimeType); } print((w as Wide).length); Other()..addAll([1])..add(2);
+        final s = events(2).listen((v) => print('v $v')); await s.cancel(); print('end');
+        print((union() as Iterable<int>).toList());
+      }
+    ''', imports: "import 'dart:async';");
+  });
 }

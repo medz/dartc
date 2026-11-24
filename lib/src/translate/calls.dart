@@ -41,13 +41,13 @@ final class CallTranslator(
     if (target != null && target.staticType is DynamicType) {
       return _dynamicCall(node, target);
     }
-    if (target?.staticType is FunctionType && !isExtensionMember(element)) {
-      return _callFunction(node, target!);
-    }
-    if (target != null &&
-        (target.staticType?.isDartCoreFunction ?? false) &&
-        node.methodName.name == 'call') {
-      return _dynamicCall(node, target);
+    final targetType = target?.staticType;
+    final bound = targetType == null ? null : boundOf(targetType);
+    if (node.methodName.name == 'call' && !isExtensionMember(element)) {
+      if (bound is FunctionType) return _callFunction(node, target!);
+      if (bound != null && bound.isDartCoreFunction) {
+        return _dynamicCall(node, target!);
+      }
     }
     if (element is! ExecutableElement) _unsupported(node, describe(node));
     if (_builder.typeOf(element.baseElement) != null) {
@@ -132,10 +132,6 @@ final class CallTranslator(
   }
 
   HirValue? _callFunction(MethodInvocation node, Expression target) {
-    if (node.methodName.name != 'call') {
-      final name = node.methodName.name;
-      _unsupported(node, 'calling $name of the SDK');
-    }
     final function = _evaluator.value(target);
     _chains.check(node, function);
     return _closures.call(
@@ -406,18 +402,20 @@ final class CallTranslator(
           _conversions.coerce(value, selector.parameters[i]),
       ], bound: bound),
     );
-    final owner = base.enclosingElement;
-    final mayBeNull =
-        !isSome &&
-        owner is ClassElement &&
-        owner.isDartCoreObject &&
-        receiver != _builder.receiver;
+    final mayBeNull = !isSome && _mayBeNull(receiver, base);
     if (mayBeNull && selector.result != null) {
       return _orNull(node, receiver, base, selector, arguments, call);
     }
     final result = call();
     if (isNever(element.returnType)) _builder.end(HirUnreachable());
     return result;
+  }
+
+  /// Whether [member] can be used on [receiver] even if that is null.
+  bool _mayBeNull(HirValue receiver, ExecutableElement member) {
+    final owner = member.enclosingElement;
+    final isThis = _builder.level != null && receiver == _builder.receiver;
+    return owner is ClassElement && owner.isDartCoreObject && !isThis;
   }
 
   static bool _isObject(InterfaceElement class_) =>
@@ -477,8 +475,8 @@ final class CallTranslator(
       values.length,
       names,
       (what) => _unsupported(node, what),
-    );
-    if (function == null) _unsupported(node, 'this use of super');
+      orForwarder: true,
+    )!;
     return _direct(function, element, [
       _this(node),
       ?types,
@@ -498,25 +496,44 @@ final class CallTranslator(
       return extensions.tearOff(node, (receiver, type), element);
     }
     _checkMember(node, element);
-    return _builder.call(
-      HirVirtualCall(
-        _scope.tearOffSelector(
-          element.baseElement,
-          classFor(type) ?? _unsupported(node, describe(node)),
-        ),
-        _conversions.coerce(receiver, .reference),
-        const [],
-      ),
+    final base = element.baseElement, owner = base.enclosingElement;
+    final object = _conversions.coerce(receiver, .reference);
+    final class_ = classFor(type) ?? _unsupported(node, describe(node));
+    HirValue ofObject() => _builder.call(
+      HirVirtualCall(_scope.tearOffSelector(base, class_), object, const []),
     )!;
+    final method = !_mayBeNull(receiver, base)
+        ? ofObject()
+        : _builder.choose(_conversions.isNull(object), .reference, () {
+            final level = _scope.levelOf(_conversions.types.nullType.element);
+            final found = implementationIn(level, base)!;
+            return _scope.tearOff(_builder, found, object);
+          }, ofObject);
+    // What its parameters have to be is checked where it is called.
+    final isKnown =
+        !mentions(base.returnType, owner, isTaken: true) &&
+        !boundsMention(base.typeParameters, owner);
+    if (isKnown) return method;
+    return _conversions.cast(
+          method,
+          _conversions.types.objectType,
+          element.type,
+        ) ??
+        _unsupported(node, 'testing for ${element.type}');
   }
 
   HirValue _methodOf(Expression node, Expression? target, MethodElement found) {
     final method = found.baseElement;
     if (target is SuperExpression) {
       _checkMember(node, method);
-      final found = implementationIn(_builder.level!.superLevel!, method);
-      if (found == null) _unsupported(node, 'this use of super');
-      return _scope.tearOff(_builder, found, _this(node));
+      final level = _builder.level!.superLevel!;
+      final found = implementationIn(level, method);
+      return _scope.tearOff(
+        _builder,
+        found ?? (element: method, level: level),
+        _this(node),
+        isForwarder: found == null,
+      );
     }
     final receiver = target == null ? _this(node) : object(target, node);
     return tearOff(node, receiver, receiverType(target, node), found);

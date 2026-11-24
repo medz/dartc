@@ -178,6 +178,28 @@ void main() {
       final module = HirModule(main, [main], classes: [box], integers: box);
       expect(_main(_optimized(module, 7)), isNot(contains('Box')));
     });
+
+    test('boxes are not taken for those of other values', () {
+      final number = HirField('value', .integer);
+      final numbers = HirClass('Number', null, [number]);
+      final fraction = HirField('value', .float);
+      final fractions = HirClass('Fraction', null, [fraction]);
+      final start = HirBlock(), never = HirBlock(), end = HirBlock();
+      final boxed = start.add(HirBox(fractions, start.add(HirConst(1.5))));
+      final time = start.add(HirMachine(.steadyTime, const []));
+      final isEarly = start.add(
+        HirCompare(.less, time, start.add(HirConst(0))),
+      );
+      start.end(HirBranch(isEarly, HirEdge(never), HirEdge(end)));
+      // The time tells the same as the class does elsewhere.
+      final value = never.add(HirUnbox(number, boxed));
+      final sum = never.add(HirIntBinary(.add, value, never.add(HirConst(1))));
+      never.end(HirExit(sum));
+      end.end(HirExit(end.add(HirConst(5))));
+      final main = HirFunction('main', const [])..define([start, never, end]);
+      final module = HirModule(main, [main], classes: [numbers, fractions]);
+      _optimized(module, 5);
+    });
   });
 
   group('calls', () {

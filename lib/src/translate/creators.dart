@@ -55,7 +55,7 @@ final class CreatorTable(final ProgramScope _scope, final SourceUnit _unit) {
       if (owner != null) .reference,
       for (final parameter in element.formalParameters)
         valueType(parameter.type)!,
-    ], .reference);
+    ], valueType(element.returnType));
     final builder = FunctionBuilder(
       _unit,
       function,
@@ -69,19 +69,13 @@ final class CreatorTable(final ProgramScope _scope, final SourceUnit _unit) {
     });
     final types = target.returnType.typeArguments;
     final base = target.baseElement, creator = of(base);
-    final arguments = [
+    final result = conversions.call(creator, [
       if (types.isNotEmpty) _scope.typeList(builder, types)!,
       for (final parameter in base.formalParameters)
         given[parameter] ?? builder.add(_scope.defaultOf(parameter)),
-    ];
-    final result = builder.call(
-      HirCall(creator, [
-        for (final (i, argument) in arguments.indexed)
-          conversions.coerce(argument, creator.parameters[i]),
-      ]),
-    );
+    ]);
     builder
-      ..end(HirReturn(result!))
+      ..end(HirReturn(conversions.coerce(result!, function.result!)))
       ..finish();
     return function;
   }

@@ -95,7 +95,8 @@ final class OperatorTranslator(
       BinaryExpression(:final element) ||
       AssignmentExpression(:final element) ||
       PrefixExpression(:final element) ||
-      PostfixExpression(:final element) => element,
+      PostfixExpression(:final element) ||
+      RelationalPattern(:final element) => element,
       _ => null,
     };
     if (element != null && isExtensionMember(element)) {

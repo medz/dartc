@@ -9,7 +9,7 @@ import 'package:dartc/driver.dart';
 import 'package:test/test.dart';
 
 import '../support/hosts.dart';
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 import 'ffi_programs.dart';
 import 'random_native.dart';
 
@@ -31,8 +31,7 @@ Future<void> _agrees(String source, String c, {bool isLong = false}) async {
       writeProgram(
         await compileProgram(
           path,
-          target: host.target,
-          collectsAlways: collectsAlways,
+          CompileOptions(target: host.target, collectsAlways: collectsAlways),
         ),
         program,
       );

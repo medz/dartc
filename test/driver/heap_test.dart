@@ -10,7 +10,7 @@ import 'package:dartc/driver.dart';
 import 'package:test/test.dart';
 
 import '../image/support.dart' show skipExecution;
-import '../support/new_compiler.dart';
+import '../support/compiler.dart';
 
 /// Runs [source], which must print `ok`, compiled and officially, giving the
 /// most memory that the compiled program used in bytes.
@@ -24,7 +24,7 @@ Future<int> _run(String source, {bool collectsAlways = false}) async {
   final program = '${directory.path}/program';
   final bytes = await compileProgram(
     '${directory.path}/main.dart',
-    collectsAlways: collectsAlways,
+    CompileOptions(collectsAlways: collectsAlways),
   );
   writeProgram(bytes, program);
   final result = await Process.run('/usr/bin/time', ['-l', program]);
@@ -143,7 +143,7 @@ void main() {
     Future<Uint8List> compile(String source, {bool always = false}) {
       final directory = writeSources({'main.dart': source});
       final path = '${directory.path}/main.dart';
-      return compileProgram(path, collectsAlways: always);
+      return compileProgram(path, CompileOptions(collectsAlways: always));
     }
 
     const source =

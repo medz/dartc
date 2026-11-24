@@ -1,11 +1,15 @@
-/// Builds native programs and libraries from checked Dart declarations.
+/// Compilation from Dart source to native programs and libraries.
 library;
 
-export 'src/compiler/compiler.dart' show Compiler, Compilation;
-export 'src/compiler/output.dart'
+export 'package:dartc/driver.dart'
     show
-        Output,
-        ExecutableOutput,
-        ObjectOutput,
-        StaticLibraryOutput,
-        SharedLibraryOutput;
+        CompileOptions,
+        LibraryKind,
+        compileLibrary,
+        compileProgram,
+        hostTarget,
+        writeOutput,
+        writeProgram;
+export 'package:dartc/native.dart' show Architecture, OperatingSystem, Target;
+export 'package:dartc/optimize.dart' show Optimization;
+export 'package:dartc/source.dart' show CompileFailure, SourceProblem;

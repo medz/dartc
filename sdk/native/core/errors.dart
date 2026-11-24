@@ -1,7 +1,7 @@
 // What the language itself throws.
 import 'dart:_heap/objects.dart' show isSubclassOfError, throwWith;
 import 'dart:_heap/type_objects.dart' show RuntimeType, TypeList;
-import 'dart:_heap/types.dart' show objectTypeName, typeName;
+import 'dart:_heap/types.dart' show isSubtype, objectTypeName, typeName;
 import 'dart:_internal' show LateError, writeText;
 
 Never _throwDivisionByZero() => throw const IntegerDivisionByZeroException();
@@ -15,14 +15,31 @@ Never _throwNull() =>
 
 _TypeError _typeError(String message) => _TypeError._create('', 0, 0, message);
 
-Never _throwCast(Object? value, String type, String ending) =>
-    throw _typeError(
-      "type '${objectTypeName(value)}' is not a subtype of type "
-      "'$type'$ending",
-    );
+Never _throwCast(Object? value, String type, String ending) => throw _typeError(
+  "type '${objectTypeName(value)}' is not a subtype of type "
+  "'$type'$ending",
+);
 
 Never _throwCastTo(Object? value, RuntimeType type, String ending) =>
     _throwCast(value, typeName(type), ending);
+
+/// Throws unless [type], which is given for the type parameter [name], is
+/// within [bound].
+void _checkBound(RuntimeType type, RuntimeType bound, String name) {
+  if (isSubtype(type, bound)) return;
+  throw _typeError(
+    "type '${typeName(type)}' is not a subtype of type "
+    "'${typeName(bound)}' of '$name'",
+  );
+}
+
+Never _throwAssertion(
+  String text,
+  String uri,
+  int line,
+  int column,
+  Object? message,
+) => throw _AssertionError._create(text, uri, line, column, message);
 
 Never _throwLate(String message) => throw LateError(message);
 

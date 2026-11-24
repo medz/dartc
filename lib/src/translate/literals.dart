@@ -46,9 +46,12 @@ final class LiteralTranslator(
     final list = _call('listOf', [types, _array(first)])!;
     if (isPlain) return list;
     for (final element in node.elements) {
-      _element(element, [type], (values) {
-        _call('addElement', [list, values.single]);
-      });
+      _element(
+        element,
+        [type],
+        (values) => _call('addElement', [list, values.single]),
+        addAll: (values) => _call('addAllToList', [list, values]),
+      );
     }
     return list;
   }
@@ -58,19 +61,26 @@ final class LiteralTranslator(
     final kind = node.isMap ? 'Map' : 'Set';
     final result = _call('new$kind', [_types(node)])!;
     for (final element in node.elements) {
-      _element(element, arguments, (values) {
-        _call('addTo$kind', [result, ...values]);
-      });
+      _element(
+        element,
+        arguments,
+        (values) => _call('addTo$kind', [result, ...values]),
+        addAll: (values) => _call('addAllTo$kind', [result, values]),
+      );
     }
     return result;
   }
 
-  /// Evaluates [node], giving each value or pair, of [types], to [add].
+  /// Evaluates [node], giving each value or pair, of [types], to [add], or a
+  /// collection that only has such to [addAll].
   void _element(
     CollectionElement node,
     List<DartType> types,
-    void Function(List<HirValue> values) add,
-  ) {
+    void Function(List<HirValue> values) add, {
+    required void Function(HirValue values) addAll,
+  }) {
+    void inner(CollectionElement node) =>
+        _element(node, types, add, addAll: addAll);
     switch (node) {
       case Expression():
         add([_evaluator.valueAsObject(node, types.single)]);
@@ -83,9 +93,9 @@ final class LiteralTranslator(
         _patterns.choose(
           node,
           (expression, caseClause),
-          () => _element(node.thenElement, types, add),
+          () => inner(node.thenElement),
           () {
-            if (node.elseElement case final other?) _element(other, types, add);
+            if (node.elseElement case final other?) inner(other);
           },
         );
       case ForElement(
@@ -101,15 +111,27 @@ final class LiteralTranslator(
         _loops.eachOfStream(
           node,
           forLoopParts,
-          () => _element(body, types, add),
+          () => inner(body),
           within: (_, _) {},
           protect: (body, last) => tries.protect(node, body, last),
         );
       case ForElement(:final forLoopParts, :final body):
-        _loops.translate(node, forLoopParts, () => _element(body, types, add));
+        _loops.translate(node, forLoopParts, () => inner(body));
       case SpreadElement(:final expression):
         final whole = _evaluator.value(expression, placeholder: .reference);
-        void spread() => types.length == 1
+        final from = _builder.library.typeSystem.promoteToNonNull(
+          expression.staticType!,
+        );
+        final provider = _conversions.types;
+        final collection = types.length == 1
+            ? provider.iterableType(types.single)
+            : provider.mapType(types[0], types[1]);
+        final fits =
+            from is! DynamicType &&
+            _builder.library.typeSystem.isSubtypeOf(from, collection);
+        void spread() => fits
+            ? addAll(whole)
+            : types.length == 1
             ? _spread(node, whole, types.single, add)
             : _spreadMap(node, whole, types, add);
         node.isNullAware ? _unlessNull(node, [whole], spread) : spread();

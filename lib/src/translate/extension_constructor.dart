@@ -35,7 +35,7 @@ final class ExtensionConstructorTranslator(
     if (body != null && body is! EmptyFunctionBody) {
       _builder
         ..setReceiver(value, null)
-        ..thisType = _type
+        ..thisType = owner.thisType
         ..fallback = () => value;
       _statements.body(body);
     }
@@ -66,6 +66,8 @@ final class ExtensionConstructorTranslator(
             element,
             expressions.calls.supplied(initializer.argumentList),
           );
+        case AssertInitializer():
+          _statements.assertions.check(initializer);
         case _:
           break;
       }
