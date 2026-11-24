@@ -1,4 +1,6 @@
-.dart_tool
-pubspec.lock
-build
 .DS_Store
+.dart_tool
+
+build
+
+pubspec.lock

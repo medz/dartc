@@ -1,7 +1,3 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 dartc is an ahead-of-time compiler for Dart, written in Dart. It makes executables, object files, static and shared libraries for macOS ARM64, Linux ARM64 and Linux x64, without a C compiler or linker. Use Dart SDK 3.14.0.
 
 `ARCHITECTURE.md` (in Chinese) has the design and the decisions behind it; `PLAN.md` (in Chinese) has the progress and known limits. What is not done is in the GitHub issues. Read the matching rows of ARCHITECTURE §5 before changing how something works, and update them when it changes.
