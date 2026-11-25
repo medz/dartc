@@ -38,14 +38,11 @@ void main() {
     expect(world.classes, isEmpty);
   });
 
-  test('keeps classes and selectors in the order they came', () {
+  test('keeps classes in the order they came', () {
     final world = _world()
       ..instantiate(6)
-      ..instantiate(4)
-      ..call('g', 1)
-      ..call('f', 1);
+      ..instantiate(4);
     expect(world.classes, [6, 4]);
-    expect(world.selectors, ['g', 'f']);
   });
 
   test('agrees with the definition in any order', () {

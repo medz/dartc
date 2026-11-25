@@ -50,13 +50,6 @@ final class HirClass(
 
   /// Every field of an object, starting with the superclass's.
   List<HirField> get fields => [...?superclass?.fields, ...ownFields];
-
-  bool isSubclassOf(HirClass other) {
-    for (HirClass? found = this; found != null; found = found.superclass) {
-      if (found == other) return true;
-    }
-    return false;
-  }
 }
 
 /// A question about the class of an object, told apart by itself.
