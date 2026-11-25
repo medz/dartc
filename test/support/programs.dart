@@ -32,15 +32,27 @@ void programs(String area) {
       },
       _ => {'main.dart': File(entity.path).readAsStringSync()},
     };
-    test(name, () => _check(sources), timeout: const Timeout.factor(6));
+    test(name, () async {
+      final expected = Expectations.of(sources['main.dart']!);
+      expect(expected.isTold, isTrue, reason: 'nothing is expected');
+      // Outside the package, as users have them.
+      await _check('${writeSources(sources).path}/main.dart', expected);
+    }, timeout: const Timeout.factor(6));
   }
 }
 
-Future<void> _check(Map<String, String> sources) async {
-  final expected = Expectations.of(sources['main.dart']!);
-  expect(expected.isTold, isTrue, reason: 'nothing is expected');
-  // Outside the package, as users have them.
-  final path = '${writeSources(sources).path}/main.dart';
+/// Checks that [source], which is generated, does what the official Dart says,
+/// at every level, and when collecting always.
+Future<void> compareGenerated(String source) async {
+  final path = '${writeSources({'main.dart': source}).path}/main.dart';
+  final official = await Process.run('$hostSdk/bin/dart', ['run', path]);
+  expect(official.exitCode, 0, reason: '${official.stderr}');
+  expect(official.stdout, isNotEmpty);
+  final output = Expectations.linesOf('${official.stdout}');
+  await _check(path, Expectations(output: output));
+}
+
+Future<void> _check(String path, Expectations expected) async {
   if (expected.isRefused) {
     final elsewhere = expected.elsewhere;
     final fails = elsewhere == null

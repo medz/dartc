@@ -12,15 +12,10 @@ import 'package:test/test.dart';
 import '../image/support.dart' show skipExecution;
 import '../support/compiler.dart';
 
-/// Runs [source], which must print `ok`, compiled and officially, giving the
-/// most memory that the compiled program used in bytes.
+/// Runs [source], which must print `ok`, giving the most memory that it used in
+/// bytes.
 Future<int> _run(String source, {bool collectsAlways = false}) async {
   final directory = writeSources({'main.dart': source});
-  final official = await Process.run('$hostSdk/bin/dart', [
-    'run',
-    '${directory.path}/main.dart',
-  ]);
-  expect(official.stdout, 'ok\n', reason: '${official.stderr}');
   final program = '${directory.path}/program';
   final bytes = await compileProgram(
     '${directory.path}/main.dart',

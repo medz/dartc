@@ -7,5 +7,5 @@ void main() {
   for (var i = 0; i < 1000; i++) {
     cell.value = cell.value + i;
   }
-  print(cell.value);
+  print(cell.value); // expect: 499500
 }

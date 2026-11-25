@@ -44,7 +44,7 @@ final class const Expectations({
     String? elsewhere;
     for (final (i, line) in const LineSplitter().convert(source).indexed) {
       final found = _comment.firstMatch(line);
-      if (found == null || found.start > 0) code = i + 1;
+      if (line.substring(0, found?.start).trim().isNotEmpty) code = i + 1;
       if (found == null) continue;
       if (found[3] == null) isTold = true;
       final text = found[2] ?? '';
