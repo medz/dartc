@@ -93,7 +93,6 @@ final class ClosureTranslator(
     _scope.addClosure(
       Closure(
         class_,
-        element.type,
         element.formalParameters,
         () => function,
         (_, self) => [self],

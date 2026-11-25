@@ -197,6 +197,18 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         return builder.inputs.first;
       });
     }
+    if (closure.part case final part? when shape.types == 0) {
+      return _make(selector.name, selector, (builder, _) {
+        final [self, ...given] = builder.inputs;
+        return builder.call(
+          HirVirtualCall(
+            selectorOf(shape.withTypes(part.count)),
+            builder.add(HirLoad(part.function, self)),
+            [builder.add(HirLoad(part.types, self)), ...given],
+          ),
+        );
+      });
+    }
     final count = closure.typeParameters.length;
     if (shape.types > 0 && shape.types != count ||
         !accepts(closure.parameters, shape.positional, shape.named)) {
@@ -204,18 +216,6 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     }
     return _make(selector.name, selector, (builder, conversions) {
       final self = builder.inputs.first;
-      if (closure.part case final part?) {
-        return builder.call(
-          HirVirtualCall(
-            selectorOf(shape.withTypes(part.count)),
-            builder.add(HirLoad(part.function, self)),
-            [
-              builder.add(HirLoad(part.types, self)),
-              ...builder.inputs.sublist(1),
-            ],
-          ),
-        );
-      }
       closure.bindTypes(builder, self);
       return conversions.call(closure.target(), [
         ...closure.leading(builder, self),

@@ -9,7 +9,6 @@ import 'builder.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'closure.dart';
-import 'constant_table.dart';
 import 'dynamic_shape.dart';
 import 'levels.dart';
 import 'members.dart';
@@ -45,9 +44,6 @@ abstract interface class ProgramScope() {
   /// The class of objects that values of [type] are without boxes.
   ClassElement boxElement(HirType type);
 
-  /// What the annotation `@pragma` of [element] says about [name].
-  String? pragmaOf(Element element, String name);
-
   /// A top-level variable or static field, or null if the program does not
   /// declare it.
   GlobalVariable? globalOf(PropertyInducingElement element);
@@ -82,13 +78,11 @@ abstract interface class ProgramScope() {
   /// How functions are called with a list of arguments and one of names.
   HirSelector get applySelector;
 
-  /// The generic [function] with a list of type arguments and their number,
-  /// which then is of [type].
+  /// The generic [function] with a list of type arguments and their number.
   HirValue partial(
     FunctionBuilder builder,
     HirValue function,
     (HirValue, int) types,
-    FunctionType type,
   );
 
   /// The object that [element], as a function of [type], is, if the program
@@ -180,9 +174,6 @@ abstract interface class ProgramScope() {
 
   /// The list of [types], or null if one of them is generic.
   HirValue? typeList(FunctionBuilder builder, List<DartType> types);
-
-  /// The object for [types] if they are closed.
-  Constant? constantTypes(List<DartType> types);
 
   /// A list of [type] that holds [values] and does not grow.
   HirValue list(FunctionBuilder builder, DartType type, List<HirValue> values);

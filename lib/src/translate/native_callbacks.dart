@@ -52,7 +52,6 @@ final class NativeCallbackTable(
       ..addClosure(
         Closure(
           class_,
-          declared,
           declared.formalParameters,
           () => body,
           (_, self) => [self],

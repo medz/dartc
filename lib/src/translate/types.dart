@@ -58,17 +58,6 @@ bool isTop(DartType declared) {
       type.isDartCoreObject && type.nullabilitySuffix == .question;
 }
 
-/// Whether a value of a type can be a number.
-bool canBeNumber(DartType declared) {
-  final type = boundOf(declared);
-  return isTop(type) ||
-      type.isDartCoreObject ||
-      type is InterfaceType &&
-          (type.isDartAsyncFutureOr ||
-              _isNumeric(type.element) ||
-              type.element.name == 'Comparable');
-}
-
 /// Whether the type given is that of numbers, without null.
 bool isNumber(DartType? declared) {
   if (declared == null || declared.nullabilitySuffix != .none) return false;

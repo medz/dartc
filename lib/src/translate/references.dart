@@ -70,7 +70,7 @@ final class ReferenceTranslator(
     if (type is! FunctionType || list == null) {
       _unsupported(node, describe(node));
     }
-    return _scope.partial(_builder, function, (list, types.length), type);
+    return _scope.partial(_builder, function, (list, types.length));
   }
 
   HirValue _instantiate(

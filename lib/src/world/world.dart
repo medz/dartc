@@ -17,9 +17,6 @@ final class World<C extends Object, S extends Object>(
   /// The classes with objects, in the order they were found.
   List<C> get classes => List.unmodifiable(_classes);
 
-  /// The selectors called, in the order they were found.
-  List<S> get selectors => List.unmodifiable(_receivers.keys);
-
   /// Records that objects of class [created] can exist.
   void instantiate(C created) {
     if (!_classes.add(created)) return;

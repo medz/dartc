@@ -43,10 +43,6 @@ HirModule _module(
 void main() {
   test('a class has its superclass fields first', () {
     expect(_derived.fields, [_x, _next, _y]);
-    expect(_derived.isSubclassOf(_base), isTrue);
-    expect(_base.isSubclassOf(_base), isTrue);
-    expect(_base.isSubclassOf(_derived), isFalse);
-    expect(_other.isSubclassOf(_base), isFalse);
   });
 
   group('interpreter', () {

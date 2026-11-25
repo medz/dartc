@@ -109,7 +109,6 @@ final class CoroutineTranslator(
       ..addClosure(
         Closure(
           class_,
-          found,
           found.formalParameters,
           () => function,
           (_, self) => [self],
@@ -152,12 +151,7 @@ final class CoroutineTranslator(
           _ => type,
         },
       );
-      builder.coroutine = Coroutine(
-        kind,
-        suspend,
-        builder.inputs[1],
-        builder.inputs[2],
-      );
+      builder.coroutine = Coroutine(kind, suspend, builder.inputs[1]);
       for (final parameter in own) {
         if (builder.typeOf(parameter) != null) builder.renew(parameter);
       }

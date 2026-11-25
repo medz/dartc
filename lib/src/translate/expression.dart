@@ -548,10 +548,6 @@ final class ExpressionTranslator(
     );
   }
 
-  /// Whether the constant [node] equals [value].
-  HirValue equal(Expression node, (HirValue, DartType) value) => _operators
-      .binary(node, '==', (this.value(node), node.staticType!), value);
-
   /// The type of the values that [node] has, which never are there if that
   /// cannot have any.
   DartType _resultType(Expression node) {

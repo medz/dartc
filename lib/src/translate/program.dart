@@ -366,9 +366,6 @@ final class ProgramTranslator(
   }
 
   @override
-  Constant? constantTypes(List<DartType> types) => _types.list(types);
-
-  @override
   HirField? argumentsOf(Level level) => _classes.argumentsOf(level);
 
   /// Makes the classes that describe types part of the program.
@@ -419,10 +416,9 @@ final class ProgramTranslator(
     FunctionBuilder builder,
     HirValue function,
     (HirValue, int) types,
-    FunctionType type,
   ) {
     _needs.addAllocation();
-    return _closures.partial(builder, function, types, type);
+    return _closures.partial(builder, function, types);
   }
 
   @override
@@ -487,10 +483,6 @@ final class ProgramTranslator(
   @override
   String? operationOf(ExecutableElement element) =>
       RuntimeLinks.operationOf(element);
-
-  @override
-  String? pragmaOf(Element element, String name) =>
-      _declarations.pragmaOf(element, name);
 
   @override
   bool declares(InstanceElement class_) =>

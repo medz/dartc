@@ -75,6 +75,29 @@ final class _Application(
   );
 
   HirFunction build() {
+    final result = switch (_closure.part) {
+      null => _applyIfFits(),
+      final part => _applyPart(part),
+    };
+    _builder
+      ..end(HirReturn(result))
+      ..finish();
+    return _function;
+  }
+
+  /// Leaves it to the function inside, which tells what fits.
+  HirValue _applyPart(Part part) {
+    final [self, arguments, names, _] = _builder.inputs;
+    return _builder.call(
+      HirVirtualCall(_selector, _builder.add(HirLoad(part.function, self)), [
+        arguments,
+        names,
+        _builder.add(HirLoad(part.types, self)),
+      ]),
+    )!;
+  }
+
+  HirValue _applyIfFits() {
     final [self, arguments, names, _] = _builder.inputs;
     final all = _closure.parameters;
     final positional = all.where((p) => p.isPositional).toList();
@@ -86,32 +109,14 @@ final class _Application(
       _names(all.where((p) => p.isNamed)),
       _names(all.where((p) => p.isRequiredNamed)),
     ]);
-    final result = _builder.choose(
-      fits,
-      .reference,
-      () => _apply(positional),
-      () {
-        final name = _text(_closure.name);
-        return _call('applyMissing', [self, arguments, names, name]);
-      },
-    );
-    _builder
-      ..end(HirReturn(result))
-      ..finish();
-    return _function;
+    return _builder.choose(fits, .reference, () => _apply(positional), () {
+      final name = _text(_closure.name);
+      return _call('applyMissing', [self, arguments, names, name]);
+    });
   }
 
   HirValue _apply(List<FormalParameterElement> positional) {
     final [self, arguments, names, given] = _builder.inputs;
-    if (_closure.part case (:final function, :final types, count: _)) {
-      return _builder.call(
-        HirVirtualCall(_selector, _builder.add(HirLoad(function, self)), [
-          arguments,
-          names,
-          _builder.add(HirLoad(types, self)),
-        ]),
-      )!;
-    }
     _closure.bindTypes(_builder, self);
     final types = _closure.typeParameters;
     HirValue? list;
