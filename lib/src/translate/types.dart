@@ -16,7 +16,7 @@ HirType? valueType(DartType declared) {
           type is RecordType ||
           type is TypeParameterType ||
           type.isDartCoreNull ||
-          type is NeverType && !isNever(type) ||
+          type is NeverType ||
           type.isDartAsyncFutureOr ||
           classOf(type) != null
       ? .reference
@@ -252,12 +252,6 @@ String _describeFunction(
   final generic = own.isEmpty ? '' : '<${own.join(', ')}>';
   return '$generic${parts.join()}';
 }
-
-/// Whether a function returning [type] gives its caller nothing to use.
-///
-/// Where the result is of type `void`, there can be one, which a caller that
-/// does not know that type uses.
-bool hasNoResult(DartType type) => isNever(type);
 
 /// Whether expressions of [type] never give a value.
 bool isNever(DartType? type) =>

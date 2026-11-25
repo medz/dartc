@@ -88,6 +88,10 @@ final class OperatorTranslator(
       final equal = _equal(node, leftOperand, rightOperand);
       return operator == '==' ? equal : _builder.add(HirUnary(.not, equal));
     }
+    if (isNever(boundOf(leftType))) {
+      _builder.end(HirUnreachable());
+      return left;
+    }
     if (leftType is DynamicType) {
       return _dynamics.operate(node, left, operator, [right]);
     }

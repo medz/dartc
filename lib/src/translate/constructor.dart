@@ -23,9 +23,6 @@ final class ConstructorTranslator(
   void initializer(ConstructorElement element) {
     final class_ = element.enclosingElement;
     final parts = partsOf(_declarations[element]?.$2);
-    if (element.isExternal) {
-      throw _declarations.unsupported(element, 'external constructors');
-    }
     final (:initializers, :body) = parts;
     for (final redirect
         in initializers.whereType<RedirectingConstructorInvocation>()) {

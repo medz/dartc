@@ -253,10 +253,12 @@ final class LoopTranslator(
   /// The type of the elements of something of [type].
   DartType elementType(DartType type) {
     final iterable = _conversions.types.iterableElement;
-    final found = switch (boundOf(type)) {
-      final InterfaceType type => type.asInstanceOf(iterable),
-      _ => null,
-    };
-    return found?.typeArguments.single ?? _conversions.types.dynamicType;
+    return switch (boundOf(type)) {
+          final InterfaceType type =>
+            type.asInstanceOf(iterable)?.typeArguments.single,
+          final NeverType type => type,
+          _ => null,
+        } ??
+        _conversions.types.dynamicType;
   }
 }

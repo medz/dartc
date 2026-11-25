@@ -153,11 +153,9 @@ final class DispatchBuilder(
     return selector;
   }
 
-  HirType? _result(ExecutableElement member, Reject reject) {
-    if (hasNoResult(member.returnType)) return null;
-    return valueType(member.returnType) ??
-        reject('a result of type ${member.returnType}');
-  }
+  HirType _result(ExecutableElement member, Reject reject) =>
+      valueType(member.returnType) ??
+      reject('a result of type ${member.returnType}');
 
   /// The parameters of [member] that calls of a shape give, in their order.
   static List<FormalParameterElement> _given(
@@ -306,6 +304,11 @@ final class DispatchBuilder(
     ExecutableElement found,
     _Shape shape,
   ) {
+    // They are not implemented, so they need no value.
+    if (variableOfAccessor(found) case final variable?
+        when isExternalVariable(variable)) {
+      return const [];
+    }
     final system = found.library.typeSystem;
     final parameters = found.formalParameters;
     final checked = <int>{};

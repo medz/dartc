@@ -8,6 +8,7 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/src/dart/constant/value.dart'
     show DartObjectImpl, FunctionState;
 import 'package:dartc/hir.dart';
+import 'package:dartc/source.dart';
 
 import 'classes.dart';
 import 'members.dart';
@@ -341,10 +342,11 @@ final class ConstantTable(
       for (final field in ClassTable.instanceFields(element)) {
         // Mixins cannot declare fields for constants.
         if (level.isMixin) return null;
-        // The analyzer puts the name of an enum's constant in its place.
-        if (class_ is EnumElement && field.name == '_name') return null;
+        final name = class_ is EnumElement && field.name == '_name'
+            ? enumNameField
+            : field.name!;
         final place = _classes.fieldOf(level, field).value;
-        final value = of(place.type, part?.getField(field.name!));
+        final value = of(place.type, part?.getField(name));
         if (value == null) return null;
         fields[place] = value.value;
       }

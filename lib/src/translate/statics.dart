@@ -41,8 +41,8 @@ final class StaticTranslator(
       _unsupported(node);
     }
     final HirFunction? getter;
-    if (element.isOriginVariable) {
-      final variable = _scope.globalOf(element.variable) ?? _unsupported(node);
+    if (_variableOf(element) case final found?) {
+      final variable = _scope.globalOf(found) ?? _unsupported(node);
       getter = variable.getter;
       if (getter == null) return _builder.add(HirLoadGlobal(variable.global));
     } else {
@@ -51,23 +51,31 @@ final class StaticTranslator(
     return _builder.call(HirCall(getter, const [])) ?? _unsupported(node);
   }
 
+  /// The variable that [accessor] uses, if that is not external.
+  static PropertyInducingElement? _variableOf(ExecutableElement accessor) {
+    final variable = variableOfAccessor(accessor);
+    return variable == null || isExternalVariable(variable) ? null : variable;
+  }
+
   /// Whether the program declares [setter].
-  bool declares(SetterElement setter) => setter.isOriginVariable
-      ? _scope.globalOf(setter.variable) != null
-      : _scope.functionOf(setter) != null;
+  bool declares(SetterElement setter) => switch (_variableOf(setter)) {
+    final variable? => _scope.globalOf(variable) != null,
+    null => _scope.functionOf(setter) != null,
+  };
 
   /// Writes with a setter that the program declares.
   void write(SetterElement setter, HirValue value) {
-    if (!setter.isOriginVariable) {
+    final variable = _variableOf(setter);
+    if (variable == null) {
       _builder.call(HirCall(_scope.functionOf(setter)!, [value]));
       return;
     }
-    final GlobalVariable(:global, :isSet) = _scope.globalOf(setter.variable)!;
+    final GlobalVariable(:global, :isSet) = _scope.globalOf(variable)!;
     if (isSet == null) {
       _builder.add(HirStoreGlobal(global, value));
     } else {
       final storage = GlobalStorage(global, isSet);
-      LateAccess(_scope, _builder, setter.variable, storage).write(value);
+      LateAccess(_scope, _builder, variable, storage).write(value);
     }
   }
 }

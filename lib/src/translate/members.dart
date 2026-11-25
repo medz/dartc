@@ -2,6 +2,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
 import 'levels.dart';
+import 'native_types.dart';
 import 'types.dart';
 
 /// Whether [element] is a member of objects, rather than of a class or library.
@@ -90,14 +91,35 @@ bool _isAbstract(ExecutableElement member) =>
     member.isAbstract || (fieldOfAccessor(member)?.isAbstract ?? false);
 
 /// The field that an implicit getter or setter reads or writes.
-FieldElement? fieldOfAccessor(ExecutableElement member) => switch (member) {
-  PropertyAccessorElement(
-    isOriginVariable: true,
-    :final FieldElement variable,
-  ) =>
-    variable,
-  _ => null,
+FieldElement? fieldOfAccessor(ExecutableElement member) =>
+    switch (variableOfAccessor(member)) {
+      final FieldElement field when !isExternalVariable(field) => field,
+      _ => null,
+    };
+
+/// The variable that declares [member], a getter or setter.
+PropertyInducingElement? variableOfAccessor(ExecutableElement member) =>
+    switch (member) {
+      PropertyAccessorElement(isOriginVariable: true, :final variable) =>
+        variable,
+      _ => null,
+    };
+
+/// Whether [variable] is only a getter and maybe a setter, which are external.
+///
+/// External fields of structs and unions are fields, in memory that C knows.
+bool isExternalVariable(PropertyInducingElement variable) => switch (variable) {
+  TopLevelVariableElement(:final isExternal) => isExternal,
+  FieldElement(isExternal: true, :final isStatic, :final enclosingElement) =>
+    isStatic || !NativeTypes.isCompound(enclosingElement),
+  _ => false,
 };
+
+/// Whether [member] is declared without saying what it does.
+bool isExternalMember(ExecutableElement member) {
+  final variable = variableOfAccessor(member);
+  return variable == null ? member.isExternal : isExternalVariable(variable);
+}
 
 /// Every member of the superclasses and interfaces of [class_] that a member
 /// like [member] overrides.

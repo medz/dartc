@@ -84,10 +84,8 @@ final class ClosureTranslator(
           valueType(parameter.type) ??
               _unsupported(node, 'a parameter of type ${parameter.type}'),
       ],
-      hasNoResult(element.returnType)
-          ? null
-          : valueType(element.returnType) ??
-                _unsupported(node, 'a result of type ${element.returnType}'),
+      valueType(element.returnType) ??
+          _unsupported(node, 'a result of type ${element.returnType}'),
     );
     _scope.addLocalFunction(function);
     _scope.addClosure(

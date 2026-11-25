@@ -1,1 +1,6 @@
-external void main(); // error 21: Not supported yet: a function without a body.
+external void main();
+// stderr: Unhandled exception:
+// stderr: NoSuchMethodError: No top-level method 'main' declared.
+// stderr: Receiver: top-level
+// stderr: Tried calling: main()
+// exit: 255

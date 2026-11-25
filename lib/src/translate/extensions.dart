@@ -1,8 +1,11 @@
+// Some imports here alone tell the type arguments of the extensions used.
+// ignore_for_file: implementation_imports
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/token.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
-// Only this tells the type arguments of the extensions used.
-// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/member.dart'
+    show SubstitutedElementImpl;
 import 'package:analyzer/src/dart/resolver/applicable_extensions.dart'
     show ExtensionsExtensions;
 import 'package:dartc/hir.dart';
@@ -27,8 +30,14 @@ final class ExtensionTranslator(
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
-  /// The type arguments that [owner] has where a value of [type] is used.
-  List<DartType> _typesOf(AstNode node, InstanceElement owner, DartType type) {
+  /// The type arguments that [owner] has where [node] uses [element] on a value
+  /// of [type].
+  List<DartType> _typesOf(
+    AstNode node,
+    ExecutableElement element,
+    InstanceElement owner,
+    DartType type,
+  ) {
     if (owner is ExtensionTypeElement) {
       final found = switch (type) {
         TypeParameterType(:final bound) => bound,
@@ -36,21 +45,58 @@ final class ExtensionTranslator(
       };
       return (found as InterfaceType).asInstanceOf(owner)!.typeArguments;
     }
+    // Elements whose types need no type arguments do not tell them.
+    if (_override(node, element)?.typeArgumentTypes case final types?) {
+      return types;
+    }
+    if (element case SubstitutedElementImpl(:final substitution)) {
+      return [
+        for (final parameter in owner.typeParameters)
+          substitution.map[parameter]!,
+      ];
+    }
     owner as ExtensionElement;
     final found = [owner]
         .applicableTo(targetLibrary: _builder.library, targetType: type)
         .single;
+    final defaults = defaultTypesOf(owner.typeParameters, _builder.library);
     return [
-      for (final parameter in owner.typeParameters)
-        if (_mentions(owner.extendedType, parameter))
-          found.substitution.map[parameter]!
-        else
-          _unsupported(
-            node,
-            'an extension that does not use its ${parameter.name}',
-          ),
+      for (final (i, parameter) in owner.typeParameters.indexed)
+        _mentions(owner.extendedType, parameter)
+            ? found.substitution.map[parameter]!
+            : _builder.typesOf(owner) == null
+            ? defaults[i]
+            : parameter.instantiate(nullabilitySuffix: .none),
     ];
   }
+
+  /// What [node] uses [element] on, if it names the extension.
+  static ExtensionOverride? _override(AstNode node, ExecutableElement element) {
+    final isPlace = element is! MethodElement || element.name!.startsWith('[');
+    final on = switch (node) {
+      AssignmentExpression(leftHandSide: final place) ||
+      PostfixExpression(operand: final place) ||
+      PrefixExpression(
+        operator: Token(type: TokenType.PLUS_PLUS || TokenType.MINUS_MINUS),
+        operand: final place,
+      ) => isPlace ? _target(place) : null,
+      BinaryExpression(:final leftOperand) => leftOperand,
+      _ => _target(node),
+    };
+    return switch (on?.unParenthesized) {
+      final ExtensionOverride override => override,
+      _ => null,
+    };
+  }
+
+  static Expression? _target(AstNode node) => switch (node) {
+    MethodInvocation(:final target) ||
+    PropertyAccess(:final target) ||
+    IndexExpression(:final target) => target,
+    PrefixExpression(:final operand) => operand,
+    FunctionExpressionInvocation(:final function) => function,
+    _ => null,
+  };
 
   static bool _mentions(DartType type, TypeParameterElement parameter) =>
       switch (type) {
@@ -70,7 +116,7 @@ final class ExtensionTranslator(
   HirValue? _types(AstNode node, ExecutableElement element, DartType? type) {
     final owner = takesExtensionTypes(element.baseElement);
     if (owner == null) return null;
-    final types = _typesOf(node, owner, type!);
+    final types = _typesOf(node, element, owner, type!);
     return _scope.typeList(_builder, types) ??
         _unsupported(node, 'these type arguments');
   }

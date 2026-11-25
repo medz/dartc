@@ -3,10 +3,10 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/native.dart';
 
-/// The field of a struct or union: how it is declared, where it is, and what
-/// it is.
+/// The field of a struct or union, or a variable of C: how it is declared, where
+/// it is, and what it is.
 typedef NativeField = ({
-  FieldElement element,
+  PropertyInducingElement element,
   int offset,
   NativeType type,
 
@@ -117,6 +117,18 @@ final class NativeTypes(final Target target) {
     return made;
   }
 
+  /// Whether [element] is a struct or union.
+  static bool isCompound(Element? element) =>
+      element is InterfaceElement &&
+      element.allSupertypes.any(
+        (type) =>
+            isFfi(type.element) &&
+            const ['Struct', 'Union'].contains(type.element.name),
+      );
+
+  static bool _isNative(Element? element) =>
+      element?.name == 'Native' && isFfi(element);
+
   /// Whether [field], or its getter, is in memory that C knows.
   static bool _isExternal(FieldElement field) =>
       field.isExternal || (field.getter?.isExternal ?? false);
@@ -127,7 +139,19 @@ final class NativeTypes(final Target target) {
     return _fields[owner]?.where((f) => f.element == field).firstOrNull;
   }
 
-  (NativeType?, List<int>) _fieldType(FieldElement field) {
+  /// What the external variable [element] is in C.
+  NativeField? variable(PropertyInducingElement element) =>
+      switch (_fieldType(element)) {
+        (final type?, final dimensions) => (
+          element: element,
+          offset: 0,
+          type: type,
+          dimensions: dimensions,
+        ),
+        _ => null,
+      };
+
+  (NativeType?, List<int>) _fieldType(PropertyInducingElement field) {
     final type = field.type;
     if (type is InterfaceType &&
         isFfi(type.element) &&
@@ -148,20 +172,25 @@ final class NativeTypes(final Target target) {
     final own = of(type);
     if (own != null) return (own, const []);
     for (final value in _annotationsOf(field)) {
-      final given = value.type;
+      final given = switch (value.type) {
+        InterfaceType(:final element, :final typeArguments)
+            when _isNative(element) =>
+          typeArguments.single,
+        final type => type,
+      };
       final found = given == null ? null : of(given);
       if (found != null) return (found, const []);
     }
     return (null, const []);
   }
 
-  static Iterable<DartObject> _annotationsOf(FieldElement field) => [
+  static Iterable<DartObject> _annotationsOf(PropertyInducingElement field) => [
     ...field.metadata.annotations,
     ...?field.getter?.metadata.annotations,
   ].map((annotation) => annotation.computeConstantValue()).nonNulls;
 
   /// The elements of each dimension of the array [field].
-  static List<int>? _dimensionsOf(FieldElement field) {
+  static List<int>? _dimensionsOf(PropertyInducingElement field) {
     for (final value in _annotationsOf(field)) {
       if (value.type?.element?.name != '_ArraySize') continue;
       final all = value.getField('dimensions')?.toListValue();
@@ -213,8 +242,7 @@ final class NativeTypes(final Target target) {
 ({String symbol, String asset})? nativeAnnotation(Element element) {
   for (final annotation in element.metadata.annotations) {
     final value = annotation.computeConstantValue();
-    final type = value?.type?.element;
-    if (type?.name != 'Native' || !NativeTypes.isFfi(type)) continue;
+    if (!NativeTypes._isNative(value?.type?.element)) continue;
     final symbol = value!.getField('symbol')?.toStringValue();
     final asset = value.getField('assetId')?.toStringValue();
     return (
@@ -229,9 +257,7 @@ final class NativeTypes(final Target target) {
 DartType? nativeTypeOf(Element element) {
   for (final annotation in element.metadata.annotations) {
     final type = annotation.computeConstantValue()?.type;
-    if (type is InterfaceType &&
-        type.element.name == 'Native' &&
-        NativeTypes.isFfi(type.element)) {
+    if (type is InterfaceType && NativeTypes._isNative(type.element)) {
       return type.typeArguments.single;
     }
   }

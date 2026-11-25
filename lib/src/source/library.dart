@@ -7,6 +7,7 @@ import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/source/line_info.dart';
 
 import 'analysis.dart';
+import 'corrected_text.dart';
 import 'corrections.dart';
 import 'problem.dart';
 import 'sdk.dart';

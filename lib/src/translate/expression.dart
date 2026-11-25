@@ -133,6 +133,7 @@ final class ExpressionTranslator(
   @override
   void effect(Expression node) {
     final inner = node.unParenthesized;
+    if (_endsWithin(inner)) return;
     if (_chains.isWhole(inner)) {
       _chains.translate(inner, null, () {
         effect(inner);
@@ -148,7 +149,7 @@ final class ExpressionTranslator(
       case FunctionExpressionInvocation():
         closures.invocation(inner);
       case ConditionalExpression(:final DartType staticType)
-          when hasNoResult(staticType):
+          when isNever(staticType):
         final exit = _builder.join(inner);
         void run(Expression part) {
           effect(part);
@@ -194,7 +195,11 @@ final class ExpressionTranslator(
   HirValue value(Expression node, {HirType placeholder = .integer}) {
     final result = _value(node, placeholder);
     final type = node.staticType;
-    if (type == null || isNever(type)) return result;
+    if (type == null) return result;
+    if (isNever(type)) {
+      _builder.end(HirUnreachable());
+      return _builder.placeholder(placeholder);
+    }
     final representation = valueType(type);
     return representation == null
         ? result
@@ -212,10 +217,7 @@ final class ExpressionTranslator(
         () => _conversions.coerce(_value(inner, result), result),
       )!;
     }
-    if (isNever(type)) {
-      _never(inner);
-      return _builder.placeholder(placeholder);
-    }
+    if (_endsWithin(inner)) return _builder.placeholder(placeholder);
     switch (inner) {
       case Literal():
         return _literal(inner);
@@ -271,9 +273,42 @@ final class ExpressionTranslator(
         return result;
       case SwitchExpression():
         return patterns.switchExpression(inner, _resultType(inner));
+      case ThrowExpression(:final expression):
+        _throw(expression);
+        return _builder.placeholder(placeholder);
+      case RethrowExpression():
+        final (exception, trace) = _builder.caught.last;
+        _builder.raise(exception, trace);
+        return _builder.placeholder(placeholder);
       default:
         _unsupported(inner, describe(inner));
     }
+  }
+
+  /// Whether what [node] uses never gives a value, which is evaluated then.
+  bool _endsWithin(Expression node) {
+    final part = switch (node) {
+      PrefixedIdentifier(:final prefix) => prefix,
+      PropertyAccess(:final target) ||
+      MethodInvocation(:final target) ||
+      IndexExpression(:final target) => target,
+      BinaryExpression(:final leftOperand) => leftOperand,
+      PrefixExpression(:final operand) ||
+      PostfixExpression(:final operand) => operand,
+      FunctionExpressionInvocation(:final function) => function,
+      AssignmentExpression(:final leftHandSide) => switch (leftHandSide) {
+        PrefixedIdentifier(:final prefix) => prefix,
+        PropertyAccess(:final target) ||
+        IndexExpression(:final target) => target,
+        _ => null,
+      },
+      _ => null,
+    };
+    final type = part?.staticType;
+    if (type == null || !isNever(boundOf(type))) return false;
+    value(part!);
+    _builder.end(HirUnreachable());
+    return true;
   }
 
   /// A function that is a value.
@@ -400,37 +435,6 @@ final class ExpressionTranslator(
     });
     _builder.enter(exit);
     return result;
-  }
-
-  /// Evaluates [inner], which gives no value.
-  void _never(Expression inner) {
-    switch (inner) {
-      case MethodInvocation():
-        calls.invocation(inner);
-      case DotShorthandInvocation():
-        calls.shorthand(inner);
-      case ThrowExpression(:final expression):
-        _throw(expression);
-      case FunctionExpressionInvocation():
-        closures.invocation(inner);
-      case AwaitExpression():
-        _coroutine.awaitExpression(inner);
-        _builder.end(HirUnreachable());
-      case RethrowExpression():
-        final (exception, trace) = _builder.caught.last;
-        _builder.raise(exception, trace);
-      case BinaryExpression():
-        _binary(inner);
-        _builder.end(HirUnreachable());
-      case ConditionalExpression():
-        _conditional(inner);
-        _builder.end(HirUnreachable());
-      case SwitchExpression():
-        patterns.switchExpression(inner, _resultType(inner));
-        _builder.end(HirUnreachable());
-      default:
-        _unsupported(inner, describe(inner));
-    }
   }
 
   void _throw(Expression expression) {

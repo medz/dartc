@@ -44,12 +44,6 @@ final class GlobalTable(
     if (declared == null) return null;
     CompileFailure unsupported(String what) =>
         _declarations.unsupported(element, what);
-    final isExternal = switch (element) {
-      FieldElement() => element.isExternal,
-      TopLevelVariableElement() => element.isExternal,
-      _ => false,
-    };
-    if (isExternal) throw unsupported('external variables');
     final type =
         valueType(element.type) ??
         (throw unsupported('a variable of type ${element.type}'));

@@ -3,37 +3,8 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
-/// Another text for a part of a file.
-typedef Edit = ({int offset, int end, String text});
-
-/// The text of a file that the analyzer is given in place of [original], so
-/// that it evaluates constants as the official compiler does.
-final class CorrectedText(final String original, final List<Edit> _edits) {
-  late final String text = () {
-    final result = StringBuffer();
-    var at = 0;
-    for (final (:offset, :end, :text) in _edits) {
-      result
-        ..write(original.substring(at, offset))
-        ..write(text);
-      at = end;
-    }
-    return '$result${original.substring(at)}';
-  }();
-
-  /// Where in [original] is what is at [offset] of [text], or where the edit
-  /// that made it starts.
-  int originalOffset(int offset) {
-    var shift = 0;
-    for (final edit in _edits) {
-      final start = edit.offset + shift;
-      if (offset < start) break;
-      if (offset < start + edit.text.length) return edit.offset;
-      shift += edit.text.length - (edit.end - edit.offset);
-    }
-    return offset - shift;
-  }
-}
+import 'corrected_text.dart';
+import 'enum_names.dart';
 
 /// What the analyzer takes to be unknown, though it is false for programs that
 /// are not compiled to JavaScript.
@@ -46,7 +17,10 @@ final _unknown = RegExp(
 CorrectedText? correctionsOf(CompilationUnit unit, String content) {
   final visitor = _Comparisons(content);
   unit.accept(visitor);
+  final names = EnumNames((node) => _Comparisons(content)._part(node));
+  unit.declarations.accept(names);
   final edits = [
+    ...names.edits,
     for (final match in _unknown.allMatches(content))
       if (!visitor.edits.any(
         (edit) => edit.offset < match.end && match.start < edit.end,

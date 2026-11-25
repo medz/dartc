@@ -10,6 +10,7 @@ import 'constructor.dart';
 import 'coroutine.dart';
 import 'coroutines.dart';
 import 'extension_constructor.dart';
+import 'external.dart';
 import 'levels.dart';
 import 'members.dart';
 import 'origins.dart';
@@ -65,8 +66,8 @@ final class FunctionTable(
                 )),
         ],
         isInitializer ||
-                hasNoResult(result) ||
-                result is VoidType && RuntimeLinks.isRuntime(element.library)
+                (result is VoidType || isNever(result)) &&
+                    RuntimeLinks.isRuntime(element.library)
             ? null
             : valueType(result) ??
                   (throw _declarations.unsupported(
@@ -109,7 +110,12 @@ final class FunctionTable(
       cellClass: _scope.cellClass,
     );
     final statements = StatementTranslator(_scope, builder);
-    if (isInitializerElement(element)) {
+    final isExternal = isExternalMember(element);
+    if (isExternal && _scope.natives.define(builder, element)) {
+      // It does only what C does.
+    } else if (isExternal && !element.library.isInSdk) {
+      throwExternal(_scope, builder, element);
+    } else if (isInitializerElement(element)) {
       ConstructorTranslator(
         _scope,
         _declarations,
@@ -133,11 +139,7 @@ final class FunctionTable(
         ConstructorDeclaration(:final body) => body,
         _ => throw StateError('Unexpected declaration $node.'),
       };
-      final isNative =
-          element.isExternal && _scope.natives.define(builder, element);
-      if (isNative) {
-        // It does only what the function of C does.
-      } else if (CoroutineKind.of(body) case final kind?) {
+      if (CoroutineKind.of(body) case final kind?) {
         CoroutineTranslator(
           _scope,
           builder,

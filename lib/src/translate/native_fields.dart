@@ -8,7 +8,7 @@ import 'native_types.dart';
 import 'native_values.dart';
 import 'scope.dart';
 
-/// Uses the fields that structs and unions have in memory.
+/// Uses the fields that structs and unions have in memory, and variables of C.
 final class NativeFields(
   final ProgramScope _scope,
   final FunctionBuilder _builder,
@@ -25,16 +25,15 @@ final class NativeFields(
     HirIntBinary(.add, _values.addressOf(object), _number(field.offset)),
   );
 
-  /// Reads [field] of [object].
-  HirValue load(NativeField field, HirValue object) {
+  /// Reads [field] of [object], or what [object] points to.
+  HirValue load(NativeField field, HirValue object, {bool isPointer = false}) {
     final (:element, :offset, :type, :dimensions) = field;
     if (type is! NativeCompound && type is! NativeArray) {
       return _values.loadScalar(_address(object, field), type, element.type);
     }
-    final base = _call('baseOf', [object]);
-    final start = _builder.add(
-      HirIntBinary(.add, _call('offsetOf', [object]), _number(offset)),
-    );
+    final base = isPointer ? object : _call('baseOf', [object]);
+    final from = isPointer ? _number(0) : _call('offsetOf', [object]);
+    final start = _builder.add(HirIntBinary(.add, from, _number(offset)));
     if (type is NativeCompound) return _values.wrap(base, element.type, start);
     final own = (element.type as InterfaceType).typeArguments;
     final integers = _conversions.types.intType;
@@ -49,7 +48,7 @@ final class NativeFields(
     ], types: _scope.typeList(_builder, own));
   }
 
-  /// Assigns [value] to [field] of [object].
+  /// Assigns [value] to [field] of [object], or to what [object] points to.
   void store(NativeField field, HirValue object, HirValue value) {
     final (element: _, :offset, :type, dimensions: _) = field;
     switch (type) {
