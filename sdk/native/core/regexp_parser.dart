@@ -3,7 +3,8 @@
 /// Reads a regular expression.
 final class _RegExpParser {
   final String _source;
-  final bool _isMultiLine, _isFolded, _isUnicode, _isDotAll;
+  final bool _isUnicode;
+  bool _isMultiLine, _isFolded, _isDotAll;
   int _at = 0;
 
   /// The groups before here, and all.
@@ -99,8 +100,8 @@ final class _RegExpParser {
   _Matcher _term() {
     if (_takes('^')) return _EdgeMatcher(false, _isMultiLine);
     if (_takes(r'$')) return _EdgeMatcher(true, _isMultiLine);
-    if (_takes(r'\b')) return const _WordMatcher(false);
-    if (_takes(r'\B')) return const _WordMatcher(true);
+    if (_takes(r'\b')) return _WordMatcher(false, _allWords);
+    if (_takes(r'\B')) return _WordMatcher(true, _allWords);
     if (_takes('(?<=')) return _look(isBehind: true, isNegative: false);
     if (_takes('(?<!')) return _look(isBehind: true, isNegative: true);
     final groups = _groups;
@@ -149,14 +150,7 @@ final class _RegExpParser {
       }
     }
     final isGreedy = !_takes('?');
-    return _RepeatMatcher(
-      atom,
-      least,
-      most,
-      isGreedy,
-      firstGroup,
-      _groups + 1,
-    );
+    return _RepeatMatcher(atom, least, most, isGreedy, firstGroup, _groups + 1);
   }
 
   /// Reads `{least,most}`, if it is here.
@@ -226,11 +220,15 @@ final class _RegExpParser {
     return unit;
   }
 
+  /// What `\w` is.
+  List<int> get _allWords =>
+      _isFolded && _isUnicode ? _foldedRanges(_words, true) : _words;
+
   _Matcher _character(int character) {
     if (!_isFolded) {
       return _CharacterMatcher(character, _isUnicode, _isBackward);
     }
-    final folded = _foldCharacter(character);
+    final folded = _foldCharacter(character, _isUnicode);
     return _FoldedMatcher(folded, _isUnicode, _isBackward);
   }
 
@@ -240,19 +238,61 @@ final class _RegExpParser {
     if (_takes('?<')) {
       _at = _source.indexOf('>', _at) + 1;
     } else if (_takes('?')) {
-      _fail('Invalid group');
+      return _flagGroup();
     }
     final index = ++_groups;
     return _GroupMatcher(_inGroup(), index, _isBackward);
   }
 
-  _ClassMatcher _ranges(List<int> ranges, {bool isNegated = false}) =>
-      _ClassMatcher(ranges, isNegated, _isFolded, _isUnicode, _isBackward);
+  /// A group that changes some of what is meant, for what is in it.
+  _Matcher _flagGroup() {
+    final wasFolded = _isFolded;
+    final wasMultiLine = _isMultiLine;
+    final wasDotAll = _isDotAll;
+    final seen = <int>{};
+    var isOn = true;
+    while (!_takes(':')) {
+      final flag = _here;
+      switch (flag) {
+        case 45:
+          if (!isOn) _fail('Multiple dashes in flag group');
+          isOn = false;
+          _at++;
+          continue;
+        case 105:
+          _isFolded = isOn;
+        case 109:
+          _isMultiLine = isOn;
+        case 115:
+          _isDotAll = isOn;
+        default:
+          _fail('Invalid group');
+      }
+      if (!seen.add(flag)) _fail('Repeated flag in flag group');
+      _at++;
+    }
+    if (seen.isEmpty) _fail('Invalid flag group');
+    final result = _inGroup();
+    _isFolded = wasFolded;
+    _isMultiLine = wasMultiLine;
+    _isDotAll = wasDotAll;
+    return result;
+  }
+
+  _ClassMatcher _ranges(List<int> ranges, {bool isNegated = false}) {
+    final ordered = _orderedRanges(ranges);
+    return _ClassMatcher(
+      _isFolded ? _foldedRanges(ordered, _isUnicode) : ordered,
+      isNegated,
+      _isUnicode,
+      _isBackward,
+    );
+  }
 
   /// What is after a backslash.
   _Matcher _escape() {
     if (_isDone) _fail(r'\ at end of pattern');
-    final ranges = _classEscape();
+    final ranges = _classEscape(isInClass: false);
     if (ranges != null) return _ranges(ranges);
     final unit = _here;
     if (unit >= 49 && unit <= 57) {
@@ -276,39 +316,41 @@ final class _RegExpParser {
   }
 
   _Matcher _back(List<int> indexes) =>
-      _BackMatcher(indexes, _isFolded, _isBackward);
+      _BackMatcher(indexes, _isFolded, _isUnicode, _isBackward);
 
   /// The ranges of `\d` and the like, if that is here.
-  List<int>? _classEscape() {
+  List<int>? _classEscape({required bool isInClass}) {
     final letter = _here | 32;
     final List<int> ranges;
     if (letter == 100) {
       ranges = _digits;
     } else if (letter == 119) {
-      ranges = _words;
+      ranges = _allWords;
     } else if (letter == 115) {
       ranges = _spaces;
     } else {
-      if (_isUnicode && letter == 112) {
-        throw UnsupportedError('Unicode properties in regular expressions');
-      }
-      return null;
+      if (!_isUnicode || letter != 112) return null;
+      return _property(isInClass: isInClass);
     }
     final isNegated = _here < 97;
     _at++;
-    return isNegated ? _others(ranges) : ranges;
+    return isNegated ? _otherRanges(ranges) : ranges;
   }
 
-  /// What is not in [ranges], which are in order.
-  static List<int> _others(List<int> ranges) {
-    final result = <int>[];
-    var from = 0;
-    for (var i = 0; i < ranges.length; i += 2) {
-      if (ranges[i] > from) result.addAll([from, ranges[i] - 1]);
-      from = ranges[i + 1] + 1;
+  /// The ranges of `\p{…}` or `\P{…}`.
+  List<int> _property({required bool isInClass}) {
+    final isNegated = _here == 80;
+    _at++;
+    final end = _takes('{') ? _source.indexOf('}', _at) : -1;
+    final ranges = end < 0
+        ? null
+        : _propertyRanges(_source.substring(_at, end));
+    if (ranges == null) {
+      const message = 'Invalid property name';
+      _fail(isInClass ? '$message in character class' : message);
     }
-    result.addAll([from, 0x10ffff]);
-    return result;
+    _at = end + 1;
+    return isNegated ? _otherRanges(ranges) : ranges;
   }
 
   /// The character that is escaped here.
@@ -407,7 +449,8 @@ final class _RegExpParser {
         _at++;
         final last = _classPart();
         if (first.length == 1 && last.length == 1) {
-          if (first[0] > last[0]) _fail('Range out of order in character class');
+          if (first[0] > last[0])
+            _fail('Range out of order in character class');
           ranges.addAll([first[0], last[0]]);
           continue;
         }
@@ -430,7 +473,7 @@ final class _RegExpParser {
     if (_here != 92) return [_next()];
     _at++;
     if (_isDone) _fail(r'\ at end of pattern');
-    final ranges = _classEscape();
+    final ranges = _classEscape(isInClass: true);
     if (ranges != null) return ranges;
     if (_takes('b')) return const [8];
     if (_takes('-')) return const [45];

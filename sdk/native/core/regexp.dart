@@ -173,7 +173,7 @@ final class _CharacterMatcher extends _SingleMatcher {
 final class _FoldedMatcher extends _SingleMatcher {
   final int character;
   const _FoldedMatcher(this.character, super.isUnicode, super.isBackward);
-  bool accepts(int other) => _foldCharacter(other) == character;
+  bool accepts(int other) => _foldCharacter(other, isUnicode) == character;
 }
 
 /// Anything, or anything that ends no line.
@@ -183,49 +183,18 @@ final class _AnyMatcher extends _SingleMatcher {
   bool accepts(int other) => isDotAll || !_endsLine(other);
 }
 
-/// Characters between pairs of ends.
+/// Characters that are in [ranges], which are in order, or not.
 final class _ClassMatcher extends _SingleMatcher {
   final List<int> ranges;
-  final bool isNegated, isFolded;
+  final bool isNegated;
   const _ClassMatcher(
     this.ranges,
     this.isNegated,
-    this.isFolded,
     super.isUnicode,
     super.isBackward,
   );
 
-  bool _has(int character) {
-    for (var i = 0; i < ranges.length; i += 2) {
-      if (character >= ranges[i] && character <= ranges[i + 1]) return true;
-    }
-    return false;
-  }
-
-  bool accepts(int other) {
-    if (_has(other)) return !isNegated;
-    if (!isFolded) return isNegated;
-    final upper = _foldCharacter(other);
-    if (_has(upper)) return !isNegated;
-    final lower = String.fromCharCode(other).toLowerCase();
-    final isSame = lower.length == 1 && _has(lower.codeUnitAt(0));
-    final of = String.fromCharCode(upper).toLowerCase();
-    return isSame || of.length == 1 && _has(of.codeUnitAt(0))
-        ? !isNegated
-        : isNegated;
-  }
-}
-
-/// [character] as it is compared where case does not count.
-int _foldCharacter(int character) {
-  if (character < 128) {
-    return character >= 97 && character <= 122 ? character - 32 : character;
-  }
-  final upper = String.fromCharCode(character).toUpperCase();
-  final isOne = upper.length == 1 || upper.length == 2 && character > 0xffff;
-  if (!isOne) return character;
-  final result = upper.runes.first;
-  return result < 128 ? character : result;
+  bool accepts(int other) => _isInRanges(ranges, other) != isNegated;
 }
 
 bool _endsLine(int character) =>
@@ -233,12 +202,6 @@ bool _endsLine(int character) =>
     character == 13 ||
     character == 0x2028 ||
     character == 0x2029;
-
-bool _isWordUnit(int unit) =>
-    unit >= 97 && unit <= 122 ||
-    unit >= 65 && unit <= 90 ||
-    unit >= 48 && unit <= 57 ||
-    unit == 95;
 
 final class _SequenceMatcher extends _Matcher {
   final List<_Matcher> parts;
@@ -255,11 +218,7 @@ final class _SequenceMatcher extends _Matcher {
       if (part is! _SingleMatcher) {
         final next = index + 1;
         if (next == parts.length) return part.match(run, position, then);
-        return part.match(
-          run,
-          position,
-          (end) => _from(next, run, end, then),
-        );
+        return part.match(run, position, (end) => _from(next, run, end, then));
       }
       position = part.step(run, position);
       if (position < 0) return false;
@@ -403,8 +362,13 @@ final class _GroupMatcher extends _Matcher {
 /// What a group matched before.
 final class _BackMatcher extends _Matcher {
   final List<int> indexes;
-  final bool isFolded, isBackward;
-  const _BackMatcher(this.indexes, this.isFolded, this.isBackward);
+  final bool isFolded, isUnicode, isBackward;
+  const _BackMatcher(
+    this.indexes,
+    this.isFolded,
+    this.isUnicode,
+    this.isBackward,
+  );
 
   bool match(_RegExpRun run, int at, bool Function(int at) then) {
     for (var i = 0; i < indexes.length; i++) {
@@ -415,15 +379,28 @@ final class _BackMatcher extends _Matcher {
       final from = isBackward ? at - length : at;
       if (from < 0 || from + length > run.input.length) return false;
       for (var j = 0; j < length; j++) {
-        final a = run.input.codeUnitAt(first + j);
-        final b = run.input.codeUnitAt(from + j);
-        if (a != b && (!isFolded || _foldCharacter(a) != _foldCharacter(b))) {
-          return false;
-        }
+        if (!_isSame(run.input, first + j, from + j)) return false;
       }
       return then(isBackward ? from : from + length);
     }
     return then(at);
+  }
+
+  bool _isSame(String input, int first, int second) {
+    final a = input.codeUnitAt(first), b = input.codeUnitAt(second);
+    if (a == b) return true;
+    if (!isFolded) return false;
+    if (_foldCharacter(a, isUnicode) == _foldCharacter(b, isUnicode)) {
+      return true;
+    }
+    if (!isUnicode || first == 0 || second == 0) return false;
+    // The second halves of two characters.
+    if (a & 0xfc00 != 0xdc00 || b & 0xfc00 != 0xdc00) return false;
+    final lead = input.codeUnitAt(first - 1);
+    if (lead & 0xfc00 != 0xd800) return false;
+    final high = (lead - 0xd7c0) << 10;
+    return _foldCharacter(high + (a & 0x3ff), true) ==
+        _foldCharacter(high + (b & 0x3ff), true);
   }
 }
 
@@ -458,12 +435,16 @@ final class _EdgeMatcher extends _Matcher {
 
 final class _WordMatcher extends _Matcher {
   final bool isNegated;
-  const _WordMatcher(this.isNegated);
+
+  /// All that words have.
+  final List<int> words;
+  const _WordMatcher(this.isNegated, this.words);
 
   bool match(_RegExpRun run, int at, bool Function(int at) then) {
     final input = run.input;
-    final before = at > 0 && _isWordUnit(input.codeUnitAt(at - 1));
-    final after = at < input.length && _isWordUnit(input.codeUnitAt(at));
+    bool isWord(int at) => _isInRanges(words, input.codeUnitAt(at));
+    final before = at > 0 && isWord(at - 1);
+    final after = at < input.length && isWord(at);
     return (before != after) != isNegated && then(at);
   }
 }
