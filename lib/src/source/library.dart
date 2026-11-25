@@ -71,22 +71,42 @@ Future<SourceProgram> loadProgram(
     throw CompileFailure([SourceProblem(path, 1, 1, 'File not found.')]);
   }
   final resolved = file.resolveSymbolicLinksSync();
-  final shared = Analysis.shared(resolved, sdk);
-  // Until it is known that there are no errors.
-  shared.release();
-  var libraries = await shared.resolve(resolved);
-  final isFirst = shared.isFirstToRead(libraries.own);
-  if (!isFirst) libraries = await Analysis(resolved, sdk).resolve(resolved);
-  // Some constants have to be analyzed as other text.
-  final corrected = {
-    for (final unit in libraries.own.expand((library) => library.units))
-      unit.path: ?correctionsOf(unit.unit, unit.content),
-  };
-  if (corrected.isNotEmpty) {
-    final replaced = corrected.map((path, text) => MapEntry(path, text.text));
-    final own = Analysis(resolved, sdk, replaced: replaced);
-    libraries = await own.resolve(resolved);
+  var analysis = Analysis.of(resolved, sdk);
+  var isRight = false;
+  Future<ResolvedLibraries> resolveAlone([
+    Map<String, String> replaced = const {},
+  ]) async {
+    await analysis.close();
+    analysis = Analysis(resolved, sdk, replaced: replaced);
+    return (await analysis.resolve(resolved))!;
   }
+
+  try {
+    var libraries = await analysis.resolve(resolved) ?? await resolveAlone();
+    // Some constants have to be analyzed as other text.
+    final corrected = {
+      for (final unit in libraries.own.expand((library) => library.units))
+        unit.path: ?correctionsOf(unit.unit, unit.content),
+    };
+    if (corrected.isNotEmpty) {
+      libraries = await resolveAlone({
+        for (final MapEntry(:key, :value) in corrected.entries) key: value.text,
+      });
+    }
+    final program = _checked(libraries, corrected);
+    isRight = true;
+    return program;
+  } finally {
+    await (isRight ? analysis.keep() : analysis.close());
+  }
+}
+
+/// The program that [libraries] are, some of whose texts were [corrected], if
+/// they have no errors.
+SourceProgram _checked(
+  ResolvedLibraries libraries,
+  Map<String, CorrectedText> corrected,
+) {
   SourceUnit unitOf(ResolvedUnitResult result) => SourceUnit(
     result.path,
     result.unit,
@@ -100,7 +120,6 @@ Future<SourceProgram> loadProgram(
             unitOf(unit).problemAt(diagnostic.offset, diagnostic.message),
   ];
   if (problems.isNotEmpty) throw CompileFailure(problems);
-  if (isFirst) shared.share();
   SourceLibrary library(ResolvedLibraryResult result) =>
       SourceLibrary(result.element, result.units.map(unitOf));
   return SourceProgram(libraries.own.map(library), libraries.sdk.map(library));
