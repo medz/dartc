@@ -5,6 +5,7 @@ import 'dart:io' as io;
 
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/session.dart';
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/file_system/file_system.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
@@ -122,6 +123,10 @@ final class Analysis(
     }
     for (final unit in own.expand((library) => library.units)) {
       if (_files.wasRead(unit.path, before: round)) return null;
+      if (_mentionedIn(unit)
+          .any((path) => _files.wasRead(path, before: round))) {
+        return null;
+      }
     }
     final needed = _neededOfSdk(seen);
     return (
@@ -132,6 +137,28 @@ final class Analysis(
             _ofSdk[uri] ??= await _resolveOfSdk(uri),
       ],
     );
+  }
+
+  /// The files that the directives of [unit] name, which can be no part of the
+  /// program as the analyzer takes them to be something else.
+  static Iterable<String> _mentionedIn(ResolvedUnitResult unit) sync* {
+    for (final directive in unit.unit.directives) {
+      if (directive is! UriBasedDirective) continue;
+      final named = [
+        directive.uri,
+        if (directive is NamespaceDirective)
+          for (final configuration in directive.configurations)
+            configuration.uri,
+      ];
+      for (final literal in named) {
+        final uri = Uri.tryParse(literal.stringValue ?? '');
+        if (uri == null) continue;
+        final path = unit.session.uriConverter.uriToPath(
+          unit.uri.resolveUri(uri),
+        );
+        if (path != null) yield path;
+      }
+    }
   }
 
   Future<ResolvedLibraryResult> _resolveOfSdk(String uri) async {
