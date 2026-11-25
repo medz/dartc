@@ -1,3 +1,4 @@
+import 'package:dartc/graph.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/lower.dart';
 import 'package:test/test.dart';
@@ -45,6 +46,50 @@ HirModule _module(HirTerminator Function(HirBlock block) build) {
 }
 
 void main() {
+  test('eight tests of classes share a table', () {
+    final classes = [
+      for (var i = 0; i < 5; i++) HirClass('C$i', null, const []),
+    ];
+    // No other test is passed by the same classes, so none can take its place.
+    final tests = <HirTypeTest, Set<HirClass>>{
+      for (var i = 0; i < 20; i++)
+        HirTypeTest('t$i'): {
+          for (final (j, class_) in classes.indexed)
+            if (i >> j & 1 != 0) class_,
+        },
+    };
+    final entry = HirBlock(), wrong = HirBlock();
+    var block = entry;
+    for (final MapEntry(key: test, value: passing) in tests.entries) {
+      for (final class_ in classes) {
+        final object = block.add(HirNew(class_)), next = HirBlock();
+        final passes = block.add(HirIsInstance(test, object));
+        final isRight = passing.contains(class_);
+        block.end(
+          HirBranch(
+            passes,
+            HirEdge(isRight ? next : wrong),
+            HirEdge(isRight ? wrong : next),
+          ),
+        );
+        block = next;
+      }
+    }
+    block.end(HirExit(block.add(HirConst(7))));
+    wrong.end(HirExit(wrong.add(HirConst(1))));
+    final blocks = reversePostorder(
+      entry,
+      (block) => block.terminator!.edges.map((edge) => edge.target),
+    );
+    final main = HirFunction('main', const [])..define(blocks);
+    final module = HirModule(main, [main], classes: classes, tests: tests);
+    expect(HirInterpreter(module).run(), 7);
+    expect(runLowered(module), 7);
+    final tables = lowerProgram(module).data
+        .where((data) => data.bytes.length == classes.length);
+    expect(tables, hasLength(3));
+  });
+
   /// Runs at both levels, which must agree.
   int? run(HirTerminator Function(HirBlock block) build) {
     final module = _module(build);
