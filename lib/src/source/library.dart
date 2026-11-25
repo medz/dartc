@@ -72,10 +72,11 @@ Future<SourceProgram> loadProgram(
   }
   final resolved = file.resolveSymbolicLinksSync();
   final shared = Analysis.shared(resolved, sdk);
+  // Until it is known that there are no errors.
+  shared.release();
   var libraries = await shared.resolve(resolved);
-  if (!shared.isFirstToRead(libraries.own)) {
-    libraries = await Analysis(resolved, sdk).resolve(resolved);
-  }
+  final isFirst = shared.isFirstToRead(libraries.own);
+  if (!isFirst) libraries = await Analysis(resolved, sdk).resolve(resolved);
   // Some constants have to be analyzed as other text.
   final corrected = {
     for (final unit in libraries.own.expand((library) => library.units))
@@ -99,6 +100,7 @@ Future<SourceProgram> loadProgram(
             unitOf(unit).problemAt(diagnostic.offset, diagnostic.message),
   ];
   if (problems.isNotEmpty) throw CompileFailure(problems);
+  if (isFirst) shared.share();
   SourceLibrary library(ResolvedLibraryResult result) =>
       SourceLibrary(result.element, result.units.map(unitOf));
   return SourceProgram(libraries.own.map(library), libraries.sdk.map(library));

@@ -27,11 +27,19 @@ final class Analysis(
 
   /// The texts of files that are analyzed as others, by their paths.
   final Map<String, String> replaced = const {},
+
+  /// Whether other programs can use it.
+  final bool isShareable = false,
 }) {
-  static final _shared = <SdkSources, Analysis>{};
+  /// The last one that was shared. Others are not kept, as each has an SDK.
+  static Analysis? _shared;
 
   /// One that programs outside packages have in common, so that the SDK is
   /// resolved only once. Others have their own.
+  ///
+  /// Whoever gets it has to [release] it, and to [share] it again if there were
+  /// no errors, and no files that were read before, as it does not see when
+  /// files change.
   factory shared(String path, SdkSources sdk) {
     for (var at = File(path).parent; ; at = at.parent) {
       final isPackage = [
@@ -41,7 +49,10 @@ final class Analysis(
       if (isPackage) return Analysis(path, sdk);
       if (at.path == at.parent.path) break;
     }
-    return _shared[sdk] ??= Analysis(path, sdk);
+    final shared = _shared;
+    return shared != null && shared._sdk == sdk
+        ? shared
+        : Analysis(path, sdk, isShareable: true);
   }
 
   /// The files outside the SDK that it has read.
@@ -70,18 +81,21 @@ final class Analysis(
     return contexts.contextFor(_root).currentSession;
   }
 
-  /// Notes that the files of [libraries] were read. Gives whether this was the
-  /// first time for all.
-  ///
-  /// If not, some can have changed since, and this is not shared any longer.
-  bool isFirstToRead(List<ResolvedLibraryResult> libraries) {
-    final isFirst = {
-      for (final library in libraries)
-        for (final unit in library.units) unit.path,
-    }.map(_read.add).toList().every((isNew) => isNew);
-    if (!isFirst && _shared[_sdk] == this) _shared.remove(_sdk);
-    return isFirst;
+  /// Shares this with programs that come later, if it can be, or not any longer.
+  void share() {
+    if (isShareable) _shared = this;
   }
+
+  void release() {
+    if (_shared == this) _shared = null;
+  }
+
+  /// Notes that the files of [libraries] were read. Gives whether this was the
+  /// first time for all. If not, some can have changed since.
+  bool isFirstToRead(List<ResolvedLibraryResult> libraries) => {
+    for (final library in libraries)
+      for (final unit in library.units) unit.path,
+  }.map(_read.add).toList().every((isNew) => isNew);
 
   /// Resolves the library at [path], every one it reaches outside the SDK, and
   /// those of the SDK that can be compiled and are reached, with the runtime.
