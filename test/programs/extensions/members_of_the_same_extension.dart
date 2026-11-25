@@ -33,6 +33,36 @@ extension D<T> on int {
   }
 }
 
+class K {}
+
+extension O<T> on K {
+  K operator +(int n) {
+    print((T, n));
+    return this;
+  }
+
+  K operator -() {
+    print((T, '-'));
+    return this;
+  }
+
+  K get own => this;
+  set own(K k) => print((T, 'own'));
+
+  void all() {
+    var k = K();
+    k += 1;
+    k++;
+    -k;
+    own += 2;
+    own++;
+    this.own += 3;
+    final self = this;
+    self + 4;
+    this + 5;
+  }
+}
+
 void main() {
   D<String>(0).all();
   // expect: String
@@ -78,4 +108,20 @@ void main() {
   // expect: 1
   // expect: (dynamic, String)
   // expect: (dynamic, String)
+  O<bool>(K()).all();
+  // expect: (dynamic, 1)
+  // expect: (dynamic, 1)
+  // expect: (dynamic, -)
+  // expect: (dynamic, 2)
+  // expect: (bool, own)
+  // expect: (dynamic, 1)
+  // expect: (bool, own)
+  // expect: (dynamic, 3)
+  // expect: (dynamic, own)
+  // expect: (dynamic, 4)
+  // expect: (dynamic, 5)
+  var k = K();
+  k += 6; // expect: (dynamic, 6)
+  ++k; // expect: (dynamic, 1)
+  -k; // expect: (dynamic, -)
 }

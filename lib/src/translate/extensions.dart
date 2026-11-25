@@ -60,7 +60,7 @@ final class ExtensionTranslator(
         .applicableTo(targetLibrary: _builder.library, targetType: type)
         .single;
     final defaults = defaultTypesOf(owner.typeParameters, _builder.library);
-    final isOwn = _isOwn(node);
+    final isOwn = _isOwn(node, element);
     return [
       for (final (i, parameter) in owner.typeParameters.indexed)
         _mentions(owner.extendedType, parameter)
@@ -71,14 +71,16 @@ final class ExtensionTranslator(
     ];
   }
 
-  /// Whether [node] uses a member of its own extension, rather than one that is
-  /// found by the type of a value.
-  static bool _isOwn(AstNode node) => switch (node) {
+  /// Whether [node] uses [element] as a member of its own extension, rather than
+  /// as one that is found by the type of a value.
+  static bool _isOwn(AstNode node, ExecutableElement element) => switch (node) {
     SimpleIdentifier() => true,
     MethodInvocation(:final realTarget) => realTarget == null,
     AssignmentExpression(leftHandSide: final place) ||
     PostfixExpression(operand: final place) ||
-    PrefixExpression(operand: final place) => place is SimpleIdentifier,
+    PrefixExpression(operand: final place) =>
+      // Operators are used on the value that is there.
+      place is SimpleIdentifier && element is! MethodElement,
     _ => false,
   };
 
