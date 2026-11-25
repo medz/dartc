@@ -306,6 +306,16 @@ void main() {
     expect(() => encodeStackMaps(maps), throwsA(isA<EmitUnsupported>()));
   });
 
+  test('too many values in a record are refused', () {
+    StackMap map(int count) =>
+        StackMap(4, [for (var i = 0; i < count; i++) i * 8]);
+    _expectFound([map(0x7fff)]);
+    expect(
+      () => encodeStackMaps([map(0x8000)]),
+      throwsA(isA<EmitUnsupported>()),
+    );
+  });
+
   test('the runtime can find both tables', () {
     final code = emitCode(
       LirModule(

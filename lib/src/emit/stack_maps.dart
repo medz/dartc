@@ -68,6 +68,10 @@ Uint8List encodeStackMaps(List<StackMap> maps) {
 
 List<int> _recordOf(List<int> offsets) {
   final words = [for (final offset in offsets) offset ~/ 8];
+  // The count has 15 bits.
+  if (words.length >= 0x8000) {
+    throw EmitUnsupported(stackMapSymbol, 'so many values in a call');
+  }
   final isShort = words.every((word) => word >= -0x8000 && word < 0x8000);
   if (!isShort) return [0x8000 | words.length, ...words];
   final halves = [words.length, ...words, 0];
