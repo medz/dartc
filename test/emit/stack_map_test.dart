@@ -1,14 +1,18 @@
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:dartc/emit.dart';
+import 'package:dartc/heap.dart' show machine;
 import 'package:dartc/lir.dart';
 import 'package:dartc/src/emit/allocate.dart';
 import 'package:dartc/src/emit/arm64/registers.dart';
 import 'package:dartc/src/emit/selection.dart';
 import 'package:dartc/src/emit/stack_maps.dart';
 import 'package:dartc/src/emit/support.dart';
+import 'package:dartc/src/heap/returns.dart';
 import 'package:test/test.dart';
 
+import '../heap/simulated.dart';
 import '../lir/support.dart';
 import 'random_lir.dart';
 import 'support.dart';
@@ -29,6 +33,40 @@ LirModule _module(
 
 Set<LirValue> _liveAfter(LirFunction function, LirCall call) =>
     livenessOf(function).liveAfter(call);
+
+/// Checks that the runtime finds [maps], and nothing between them.
+void _expectFound(List<StackMap> maps) {
+  final memory = SimulatedMachine(), data = encodeStackMaps(maps);
+  machine = memory;
+  final table = memory.mapMemory(data.length);
+  final words = ByteData.sublistView(data);
+  for (var at = 0; at < data.length; at += 4) {
+    memory.store32(table + at, words.getUint32(at, .little));
+  }
+  final found = {for (final map in maps) map.returnOffset: map.offsets};
+  final end = maps.lastOrNull?.returnOffset ?? 0;
+  for (var at = -2; at < end + 9000; at++) {
+    final record = findStackMap(table, at);
+    final expected = found[at];
+    if (expected == null) {
+      if (record != 0) fail('$at has none');
+      continue;
+    }
+    expect(_offsetsAt(memory, record), expected);
+  }
+}
+
+List<int> _offsetsAt(SimulatedMachine memory, int record) {
+  final first = memory.load32(record), count = first & 0x7fff;
+  int half(int i) =>
+      (memory.load32(record + (i >> 1) * 4) >> (i & 1) * 16 & 0xffff).toSigned(
+        16,
+      );
+  return [
+    for (var i = 1; i <= count; i++)
+      8 * (first & 0x8000 != 0 ? memory.load32Signed(record + i * 4) : half(i)),
+  ];
+}
 
 void main() {
   test('exactly the values used after a call are alive across it', () {
@@ -237,20 +275,35 @@ void main() {
       StackMap(100, []),
       StackMap(104, [-16, -40]),
     ];
-    final data = ByteData.sublistView(encodeStackMaps(maps));
-    expect(data.getUint32(0, .little), 4);
-    for (final (i, map) in maps.indexed) {
-      expect(data.getUint32(4 + i * 8, .little), map.returnOffset);
-      final record = data.getUint32(8 + i * 8, .little);
-      expect(data.getUint32(record, .little), map.offsets.length);
-      expect([
-        for (var j = 0; j < map.offsets.length; j++)
-          data.getInt32(record + 4 + j * 4, .little),
-      ], map.offsets);
+    // Equal records are stored once: the pages, two starts, an index and two
+    // records.
+    expect(encodeStackMaps(maps), hasLength((1 + 2 + 4 + 1 + 2) * 4));
+    expect(encodeStackMaps([]), hasLength(8));
+    _expectFound(maps);
+    _expectFound([]);
+  });
+
+  test('random tables can be searched', () {
+    final random = Random(4);
+    for (var round = 0; round < 60; round++) {
+      var at = random.nextInt(9000);
+      _expectFound([
+        for (var i = random.nextInt(120); i > 0; i--)
+          StackMap(at += 1 + random.nextInt(round < 30 ? 12 : 9000), [
+            for (var j = random.nextInt(8); j > 0; j--)
+              (random.nextInt(70000) - 35000) *
+                  (random.nextInt(9) == 0 ? 80 : 8),
+          ]),
+      ]);
     }
-    // Equal records are stored once.
-    expect(data.lengthInBytes, 4 + 4 * 8 + 4 + 12);
-    expect(encodeStackMaps([]), [0, 0, 0, 0]);
+  });
+
+  test('too many records are refused', () {
+    final maps = [
+      for (var i = 0; i < 300000; i++)
+        StackMap(i * 4, [i * 8 << 8, i * 8 << 8, 8, 16]),
+    ];
+    expect(() => encodeStackMaps(maps), throwsA(isA<EmitUnsupported>()));
   });
 
   test('the runtime can find both tables', () {
