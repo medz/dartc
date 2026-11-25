@@ -16,6 +16,7 @@ import 'closure.dart';
 import 'closure_table.dart';
 import 'constant_table.dart';
 import 'creators.dart';
+import 'deferred.dart';
 import 'dispatch.dart';
 import 'dynamic_shape.dart';
 import 'dynamic_table.dart';
@@ -106,7 +107,6 @@ final class ProgramTranslator(
         _unit.problemAt(0, 'The program has no main function.'),
       ]);
     }
-    checkImports(program);
     final main = _functions.of(entry);
     final start = EntryTranslator(this, _unit, entry, main)..begin();
     _translateAll();
@@ -116,7 +116,6 @@ final class ProgramTranslator(
 
   /// The program as a library, and a header for it.
   ({HirModule module, String header}) translateLibrary() {
-    checkImports(program);
     final exports = exportsOf(program), table = ExportTable(this);
     if (exports.isEmpty) {
       throw CompileFailure([
@@ -173,7 +172,7 @@ final class ProgramTranslator(
           ..._typeFunctions.dispatch,
           ..._applications.dispatch,
         },
-        globals: [..._globals.globals, ...natives.globals],
+        globals: [..._globals.globals, ...natives.globals, ...deferred.globals],
         tests: _tests.results(
           _dispatch.classes,
           _closures.closures,
@@ -290,6 +289,9 @@ final class ProgramTranslator(
 
   @override
   late final NativeTable natives = NativeTable(this, _unit);
+
+  @override
+  late final DeferredTable deferred = DeferredTable(this, _unit);
 
   @override
   ClassElement get futureClass => _core.typeProvider.futureElement;

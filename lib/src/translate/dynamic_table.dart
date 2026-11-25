@@ -341,6 +341,10 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     final (element: accessor, :level) = found;
     final receiver = builder.inputs.first;
     final field = fieldOfAccessor(accessor);
+    final isExternal = switch (variableOfAccessor(accessor)) {
+      FieldElement(:final isExternal) => isExternal,
+      _ => false,
+    };
     builder.setReceiver(receiver, level);
     final own = _own(conversions, receiver, level);
     if (shape.use == .set) {
@@ -349,7 +353,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
         builder.inputs[1],
         accessor.formalParameters.single,
         shape,
-        field != null && field.isExternal ? '#externalFieldValue' : null,
+        isExternal ? '#externalFieldValue' : null,
       );
       if (field != null) {
         _scope.storeField(builder, level, field, receiver, value);

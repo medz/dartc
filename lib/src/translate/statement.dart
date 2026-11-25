@@ -262,10 +262,15 @@ final class StatementTranslator(
           _builder
             ..jump(body)
             ..enter(next);
+        // Before language version 3.0, there were no patterns.
+        case SwitchCase(:final expression):
+          final next = patterns.join(node);
+          patterns.matchConstant(member, expression, value, next);
+          _builder
+            ..jump(body)
+            ..enter(next);
         case SwitchDefault():
           _builder.jump(body);
-        default:
-          _unsupported(member, describe(member));
       }
     }
     final after = patterns.join(node);

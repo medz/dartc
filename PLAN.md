@@ -75,10 +75,8 @@ void main() { exit(1 + 2 * 3); }
 | 网络、子进程、信号、压缩、监视文件、`dart:isolate` | 第 13 步之后 |
 | 没有关闭的文件，对象没人用了也不关，程序结束时才关 | 和 `Finalizer` 一起 |
 | `Platform.version` 写的是 dartc，不是官方的编译日期 | 不改 |
-| 变量的类型是 `Never`；返回 `Never` 的 getter | 需要时再做 |
-| 延迟导入（`deferred as`） | 需要时再做 |
 | analyzer 和官方的差别，见 [specs](specs/README.md) | 需要时再做 |
-| `external` 变量（`@Native`）；`列表[i].address` | 需要时再做 |
+| `列表[i].address` | 需要时再做 |
 
 **11 其余的语法。** 分小步，每小步单独完成和提交：
 
@@ -150,7 +148,7 @@ Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `t
 | `typedef` 有自己的类型参数时，经过它提取的构造函数和直接提取的相等 | 官方认为不等 |
 | 相等的 `Type` 都是 `identical` | 官方有时不是 |
 | 泛型类的 `late final` 字段，赋值时检查类型 | 官方没有检查 |
-| 枚举自己有叫 `_name` 的字段：报"不支持" | analyzer 把它和枚举的名字混在一起 |
+| 没有实现的 `external` 成员，mixin 的在错误里写 mixin 的名字；官方写混入后的类 | 官方内部的名字 |
 | `const bool.fromEnvironment('dart.vm.product')` 是 true | 和官方 AOT 相同，和 `dart run` 不同 |
 
 **16 自举。** dartc 能编译自己，不用改源码。

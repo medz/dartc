@@ -7,6 +7,7 @@ import 'package:dartc/native.dart';
 import 'builder.dart';
 import 'closures.dart';
 import 'conversions.dart';
+import 'members.dart';
 import 'native_scope.dart';
 import 'native_types.dart';
 import 'native_values.dart';
@@ -78,8 +79,8 @@ final class NativeMembers(
           SimpleIdentifier(:final element?) ||
           PrefixedIdentifier(identifier: SimpleIdentifier(:final element?)) ||
           PropertyAccess(propertyName: SimpleIdentifier(:final element?)) =>
-            element is GetterElement && element.isOriginVariable
-                ? element.variable
+            element is ExecutableElement
+                ? variableOfAccessor(element) ?? element
                 : element,
           _ => null,
         };

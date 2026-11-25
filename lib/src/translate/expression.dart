@@ -13,6 +13,7 @@ import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'coroutine_body.dart';
+import 'deferred.dart';
 import 'describe.dart';
 import 'dynamics.dart';
 import 'late_locals.dart';
@@ -99,6 +100,7 @@ final class ExpressionTranslator(
   );
   late final _coroutine = CoroutineBody(_scope, _builder, this);
   late final _references = ReferenceTranslator(_scope, _builder);
+  late final _deferred = DeferredTranslator(_scope, _builder);
   late final _texts = TextTranslator(_scope, _builder, this);
   late final LoopTranslator loops = LoopTranslator(
     _scope,
@@ -133,6 +135,7 @@ final class ExpressionTranslator(
   @override
   void effect(Expression node) {
     final inner = node.unParenthesized;
+    if (_endsWithin(inner)) return;
     if (_chains.isWhole(inner)) {
       _chains.translate(inner, null, () {
         effect(inner);
@@ -142,13 +145,13 @@ final class ExpressionTranslator(
     }
     switch (inner) {
       case MethodInvocation():
-        calls.invocation(inner);
+        if (_deferred.use(inner) == null) calls.invocation(inner);
       case DotShorthandInvocation():
         calls.shorthand(inner);
       case FunctionExpressionInvocation():
         closures.invocation(inner);
       case ConditionalExpression(:final DartType staticType)
-          when hasNoResult(staticType):
+          when isNever(staticType):
         final exit = _builder.join(inner);
         void run(Expression part) {
           effect(part);
@@ -192,10 +195,14 @@ final class ExpressionTranslator(
 
   @override
   HirValue value(Expression node, {HirType placeholder = .integer}) {
-    final result = _value(node, placeholder);
     final type = node.staticType;
-    if (type == null || isNever(type)) return result;
-    final representation = valueType(type);
+    final never = isNever(type);
+    final representation = type == null || never ? null : valueType(type);
+    final result = _value(node, representation ?? placeholder);
+    if (never) {
+      _builder.end(HirUnreachable());
+      return _builder.placeholder(placeholder);
+    }
     return representation == null
         ? result
         : _conversions.coerce(result, representation);
@@ -212,10 +219,8 @@ final class ExpressionTranslator(
         () => _conversions.coerce(_value(inner, result), result),
       )!;
     }
-    if (isNever(type)) {
-      _never(inner);
-      return _builder.placeholder(placeholder);
-    }
+    if (_endsWithin(inner)) return _builder.placeholder(placeholder);
+    if (_deferred.use(inner) case final result?) return result;
     switch (inner) {
       case Literal():
         return _literal(inner);
@@ -271,9 +276,41 @@ final class ExpressionTranslator(
         return result;
       case SwitchExpression():
         return patterns.switchExpression(inner, _resultType(inner));
+      case ThrowExpression(:final expression):
+        _throw(expression);
+        return _builder.placeholder(placeholder);
+      case RethrowExpression():
+        final (exception, trace) = _builder.caught.last;
+        _builder.raise(exception, trace);
+        return _builder.placeholder(placeholder);
       default:
         _unsupported(inner, describe(inner));
     }
+  }
+
+  /// Whether what [node] uses never gives a value, which is evaluated then.
+  bool _endsWithin(Expression node) {
+    final part = switch (node) {
+      PrefixedIdentifier(:final prefix) => prefix,
+      PropertyAccess(:final target) ||
+      MethodInvocation(:final target) ||
+      IndexExpression(:final target) => target,
+      BinaryExpression(:final leftOperand) => leftOperand,
+      PrefixExpression(:final operand) ||
+      PostfixExpression(:final operand) => operand,
+      FunctionExpressionInvocation(:final function) => function,
+      AssignmentExpression(:final leftHandSide) => switch (leftHandSide) {
+        PrefixedIdentifier(:final prefix) => prefix,
+        PropertyAccess(:final target) ||
+        IndexExpression(:final target) => target,
+        _ => null,
+      },
+      _ => null,
+    };
+    if (!isBottom(part?.staticType)) return false;
+    value(part!);
+    _builder.end(HirUnreachable());
+    return true;
   }
 
   /// A function that is a value.
@@ -400,37 +437,6 @@ final class ExpressionTranslator(
     });
     _builder.enter(exit);
     return result;
-  }
-
-  /// Evaluates [inner], which gives no value.
-  void _never(Expression inner) {
-    switch (inner) {
-      case MethodInvocation():
-        calls.invocation(inner);
-      case DotShorthandInvocation():
-        calls.shorthand(inner);
-      case ThrowExpression(:final expression):
-        _throw(expression);
-      case FunctionExpressionInvocation():
-        closures.invocation(inner);
-      case AwaitExpression():
-        _coroutine.awaitExpression(inner);
-        _builder.end(HirUnreachable());
-      case RethrowExpression():
-        final (exception, trace) = _builder.caught.last;
-        _builder.raise(exception, trace);
-      case BinaryExpression():
-        _binary(inner);
-        _builder.end(HirUnreachable());
-      case ConditionalExpression():
-        _conditional(inner);
-        _builder.end(HirUnreachable());
-      case SwitchExpression():
-        patterns.switchExpression(inner, _resultType(inner));
-        _builder.end(HirUnreachable());
-      default:
-        _unsupported(inner, describe(inner));
-    }
   }
 
   void _throw(Expression expression) {

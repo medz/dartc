@@ -7,7 +7,10 @@ import 'package:dartc/source.dart';
 import 'builder.dart';
 import 'closure.dart';
 import 'native_callbacks.dart';
+import 'conversions.dart';
+import 'members.dart';
 import 'native_calls.dart';
+import 'native_fields.dart';
 import 'native_scope.dart';
 import 'native_types.dart';
 import 'native_values.dart';
@@ -53,7 +56,7 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
     final function = HirFunction('call C ${describeType(type)}', [
       .reference,
       ...parameterTypes(type)!,
-    ], hasNoResult(type.returnType) ? null : valueType(type.returnType));
+    ], valueType(type.returnType));
     _scope
       ..addLocalFunction(function)
       ..addClosure(
@@ -145,6 +148,8 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
 
   @override
   bool define(FunctionBuilder builder, ExecutableElement element) {
+    final variable = variableOfAccessor(element);
+    if (variable != null) return _defineAccessor(builder, variable);
     final annotation = nativeAnnotation(element);
     final native = nativeTypeOf(element);
     if (annotation == null || native is! FunctionType) return false;
@@ -155,6 +160,28 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
       _scope,
       builder,
     ).forward(address, signature, builder.inputs, element.type);
+    return true;
+  }
+
+  /// Reads [variable], or writes it if the function takes a value.
+  bool _defineAccessor(
+    FunctionBuilder builder,
+    PropertyInducingElement variable,
+  ) {
+    final address = addressOf(builder, variable);
+    final field = types.variable(variable);
+    if (address == null || field == null) return false;
+    final never = variable.library.typeProvider.neverType;
+    final pointer = NativeValues(_scope, builder).pointer(address, never);
+    final fields = NativeFields(_scope, builder);
+    if (builder.inputs case [final value]) {
+      fields.store(field, pointer, value);
+      builder.end(HirReturn(builder.add(HirNull())));
+    } else {
+      final value = fields.load(field, pointer, isPointer: true);
+      final type = builder.function.result!;
+      builder.end(HirReturn(Conversions(_scope, builder).coerce(value, type)));
+    }
     return true;
   }
 

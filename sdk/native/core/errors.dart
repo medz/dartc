@@ -100,6 +100,20 @@ class NoSuchMethodError {
   ) => _found;
 }
 
+/// Throws the error for a use of a member called [name], of [class_] if it is
+/// of one, which is declared but not implemented. It is like one that takes
+/// [found].
+Never _throwExternal(Type? class_, String name, int type, String? found) {
+  final invocation = _InvocationMirror._withType(
+    internal.Symbol.unvalidated(name),
+    type,
+    const [],
+    const [],
+    const {},
+  ).._found = found;
+  throw NoSuchMethodError.withInvocation(class_, invocation);
+}
+
 /// Notes where [error] is thrown, if it keeps that.
 void _markThrown(Object error) {
   if (!isSubclassOfError(error)) return;

@@ -310,7 +310,9 @@ final class ConstantTable(
 
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
-    if (class_ == null || _declarations[class_] == null) return null;
+    if (class_ == null) return null;
+    final declaration = _declarations[class_];
+    if (declaration == null) return null;
     // The analyzer does not know every value.
     if (plainType(class_) != null) return null;
     final target = _classes.classOf(class_);
@@ -341,10 +343,12 @@ final class ConstantTable(
       for (final field in ClassTable.instanceFields(element)) {
         // Mixins cannot declare fields for constants.
         if (level.isMixin) return null;
-        // The analyzer puts the name of an enum's constant in its place.
-        if (class_ is EnumElement && field.name == '_name') return null;
+        final name = element is EnumElement && field.name == '_name'
+            ? declaration.$1.enumNameField(element)
+            : field.name;
+        if (name == null) return null;
         final place = _classes.fieldOf(level, field).value;
-        final value = of(place.type, part?.getField(field.name!));
+        final value = of(place.type, part?.getField(name));
         if (value == null) return null;
         fields[place] = value.value;
       }

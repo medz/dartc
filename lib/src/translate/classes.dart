@@ -4,6 +4,7 @@ import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
 import 'levels.dart';
+import 'members.dart';
 import 'types.dart';
 
 /// Where the program declares each of its elements.
@@ -82,8 +83,14 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
 
   void _addVariables(SourceUnit unit, VariableDeclarationList list) {
     for (final variable in list.variables) {
-      if (variable.declaredFragment case final fragment?) {
-        _nodes[fragment.element] = (unit, variable);
+      final element = variable.declaredFragment?.element;
+      if (element == null) continue;
+      _nodes[element] = (unit, variable);
+      if (element is! PropertyInducingElement || !isExternalVariable(element)) {
+        continue;
+      }
+      for (final accessor in [?element.getter, ?element.setter]) {
+        _nodes[accessor] = (unit, variable);
       }
     }
   }

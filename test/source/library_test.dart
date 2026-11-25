@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:dartc/driver.dart';
 import 'package:dartc/source.dart';
 import 'package:test/test.dart';
@@ -22,6 +23,31 @@ void main() {
       'part.dart',
     ]);
     expect(program.main.element.entryPoint, isNotNull);
+  });
+
+  test('enum companion names are distinct across library parts', () async {
+    final program = await loadFiles({
+      'main.dart': '''
+        part 'part.dart';
+        enum First { item; final int _name = 1; }
+        enum Second { item; final int _name = 2; }
+        void main() {}
+      ''',
+      'part.dart': r'''
+        part of 'main.dart';
+        enum Third { item; final int _name = 3, _name$dartc = 4, _name$dartc0 = 5; }
+      ''',
+    });
+    final names = [
+      for (final unit in program.main.units)
+        for (final node in unit.ast.declarations.whereType<EnumDeclaration>())
+          unit.enumNameField(node.declaredFragment!.element),
+    ];
+    expect(names, hasLength(3));
+    expect(names, everyElement(isNotNull));
+    expect(names.toSet(), hasLength(3));
+    expect(names, isNot(contains(r'_name$dartc')));
+    expect(names, isNot(contains(r'_name$dartc0')));
   });
 
   test('follows a symbolic link', () async {

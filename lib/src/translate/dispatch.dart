@@ -10,6 +10,7 @@ import 'conversions.dart';
 import 'forwarders.dart' show viewedAt;
 import 'levels.dart';
 import 'members.dart';
+import 'native_types.dart' show nativeAnnotation;
 import 'scope.dart';
 import 'types.dart';
 
@@ -153,11 +154,9 @@ final class DispatchBuilder(
     return selector;
   }
 
-  HirType? _result(ExecutableElement member, Reject reject) {
-    if (hasNoResult(member.returnType)) return null;
-    return valueType(member.returnType) ??
-        reject('a result of type ${member.returnType}');
-  }
+  HirType _result(ExecutableElement member, Reject reject) =>
+      valueType(member.returnType) ??
+      reject('a result of type ${member.returnType}');
 
   /// The parameters of [member] that calls of a shape give, in their order.
   static List<FormalParameterElement> _given(
@@ -285,18 +284,73 @@ final class DispatchBuilder(
     HirSelector selector, {
     bool isUnboxed = false,
   }) {
-    final checked = _checkedParameters(
-      level.class_,
-      found.element,
-      _shapes[selector]!,
-    );
-    return _adapters[(found, selector, '$checked $isUnboxed')] ??= _adapt(
-      found,
-      selector,
-      _shapes[selector]!,
-      checked,
-      isUnboxed: isUnboxed,
-    );
+    final element = found.element;
+    final shape = _shapes[selector]!;
+    final isMissingSetter = switch (variableOfAccessor(element)) {
+      final FieldElement field when element is SetterElement =>
+        isExternalVariable(field) &&
+            !field.library.isInSdk &&
+            nativeAnnotation(field) == null,
+      _ => false,
+    };
+    // Missing setters keep explicit covariance checks even when an own call
+    // shares a selector with a call through a wider interface.
+    final checked =
+        isMissingSetter && !_isCovariantSetter(level.class_, element)
+        ? const <int>[]
+        : _checkedParameters(
+            level.class_,
+            element,
+            shape,
+            checksOwnCall: isMissingSetter,
+          );
+    final key = (found, selector, '$checked $isUnboxed');
+    return _adapters[key] ??= isMissingSetter
+        ? _missingSetter(found, selector, checked.isNotEmpty)
+        : _adapt(found, selector, shape, checked, isUnboxed: isUnboxed);
+  }
+
+  /// Whether the setter is marked `covariant` here or in a supertype.
+  static bool _isCovariantSetter(
+    InterfaceElement class_,
+    ExecutableElement setter,
+  ) =>
+      setter.formalParameters.single.isCovariant ||
+      overriddenBy(
+        class_,
+        setter,
+      ).any((other) => other.formalParameters.single.isCovariant);
+
+  HirFunction _missingSetter(
+    Implementation found,
+    HirSelector selector,
+    bool isChecked,
+  ) {
+    final (:element, :level) = found;
+    final target = _scope.memberOf(level, element);
+    final type = target.parameters[1];
+    if (!isChecked && selector.parameters.single == type) return target;
+    return _make('adapt ${target.name}', selector, level, (
+      builder,
+      conversions,
+    ) {
+      final [receiver, given] = builder.inputs;
+      // The stub ignores the argument after any required type check.
+      final parameterType = element.formalParameters.single.type;
+      final value = isChecked
+          ? conversions.cast(
+                  given,
+                  conversions.types.objectQuestionType,
+                  parameterType,
+                  ending: " of '#externalFieldValue'",
+                ) ??
+                (throw _declarations.unsupported(
+                  element,
+                  'testing for $parameterType',
+                ))
+          : builder.placeholder(type);
+      return builder.call(HirCall(target, [receiver, value]));
+    });
   }
 
   /// The places of parameters that calls may give values of other types, as
@@ -304,8 +358,9 @@ final class DispatchBuilder(
   List<int> _checkedParameters(
     InterfaceElement class_,
     ExecutableElement found,
-    _Shape shape,
-  ) {
+    _Shape shape, {
+    bool checksOwnCall = false,
+  }) {
     final system = found.library.typeSystem;
     final parameters = found.formalParameters;
     final checked = <int>{};
@@ -325,7 +380,7 @@ final class DispatchBuilder(
     for (final (i, parameter) in parameters.indexed) {
       if (mentions(parameter.type, found.enclosingElement)) checked.add(i);
     }
-    if (shape.isOwn) {
+    if (shape.isOwn && !checksOwnCall) {
       // Code of the object itself knows its type arguments.
       checked.removeWhere((i) => _isGiven(class_, found, shape.member, i));
     }

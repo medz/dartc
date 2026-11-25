@@ -11,6 +11,7 @@ import 'package:test/test.dart';
 import '../support/hosts.dart';
 import '../support/compiler.dart';
 import 'ffi_programs.dart';
+import 'ffi_variables.dart';
 import 'random_native.dart';
 
 /// Checks that the program [source] does what it does officially.
@@ -60,6 +61,10 @@ void main() {
 
     test('structs, unions and arrays', () async {
       await _agrees(structsDart, structsC);
+    });
+
+    test('variables', () async {
+      await _agrees(variablesDart, variablesC);
     });
 
     test('names of types and functions', () async {

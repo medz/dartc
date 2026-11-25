@@ -98,6 +98,9 @@ void main() {
         'n=12',
         '$path/main.dart',
         '--define=yes=true',
+        '-Dnone.library.js_interop=true',
+        '-Dnone.library.js_interop0=true',
+        '-Dnone.library.js_util=123',
         '-D',
         r"odd='$x\é🙂",
         '-o',
@@ -115,6 +118,13 @@ void main() {
             print(const bool.hasEnvironment('a'));
             print(const bool.fromEnvironment('dart.library.io'));
             print(const bool.fromEnvironment('dart.library.js_interop'));
+            print(bool.fromEnvironment('dart.library.js_interop'));
+            print(const String.fromEnvironment(
+              /* availability */ 'dart.library.js_util', defaultValue: 'native',
+            ));
+            print(const int.fromEnvironment(
+              /* availability */ 'dart.library.js_util', defaultValue: 42,
+            ));
             print(const bool.fromEnvironment('dart.vm.product'));
             for (final name in ['a', 'n', 'yes', 'odd', 'none']) {
               print((
@@ -144,6 +154,9 @@ x
 true
 true
 false
+false
+native
+42
 true
 (true, b=c, 3, false)
 (true, 12, 12, false)

@@ -111,6 +111,17 @@ final class PatternTranslator(
     _builder.enter(exit);
   }
 
+  /// Goes on if [value] is what [constant], of [node], is, or else to [fail].
+  void matchConstant(
+    AstNode node,
+    Expression constant,
+    (HirValue, DartType) value,
+    Join fail,
+  ) {
+    final own = (_evaluator.value(constant), constant.staticType!);
+    _unless(_operators.binary(node, '==', own, value), fail);
+  }
+
   /// Gives the variables of [pattern] what they are of [value], which is of
   /// [type] and matches.
   void destructure(DartPattern pattern, HirValue value, DartType type) =>
@@ -179,9 +190,7 @@ final class PatternTranslator(
         if (found == null) _unsupported(pattern, 'testing for $to');
         _match(pattern, (value: found, type: to, path: path), fail);
       case ConstantPattern(:final expression):
-        final constant = (_evaluator.value(expression), expression.staticType!);
-        final equal = _operators.binary(pattern, '==', constant, (value, type));
-        _unless(equal, fail);
+        matchConstant(pattern, expression, (value, type), fail);
       case RelationalPattern():
         _relation(pattern, matched, fail);
       case LogicalAndPattern(:final leftOperand, :final rightOperand):

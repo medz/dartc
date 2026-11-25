@@ -16,7 +16,7 @@ HirType? valueType(DartType declared) {
           type is RecordType ||
           type is TypeParameterType ||
           type.isDartCoreNull ||
-          type is NeverType && !isNever(type) ||
+          type is NeverType ||
           type.isDartAsyncFutureOr ||
           classOf(type) != null
       ? .reference
@@ -253,15 +253,18 @@ String _describeFunction(
   return '$generic${parts.join()}';
 }
 
-/// Whether a function returning [type] gives its caller nothing to use.
-///
-/// Where the result is of type `void`, there can be one, which a caller that
-/// does not know that type uses.
-bool hasNoResult(DartType type) => isNever(type);
-
 /// Whether expressions of [type] never give a value.
 bool isNever(DartType? type) =>
     type is NeverType && type.nullabilitySuffix == .none;
+
+/// Whether [type], after erasing extensions and following bounds, has no value.
+bool isBottom(DartType? type) {
+  var found = type?.extensionTypeErasure;
+  while (found is TypeParameterType && found.nullabilitySuffix == .none) {
+    found = found.bound.extensionTypeErasure;
+  }
+  return isNever(found);
+}
 
 /// The type arguments that make the generic [element] a function of [type].
 List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {

@@ -1,4 +1,3 @@
-import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
@@ -7,20 +6,6 @@ import 'builder.dart';
 import 'conversions.dart';
 import 'scope.dart';
 import 'types.dart';
-
-/// Throws [CompileFailure] if [program] imports something in a way that is not
-/// supported yet.
-void checkImports(SourceProgram program) {
-  for (final library in program.libraries) {
-    for (final unit in library.units) {
-      for (final directive in unit.ast.directives) {
-        if (directive is ImportDirective && directive.deferredKeyword != null) {
-          throw unit.unsupported(directive, 'deferred imports');
-        }
-      }
-    }
-  }
-}
 
 /// Makes the function that starts the program with [_main], which is
 /// [_element].

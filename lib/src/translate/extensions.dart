@@ -1,8 +1,11 @@
+// Some imports here alone tell the type arguments of the extensions used.
+// ignore_for_file: implementation_imports
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/token.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
-// Only this tells the type arguments of the extensions used.
-// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/member.dart'
+    show SubstitutedElementImpl;
 import 'package:analyzer/src/dart/resolver/applicable_extensions.dart'
     show ExtensionsExtensions;
 import 'package:dartc/hir.dart';
@@ -27,8 +30,14 @@ final class ExtensionTranslator(
   Never _unsupported(AstNode node, String what) =>
       throw _builder.unit.unsupported(node, what);
 
-  /// The type arguments that [owner] has where a value of [type] is used.
-  List<DartType> _typesOf(AstNode node, InstanceElement owner, DartType type) {
+  /// The type arguments that [owner] has where [node] uses [element] on a value
+  /// of [type].
+  List<DartType> _typesOf(
+    AstNode node,
+    ExecutableElement element,
+    InstanceElement owner,
+    DartType type,
+  ) {
     if (owner is ExtensionTypeElement) {
       final found = switch (type) {
         TypeParameterType(:final bound) => bound,
@@ -36,41 +45,75 @@ final class ExtensionTranslator(
       };
       return (found as InterfaceType).asInstanceOf(owner)!.typeArguments;
     }
-    owner as ExtensionElement;
-    final found = [owner]
-        .applicableTo(targetLibrary: _builder.library, targetType: type)
-        .single;
+    // Elements whose types need no type arguments do not tell them.
+    if (_override(node, element)?.typeArgumentTypes case final types?) {
+      return types;
+    }
+    final substitution = switch (element) {
+      SubstitutedElementImpl(:final substitution) => substitution,
+      _ =>
+        [owner as ExtensionElement]
+            .applicableTo(targetLibrary: _builder.library, targetType: type)
+            .single
+            .substitution,
+    };
     return [
       for (final parameter in owner.typeParameters)
-        if (_mentions(owner.extendedType, parameter))
-          found.substitution.map[parameter]!
-        else
-          _unsupported(
-            node,
-            'an extension that does not use its ${parameter.name}',
-          ),
+        substitution.map[parameter]!,
     ];
   }
 
-  static bool _mentions(DartType type, TypeParameterElement parameter) =>
-      switch (type) {
-        TypeParameterType(:final element) => element == parameter,
-        InterfaceType(:final typeArguments) => typeArguments.any(
-          (argument) => _mentions(argument, parameter),
-        ),
-        FunctionType(:final returnType, :final formalParameters) =>
-          _mentions(returnType, parameter) ||
-              formalParameters.any((p) => _mentions(p.type, parameter)),
-        RecordType() => fieldsOf(
-          type,
-        ).any((field) => _mentions(field, parameter)),
+  /// Whether [node] uses [element] without naming a receiver.
+  static bool _omitsReceiver(AstNode node, ExecutableElement element) =>
+      switch (node) {
+        SimpleIdentifier() => true,
+        MethodInvocation(:final realTarget) => realTarget == null,
+        AssignmentExpression(leftHandSide: final place) ||
+        PostfixExpression(operand: final place) ||
+        PrefixExpression(operand: final place) =>
+          // Operators are used on the value that is there.
+          place is SimpleIdentifier && element is! MethodElement,
         _ => false,
       };
+
+  /// What [node] uses [element] on, if it names the extension.
+  static ExtensionOverride? _override(AstNode node, ExecutableElement element) {
+    final isPlace = element is! MethodElement || element.name!.startsWith('[');
+    final on = switch (node) {
+      AssignmentExpression(leftHandSide: final place) ||
+      PostfixExpression(operand: final place) ||
+      PrefixExpression(
+        operator: Token(type: TokenType.PLUS_PLUS || TokenType.MINUS_MINUS),
+        operand: final place,
+      ) => isPlace ? _target(place) : null,
+      BinaryExpression(:final leftOperand) => leftOperand,
+      _ => _target(node),
+    };
+    return switch (on?.unParenthesized) {
+      final ExtensionOverride override => override,
+      _ => null,
+    };
+  }
+
+  static Expression? _target(AstNode node) => switch (node) {
+    MethodInvocation(:final target) ||
+    PropertyAccess(:final target) ||
+    IndexExpression(:final target) => target,
+    PrefixExpression(:final operand) => operand,
+    FunctionExpressionInvocation(:final function) => function,
+    _ => null,
+  };
 
   HirValue? _types(AstNode node, ExecutableElement element, DartType? type) {
     final owner = takesExtensionTypes(element.baseElement);
     if (owner == null) return null;
-    final types = _typesOf(node, owner, type!);
+    if (owner is ExtensionElement &&
+        element is! SubstitutedElementImpl &&
+        _omitsReceiver(node, element)) {
+      // A bare reference in a class can also resolve to an extension member.
+      if (_builder.typesOf(owner) case final types?) return types;
+    }
+    final types = _typesOf(node, element, owner, type!);
     return _scope.typeList(_builder, types) ??
         _unsupported(node, 'these type arguments');
   }

@@ -28,7 +28,6 @@ final class ForwarderTable(
     Never reject(String what) => throw _declarations.unsupported(member, what);
     final isGeneric = member.typeParameters.isNotEmpty;
     final viewed = viewedAt(level, member), resultType = viewed.returnType;
-    final hasResult = !hasNoResult(resultType);
     final function = HirFunction(
       '${level.element.displayName}.${member.displayName}',
       [
@@ -38,10 +37,7 @@ final class ForwarderTable(
           valueType(parameter.type) ??
               reject('a parameter of type ${parameter.type}'),
       ],
-      hasResult
-          ? valueType(member.returnType) ??
-                reject('a result of type $resultType')
-          : null,
+      valueType(member.returnType) ?? reject('a result of type $resultType'),
     );
     final builder = FunctionBuilder(
       _unit,
@@ -55,15 +51,14 @@ final class ForwarderTable(
       builder.bindParameters(viewed.typeParameters, types);
     }
     final result = _call(builder, member, viewed);
-    if (hasResult) {
-      final conversions = Conversions(_scope, builder);
-      final dynamic = conversions.types.dynamicType;
-      final checked =
-          conversions.cast(result, dynamic, resultType) ??
-          reject('testing for $resultType');
-      builder.end(HirReturn(conversions.coerce(checked, function.result!)));
-    }
-    builder.finish();
+    final conversions = Conversions(_scope, builder);
+    final dynamic = conversions.types.dynamicType;
+    final checked =
+        conversions.cast(result, dynamic, resultType) ??
+        reject('testing for $resultType');
+    builder
+      ..end(HirReturn(conversions.coerce(checked, function.result!)))
+      ..finish();
     return function;
   }
 

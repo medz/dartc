@@ -7,6 +7,7 @@ import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/source/line_info.dart';
 
 import 'analysis.dart';
+import 'corrected_text.dart';
 import 'corrections.dart';
 import 'problem.dart';
 import 'sdk.dart';
@@ -24,6 +25,10 @@ final class SourceUnit(
     _content.originalOffset(node.offset),
     _content.originalOffset(node.end),
   );
+
+  /// The field that preserves the value of [element]'s own `_name` field.
+  String? enumNameField(EnumElement element) =>
+      _content.enumNameFields[element.name];
 
   /// A problem at [offset] characters into the text that was resolved.
   SourceProblem problemAt(int offset, String message) {
@@ -85,8 +90,8 @@ Future<SourceProgram> loadProgram(
     var libraries = await analysis.resolve(resolved) ?? await resolveAlone();
     // Some constants have to be analyzed as other text.
     final corrected = {
-      for (final unit in libraries.own.expand((library) => library.units))
-        unit.path: ?correctionsOf(unit.unit, unit.content),
+      for (final library in libraries.own)
+        ...correctionsOf(library.units, sdk.environment),
     };
     if (corrected.isNotEmpty) {
       libraries = await resolveAlone({
