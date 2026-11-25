@@ -1,5 +1,4 @@
 import 'package:analyzer/dart/element/element.dart';
-import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
@@ -11,10 +10,9 @@ typedef Part = ({HirField function, HirField types, int count});
 /// Functions that are values, as objects of one class.
 ///
 /// Calling one calls [target], first giving what [_leading] gives for the
-/// object, then the parameters of [type] as they are declared.
+/// object, then the [parameters] as they are declared.
 final class Closure(
   final HirClass class_,
-  final FunctionType type,
   final List<FormalParameterElement> parameters,
   final HirFunction Function() target,
   final List<HirValue> Function(FunctionBuilder builder, HirValue self)
@@ -34,7 +32,7 @@ final class Closure(
   /// The field of a list of the types that it has been given, if any.
   final HirField? types,
 
-  /// What it calls instead of a [target].
+  /// What it calls instead of a [target], which tells what it takes.
   final Part? part,
 
   /// Makes what types in its parameters are made of known.

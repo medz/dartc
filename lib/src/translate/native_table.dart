@@ -59,7 +59,6 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
       ..addClosure(
         Closure(
           class_,
-          type,
           type.formalParameters,
           () => function,
           (_, self) => [self],
@@ -215,7 +214,6 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
       ..addClosure(
         Closure(
           class_,
-          declared,
           declared.formalParameters,
           () => function,
           (_, self) => [self],

@@ -60,16 +60,28 @@ final class ClosureTable(
     for (final MapEntry(key: selector, value: shape)
         in _shapes.entries.toList()) {
       for (final closure in closures.toList()) {
-        if (closure.typeParameters.length != shape.types ||
-            !accepts(closure.parameters, shape.positional, shape.named)) {
-          continue;
-        }
         if (_entries[selector]!.containsKey(closure.class_)) continue;
+        if (!_takes(closure, shape)) continue;
         _entries[selector]![closure.class_] = _entry(closure, selector, shape);
         found = true;
       }
     }
     return found;
+  }
+
+  /// Whether objects of [closure] can be called like this.
+  ///
+  /// Those with type arguments take what the function takes that got them. The
+  /// type of that where it got them can tell less.
+  bool _takes(Closure closure, _Shape shape) {
+    final (:types, :positional, :named) = shape;
+    if (closure.part case (:final count, function: _, types: _)) {
+      final inner = (types: count, positional: positional, named: named);
+      return types == 0 &&
+          closures.any((other) => other.part == null && _takes(other, inner));
+    }
+    return closure.typeParameters.length == types &&
+        accepts(closure.parameters, positional, named);
   }
 
   HirFunction _entry(Closure closure, HirSelector selector, _Shape shape) {
@@ -148,7 +160,6 @@ final class ClosureTable(
         : HirField('types', .reference, isFinal: true);
     final made = Closure(
       HirClass(element.displayName, null, [?types]),
-      element.type,
       element.formalParameters,
       () => element is ConstructorElement
           ? _creatorOf(element)
@@ -205,7 +216,6 @@ final class ClosureTable(
     return _constants[key] ??= () {
       final made = Closure(
         HirClass(element.displayName, null, []),
-        type,
         type.formalParameters,
         () => element is ConstructorElement
             ? _creatorOf(element)
@@ -262,7 +272,6 @@ final class ClosureTable(
 
     final made = Closure(
       HirClass('tear-off ${element.displayName}', null, [receiver, ?types]),
-      element.type,
       element.formalParameters,
       () => _scope.functionOf(element)!,
       (builder, self) => [
@@ -281,19 +290,16 @@ final class ClosureTable(
     return made;
   }
 
-  final _partials = <String, Closure>{};
+  final _partials = <int, Closure>{};
 
-  /// The generic [function] with a list of types and their number, which then
-  /// is of [type].
+  /// The generic [function] with a list of types and their number.
   HirValue partial(
     FunctionBuilder builder,
     HirValue function,
     (HirValue, int) types,
-    FunctionType type,
   ) {
     final (typeList, count) = types;
-    final key = '$count ${describeType(type)}';
-    final closure = _partials[key] ??= _partial(type, count);
+    final closure = _partials[count] ??= _partial(count);
     final [inner, list] = closure.class_.fields;
     final object = builder.create(closure.class_);
     builder
@@ -302,13 +308,12 @@ final class ClosureTable(
     return object;
   }
 
-  Closure _partial(FunctionType type, int count) {
+  Closure _partial(int count) {
     final inner = HirField('function', .reference, isFinal: true);
     final list = HirField('types', .reference, isFinal: true);
     final made = Closure(
-      HirClass('part of ${describeType(type)}', null, [inner, list]),
-      type,
-      type.formalParameters,
+      HirClass('part with $count', null, [inner, list]),
+      const [],
       () => throw StateError('It has no target.'),
       (_, _) => const [],
       types: list,
@@ -369,7 +374,6 @@ final class ClosureTable(
       final field = HirField('receiver', .reference, isFinal: true);
       final made = Closure(
         HirClass('tear-off ${element.displayName}', null, [field]),
-        viewed.type,
         viewed.formalParameters,
         () => isForwarder
             ? _scope.forwarderOf(level, element)

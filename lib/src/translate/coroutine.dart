@@ -26,7 +26,4 @@ final class Coroutine(
 
   /// What the runtime knows it by.
   final HirValue state,
-
-  /// What it is first given.
-  final HirValue first,
 );
