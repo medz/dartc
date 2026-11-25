@@ -152,7 +152,8 @@ final class Analysis(
       ];
       for (final literal in named) {
         final uri = Uri.tryParse(literal.stringValue ?? '');
-        if (uri == null) continue;
+        // The SDK does not change.
+        if (uri == null || uri.isScheme('dart')) continue;
         final path = unit.session.uriConverter.uriToPath(
           unit.uri.resolveUri(uri),
         );
