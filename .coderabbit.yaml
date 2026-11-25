@@ -1,14 +1,17 @@
 inheritance: true
 
 issue_enrichment:
+  auto_enrich:
+    enabled: true
   labeling:
     auto_apply_labels: true
     labeling_instructions:
       - label: "type: bug"
         instructions: >-
           Apply when the requested change corrects behavior in dartc, including
-          crashes, wrong results, and incorrect acceptance or rejection.
-          Choose the primary issue type and respect an existing type label.
+          crashes, wrong results, incorrect acceptance or rejection, and
+          inherited toolchain defects that affect dartc. Choose the primary
+          issue type and respect an existing type label.
       - label: "type: feature"
         instructions: >-
           Apply when the requested change adds a capability or improves the
