@@ -188,4 +188,181 @@ void main() {
       );
     },
   );
+
+  group('programs loaded one after the other', () {
+    Future<String> first(Directory directory) async {
+      final program = await loadProgram(
+        '${directory.path}/main.dart',
+        sdk: await packagedSdk(),
+      );
+      return [
+        for (final library in program.libraries)
+          for (final unit in library.units) unit.ast.toSource(),
+      ].join('|');
+    }
+
+    test('share the SDK', () async {
+      final [one, two] = [
+        for (final text in ['one', 'two'])
+          await load("import 'dart:io'; void main() { print('$text'); }"),
+      ];
+      expect(two.sdk.first.element, same(one.sdk.first.element));
+      expect(two.main.element, isNot(one.main.element));
+    });
+
+    test('see what changed', () async {
+      final directory = writeSources({
+        'main.dart': "import 'a.dart'; void main() => f();",
+        'a.dart': 'void f() {}',
+      });
+      void write(String name, String text) =>
+          File('${directory.path}/$name').writeAsStringSync(text);
+      expect(await first(directory), contains('void f() {}'));
+      write('a.dart', 'int f() => 1;');
+      expect(await first(directory), contains('int f() => 1;'));
+      write('main.dart', "import 'a.dart'; void main() { f(); f(); }");
+      expect(await first(directory), contains('{f(); f();}'));
+      write('a.dart', 'int f() => wrong;');
+      await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+      // An error is not kept either.
+      write('a.dart', 'int f() => 2;');
+      expect(await first(directory), contains('int f() => 2;'));
+    });
+
+    test('see files that were missing', () async {
+      final directory = writeSources({
+        'main.dart': "import 'a.dart'; void main() => f();",
+      });
+      await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+      File('${directory.path}/a.dart').writeAsStringSync('void f() {}');
+      expect(await first(directory), contains('void f() {}'));
+      // Another program can need one, too.
+      final other = writeSources({
+        'main.dart': "import 'b.dart'; void main() => g();",
+        'b.dart': "export '${directory.path}/c.dart';",
+      });
+      await expectLater(first(other), throwsA(isA<CompileFailure>()));
+      File('${directory.path}/c.dart').writeAsStringSync('void g() {}');
+      final third = writeSources({
+        'main.dart': "import '${directory.path}/c.dart'; void main() => g();",
+      });
+      expect(await first(third), contains('void g() {}'));
+    });
+
+    test(
+      'see a part that becomes a library, and the other way round',
+      () async {
+        final directory = writeSources({
+          'main.dart': "part of 'other.dart'; void main() {}",
+        });
+        final main = File('${directory.path}/main.dart');
+        await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+        main.writeAsStringSync('void main() { 1; }');
+        expect(await first(directory), contains('{1;}'));
+        main.writeAsStringSync("part of 'other.dart';");
+        await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+      },
+    );
+
+    test('see parts that were missing', () async {
+      final directory = writeSources({
+        'main.dart': "part 'a.dart'; void main() => f();",
+      });
+      await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+      File('${directory.path}/a.dart')
+          .writeAsStringSync("part of 'b.dart'; void f() {}");
+      File('${directory.path}/b.dart')
+          .writeAsStringSync("part 'a.dart'; void main() => f();");
+      final program = await loadProgram(
+        '${directory.path}/b.dart',
+        sdk: await packagedSdk(),
+      );
+      expect(program.main.units, hasLength(2));
+    });
+
+    test('see a part that becomes a program', () async {
+      final directory = writeSources({
+        'main.dart': "part 'a.dart'; void main() => f();",
+        'a.dart': "part of 'main.dart'; void f() {}",
+      });
+      expect(await first(directory), contains('void f() {}'));
+      final part = File('${directory.path}/a.dart')
+        ..writeAsStringSync('void main() { 2; }');
+      final program = await loadProgram(part.path, sdk: await packagedSdk());
+      expect(program.main.units.single.ast.toSource(), contains('{2;}'));
+    });
+
+    test('see a part that becomes a library that others import', () async {
+      final directory = writeSources({
+        'main.dart': "part 'a.dart'; void main() => f();",
+        'a.dart': "part of 'main.dart'; void f() {}",
+        'b.dart': "import 'a.dart'; void main() => f();",
+        'c.dart': "export 'a.dart'; void main() {}",
+      });
+      File file(String name) => File('${directory.path}/$name');
+      for (final name in ['b.dart', 'c.dart']) {
+        file('a.dart').writeAsStringSync("part of 'main.dart'; void f() {}");
+        expect(await first(directory), contains('void f() {}'));
+        file('a.dart').writeAsStringSync('int f() => 3;');
+        final program = await loadProgram(
+          file(name).path,
+          sdk: await packagedSdk(),
+        );
+        expect(program.libraries, hasLength(2));
+      }
+    });
+
+    test('see what was only imported under other conditions', () async {
+      final directory = writeSources({
+        'main.dart':
+            "import 'a.dart' if (dart.library.js_interop) 'b.dart';\n"
+            'void main() => f();',
+        'a.dart': 'void f() {}',
+        'b.dart': 'int f() => 1;',
+      });
+      expect(await first(directory), contains('void f() {}'));
+      File('${directory.path}/b.dart').writeAsStringSync('int f() => 2;');
+      final other = writeSources({
+        'main.dart': "import '${directory.path}/b.dart'; void main() => f();",
+      });
+      expect(await first(other), contains('int f() => 2;'));
+    });
+
+    test('in packages and outside do not mix', () async {
+      final package = writeSources({
+        'pubspec.yaml': 'name: a\nenvironment: {sdk: ^3.14.0}\n',
+        '.dart_tool/package_config.json':
+            '{"configVersion": 2, "packages": '
+            '[{"name": "a", "rootUri": "../", "packageUri": "lib/"}]}',
+        'lib/a.dart': 'int f() => 1;',
+        'main.dart': "import 'package:a/a.dart'; void main() => print(f());",
+      });
+      expect(await first(package), contains('int f() => 1;'));
+      File('${package.path}/lib/a.dart').writeAsStringSync('int f() => 2;');
+      expect(await first(package), contains('int f() => 2;'));
+      final outside = writeSources({
+        'main.dart': "import 'package:a/b.dart'; void main() => print(g());",
+      });
+      File('${package.path}/lib/b.dart').writeAsStringSync('int g() => 3;');
+      await expectLater(first(outside), throwsA(isA<CompileFailure>()));
+    });
+
+    test('are the same as alone', () async {
+      const source =
+          "class A { String toString() => 'a'; }\n"
+          "void main() { print([A(), const {'x': 1}]); }";
+      Future<List<int>> build(SdkSources sdk) => buildProgram(
+        '${writeSources({'main.dart': source}).path}/main.dart',
+        sdk,
+        const CompileOptions(),
+      );
+      final files = await packagedSdkFiles();
+      final alone = await build(sdkFor(.macosArm64, files));
+      final sdk = await packagedSdk();
+      await load("import 'dart:io'; void main() { exitCode = 1; }");
+      await load('void main() { print(RegExp("a").pattern); }');
+      expect(await build(sdk), alone);
+      expect(await build(sdk), alone);
+    });
+  });
 }
