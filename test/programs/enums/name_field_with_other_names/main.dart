@@ -8,6 +8,12 @@ enum WithField {
   final int _name, _name$dartc, _name$dartc0;
 }
 
+enum WithInitializedField {
+  item;
+
+  final int _name = 6, _name$dartc = 7;
+}
+
 mixin Names {
   int _name$dartc() => 5;
 }
@@ -26,4 +32,10 @@ void main() {
     method._name,
     method._name$dartc(),
   )); // expect: (item, 4, 5)
+  const initialized = WithInitializedField.item;
+  print((
+    initialized.name,
+    initialized._name,
+    initialized._name$dartc,
+  )); // expect: (item, 6, 7)
 }

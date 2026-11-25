@@ -12,11 +12,15 @@ Map<String, CorrectedText> correctionsOf(
   List<ResolvedUnitResult> units,
   Map<String, String> environment,
 ) {
-  late final enumName = unusedEnumNameField(units.map((unit) => unit.content));
+  late final enumName = enumNameFields(units.map((unit) => unit.content));
   late final absentName = _unusedEnvironmentName(environment);
   return {
     for (final unit in units)
-      unit.path: ?_correctionsOf(unit, () => enumName, () => absentName),
+      unit.path: ?_correctionsOf(
+        unit,
+        (element) => enumName(element),
+        () => absentName,
+      ),
   };
 }
 
@@ -31,7 +35,7 @@ String _unusedEnvironmentName(Map<String, String> environment) {
 
 CorrectedText? _correctionsOf(
   ResolvedUnitResult result,
-  String Function() enumName,
+  String Function(EnumElement) enumName,
   String Function() absentName,
 ) {
   final ResolvedUnitResult(:unit, :content) = result;

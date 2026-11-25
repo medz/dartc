@@ -1,6 +1,7 @@
 extension E<A, B extends List<A>, C extends Iterable<B>, D> on List<A> {
   (Type, Type, Type, Type) get bounds => (A, B, C, D);
   Type argument() => B;
+  (Type, B) collect(A value) => (B, <A>[value] as B);
 
   void show() {
     print(bounds);
@@ -21,6 +22,12 @@ void main() {
   // expect: (int, List<int>, Iterable<List<int>>, dynamic)
   print(E(<int>[]).bounds);
   // expect: (int, List<int>, Iterable<List<int>>, dynamic)
+  final (Type, List<int>) Function(int) implicitCollect = <int>[].collect;
+  final (Type, List<int>) Function(int) namedCollect = E(<int>[]).collect;
+  print((
+    implicitCollect(1),
+    namedCollect(2),
+  )); // expect: ((List<int>, [1]), (List<int>, [2]))
   final implicit = <int>[].argument;
   final explicit = E(<int>[]).argument;
   print((implicit(), explicit())); // expect: (List<int>, List<int>)
