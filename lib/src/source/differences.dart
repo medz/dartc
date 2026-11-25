@@ -114,5 +114,21 @@ bool _isOwnField(AstNode? node) {
   };
   if (element is! GetterElement) return false;
   final variable = element.variable;
-  return variable is FieldElement && variable.isExternal && !variable.isStatic;
+  return variable is FieldElement &&
+      variable.isExternal &&
+      !variable.isStatic &&
+      _isNumber(variable.type) &&
+      _isCompound(variable.enclosingElement);
 }
+
+bool _isNumber(DartType type) =>
+    type.isDartCoreInt || type.isDartCoreDouble || type.isDartCoreBool;
+
+/// Whether [element] is a struct or union.
+bool _isCompound(Element? element) =>
+    element is InterfaceElement &&
+    element.allSupertypes.any(
+      (type) =>
+          '${type.element.library.uri}' == 'dart:ffi' &&
+          const ['Struct', 'Union'].contains(type.element.name),
+    );
