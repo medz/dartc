@@ -9,6 +9,7 @@ import 'builder.dart';
 import 'captures.dart';
 import 'classes.dart';
 import 'closure.dart';
+import 'deferred_scope.dart';
 import 'dynamic_shape.dart';
 import 'levels.dart';
 import 'members.dart';
@@ -135,6 +136,9 @@ abstract interface class ProgramScope() {
 
   /// The functions of C that the program calls.
   NativeScope get natives;
+
+  /// The libraries that the program loads itself.
+  DeferredScope get deferred;
 
   /// What the program is compiled for.
   Target get target;

@@ -13,6 +13,7 @@ import 'closures.dart';
 import 'constant.dart';
 import 'conversions.dart';
 import 'coroutine_body.dart';
+import 'deferred.dart';
 import 'describe.dart';
 import 'dynamics.dart';
 import 'late_locals.dart';
@@ -99,6 +100,7 @@ final class ExpressionTranslator(
   );
   late final _coroutine = CoroutineBody(_scope, _builder, this);
   late final _references = ReferenceTranslator(_scope, _builder);
+  late final _deferred = DeferredTranslator(_scope, _builder);
   late final _texts = TextTranslator(_scope, _builder, this);
   late final LoopTranslator loops = LoopTranslator(
     _scope,
@@ -143,7 +145,7 @@ final class ExpressionTranslator(
     }
     switch (inner) {
       case MethodInvocation():
-        calls.invocation(inner);
+        if (_deferred.use(inner) == null) calls.invocation(inner);
       case DotShorthandInvocation():
         calls.shorthand(inner);
       case FunctionExpressionInvocation():
@@ -218,6 +220,7 @@ final class ExpressionTranslator(
       )!;
     }
     if (_endsWithin(inner)) return _builder.placeholder(placeholder);
+    if (_deferred.use(inner) case final result?) return result;
     switch (inner) {
       case Literal():
         return _literal(inner);
