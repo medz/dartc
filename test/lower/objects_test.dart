@@ -48,9 +48,9 @@ HirModule _module(HirTerminator Function(HirBlock block) build) {
 void main() {
   test('eight tests of classes share a table', () {
     final classes = [
-      for (var i = 0; i < 3; i++) HirClass('C$i', null, const []),
+      for (var i = 0; i < 5; i++) HirClass('C$i', null, const []),
     ];
-    // Every combination of classes passes some tests.
+    // No other test is passed by the same classes, so none can take its place.
     final tests = <HirTypeTest, Set<HirClass>>{
       for (var i = 0; i < 20; i++)
         HirTypeTest('t$i'): {
