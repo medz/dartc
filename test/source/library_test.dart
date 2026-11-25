@@ -292,6 +292,26 @@ void main() {
       expect(program.main.units.single.ast.toSource(), contains('{2;}'));
     });
 
+    test('see a part that becomes a library that others import', () async {
+      final directory = writeSources({
+        'main.dart': "part 'a.dart'; void main() => f();",
+        'a.dart': "part of 'main.dart'; void f() {}",
+        'b.dart': "import 'a.dart'; void main() => f();",
+        'c.dart': "export 'a.dart'; void main() {}",
+      });
+      File file(String name) => File('${directory.path}/$name');
+      for (final name in ['b.dart', 'c.dart']) {
+        file('a.dart').writeAsStringSync("part of 'main.dart'; void f() {}");
+        expect(await first(directory), contains('void f() {}'));
+        file('a.dart').writeAsStringSync('int f() => 3;');
+        final program = await loadProgram(
+          file(name).path,
+          sdk: await packagedSdk(),
+        );
+        expect(program.libraries, hasLength(2));
+      }
+    });
+
     test('see what was only imported under other conditions', () async {
       final directory = writeSources({
         'main.dart':
