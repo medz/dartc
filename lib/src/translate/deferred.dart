@@ -149,7 +149,9 @@ final class DeferredTranslator(
     // A class or the like, which is not evaluated.
     PrefixedIdentifier(
       :final prefix,
-      identifier: SimpleIdentifier(element: InstanceElement()),
+      identifier: SimpleIdentifier(
+        element: InstanceElement() || TypeAliasElement(),
+      ),
     ) =>
       _prefix(prefix),
     _ => null,

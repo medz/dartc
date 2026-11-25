@@ -45,6 +45,11 @@ Future<void> main() async {
   // expect: enum _DeferredNotLoadedError Deferred library p was not loaded.
   // expect: type _DeferredNotLoadedError Deferred library p was not loaded.
   // expect: alias _DeferredNotLoadedError Deferred library p was not loaded.
+  // expect: static of alias _DeferredNotLoadedError Deferred library p was not loaded.
+  // expect: call of alias _DeferredNotLoadedError Deferred library p was not loaded.
+  // expect: set of alias _DeferredNotLoadedError Deferred library p was not loaded.
+  // expect: named of alias _DeferredNotLoadedError Deferred library p was not loaded.
+  // expect: reference of alias _DeferredNotLoadedError Deferred library p was not loaded.
   // expect: call _DeferredNotLoadedError Deferred library p was not loaded.
   // expect: cascade _DeferredNotLoadedError Deferred library p was not loaded.
   // expect: interpolated _DeferredNotLoadedError Deferred library p was not loaded.
@@ -67,6 +72,8 @@ Future<void> main() async {
   // expect: enum [E.a]
   // expect: type A
   // expect: alias 3
+  // expect: static of alias 7
+  // expect: call of alias 4
   // expect: call 8
   // expect: cascade [0, 1]
   // expect: index 0
@@ -133,6 +140,11 @@ Future<void> more() async {
   go('enum', () => p.E.values);
   go('type', () => p.A);
   go('alias', () => p.B(3));
+  go('static of alias', () => p.B.s);
+  go('call of alias', () => p.B.make(4));
+  go('set of alias', () => p.B.s = 1);
+  go('named of alias', () => p.B.named(5));
+  go('reference of alias', () => p.B.make);
   go('call', () => p.function((print('argument') as dynamic)));
   go('cascade', () => p.list..add(1));
   go('interpolated', () => '${p.f()}');
@@ -161,6 +173,8 @@ Future<void> more() async {
   go('enum', () => p.E.values);
   go('type', () => p.A);
   go('alias', () => p.B(3).i);
+  go('static of alias', () => p.B.s);
+  go('call of alias', () => p.B.make(4).i);
   go('call', () => p.function(8));
   go('cascade', () => p.list..add(1));
   go('index', () => p.list[0]);
