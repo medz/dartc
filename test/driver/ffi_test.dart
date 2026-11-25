@@ -10,6 +10,7 @@ import 'package:test/test.dart';
 
 import '../support/hosts.dart';
 import '../support/compiler.dart';
+import 'ffi_addresses.dart';
 import 'ffi_programs.dart';
 import 'ffi_variables.dart';
 import 'random_native.dart';
@@ -65,6 +66,10 @@ void main() {
 
     test('variables', () async {
       await _agrees(variablesDart, variablesC);
+    });
+
+    test('addresses of parts of objects', () async {
+      await _agrees(addressesDart, '');
     });
 
     test('names of types and functions', () async {

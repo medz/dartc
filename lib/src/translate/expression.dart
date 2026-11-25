@@ -20,6 +20,7 @@ import 'late_locals.dart';
 import 'literals.dart';
 import 'loops.dart';
 import 'members.dart';
+import 'native_addresses.dart';
 import 'operators.dart';
 import 'patterns.dart';
 import 'places.dart';
@@ -101,6 +102,7 @@ final class ExpressionTranslator(
   late final _coroutine = CoroutineBody(_scope, _builder, this);
   late final _references = ReferenceTranslator(_scope, _builder);
   late final _deferred = DeferredTranslator(_scope, _builder);
+  late final _addresses = NativeAddresses(_scope, _builder, this, calls);
   late final _texts = TextTranslator(_scope, _builder, this);
   late final LoopTranslator loops = LoopTranslator(
     _scope,
@@ -220,7 +222,9 @@ final class ExpressionTranslator(
       )!;
     }
     if (_endsWithin(inner)) return _builder.placeholder(placeholder);
-    if (_deferred.use(inner) case final result?) return result;
+    if (_deferred.use(inner) ?? _addresses.of(inner) case final result?) {
+      return result;
+    }
     switch (inner) {
       case Literal():
         return _literal(inner);

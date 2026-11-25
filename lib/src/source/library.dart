@@ -9,6 +9,7 @@ import 'package:analyzer/source/line_info.dart';
 import 'analysis.dart';
 import 'corrected_text.dart';
 import 'corrections.dart';
+import 'differences.dart';
 import 'problem.dart';
 import 'sdk.dart';
 
@@ -121,8 +122,13 @@ SourceProgram _checked(
     for (final library in libraries.own)
       for (final unit in library.units)
         for (final diagnostic in unit.diagnostics)
-          if (diagnostic.severity == Severity.error)
+          if (diagnostic.severity == Severity.error &&
+              !isAccepted(diagnostic, unit.unit))
             unitOf(unit).problemAt(diagnostic.offset, diagnostic.message),
+    for (final library in libraries.own)
+      for (final unit in library.units)
+        for (final (offset, message) in errorsMissedIn(unit.unit))
+          unitOf(unit).problemAt(offset, message),
   ];
   if (problems.isNotEmpty) throw CompileFailure(problems);
   SourceLibrary library(ResolvedLibraryResult result) =>

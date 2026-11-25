@@ -39,10 +39,10 @@ final class ExtensionTranslator(
     DartType type,
   ) {
     if (owner is ExtensionTypeElement) {
-      final found = switch (type) {
-        TypeParameterType(:final bound) => bound,
-        _ => type,
-      };
+      var found = type;
+      while (found is TypeParameterType) {
+        found = found.bound;
+      }
       return (found as InterfaceType).asInstanceOf(owner)!.typeArguments;
     }
     // Elements whose types need no type arguments do not tell them.

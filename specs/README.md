@@ -23,9 +23,16 @@ Wasm 是以后的目标。
 
 | 例子 | 官方 | analyzer，也就是 dartc |
 | --- | --- | --- |
-| `extension type E<T>(T value) { T get() => value; }` 时，`B extends E<int>` 的值调用 `get()` | 可以 | 报错：接收者可能是 null。先转换成 `E<int>` 就可以 |
 | 明确写出泛型扩展的运算符 `E<int>(box) + 7`，参数的类型是 `T` | 可以 | 报错：`int` 不能给 `T` |
-| `receiver?.method<int>`，不调用 | 报错 | 接受 |
+
+上面这一条没有改：14.7.0 是最新的 analyzer，它连这个表达式的类型也算成 `T`，所以不能只是忽略错误。改成方法，或者写 `box + 7`，就可以。
+
+下面几条已经按官方处理，见 `lib/src/source/differences.dart`：
+
+- `extension type E<T>(T value) { T get() => value; }` 时，`B extends E<int>` 的值可以调用 `get()`。
+- 结构体里可以不写 `this` 就用自己的字段的 `.address`。
+- `receiver?.method<int>`，不调用，是错误。
+- 延迟导入的 `prefix.Type<int>`，当作值，是错误。
 
 ## 规范
 
