@@ -12,7 +12,7 @@ import 'x64/backend.dart';
 /// What Linux starts in programs.
 const linuxEntrySymbol = '.linuxEntry';
 
-/// Translates a module to machine code, throwing [EmitUnsupported] where it
+/// Translates a module to machine code, throwing `EmitUnsupported` where it
 /// cannot.
 ///
 /// [entry] is the function that a program starts with.

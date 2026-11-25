@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:dartc/lir.dart';
 
-import 'code.dart';
+import 'unsupported.dart';
 
 /// The stack words holding references while a call is made.
 ///
