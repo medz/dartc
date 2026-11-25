@@ -229,11 +229,11 @@ final class ObjectLayout(
 
   /// The address of what the class with [number] has for [selector].
   LirValue lookUp(LirBlock block, HirSelector selector, LirValue number) {
+    final row = block.add(ConstInt(_selectorOffsets[selector]!));
+    final entry = block.add(IntBinary(.add, number, row));
+    final index = block.add(IntBinary(.shl, entry, block.add(ConstInt(2))));
     final table = block.add(SymbolAddress(_tableSymbol));
-    final index = block.add(IntBinary(.shl, number, block.add(ConstInt(2))));
-    final offset = block.add(
-      Load(.i32, table, offset: _selectorOffsets[selector]! * 4, index: index),
-    );
-    return block.add(PtrAdd(table, offset));
+    final distance = block.add(Load(.i32, table, index: index));
+    return block.add(PtrAdd(table, distance));
   }
 }

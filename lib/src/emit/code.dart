@@ -4,13 +4,6 @@ import 'package:dartc/native.dart';
 
 import 'stack_maps.dart';
 
-/// LIR that this version cannot translate yet.
-final class EmitUnsupported(final String function, final String what)
-    implements Exception {
-  @override
-  String toString() => 'EmitUnsupported: $function: $what';
-}
-
 /// How a symbol's address enters an instruction.
 enum RelocationKind({final bool isCall = false}) {
   /// A 26-bit word displacement in `bl` of ARM64.

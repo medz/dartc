@@ -131,8 +131,11 @@ final class Arm64Assembler() {
 
   void cmp(int n, int m) => _three(0xeb000000, zero, n, m);
 
-  /// Whether [cmpImmediate] and [addSigned] can have [value].
+  /// Whether [cmpImmediate] can have [value].
   static bool isSmall(int value) => value > -4096 && value < 4096;
+
+  /// Whether [addSigned] can have [value].
+  static bool isAddable(int value) => value > -(1 << 24) && value < 1 << 24;
 
   void cmpImmediate(int n, int value) => _emit(
     (value < 0 ? 0xb1000000 : 0xf1000000) |
@@ -142,15 +145,18 @@ final class Arm64Assembler() {
   );
 
   /// d = n + value.
-  void addSigned(int d, int n, int value) => _emit(
-    (value < 0 ? 0xd1000000 : 0x91000000) |
-        _field(value.abs(), 12, 'add immediate') << 10 |
-        n << 5 |
-        d,
-  );
+  void addSigned(int d, int n, int value) {
+    final base = value < 0 ? 0xd1000000 : 0x91000000, size = value.abs();
+    final high = _field(size >> 12, 12, 'add immediate'), low = size & 0xfff;
+    if (high != 0) _emit(base | 1 << 22 | high << 10 | n << 5 | d);
+    if (high == 0 || low != 0) {
+      _emit(base | low << 10 | (high == 0 ? n : d) << 5 | d);
+    }
+  }
 
-  /// d = n + m * 8.
-  void addScaled(int d, int n, int m) => _three(0x8b000c00, d, n, m);
+  /// d = n + m * 2^[shift].
+  void addScaled(int d, int n, int m, int shift) =>
+      _three(0x8b000000 | _field(shift, 6, 'shift') << 10, d, n, m);
 
   void lslImmediate(int d, int n, int count) =>
       _emit(0xd3400000 | (-count & 63) << 16 | 63 - count << 10 | n << 5 | d);
@@ -240,25 +246,50 @@ final class Arm64Assembler() {
   void storeIndexed(int t, int n, int m, {bool float = false}) =>
       _three(float ? 0xfc206800 : 0xf8206800, t, n, m);
 
+  /// Loads or stores two registers, one after the other, at [offset] from [n].
+  ///
+  /// [offset] must satisfy [pairReaches].
+  void loadPair(int t, int u, int n, int offset, {bool float = false}) =>
+      _pair(float ? 0x6d400000 : 0xa9400000, t, u, n, offset);
+  void storePair(int t, int u, int n, int offset, {bool float = false}) =>
+      _pair(float ? 0x6d000000 : 0xa9000000, t, u, n, offset);
+
+  void _pair(int base, int t, int u, int n, int offset) {
+    if (!pairReaches(offset)) throw RangeError('Pair out of reach: $offset');
+    _emit(base | (offset ~/ 8 & 0x7f) << 15 | u << 10 | n << 5 | t);
+  }
+
+  static bool pairReaches(int offset) =>
+      offset % 8 == 0 && offset >= -512 && offset < 512;
+
+  static int _loadOf(Width width) => switch (width) {
+    .i8 => 0x39800000,
+    .u8 => 0x39400000,
+    .i16 => 0x79800000,
+    .u16 => 0x79400000,
+    .i32 => 0xb9800000,
+    .u32 => 0xb9400000,
+    .i64 || .ref || .ptr => 0xf9400000,
+    .f32 => 0xbd400000,
+    .f64 => 0xfd400000,
+  };
+
   /// Loads [width] into [t], extending or converting it to a full register.
   ///
   /// [offset] must satisfy [reaches].
   void loadWidth(Width width, int t, int n, int offset) {
-    final word = switch (width) {
-      .i8 => 0x39800000,
-      .u8 => 0x39400000,
-      .i16 => 0x79800000,
-      .u16 => 0x79400000,
-      .i32 => 0xb9800000,
-      .u32 => 0xb9400000,
-      .i64 || .ref || .ptr => 0xf9400000,
-      .f32 => 0xbd400000,
-      .f64 => 0xfd400000,
-    };
     if (!reaches(width, offset)) {
       throw RangeError('Offset out of reach: $offset');
     }
-    _emit(word | offset ~/ width.bytes << 10 | n << 5 | t);
+    _emit(_loadOf(width) | offset ~/ width.bytes << 10 | n << 5 | t);
+    if (width == .f32) _three(0x1e22c000, t, t, 0);
+  }
+
+  /// As above, at [n] plus [m], which is a number of [width] if it [isScaled].
+  void loadWidthAt(Width width, int t, int n, int m, {required bool isScaled}) {
+    // The same load, but not with an offset.
+    final word = _loadOf(width) & ~(1 << 24) | 0x206800;
+    _emit(word | (isScaled ? 1 << 12 : 0) | m << 16 | n << 5 | t);
     if (width == .f32) _three(0x1e22c000, t, t, 0);
   }
 

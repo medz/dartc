@@ -1,6 +1,6 @@
 import 'package:dartc/lir.dart';
 
-import 'code.dart';
+import 'unsupported.dart';
 
 /// The calls that [block] makes.
 Iterable<LirCall> callsOf(LirBlock block) => [

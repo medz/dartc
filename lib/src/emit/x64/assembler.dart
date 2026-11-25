@@ -68,8 +68,8 @@ final class const Memory(
   final int offset = 0,
   final int? index,
 
-  /// Whether the index is a number of 8 bytes.
-  final bool isScaled = false,
+  /// How far the index is shifted.
+  final int shift = 0,
 });
 
 /// Encodes 64-bit x64 instructions, with registers given by number.
@@ -121,7 +121,7 @@ final class X64Assembler() {
 
   /// Emits what tells [reg] and [memory].
   void _memory(int reg, Memory memory) {
-    final Memory(:base, :offset, :index, :isScaled) = memory;
+    final Memory(:base, :offset, :index, :shift) = memory;
     // rbp and r13 always have an offset.
     final mode = offset == 0 && base & 7 != rbp
         ? 0
@@ -132,7 +132,7 @@ final class X64Assembler() {
     if (index != null || base & 7 == rsp) {
       if (index == rsp) throw ArgumentError.value(index, 'index');
       _byte(mode << 6 | (reg & 7) << 3 | 4);
-      _byte((isScaled ? 0xc0 : 0) | ((index ?? rsp) & 7) << 3 | (base & 7));
+      _byte(shift << 6 | ((index ?? rsp) & 7) << 3 | (base & 7));
     } else {
       _byte(mode << 6 | (reg & 7) << 3 | (base & 7));
     }

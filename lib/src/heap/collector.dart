@@ -199,22 +199,34 @@ void collect() {
 void _markStack() {
   var frame = frameAddress(), native = load64(nativeFrame());
   while (true) {
-    final table = stackMaps();
-    final at = findReturn(table, load64(frame + 8) - codeStart());
-    if (at == 0) {
+    final record = findStackMap(stackMaps(), load64(frame + 8) - codeStart());
+    if (record == 0) {
       // C called this. What called C is further out, if there is anything.
       if (native == 0) return;
       frame = native;
       native = load64(native - 8);
       continue;
     }
-    final record = table + at;
     // The record tells about the caller, whose frame is stored first.
     frame = load64(frame);
-    final count = load32(record);
-    for (var i = 0; i < count; i++) {
-      _mark(load64(frame + load32Signed(record + 4 + i * 4)));
+    _markFrame(frame, record);
+  }
+}
+
+/// Marks what [record] tells of the function with [frame].
+void _markFrame(int frame, int record) {
+  final first = load32(record), count = first & 0x7fff;
+  if (first & 0x8000 != 0) {
+    for (var i = 1; i <= count; i++) {
+      _mark(load64(frame + load32Signed(record + i * 4) * 8));
     }
+    return;
+  }
+  for (var i = 1; i <= count; i++) {
+    final word = load32Signed(record + (i >> 1) * 4);
+    // The lower half keeps its sign where it is moved up and down.
+    final offset = i & 1 != 0 ? word >> 16 : word << 48 >> 48;
+    _mark(load64(frame + offset * 8));
   }
 }
 

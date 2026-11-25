@@ -18,7 +18,7 @@ final class Selection(final LirFunction _function, final Abilities _abilities) {
   /// The comparisons that branches do themselves.
   final _branches = <Branch, Compare>{};
 
-  /// The numbers of 8 bytes that loads and stores have as their index.
+  /// The numbers of what they access that loads and stores have as their index.
   final _scaled = <LirInstruction, LirValue>{};
 
   /// What instructions have on their right.
@@ -70,11 +70,11 @@ final class Selection(final LirFunction _function, final Abilities _abilities) {
           when _abilities.comparesImmediate(right.value):
         _immediates[instruction] = right.value;
         _uses[right] = _uses[right]! - 1;
-      case Load(:final index?, width: Width(bytes: 8)) ||
-          Store(:final index?, width: Width(bytes: 8)):
+      case Load(:final index?, :final width) ||
+          Store(:final index?, :final width):
         if (index
-            case IntBinary(op: .shl, :final left, right: ConstInt(value: 3))
-            when _uses[index] == 1) {
+            case IntBinary(op: .shl, :final left, right: ConstInt(:final value))
+            when value == width.shift && value > 0 && _uses[index] == 1) {
           _scaled[instruction] = left;
           _folded.add(index);
         }
@@ -96,7 +96,7 @@ final class Selection(final LirFunction _function, final Abilities _abilities) {
   /// What [instruction] has on its right instead of a value.
   int? immediateOf(LirInstruction instruction) => _immediates[instruction];
 
-  /// Whether the index of [instruction] is a number of 8 bytes.
+  /// Whether the index of [instruction] is a number of what it accesses.
   bool isScaled(LirInstruction instruction) => _scaled.containsKey(instruction);
 
   /// The comparison that [branch] does.

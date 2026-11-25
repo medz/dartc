@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dartc/heap.dart';
+import 'package:dartc/src/emit/stack_maps.dart';
 
 /// Classes as the collector sees them: the offsets of their references.
 const classes = <List<int>>[
@@ -37,15 +38,21 @@ final class SimulatedMachine({
   final Set<int> calledFromC = {};
 
   /// The number of references each kind of frame holds, by return address.
-  static const _kinds = [0, 1, 2, 5];
-  static const globalCount = 4;
+  static const _kinds = [0, 1, 2, 5, _wide];
+
+  /// The number of references in frames where the last one is far away.
+  static const _wide = 3, _far = -8 * 40000;
+  static const globalCount = 4, _frameBytes = 1 << 23;
   static const _code = 0x5000;
 
   /// What the machine maps for itself.
   static int get ownBytes => SimulatedMachine().mapped;
 
   this {
-    _frames = mapMemory(1 << 16);
+    // The program does not map its stack.
+    _frames = _next;
+    _regions[_frames] = ByteData(_frameBytes);
+    _next += _frameBytes + 0x1000;
     _globals = mapMemory(globalCount * 8);
     _handlers = mapMemory(4096);
     _native = mapMemory(8);
@@ -66,19 +73,23 @@ final class SimulatedMachine({
     mostMapped = mapped;
   }
 
-  /// Each kind returns to its own address; records follow the index.
+  /// Where a kind of frame has its references, from its address.
+  static List<int> _offsetsOf(int count) => [
+    for (var i = 1; i <= count; i++)
+      count == _wide && i == count ? _far : -8 * i,
+  ];
+
+  /// Each kind returns to its own address.
   void _makeMaps() {
-    _maps = mapMemory(4096);
-    store32(_maps, _kinds.length);
-    var at = 4 + _kinds.length * 8;
-    for (final (i, count) in _kinds.indexed) {
-      store32(_maps + 4 + i * 8, 100 + i * 4);
-      store32(_maps + 8 + i * 8, at);
-      store32(_maps + at, count);
-      for (var j = 0; j < count; j++) {
-        store32(_maps + at + 4 + j * 4, (-8 * (j + 1)) & 0xffffffff);
-      }
-      at += 4 + count * 4;
+    final encoded = ByteData.sublistView(
+      encodeStackMaps([
+        for (final (i, count) in _kinds.indexed)
+          StackMap(100 + i * 4, _offsetsOf(count)),
+      ]),
+    );
+    _maps = mapMemory(encoded.lengthInBytes);
+    for (var at = 0; at < encoded.lengthInBytes; at += 4) {
+      store32(_maps + at, encoded.getUint32(at, .little));
     }
   }
 
@@ -86,7 +97,7 @@ final class SimulatedMachine({
   @override
   int get frameAddress {
     collections++;
-    var address = _frames + (1 << 16) - 16;
+    var address = _frames + _frameBytes - 16;
     store64(address, 0);
     store64(address + 8, 0x77777777);
     var native = 0;
@@ -101,10 +112,11 @@ final class SimulatedMachine({
       }
       final kind = _kinds.indexOf(references.length);
       // The caller's references are below its frame address.
+      final offsets = _offsetsOf(references.length);
       for (final (j, reference) in references.indexed) {
-        store64(address - 8 * (j + 1), reference);
+        store64(address + offsets[j], reference);
       }
-      final callee = address - references.length * 8 - 64;
+      final callee = address + (offsets.lastOrNull ?? 0) - 64;
       store64(callee, address);
       store64(callee + 8, _code + 100 + kind * 4);
       address = callee;

@@ -86,7 +86,7 @@ final class ForwarderTable(
         SetterElement() => 2,
         _ => 0,
       },
-      member.lookupName!,
+      builder.add(_scope.text(member.lookupName!)),
       [
         for (final parameter in parameters)
           if (parameter.isPositional) given(parameter),
@@ -123,26 +123,24 @@ HirValue callMissing(
   FunctionBuilder builder,
   HirValue object,
   int kind,
-  String name,
+  HirValue name,
   List<HirValue> positional,
   Map<String, HirValue> named, {
   HirValue? types,
   String? found,
 }) {
   final dynamic = builder.library.typeProvider.dynamicType;
-  HirValue text(String? text) =>
-      builder.add(text == null ? HirNull() : scope.text(text));
   return builder.call(
     HirCall(scope.runtime('missing'), [
       object,
       builder.add(HirConst(kind)),
-      text(name),
+      name,
       types ?? builder.add(HirNull()),
       scope.list(builder, dynamic, [...positional, ...named.values]),
       scope.list(builder, dynamic, [
         for (final name in named.keys) builder.add(scope.text(name)),
       ]),
-      text(found),
+      builder.add(found == null ? HirNull() : scope.text(found)),
     ]),
   )!;
 }

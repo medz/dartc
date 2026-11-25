@@ -115,11 +115,11 @@ void main() {
     _encodes('4c69c990eefeff', (a) => a.imulImmediate(9, 1, -70000));
     _encodes(
       '4a8d4cca18',
-      (a) => a.lea(1, const Memory(2, offset: 24, index: 9, isScaled: true)),
+      (a) => a.lea(1, const Memory(2, offset: 24, index: 9, shift: 3)),
     );
     _encodes(
       '4d8b54c500',
-      (a) => a.load(10, const Memory(13, index: 0, isScaled: true)),
+      (a) => a.load(10, const Memory(13, index: 0, shift: 3)),
     );
     _encodes('488d10', (a) => a.lea(2, const Memory(0)));
     _encodes('488d5308', (a) => a.lea(2, const Memory(3, offset: 8)));

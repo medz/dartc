@@ -98,6 +98,16 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
 
   void _load(Load load, int d, List<int> operands, {required bool isScaled}) {
     final index = load.index == null ? null : operands[1];
+    if (index != null && load.offset == 0) {
+      _assembler.loadWidthAt(
+        load.width,
+        d,
+        operands[0],
+        index,
+        isScaled: isScaled,
+      );
+      return;
+    }
     final (base, offset) = _address(
       load.width,
       operands[0],
@@ -146,7 +156,7 @@ final class Arm64Operations(final Arm64Assembler _assembler) {
   }) {
     if (index != null) {
       isScaled
-          ? _assembler.addScaled(farScratch, base, index)
+          ? _assembler.addScaled(farScratch, base, index, width.shift)
           : _assembler.add(farScratch, base, index);
       base = farScratch;
     }

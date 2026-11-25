@@ -17,6 +17,9 @@ abstract interface class Program() {
   /// What else the text of [function] says.
   String functionName(Object function);
 
+  /// What [function] is called where it is not given what it needs.
+  String calledName(Object function);
+
   /// The supertypes of a class, other than `Object`.
   SuperList? superTypesOf(int number);
 
@@ -39,6 +42,7 @@ RuntimeType typeOf(Object object) => program.typeOf(object);
 Object? receiverOf(Object function) => program.receiverOf(function);
 TypeList? typesOf(Object function) => program.typesOf(function);
 String functionName(Object function) => program.functionName(function);
+String calledName(Object function) => program.calledName(function);
 SuperList? superTypesOf(int number) => program.superTypesOf(number);
 int functionNumber() => program.functionNumber;
 int futureNumber() => program.futureNumber;
