@@ -1,0 +1,51 @@
+inheritance: true
+
+issue_enrichment:
+  labeling:
+    auto_apply_labels: true
+    labeling_instructions:
+      - label: "type: bug"
+        instructions: >-
+          Apply when the requested change corrects behavior in dartc, including
+          crashes, wrong results, and incorrect acceptance or rejection.
+          Choose the primary issue type and respect an existing type label.
+      - label: "type: feature"
+        instructions: >-
+          Apply when the requested change adds a capability or improves the
+          compiler or its libraries. Include language support and version
+          decisions. Choose the primary issue type and respect an existing
+          type label.
+      - label: "type: test"
+        instructions: >-
+          Apply when the requested change is regression coverage, fixtures, or
+          test expectations. Include issues that protect correct dartc behavior
+          when the official SDK differs. Choose the primary issue type and
+          respect an existing type label.
+      - label: "type: docs"
+        instructions: >-
+          Apply when updating documentation or specification text is the
+          primary requested change. Respect an existing type label.
+      - label: "area: frontend"
+        instructions: >-
+          Apply to source loading, parsing, analyzer integration, static
+          diagnostics, or compile-time analysis and constant evaluation.
+      - label: "area: translation"
+        instructions: >-
+          Apply to translation of resolved Dart into HIR, including
+          null-short chains, closures, dispatch, and type adaptation.
+      - label: "area: runtime"
+        instructions: >-
+          Apply to runtime representations and operations such as numeric
+          equality, identity, runtime types, allocation, GC, and unwinding.
+      - label: "area: stdlib"
+        instructions: >-
+          Apply to Dart standard-library API behavior or patches in sdk/native.
+      - label: "upstream: dart-sdk"
+        instructions: >-
+          Apply when the requested work depends on or verifies a specific
+          behavior or defect in the official Dart VM, CFE, analyzer, or standard
+          library. An upstream issue or a concrete SDK reproducer is evidence.
+      - label: "upstream: dart-language"
+        instructions: >-
+          Apply when the requested work tracks a Dart language design proposal
+          or a decision about the semantics or language version to support.
