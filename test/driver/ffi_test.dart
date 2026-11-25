@@ -13,6 +13,7 @@ import '../support/compiler.dart';
 import 'ffi_addresses.dart';
 import 'ffi_programs.dart';
 import 'ffi_variables.dart';
+import 'finalizers.dart';
 import 'random_native.dart';
 
 /// Checks that the program [source] does what it does officially.
@@ -74,6 +75,14 @@ void main() {
 
     test('names of types and functions', () async {
       await _agrees(namesDart, '');
+    });
+
+    test('finalizers', () async {
+      await _agrees(finalizersDart, finalizersC, isLong: true);
+    });
+
+    test('weak references', () async {
+      await _agrees(weakDart, '', isLong: true);
     });
 
     test('callbacks', () async {
