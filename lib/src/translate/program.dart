@@ -218,7 +218,7 @@ final class ProgramTranslator(
   }
 
   @override
-  HirFunction runtime(String name) => _functions.of(_links.function(name));
+  HirFunction runtime(String name) => functionOf(_links.function(name))!;
 
   @override
   Captures capturesOf(AstNode declaration) =>

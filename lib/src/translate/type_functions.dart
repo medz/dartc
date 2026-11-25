@@ -35,11 +35,21 @@ final class TypeFunctions(
   late final _ofFunctions = [
     _ClosureTable('receiverOf', _receiverOf),
     _ClosureTable('typesOf', _typesOf),
-    _ClosureTable(
-      'functionName',
-      (builder, closure) => builder.add(_scope.text(closure.text)),
-    ),
+    _texts('functionName', (closure) => closure.text),
+    _texts('calledName', (closure) => closure.name),
   ];
+
+  /// What gives [text]. Functions with type arguments give that of the function
+  /// that got them.
+  _ClosureTable _texts(String name, String Function(Closure closure) text) {
+    late final _ClosureTable table;
+    return table = _ClosureTable(name, (builder, closure) {
+      final part = closure.part;
+      if (part == null) return builder.add(_scope.text(text(closure)));
+      final inner = builder.add(HirLoad(part.function, builder.inputs.single));
+      return builder.call(HirVirtualCall(table.selector, inner, const []))!;
+    });
+  }
 
   /// What the selectors call, by class.
   Map<HirSelector, Map<HirClass, HirFunction>> get dispatch => {

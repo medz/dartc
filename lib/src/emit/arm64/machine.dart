@@ -37,12 +37,18 @@ final class Arm64Machine(final Arm64Assembler _assembler) implements Machine {
 
   void _checkStack(int bytes, void Function() onCheck) {
     final enough = Label();
+    var lowest = _frame;
+    // There is more below the limit than little frames take.
+    if (bytes > littleFrame) {
+      _assembler
+        ..constant(rightScratch, bytes)
+        ..sub(rightScratch, _frame, rightScratch);
+      lowest = rightScratch;
+    }
     _assembler
-      ..constant(rightScratch, bytes)
-      ..sub(rightScratch, _frame, rightScratch)
       ..address(farScratch, stackLimitSymbol)
       ..load(farScratch, farScratch, 0)
-      ..cmp(rightScratch, farScratch)
+      ..cmp(lowest, farScratch)
       ..jumpIf(.lo, enough, holds: false)
       ..call(stackOverflowSymbol);
     onCheck();
@@ -74,7 +80,7 @@ final class Arm64Machine(final Arm64Assembler _assembler) implements Machine {
 
   @override
   bool takesImmediate(IntOp op, int value) => switch (op) {
-    .add || .sub => Arm64Assembler.isSmall(value),
+    .add || .sub => Arm64Assembler.isAddable(value),
     .mul => value > 0 && value & (value - 1) == 0,
     .and || .or || .xor => Arm64Assembler.maskOf(value) != null,
     .shl || .sar || .shr => value >= 0 && value < 64,
@@ -103,6 +109,28 @@ final class Arm64Machine(final Arm64Assembler _assembler) implements Machine {
     store
         ? _assembler.storeIndexed(number, base, farScratch, float: float)
         : _assembler.loadIndexed(number, base, farScratch, float: float);
+  }
+
+  @override
+  void accessAll(
+    List<InRegister> registers,
+    int offset, {
+    required bool store,
+  }) {
+    for (var i = 0; i < registers.length; i++) {
+      final InRegister(:bank, :number) = registers[i];
+      final at = offset + i * 8;
+      final next = registers.elementAtOrNull(i + 1);
+      if (next?.bank != bank || !Arm64Assembler.pairReaches(at)) {
+        access(registers[i], at, fromFrame: false, store: store);
+        continue;
+      }
+      final other = next!.number, float = bank == .float;
+      store
+          ? _assembler.storePair(number, other, _stack, at, float: float)
+          : _assembler.loadPair(number, other, _stack, at, float: float);
+      i++;
+    }
   }
 
   @override

@@ -99,36 +99,40 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
   }
 
   /// A function telling that objects have no such member, or one that takes
-  /// [found] and is called [name]. Objects of all classes share it.
+  /// [found], or that they are functions that take something else. Objects of
+  /// all classes share it.
   HirFunction _missing(
     HirSelector selector,
     DynamicShape shape, {
-    String? name,
+    bool isCall = false,
     String? found,
-  }) => _missed[(selector, name, found)] ??= _makeMissing(
+  }) => _missed[(selector, isCall, found)] ??= _makeMissing(
     selector,
     shape,
-    name,
     found,
+    isCall: isCall,
   );
-  final _missed = <(HirSelector, String?, String?), HirFunction>{};
+  final _missed = <(HirSelector, bool, String?), HirFunction>{};
 
   HirFunction _makeMissing(
     HirSelector selector,
     DynamicShape shape,
-    String? name,
-    String? found,
-  ) => _make('no ${shape.name}', selector, (builder, _) {
+    String? found, {
+    required bool isCall,
+  }) => _make('no ${shape.name}', selector, (builder, _) {
     final [receiver, ...all] = builder.inputs;
     final types = shape.types > 0 ? all.first : null;
     final given = types == null ? all : all.sublist(1);
     final isSetter = shape.use == .set;
+    final name = isCall
+        ? builder.call(HirCall(_scope.runtime('calledName'), [receiver]))!
+        : builder.add(_scope.text(isSetter ? '${shape.name}=' : shape.name));
     return callMissing(
       _scope,
       builder,
       receiver,
       shape.use.index,
-      name ?? (isSetter ? '${shape.name}=' : shape.name),
+      name,
       given.take(isSetter ? 1 : shape.positional).toList(),
       {
         for (final (i, name) in shape.named.indexed)
@@ -212,7 +216,7 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     final count = closure.typeParameters.length;
     if (shape.types > 0 && shape.types != count ||
         !accepts(closure.parameters, shape.positional, shape.named)) {
-      return _missing(selector, shape, name: closure.name);
+      return _missing(selector, shape, isCall: true);
     }
     return _make(selector.name, selector, (builder, conversions) {
       final self = builder.inputs.first;

@@ -82,9 +82,7 @@ final class FunctionEmitter(
       checksStack: function.checksStack,
       onCheck: () => stackMaps.add(StackMap(_machine.offset, const [])),
     );
-    for (final (i, register) in _saved.indexed) {
-      _accessSaved(i, register, store: true);
-    }
+    _accessSaved(store: true);
     final incoming = _registers.argumentLocations(
       function.signature,
       .incoming,
@@ -96,19 +94,12 @@ final class FunctionEmitter(
   }
 
   void _epilogue() {
-    for (final (i, register) in _saved.indexed) {
-      _accessSaved(i, register, store: false);
-    }
+    _accessSaved(store: false);
     _machine.leave();
   }
 
-  void _accessSaved(int index, InRegister register, {required bool store}) =>
-      _machine.access(
-        register,
-        _savedOffset(index),
-        fromFrame: false,
-        store: store,
-      );
+  void _accessSaved({required bool store}) =>
+      _machine.accessAll(_saved, _savedOffset(0), store: store);
 
   void _accessStack(InRegister register, OnStack word, {required bool store}) {
     final (fromFrame, index) = switch (word.area) {

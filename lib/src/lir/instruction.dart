@@ -210,7 +210,10 @@ enum Width(final int bytes, final LirType type) {
   f32(4, .f64),
   f64(8, .f64),
   ref(8, .ref),
-  ptr(8, .ptr),
+  ptr(8, .ptr);
+
+  /// How far numbers of it are shifted to be bytes.
+  int get shift => bytes.bitLength - 1;
 }
 
 /// Reads [width] at [offset] bytes after [base], a reference or an address.

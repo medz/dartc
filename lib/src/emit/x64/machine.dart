@@ -94,6 +94,17 @@ final class X64Machine(
   }
 
   @override
+  void accessAll(
+    List<InRegister> registers,
+    int offset, {
+    required bool store,
+  }) {
+    for (final (i, register) in registers.indexed) {
+      access(register, offset + i * 8, fromFrame: false, store: store);
+    }
+  }
+
+  @override
   void call(String symbol, LirSignature signature) {
     // Functions with variable arguments are told how many are doubles.
     if (_externals.contains(symbol)) {

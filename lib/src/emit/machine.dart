@@ -72,6 +72,10 @@ final class const MachineRegisters({
   }
 }
 
+/// The largest frames that may reach below the limit of the stack, where there
+/// is much more.
+const littleFrame = 4096;
+
 /// What a kind of processor does for functions.
 ///
 /// From the stack pointer up, a frame holds outgoing arguments, spilled values,
@@ -83,8 +87,8 @@ abstract interface class Machine() implements Abilities {
   int get offset;
 
   /// Makes a frame of [bytes], after calling a function that throws unless the
-  /// stack has so many left if it [checksStack]. Calls [onCheck] after that
-  /// call.
+  /// stack has so many left if it [checksStack], or a little less. Calls
+  /// [onCheck] after that call.
   void enter(
     int bytes, {
     required bool checksStack,
@@ -110,6 +114,9 @@ abstract interface class Machine() implements Abilities {
     required bool fromFrame,
     required bool store,
   });
+
+  /// As above, words that are one after the other from [offset] on.
+  void accessAll(List<InRegister> registers, int offset, {required bool store});
 
   void call(String symbol, LirSignature signature);
   void callRegister(int register);
@@ -139,7 +146,7 @@ abstract interface class Machine() implements Abilities {
 
   /// Computes [instruction] into [result], which may equal any operand. What is
   /// on its right is [immediate] if that is given, and its index is a number of
-  /// 8 bytes if it [isScaled].
+  /// what it loads if it [isScaled].
   void operation(
     LirInstruction instruction,
     int result,
@@ -149,7 +156,7 @@ abstract interface class Machine() implements Abilities {
   });
 
   /// Stores register [value] at [base] plus the register [index], if any, which
-  /// is a number of 8 bytes if it [isScaled].
+  /// is a number of what it stores if it [isScaled].
   void store(
     Store store,
     int base,

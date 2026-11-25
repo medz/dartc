@@ -64,7 +64,12 @@ void main() {
     _encodes(0xf13ffc1f, (a) => a.cmpImmediate(0, 4095));
     _encodes(0x91001c41, (a) => a.addSigned(1, 2, 7));
     _encodes(0xd1001c41, (a) => a.addSigned(1, 2, -7));
-    _encodes(0x8b040c71, (a) => a.addScaled(17, 3, 4));
+    _encodes(0x8b040c71, (a) => a.addScaled(17, 3, 4, 3));
+    _encodes(0x8b040871, (a) => a.addScaled(17, 3, 4, 2));
+    _encodes(0x91448c41, (a) => a.addSigned(1, 2, 0x123000));
+    _encodes(0xd1400483, (a) => a.addSigned(3, 4, -0x1000));
+    final both = Arm64Assembler()..addSigned(1, 2, 0x123456);
+    expect(both.finish().buffer.asUint32List(), [0x91448c41, 0x91115821]);
     _encodes(0xd37df041, (a) => a.lslImmediate(1, 2, 3));
     _encodes(0xd340fc41, (a) => a.lslImmediate(1, 2, 0));
     _encodes(0xd3410041, (a) => a.lslImmediate(1, 2, 63));
@@ -128,6 +133,34 @@ void main() {
     expect(Arm64Assembler.isSmall(4095), isTrue);
     expect(Arm64Assembler.isSmall(-4095), isTrue);
     expect(Arm64Assembler.isSmall(4096), isFalse);
+  });
+
+  test('pairs', () {
+    _encodes(0xa94153f3, (a) => a.loadPair(19, 20, 31, 16));
+    _encodes(0xa91fd3f3, (a) => a.storePair(19, 20, 31, 504));
+    _encodes(0x6d2027e8, (a) => a.storePair(8, 9, 31, -512, float: true));
+    _encodes(0x6d4227e8, (a) => a.loadPair(8, 9, 31, 32, float: true));
+    for (final offset in [512, -520, 4]) {
+      expect(
+        () => Arm64Assembler().loadPair(1, 2, 3, offset),
+        throwsRangeError,
+      );
+    }
+  });
+
+  test('loads at an index', () {
+    void encodes(int word, Width width, {bool isScaled = true}) => _encodes(
+      word,
+      (a) => a.loadWidthAt(width, 1, 2, 3, isScaled: isScaled),
+    );
+    encodes(0xb8a37841, .i32);
+    encodes(0x38636841, .u8, isScaled: false);
+    encodes(0xf8637841, .ref);
+    encodes(0xfc637841, .f64);
+    encodes(0x38a36841, .i8, isScaled: false);
+    encodes(0x78637841, .u16);
+    final single = Arm64Assembler()..loadWidthAt(.f32, 1, 2, 3, isScaled: true);
+    expect(single.finish().buffer.asUint32List(), [0xbc637841, 0x1e22c021]);
   });
 
   test('branches on conditions', () {

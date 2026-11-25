@@ -54,7 +54,7 @@ final class X64Operations(final X64Assembler _assembler) {
           operands[0],
           offset: offset,
           index: index == null ? null : operands[1],
-          isScaled: isScaled,
+          shift: isScaled ? width.shift : 0,
         );
         _assembler.loadWidth(width, d, at);
       case FrameAddress():
@@ -76,7 +76,12 @@ final class X64Operations(final X64Assembler _assembler) {
   }) => _assembler.storeWidth(
     store.width,
     value,
-    Memory(base, offset: store.offset, index: index, isScaled: isScaled),
+    Memory(
+      base,
+      offset: store.offset,
+      index: index,
+      shift: isScaled ? store.width.shift : 0,
+    ),
     scratch: rightFloatScratch,
   );
 
