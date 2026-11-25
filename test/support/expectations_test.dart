@@ -62,7 +62,7 @@ g(); // error 1: kept
       expect(Expectations.of('f(); $comment').output, [text]);
     }
     expect(Expectations.linesOf('a\n\nb\n'), ['a', '', 'b']);
-    expect(Expectations.linesOf('a\nb'), ['a', 'b']);
+    expect(() => Expectations.linesOf('a\nb'), throwsFormatException);
     expect(Expectations.linesOf(''), isEmpty);
   });
 }

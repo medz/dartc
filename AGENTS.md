@@ -33,7 +33,7 @@ Format files one by one. Never format `sdk/std`, which is the unmodified officia
 - **Correctness does not depend on optimization.** Without any optimization, programs compile and run right. Nothing may need facts about the whole program's heap, and every stage ends for a stated reason, not by a budget or timeout.
 - **What is not supported is refused** with its position (`Not supported yet: …`). Never guess or generate code that may be wrong. A static error must stop compilation whatever comments or `analysis_options.yaml` say.
 - Later stages never ask earlier ones to start again.
-- Files have at most 600 lines, functions at most 80. No code for features that are not there yet.
+- Files have at most 600 lines, functions at most 80, apart from `main` of programs of the tests. No code for features that are not there yet.
 
 ## Pipeline
 
