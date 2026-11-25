@@ -280,6 +280,34 @@ void main() {
       expect(program.main.units, hasLength(2));
     });
 
+    test('see a part that becomes a program', () async {
+      final directory = writeSources({
+        'main.dart': "part 'a.dart'; void main() => f();",
+        'a.dart': "part of 'main.dart'; void f() {}",
+      });
+      expect(await first(directory), contains('void f() {}'));
+      final part = File('${directory.path}/a.dart')
+        ..writeAsStringSync('void main() { 2; }');
+      final program = await loadProgram(part.path, sdk: await packagedSdk());
+      expect(program.main.units.single.ast.toSource(), contains('{2;}'));
+    });
+
+    test('see what was only imported under other conditions', () async {
+      final directory = writeSources({
+        'main.dart':
+            "import 'a.dart' if (dart.library.js_interop) 'b.dart';\n"
+            'void main() => f();',
+        'a.dart': 'void f() {}',
+        'b.dart': 'int f() => 1;',
+      });
+      expect(await first(directory), contains('void f() {}'));
+      File('${directory.path}/b.dart').writeAsStringSync('int f() => 2;');
+      final other = writeSources({
+        'main.dart': "import '${directory.path}/b.dart'; void main() => f();",
+      });
+      expect(await first(other), contains('int f() => 2;'));
+    });
+
     test('in packages and outside do not mix', () async {
       final package = writeSources({
         'pubspec.yaml': 'name: a\nenvironment: {sdk: ^3.14.0}\n',
