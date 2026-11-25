@@ -30,6 +30,10 @@ final class SdkSources(
   /// The libraries that need no more than the official patches.
   static const _whole = ['collection'];
 
+  /// The libraries without the official patches. These would make programs
+  /// reach `dart:io`, for what is not supported.
+  static const _unpatched = ['developer'];
+
   /// Where [install] makes the files be found. The analyzer takes them from
   /// there.
   static const _place = '/dartc-sdk';
@@ -82,11 +86,15 @@ final class SdkSources(
       if (!_names.contains(name)) continue;
       library as Map<String, Object?>;
       result.addAll(
-        _library('$_lib/${library['uri']}', _official(library['patches']), {
-          for (final path in files.keys)
-            if (_isOwn(path, name)) '$_place/$path': files[path]!,
-          if (name == 'core') ..._environmentFile,
-        }),
+        _library(
+          '$_lib/${library['uri']}',
+          [if (!_unpatched.contains(name)) ..._official(library['patches'])],
+          {
+            for (final path in files.keys)
+              if (_isOwn(path, name)) '$_place/$path': files[path]!,
+            if (name == 'core') ..._environmentFile,
+          },
+        ),
       );
     }
     for (final MapEntry(key: path, value: text) in files.entries) {

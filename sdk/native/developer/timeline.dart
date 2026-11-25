@@ -24,13 +24,13 @@ void _reportTaskEvent(
 ) {}
 
 @patch
-_log(
-  String message,
-  int timestamp,
-  int sequenceNumber,
-  int level,
-  String name,
+void log(
+  String message, {
+  DateTime? time,
+  int? sequenceNumber,
+  int level = 0,
+  String name = '',
   Zone? zone,
   Object? error,
   StackTrace? stackTrace,
-) {}
+}) {}
