@@ -5,6 +5,7 @@ analyzer:
     - build/**
     # Programs that are only compiled.
     - tool/bench/**
+    - test/programs/**
     # Checked within the libraries they patch, by test/source/sdk_test.dart.
     - sdk/std/**
     - sdk/native/**

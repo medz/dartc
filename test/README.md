@@ -5,13 +5,21 @@ dart test                                # everything, on this machine
 dart test test/translate -N 'closures'   # some
 ```
 
-The official `dart` is the oracle: each program is run with it, and its output and exit code are compared with what dartc gives at every level. Nothing is expected from memory.
+The official `dart` is the oracle. What the programs in `programs` do is told by comments next to their code, which a tool writes and checks with the official `dart`:
+
+```sh
+dart run tool/expect.dart                # checks all
+dart run tool/expect.dart --update <files>
+```
+
+`support/expectations.dart` tells what comments there are. Random programs, and those that use files or C, are compared with the official `dart` when they run.
 
 | Directory | What is tested |
 | --- | --- |
 | `lir`, `hir`, `graph` | The intermediate representations: printing, verifying, interpreting |
 | `source` | Finding errors, patching the libraries |
-| `translate` | Dart programs, by the HIR interpreter, the LIR interpreter, optimized, and compiled; also when collecting at every allocation |
+| `programs` | Dart programs, with what they do |
+| `translate` | These programs, by the HIR interpreter, the LIR interpreter, optimized, and compiled; also when collecting at every allocation |
 | `world`, `optimize`, `lower`, `heap` | These parts by themselves |
 | `emit` | Encoded instructions, and machine code against the LIR interpreter |
 | `image` | Object files, executables and libraries, checked with the tools of the system |

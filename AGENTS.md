@@ -9,9 +9,10 @@ dart run bin/dartc.dart hello.dart -o hello     # compile; see --help
 dart run tool/build.dart                        # build/dartc, one program with the SDK inside
 dart run tool/build.dart --with=build/dartc x   # the same, compiled by that dartc
 dart analyze --fatal-infos                      # has to be clean
-dart test                                       # everything; about 6 minutes
+dart test                                       # everything; about 4 minutes
 dart test test/translate/closures_test.dart     # one file
 dart test test/translate -N 'part of a name'    # by name; -n takes a regular expression
+dart run tool/expect.dart [--update] [files]     # checks or writes what programs of the tests do
 dart run tool/measure.dart [names] [-inline] [-devirtualize]  # time against official AOT
 ```
 
@@ -28,11 +29,11 @@ Format files one by one. Never format `sdk/std`, which is the unmodified officia
 
 ## Rules of the design
 
-- **The official `dart` is the oracle.** Tests run each program with it and compare output and exit code; expectations are not written from memory.
+- **The official `dart` is the oracle.** What programs of the tests do is told by comments in them, which `tool/expect.dart` writes and checks with the official `dart`. They are not written from memory.
 - **Correctness does not depend on optimization.** Without any optimization, programs compile and run right. Nothing may need facts about the whole program's heap, and every stage ends for a stated reason, not by a budget or timeout.
 - **What is not supported is refused** with its position (`Not supported yet: …`). Never guess or generate code that may be wrong. A static error must stop compilation whatever comments or `analysis_options.yaml` say.
 - Later stages never ask earlier ones to start again.
-- Files have at most 600 lines, functions at most 80. No code for features that are not there yet.
+- Files have at most 600 lines, functions at most 80, apart from `main` of programs of the tests. No code for features that are not there yet.
 
 ## Pipeline
 
@@ -54,7 +55,16 @@ The runtime finds functions of the libraries by their private names: `_scope.run
 
 ## Tests
 
-`agrees(name, source)` in `test/translate/support.dart` is the main tool. It runs a program with the official `dart`, the HIR interpreter, the LIR interpreter, the interpreter after optimizing, and compiled, also when collecting before every allocation. When levels disagree, the first one that differs has the bug. Use `isLong: true` for programs that depend on time or create too much to always collect.
+The programs in `test/programs/<area>` are the main tests. A program is a file, or a directory with a `main.dart`. Comments tell what it does, next to the statement of `main` that does it:
+
+```dart
+print(1 + 1); // expect: 2
+// stderr: Unhandled exception:
+// exit: 255
+external int x; // error 14: Not supported yet: external variables.
+```
+
+`programs(area)` in `test/support/programs.dart` runs each with the HIR interpreter, the LIR interpreter, the interpreter after optimizing, and compiled, also when collecting before every allocation. When levels disagree, the first one that differs has the bug. A program with `// long` depends on time or creates too much to always collect. To add one, write the program, then run `dart run tool/expect.dart --update <file>` and look at what the official `dart` does. Only `error` is written by hand.
 
 The text of stack traces is not compared. `test/driver/random_*.dart` generate programs; new seeds are a good check after changes to `translate` or `optimize`.
 
