@@ -249,6 +249,56 @@ void main() {
       expect(await first(third), contains('void g() {}'));
     });
 
+    test(
+      'see a part that becomes a library, and the other way round',
+      () async {
+        final directory = writeSources({
+          'main.dart': "part of 'other.dart'; void main() {}",
+        });
+        final main = File('${directory.path}/main.dart');
+        await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+        main.writeAsStringSync('void main() { 1; }');
+        expect(await first(directory), contains('{1;}'));
+        main.writeAsStringSync("part of 'other.dart';");
+        await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+      },
+    );
+
+    test('see parts that were missing', () async {
+      final directory = writeSources({
+        'main.dart': "part 'a.dart'; void main() => f();",
+      });
+      await expectLater(first(directory), throwsA(isA<CompileFailure>()));
+      File('${directory.path}/a.dart')
+          .writeAsStringSync("part of 'b.dart'; void f() {}");
+      File('${directory.path}/b.dart')
+          .writeAsStringSync("part 'a.dart'; void main() => f();");
+      final program = await loadProgram(
+        '${directory.path}/b.dart',
+        sdk: await packagedSdk(),
+      );
+      expect(program.main.units, hasLength(2));
+    });
+
+    test('in packages and outside do not mix', () async {
+      final package = writeSources({
+        'pubspec.yaml': 'name: a\nenvironment: {sdk: ^3.14.0}\n',
+        '.dart_tool/package_config.json':
+            '{"configVersion": 2, "packages": '
+            '[{"name": "a", "rootUri": "../", "packageUri": "lib/"}]}',
+        'lib/a.dart': 'int f() => 1;',
+        'main.dart': "import 'package:a/a.dart'; void main() => print(f());",
+      });
+      expect(await first(package), contains('int f() => 1;'));
+      File('${package.path}/lib/a.dart').writeAsStringSync('int f() => 2;');
+      expect(await first(package), contains('int f() => 2;'));
+      final outside = writeSources({
+        'main.dart': "import 'package:a/b.dart'; void main() => print(g());",
+      });
+      File('${package.path}/lib/b.dart').writeAsStringSync('int g() => 3;');
+      await expectLater(first(outside), throwsA(isA<CompileFailure>()));
+    });
+
     test('are the same as alone', () async {
       const source =
           "class A { String toString() => 'a'; }\n"
