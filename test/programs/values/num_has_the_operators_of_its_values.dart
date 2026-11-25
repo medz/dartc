@@ -19,22 +19,22 @@ bool yes() => zero() == 0;
 /// Says what any object is.
 void show(Object? o) {
   if (o == null) {
-    print('null');
+    tell('null');
   } else if (o is int) {
     number(o);
   } else if (o is double) {
-    print('double');
+    tell('double');
     number((o * 2).toInt());
   } else if (o is bool) {
     truth(o);
   } else if (o is B) {
-    print('B');
+    tell('B');
     number(o.n);
   } else if (o is A) {
-    print('A');
+    tell('A');
     number(o.n);
   } else {
-    print('other');
+    tell('other');
   }
 }
 
@@ -98,6 +98,7 @@ void main() {
       show(c);
       --c;
       show(c);
+      endLine();
     }
     final a = pickNum(i);
     show(-a);
@@ -122,524 +123,50 @@ void main() {
     truth(k > a);
     truth(d <= a);
     truth(k == a);
+    endLine();
   }
-  // expect: 14
-  // expect: 0
-  // expect: 49
-  // expect: double
-  // expect: 2
-  // expect: 1
-  // expect: 0
-  // expect: false
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: 14
-  // expect: 13
-  // expect: 26
-  // expect: 27
-  // expect: 26
-  // expect: double
-  // expect: 19
-  // expect: double
-  // expect: 9
-  // expect: double
-  // expect: 35
-  // expect: double
-  // expect: 5
-  // expect: 2
-  // expect: double
-  // expect: 4
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: 19
-  // expect: double
-  // expect: 17
-  // expect: double
-  // expect: 34
-  // expect: double
-  // expect: 36
-  // expect: double
-  // expect: 34
-  // expect: 4
-  // expect: 10
-  // expect: -21
-  // expect: double
-  // expect: -4
-  // expect: -2
-  // expect: 1
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: 4
-  // expect: 3
-  // expect: 6
-  // expect: 7
-  // expect: 6
-  // expect: double
-  // expect: 13
-  // expect: double
-  // expect: 15
-  // expect: double
-  // expect: -7
-  // expect: double
-  // expect: -28
-  // expect: -14
-  // expect: double
-  // expect: 0
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: 13
-  // expect: double
-  // expect: 11
-  // expect: double
-  // expect: 22
-  // expect: double
-  // expect: 24
-  // expect: double
-  // expect: 22
-  // expect: -7
-  // expect: 8
-  // expect: 8
-  // expect: double
-  // expect: 17
-  // expect: double
-  // expect: 7
-  // expect: -4
-  // expect: 1
-  // expect: 7
-  // expect: double
-  // expect: 14
-  // expect: 12
-  // expect: double
-  // expect: 17
-  // expect: double
-  // expect: 119
-  // expect: double
-  // expect: 1
-  // expect: 0
-  // expect: 5
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: double
-  // expect: 19
-  // expect: double
-  // expect: -9
-  // expect: double
-  // expect: 35
-  // expect: double
-  // expect: 0
-  // expect: 0
-  // expect: double
-  // expect: 5
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: 19
-  // expect: double
-  // expect: 17
-  // expect: double
-  // expect: 34
-  // expect: double
-  // expect: 36
-  // expect: double
-  // expect: 34
-  // expect: double
-  // expect: 10
-  // expect: double
-  // expect: 0
-  // expect: double
-  // expect: 12
-  // expect: double
-  // expect: 2
-  // expect: 1
-  // expect: double
-  // expect: 0
-  // expect: false
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: double
-  // expect: 10
-  // expect: double
-  // expect: 8
-  // expect: double
-  // expect: 16
-  // expect: double
-  // expect: 18
-  // expect: double
-  // expect: 16
-  // expect: double
-  // expect: -1
-  // expect: double
-  // expect: 11
-  // expect: double
-  // expect: -15
-  // expect: double
-  // expect: -1
-  // expect: 0
-  // expect: double
-  // expect: 5
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: -1
-  // expect: double
-  // expect: -3
-  // expect: double
-  // expect: -6
-  // expect: double
-  // expect: -4
-  // expect: double
-  // expect: -6
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: 6
-  // expect: double
-  // expect: -2
-  // expect: double
-  // expect: -10
-  // expect: -5
-  // expect: double
-  // expect: 0
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: 2
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: 6
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: -5
-  // expect: double
-  // expect: 7
-  // expect: double
-  // expect: 7
-  // expect: double
-  // expect: 8
-  // expect: double
-  // expect: 2
-  // expect: double
-  // expect: 1
-  // expect: 1
-  // expect: 2
-  // expect: double
-  // expect: 5
-  // expect: double
-  // expect: 15
-  // expect: double
-  // expect: 8
-  // expect: double
-  // expect: 20
-  // expect: double
-  // expect: 4
-  // expect: 2
-  // expect: double
-  // expect: 0
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: 4
-  // expect: -10
-  // expect: -21
-  // expect: double
-  // expect: 0
-  // expect: 0
-  // expect: 4
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: 4
-  // expect: 3
-  // expect: 6
-  // expect: 7
-  // expect: 6
-  // expect: double
-  // expect: -1
-  // expect: double
-  // expect: -11
-  // expect: double
-  // expect: -15
-  // expect: double
-  // expect: -2
-  // expect: -1
-  // expect: double
-  // expect: 4
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: -1
-  // expect: double
-  // expect: -3
-  // expect: double
-  // expect: -6
-  // expect: double
-  // expect: -4
-  // expect: double
-  // expect: -6
-  // expect: -6
-  // expect: 0
-  // expect: 9
-  // expect: double
-  // expect: 2
-  // expect: 1
-  // expect: 0
-  // expect: false
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: -6
-  // expect: -7
-  // expect: -14
-  // expect: -13
-  // expect: -14
-  // expect: double
-  // expect: -7
-  // expect: double
-  // expect: -5
-  // expect: double
-  // expect: 3
-  // expect: double
-  // expect: 12
-  // expect: 6
-  // expect: double
-  // expect: 0
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: -7
-  // expect: double
-  // expect: -9
-  // expect: double
-  // expect: -18
-  // expect: double
-  // expect: -16
-  // expect: double
-  // expect: -18
-  // expect: 3
-  // expect: -2
-  // expect: -2
-  // expect: double
-  // expect: -3
-  // expect: double
-  // expect: -3
-  // expect: 6
-  // expect: 2
-  // expect: -3
-  // expect: double
-  // expect: -6
-  // expect: 2
-  // expect: double
-  // expect: -3
-  // expect: double
-  // expect: 9
-  // expect: double
-  // expect: -3
-  // expect: -1
-  // expect: 2
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: double
-  // expect: 13
-  // expect: double
-  // expect: -15
-  // expect: double
-  // expect: -7
-  // expect: double
-  // expect: 0
-  // expect: 0
-  // expect: double
-  // expect: 13
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: 13
-  // expect: double
-  // expect: 11
-  // expect: double
-  // expect: 22
-  // expect: double
-  // expect: 24
-  // expect: double
-  // expect: 22
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: -6
-  // expect: double
-  // expect: -2
-  // expect: double
-  // expect: 0
-  // expect: 0
-  // expect: double
-  // expect: 4
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: 2
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: 6
-  // expect: double
-  // expect: 4
-  // expect: double
-  // expect: -7
-  // expect: double
-  // expect: 5
-  // expect: double
-  // expect: 3
-  // expect: double
-  // expect: 0
-  // expect: 0
-  // expect: double
-  // expect: 5
-  // expect: false
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: double
-  // expect: -7
-  // expect: double
-  // expect: -9
-  // expect: double
-  // expect: -18
-  // expect: double
-  // expect: -16
-  // expect: double
-  // expect: -18
-  // expect: double
-  // expect: -2
-  // expect: double
-  // expect: 0
-  // expect: double
-  // expect: 0
-  // expect: double
-  // expect: 2
-  // expect: 1
-  // expect: double
-  // expect: 0
-  // expect: false
-  // expect: true
-  // expect: false
-  // expect: true
-  // expect: true
-  // expect: false
-  // expect: double
-  // expect: -2
-  // expect: double
-  // expect: -4
-  // expect: double
-  // expect: -8
-  // expect: double
-  // expect: -6
-  // expect: double
-  // expect: -8
-  // expect: double
-  // expect: 1
-  // expect: double
-  // expect: 1
-  // expect: double
-  // expect: 1
-  // expect: double
-  // expect: 2
-  // expect: double
-  // expect: 0
-  // expect: double
-  // expect: 7
-  // expect: 2
-  // expect: 0
-  // expect: double
-  // expect: -1
-  // expect: double
-  // expect: 9
-  // expect: double
-  // expect: 2
-  // expect: double
-  // expect: -1
-  // expect: double
-  // expect: -20
-  // expect: -10
-  // expect: double
-  // expect: 0
-  // expect: true
-  // expect: true
-  // expect: false
+  // expect: 14 0 49 double 2 1 0 false true false true true false 14 13 26 27 26
+  // expect: double 19 double 9 double 35 double 5 2 double 4 false false true true false true double 19 double 17 double 34 double 36 double 34
+  // expect: 4 10 -21 double -4 -2 1 false false true true false true 4 3 6 7 6
+  // expect: double 13 double 15 double -7 double -28 -14 double 0 false false true true false true double 13 double 11 double 22 double 24 double 22
+  // expect: -7 8 8 double 17 double 7 -4 1 7 double 14 12 double 17 double 119 double 1 0 5 false false false
+  // expect: double 19 double -9 double 35 double 0 0 double 5 true true false false false true double 19 double 17 double 34 double 36 double 34
+  // expect: double 10 double 0 double 12 double 2 1 double 0 false true false true true false double 10 double 8 double 16 double 18 double 16
+  // expect: double -1 double 11 double -15 double -1 0 double 5 false false true true false true double -1 double -3 double -6 double -4 double -6
+  // expect: double 4 double 6 double -2 double -10 -5 double 0 false false true true false true double 4 double 2 double 4 double 6 double 4
+  // expect: double -5 double 7 double 7 double 8 double 2 double 1 1 2 double 5 double 15 double 8 double 20 double 4 2 double 0 true false false
+  // expect: 4 -10 -21 double 0 0 4 true true false false false true 4 3 6 7 6
+  // expect: double -1 double -11 double -15 double -2 -1 double 4 true true false false false true double -1 double -3 double -6 double -4 double -6
+  // expect: -6 0 9 double 2 1 0 false true false true true false -6 -7 -14 -13 -14
+  // expect: double -7 double -5 double 3 double 12 6 double 0 true true false false false true double -7 double -9 double -18 double -16 double -18
+  // expect: 3 -2 -2 double -3 double -3 6 2 -3 double -6 2 double -3 double 9 double -3 -1 2 true false false
+  // expect: double 13 double -15 double -7 double 0 0 double 13 true true false false false true double 13 double 11 double 22 double 24 double 22
+  // expect: double 4 double -6 double -2 double 0 0 double 4 true true false false false true double 4 double 2 double 4 double 6 double 4
+  // expect: double -7 double 5 double 3 double 0 0 double 5 false false true true false true double -7 double -9 double -18 double -16 double -18
+  // expect: double -2 double 0 double 0 double 2 1 double 0 false true false true true false double -2 double -4 double -8 double -6 double -8
+  // expect: double 1 double 1 double 1 double 2 double 0 double 7 2 0 double -1 double 9 double 2 double -1 double -20 -10 double 0 true true false
   num x = 1;
   x = x is int ? x + 1 : x;
-  show(x); // expect: 2
-  if (x is int) number(x << 2); // expect: 8
+  show(x);
+  if (x is int) number(x << 2);
   num sum = 0;
   for (var i = 0; i < 5; i++) {
     sum += i % 2 == 0 ? i : i / 2;
   }
   show(sum);
-  // expect: double
-  // expect: 16
+  endLine(); // expect: 2 8 double 16
 }
 
-void number(int n) => print(n);
+/// What is told on one line.
+final told = <Object?>[];
 
-void truth(bool b) => print(b);
+void tell(Object? o) => told.add(o);
+
+void endLine() {
+  print(told.join(' '));
+  told.clear();
+}
+
+void number(int n) => tell(n);
+
+void truth(bool b) => tell(b);

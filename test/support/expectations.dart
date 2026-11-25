@@ -114,6 +114,9 @@ final class const Expectations({
   static List<String> linesOf(String text) {
     if (text.isEmpty) return const [];
     final lines = text.split('\n');
-    return lines.last.isEmpty ? lines.sublist(0, lines.length - 1) : lines;
+    if (lines.removeLast().isNotEmpty) {
+      throw FormatException('The last line does not end', text, text.length);
+    }
+    return lines;
   }
 }
