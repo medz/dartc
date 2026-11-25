@@ -100,7 +100,11 @@ Future<void> main() async {
   final l = o.loadLibrary;
   print(l.runtimeType); // expect: () => Future<dynamic>
   print(await l()); // expect: null
-  print(await t.loadLibrary()); // expect: null
+  final loadThird = t.loadLibrary;
+  go('third before calling the tear-off', () => t.x); // expect: third before calling the tear-off _DeferredNotLoadedError Deferred library t was not loaded.
+  final third = loadThird();
+  go('third before awaiting the tear-off', () => t.x); // expect: third before awaiting the tear-off _DeferredNotLoadedError Deferred library t was not loaded.
+  print(await third); // expect: null
   go('third', () => t.x); // expect: third x
   go('third', () => t.y); // expect: third 1
   go('third', () => (t.y = 5)); // expect: third 5

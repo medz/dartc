@@ -49,40 +49,32 @@ final class ExtensionTranslator(
     if (_override(node, element)?.typeArgumentTypes case final types?) {
       return types;
     }
-    if (element case SubstitutedElementImpl(:final substitution)) {
-      return [
-        for (final parameter in owner.typeParameters)
-          substitution.map[parameter]!,
-      ];
-    }
-    owner as ExtensionElement;
-    final found = [owner]
-        .applicableTo(targetLibrary: _builder.library, targetType: type)
-        .single;
-    final defaults = defaultTypesOf(owner.typeParameters, _builder.library);
-    final isOwn = _isOwn(node, element);
+    final substitution = switch (element) {
+      SubstitutedElementImpl(:final substitution) => substitution,
+      _ =>
+        [owner as ExtensionElement]
+            .applicableTo(targetLibrary: _builder.library, targetType: type)
+            .single
+            .substitution,
+    };
     return [
-      for (final (i, parameter) in owner.typeParameters.indexed)
-        _mentions(owner.extendedType, parameter)
-            ? found.substitution.map[parameter]!
-            : isOwn
-            ? parameter.instantiate(nullabilitySuffix: .none)
-            : defaults[i],
+      for (final parameter in owner.typeParameters)
+        substitution.map[parameter]!,
     ];
   }
 
-  /// Whether [node] uses [element] as a member of its own extension, rather than
-  /// as one that is found by the type of a value.
-  static bool _isOwn(AstNode node, ExecutableElement element) => switch (node) {
-    SimpleIdentifier() => true,
-    MethodInvocation(:final realTarget) => realTarget == null,
-    AssignmentExpression(leftHandSide: final place) ||
-    PostfixExpression(operand: final place) ||
-    PrefixExpression(operand: final place) =>
-      // Operators are used on the value that is there.
-      place is SimpleIdentifier && element is! MethodElement,
-    _ => false,
-  };
+  /// Whether [node] uses [element] without naming a receiver.
+  static bool _omitsReceiver(AstNode node, ExecutableElement element) =>
+      switch (node) {
+        SimpleIdentifier() => true,
+        MethodInvocation(:final realTarget) => realTarget == null,
+        AssignmentExpression(leftHandSide: final place) ||
+        PostfixExpression(operand: final place) ||
+        PrefixExpression(operand: final place) =>
+          // Operators are used on the value that is there.
+          place is SimpleIdentifier && element is! MethodElement,
+        _ => false,
+      };
 
   /// What [node] uses [element] on, if it names the extension.
   static ExtensionOverride? _override(AstNode node, ExecutableElement element) {
@@ -112,24 +104,15 @@ final class ExtensionTranslator(
     _ => null,
   };
 
-  static bool _mentions(DartType type, TypeParameterElement parameter) =>
-      switch (type) {
-        TypeParameterType(:final element) => element == parameter,
-        InterfaceType(:final typeArguments) => typeArguments.any(
-          (argument) => _mentions(argument, parameter),
-        ),
-        FunctionType(:final returnType, :final formalParameters) =>
-          _mentions(returnType, parameter) ||
-              formalParameters.any((p) => _mentions(p.type, parameter)),
-        RecordType() => fieldsOf(
-          type,
-        ).any((field) => _mentions(field, parameter)),
-        _ => false,
-      };
-
   HirValue? _types(AstNode node, ExecutableElement element, DartType? type) {
     final owner = takesExtensionTypes(element.baseElement);
     if (owner == null) return null;
+    if (owner is ExtensionElement &&
+        element is! SubstitutedElementImpl &&
+        _omitsReceiver(node, element)) {
+      // A bare reference in a class can also resolve to an extension member.
+      if (_builder.typesOf(owner) case final types?) return types;
+    }
     final types = _typesOf(node, element, owner, type!);
     return _scope.typeList(_builder, types) ??
         _unsupported(node, 'these type arguments');

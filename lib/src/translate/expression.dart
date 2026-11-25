@@ -195,14 +195,14 @@ final class ExpressionTranslator(
 
   @override
   HirValue value(Expression node, {HirType placeholder = .integer}) {
-    final result = _value(node, placeholder);
     final type = node.staticType;
-    if (type == null) return result;
-    if (isNever(type)) {
+    final never = isNever(type);
+    final representation = type == null || never ? null : valueType(type);
+    final result = _value(node, representation ?? placeholder);
+    if (never) {
       _builder.end(HirUnreachable());
       return _builder.placeholder(placeholder);
     }
-    final representation = valueType(type);
     return representation == null
         ? result
         : _conversions.coerce(result, representation);
@@ -307,8 +307,7 @@ final class ExpressionTranslator(
       },
       _ => null,
     };
-    final type = part?.staticType;
-    if (type == null || !isNever(boundOf(type))) return false;
+    if (!isBottom(part?.staticType)) return false;
     value(part!);
     _builder.end(HirUnreachable());
     return true;

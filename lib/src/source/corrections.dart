@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
@@ -6,39 +7,50 @@ import 'package:analyzer/dart/element/type.dart';
 import 'corrected_text.dart';
 import 'enum_names.dart';
 
-/// What the analyzer takes to be unknown, though it is false for programs that
-/// are not compiled to JavaScript.
-final _unknown = RegExp(
-  r'''fromEnvironment\(\s*['"]dart\.library\.js_(?:interop|util)['"]''',
-);
-
-/// The text to analyze in place of [content], whose resolved [unit] there is,
-/// or null if it is right as it is.
-CorrectedText? correctionsOf(CompilationUnit unit, String content) {
-  final visitor = _Comparisons(content);
-  unit.accept(visitor);
-  final names = EnumNames((node) => _Comparisons(content)._part(node));
-  unit.declarations.accept(names);
-  final edits = [
-    ...names.edits,
-    for (final match in _unknown.allMatches(content))
-      if (!visitor.edits.any(
-        (edit) => edit.offset < match.end && match.start < edit.end,
-      ))
-        (
-          offset: match.start,
-          end: match.end,
-          text: match[0]!.replaceFirst('dart.library', 'none.library'),
-        ),
-    ...visitor.edits,
-  ]..sort((a, b) => a.offset - b.offset);
-  return edits.isEmpty ? null : CorrectedText(content, edits);
+/// The texts to analyze for [units] that need an overlay, keyed by path.
+Map<String, CorrectedText> correctionsOf(
+  List<ResolvedUnitResult> units,
+  Map<String, String> environment,
+) {
+  late final enumName = unusedEnumNameField(units.map((unit) => unit.content));
+  late final absentName = _unusedEnvironmentName(environment);
+  return {
+    for (final unit in units)
+      unit.path: ?_correctionsOf(unit, () => enumName, () => absentName),
+  };
 }
 
-/// Finds the comparisons of numbers in constants. The analyzer tells `0.0` from
-/// `-0.0`, and takes neither what is not a number nor integers right.
-final class _Comparisons(final String _content)
-    extends RecursiveAstVisitor<void> {
+String _unusedEnvironmentName(Map<String, String> environment) {
+  const prefix = 'none.library.js_interop';
+  var name = prefix;
+  for (var suffix = 0; environment.containsKey(name); suffix++) {
+    name = '$prefix$suffix';
+  }
+  return name;
+}
+
+CorrectedText? _correctionsOf(
+  ResolvedUnitResult result,
+  String Function() enumName,
+  String Function() absentName,
+) {
+  final ResolvedUnitResult(:unit, :content) = result;
+  final visitor = _Constants(content, absentName);
+  unit.accept(visitor);
+  final names = EnumNames(enumName, visitor._part);
+  unit.declarations.accept(names);
+  final edits = [...names.edits, ...visitor.edits]
+    ..sort((a, b) => a.offset - b.offset);
+  return edits.isEmpty
+      ? null
+      : CorrectedText(content, edits, enumNameFields: names.fields);
+}
+
+/// Corrects the analyzer's evaluation of constants.
+final class _Constants(
+  final String _content,
+  final String Function() _absentName,
+) extends RecursiveAstVisitor<void> {
   final edits = <Edit>[];
 
   @override
@@ -48,6 +60,43 @@ final class _Comparisons(final String _content)
   @override
   void visitMethodInvocation(MethodInvocation node) =>
       _replace(node, () => super.visitMethodInvocation(node));
+
+  @override
+  void visitInstanceCreationExpression(InstanceCreationExpression node) {
+    if (node.isConst || _isConstant(node)) {
+      _environment(node.constructorName.element, node.argumentList);
+    }
+    super.visitInstanceCreationExpression(node);
+  }
+
+  @override
+  void visitDotShorthandConstructorInvocation(
+    DotShorthandConstructorInvocation node,
+  ) {
+    if (node.isConst || _isConstant(node)) {
+      _environment(node.element, node.argumentList);
+    }
+    super.visitDotShorthandConstructorInvocation(node);
+  }
+
+  void _environment(ConstructorElement? constructor, ArgumentList arguments) {
+    if (constructor case ConstructorElement(
+      name: 'fromEnvironment',
+      returnType: DartType(isDartCoreBool: true),
+    )) {
+      final argument = arguments.arguments.firstOrNull;
+      // The analyzer treats web availability as unknown for a boolean read.
+      if (argument case StringLiteral(
+        stringValue: 'dart.library.js_util' || 'dart.library.js_interop',
+      )) {
+        edits.add((
+          offset: argument.offset,
+          end: argument.end,
+          text: "'${_absentName()}'",
+        ));
+      }
+    }
+  }
 
   void _replace(Expression node, void Function() orElse) {
     if (!_isCompared(node) || !_isConstant(node)) return orElse();
@@ -119,9 +168,8 @@ final class _Comparisons(final String _content)
   }
 
   String _part(Expression node) {
-    final inner = _Comparisons(_content);
+    final inner = _Constants(_content, _absentName);
     node.accept(inner);
-    // Those in constants are so inside too.
     final text = CorrectedText(_content.substring(node.offset, node.end), [
       for (final edit in inner.edits)
         (

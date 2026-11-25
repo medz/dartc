@@ -8,7 +8,6 @@ import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/src/dart/constant/value.dart'
     show DartObjectImpl, FunctionState;
 import 'package:dartc/hir.dart';
-import 'package:dartc/source.dart';
 
 import 'classes.dart';
 import 'members.dart';
@@ -311,7 +310,9 @@ final class ConstantTable(
 
   HirConstObject? _object(DartObject object) {
     final type = object.type, class_ = classOf(type);
-    if (class_ == null || _declarations[class_] == null) return null;
+    if (class_ == null) return null;
+    final declaration = _declarations[class_];
+    if (declaration == null) return null;
     // The analyzer does not know every value.
     if (plainType(class_) != null) return null;
     final target = _classes.classOf(class_);
@@ -342,9 +343,10 @@ final class ConstantTable(
       for (final field in ClassTable.instanceFields(element)) {
         // Mixins cannot declare fields for constants.
         if (level.isMixin) return null;
-        final name = class_ is EnumElement && field.name == '_name'
-            ? enumNameField
-            : field.name!;
+        final name = element is EnumElement && field.name == '_name'
+            ? declaration.$1.enumNameField(element)
+            : field.name;
+        if (name == null) return null;
         final place = _classes.fieldOf(level, field).value;
         final value = of(place.type, part?.getField(name));
         if (value == null) return null;

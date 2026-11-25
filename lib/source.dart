@@ -1,7 +1,6 @@
 /// Resolved Dart source and the problems found in it.
 library;
 
-export 'src/source/enum_names.dart' show enumNameField;
 export 'src/source/library.dart'
     show SourceLibrary, SourceProgram, SourceUnit, loadProgram;
 export 'src/source/problem.dart';

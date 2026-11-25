@@ -3,32 +3,52 @@ import 'package:analyzer/dart/ast/visitor.dart';
 
 import 'corrected_text.dart';
 
-/// The field that has the value of an enum's own field called `_name`.
-///
-/// Where the analyzer evaluates the constants of an enum, it puts the name of
-/// the constant in place of that value.
-const enumNameField = '_name\$dartc';
+const _prefix = '_name\$dartc';
+final _fieldNames = RegExp('${RegExp.escape(_prefix)}[0-9]*');
 
-/// Finds the enums with such a field, and gives them the other one.
-final class EnumNames(final String Function(Expression node) _textOf)
-    extends SimpleAstVisitor<void> {
+/// Finds a private name that does not occur in any original unit of a library.
+String unusedEnumNameField(Iterable<String> contents) {
+  final used = {
+    for (final text in contents)
+      for (final match in _fieldNames.allMatches(text)) match[0]!,
+  };
+  var name = _prefix;
+  for (var suffix = 0; used.contains(name); suffix++) {
+    name = '$_prefix$suffix';
+  }
+  return name;
+}
+
+/// Adds a second field to preserve the value of an enum's own `_name` field.
+///
+/// The analyzer puts the name of the enum constant in place of that value.
+final class EnumNames(
+  final String Function() _name,
+  final String Function(Expression node) _textOf,
+) extends SimpleAstVisitor<void> {
   final edits = <Edit>[];
+  final fields = <String, String>{};
+  late final _field = _name();
 
   void _insert(int offset, String text) =>
       edits.add((offset: offset, end: offset, text: text));
 
   @override
   void visitEnumDeclaration(EnumDeclaration node) {
-    if (!(node.declaredFragment?.element.fields.any(
+    final element = node.declaredFragment?.element;
+    final name = element?.name;
+    if (element == null ||
+        name == null ||
+        !element.fields.any(
           (field) =>
               field.name == '_name' &&
               !field.isStatic &&
               (field.isOriginDeclaration ||
                   field.isOriginDeclaringFormalParameter),
-        ) ??
-        false)) {
+        )) {
       return;
     }
+    fields[name] = _field;
     final members = node.body.members;
     var isInitialized = false;
     for (final FieldDeclaration(:fields)
@@ -38,7 +58,7 @@ final class EnumNames(final String Function(Expression node) _textOf)
         final value = variable.initializer;
         isInitialized = value != null;
         final own = value == null ? '' : ' = ${_textOf(value)}';
-        _insert(variable.end, ', $enumNameField$own');
+        _insert(variable.end, ', $_field$own');
       }
     }
     if (isInitialized) return;
@@ -71,10 +91,10 @@ final class EnumNames(final String Function(Expression node) _textOf)
       if (initializer is! ConstructorFieldInitializer) continue;
       if (initializer.fieldName.name != '_name') continue;
       final value = _textOf(initializer.expression);
-      return _insert(initializer.end, ', $enumNameField = $value');
+      return _insert(initializer.end, ', $_field = $value');
     }
     if (!parameters.parameters.any((p) => p.name?.lexeme == '_name')) return;
-    final value = '$enumNameField = _name';
+    final value = '$_field = _name';
     if (initializers.isEmpty) {
       _insert(offset, ': $value');
     } else {
@@ -87,13 +107,13 @@ final class EnumNames(final String Function(Expression node) _textOf)
     if (body is! BlockEnumBody) return;
     final added = StringBuffer(body.semicolon == null ? ';' : '');
     if (!body.members.any(_declaresField)) {
-      added.write(' final Object? $enumNameField;');
+      added.write(' final Object? $_field;');
     }
     if (primary.body case final own?) {
       final at = own.colon?.end ?? own.thisKeyword.end;
       _initialize(primary.formalParameters, own.initializers, at);
     } else {
-      added.write(' this : $enumNameField = _name;');
+      added.write(' this : $_field = _name;');
     }
     _insert(body.rightBracket.offset, '$added');
   }

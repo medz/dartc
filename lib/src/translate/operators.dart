@@ -88,7 +88,7 @@ final class OperatorTranslator(
       final equal = _equal(node, leftOperand, rightOperand);
       return operator == '==' ? equal : _builder.add(HirUnary(.not, equal));
     }
-    if (isNever(boundOf(leftType))) {
+    if (isBottom(leftType)) {
       _builder.end(HirUnreachable());
       return left;
     }

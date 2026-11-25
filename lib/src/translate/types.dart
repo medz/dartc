@@ -257,6 +257,15 @@ String _describeFunction(
 bool isNever(DartType? type) =>
     type is NeverType && type.nullabilitySuffix == .none;
 
+/// Whether [type], after erasing extensions and following bounds, has no value.
+bool isBottom(DartType? type) {
+  var found = type?.extensionTypeErasure;
+  while (found is TypeParameterType && found.nullabilitySuffix == .none) {
+    found = found.bound.extensionTypeErasure;
+  }
+  return isNever(found);
+}
+
 /// The type arguments that make the generic [element] a function of [type].
 List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
   final owner = element.enclosingElement;
