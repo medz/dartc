@@ -11,8 +11,6 @@ import 'package:dartc/optimize.dart';
 import 'package:dartc/source.dart';
 import 'package:dartc/translate.dart';
 
-import 'sdk.dart';
-
 /// How to compile.
 final class const CompileOptions({
   final Target target = .macosArm64,
@@ -28,9 +26,6 @@ final class const CompileOptions({
 
   /// Whether programs collect before every allocation.
   final bool collectsAlways = false,
-
-  /// The sources of the SDK, if not those that come with this package.
-  final SdkFiles? sdk,
 });
 
 /// What this machine runs, if it is supported.
@@ -41,17 +36,18 @@ Target? get hostTarget => switch (Abi.current()) {
   _ => null,
 };
 
-/// Compiles the program at [path] to an executable.
+/// Compiles the program at [path], which uses [sdk], to an executable.
 ///
 /// Throws [CompileFailure] if the program has an error or is not supported
 /// yet.
-Future<Uint8List> compileProgram(
-  String path, [
-  CompileOptions options = const CompileOptions(),
-]) async {
+Future<Uint8List> buildProgram(
+  String path,
+  SdkSources sdk,
+  CompileOptions options,
+) async {
   final target = options.target;
   final module = translateProgram(
-    await _load(path, options),
+    await loadProgram(path, sdk: sdk),
     target: target,
     checksAssertions: options.checksAssertions,
   );
@@ -73,21 +69,22 @@ enum LibraryKind() {
   shared,
 }
 
-/// Compiles the library at [path]. Also gives a header of C for the functions
-/// that it exports.
+/// Compiles the library at [path], which uses [sdk]. Also gives a header of C
+/// for the functions that it exports.
 ///
 /// [name] is what the file will be called. On macOS, programs load a shared
 /// library from where that is.
 ///
 /// Throws [CompileFailure] if the library has an error or is not supported yet.
-Future<({Uint8List bytes, String header})> compileLibrary(
+Future<({Uint8List bytes, String header})> buildLibrary(
   String path,
-  LibraryKind kind, {
+  LibraryKind kind,
+  SdkSources sdk, {
   required String name,
-  CompileOptions options = const CompileOptions(),
+  required CompileOptions options,
 }) async {
   final (:module, :header) = translateLibrary(
-    await _load(path, options),
+    await loadProgram(path, sdk: sdk),
     target: options.target,
     checksAssertions: options.checksAssertions,
   );
@@ -97,17 +94,6 @@ Future<({Uint8List bytes, String header})> compileLibrary(
     .linux => _linuxLibrary(code, kind, Uri.file(name).pathSegments.last),
   };
   return (bytes: bytes, header: header);
-}
-
-Future<SourceProgram> _load(String path, CompileOptions options) async {
-  final CompileOptions(:target, :sdk, :environment) = options;
-  final isUsual = sdk == null && environment.isEmpty;
-  return loadProgram(
-    path,
-    sdk: await (isUsual
-        ? packagedSdk(target)
-        : sdkFor(target, files: sdk, environment: environment)),
-  );
 }
 
 EmittedCode _emit(HirModule module, CompileOptions options, {String? entry}) =>
@@ -148,24 +134,3 @@ Uint8List _linuxLibrary(EmittedCode code, LibraryKind kind, String name) =>
       ),
       .shared => linkElfLibrary(code, name: name),
     };
-
-/// Writes a file, replacing [output] only once it is complete.
-void writeOutput(Uint8List bytes, String output, {required bool isExecutable}) {
-  final staged = File('$output.tmp-$pid');
-  try {
-    staged.writeAsBytesSync(bytes, flush: true);
-    if (isExecutable) {
-      final result = Process.runSync('/bin/chmod', ['+x', staged.path]);
-      if (result.exitCode != 0) {
-        throw FileSystemException('${result.stderr}', staged.path);
-      }
-    }
-    staged.renameSync(output);
-  } finally {
-    if (staged.existsSync()) staged.deleteSync();
-  }
-}
-
-/// Writes an executable file, replacing [output] only once it is complete.
-void writeProgram(Uint8List program, String output) =>
-    writeOutput(program, output, isExecutable: true);

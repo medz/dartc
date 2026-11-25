@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'inflate.dart';
+
 /// The sources of the SDK by their paths, where `std` has the official ones,
 /// `native` those patching them and `heap` the runtime.
 typedef SdkFiles = Map<String, String>;
@@ -38,9 +40,11 @@ SdkFiles readSdkFiles({
 
 /// [files] as one text.
 String packSdkFiles(SdkFiles files) =>
-    base64.encode(gzip.encode(utf8.encode(jsonEncode(files))));
+    base64.encode(_deflate.encode(utf8.encode(jsonEncode(files))));
+
+final _deflate = ZLibCodec(raw: true);
 
 /// The files that [packSdkFiles] made [text] of.
 SdkFiles unpackSdkFiles(String text) => (jsonDecode(
-  utf8.decode(gzip.decode(base64.decode(text))),
+  utf8.decode(inflate(base64.decode(text))),
 ) as Map<String, Object?>).cast();

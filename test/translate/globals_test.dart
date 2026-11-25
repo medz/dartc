@@ -372,7 +372,7 @@ int get get => x;''',
       '1:14: $what external variables.',
     );
     reports(
-      "import 'dart:developer';\nvoid main() { extensionStreamHasListener; }",
+      "import 'dart:mirrors';\nvoid main() { reflect; }",
       '2:15: $what simple identifier.',
     );
   });

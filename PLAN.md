@@ -151,3 +151,14 @@ Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `t
 | 泛型类的 `late final` 字段，赋值时检查类型 | 官方没有检查 |
 | 枚举自己有叫 `_name` 的字段：报"不支持" | analyzer 把它和枚举的名字混在一起 |
 | `const bool.fromEnvironment('dart.vm.product')` 是 true | 和官方 AOT 相同，和 `dart run` 不同 |
+
+**16 自举。** dartc 能编译自己，不用改源码。
+
+- 16a（完成）：驱动不用子进程、`dart:isolate` 和 `zlib`；`dart:developer` 的 `Timeline` 和 `log`。
+- 16b（完成）：`tool/build.dart --with=<dartc>` 用 dartc 构建。第二代和第三代逐字节相同。测试 `test/driver/build_test.dart` 只在 `DARTC_SELF_HOSTING=1` 时编译自己，因为要很多分钟和约 6 GB 内存。
+
+| | 官方 AOT 编译出的 dartc | dartc 编译出的 dartc |
+| --- | --- | --- |
+| 尺寸 | 22 MB | 31 MB |
+| 编译 `hello` | 1.0 秒，208 MB | 3.6 秒，364 MB |
+| 编译自己 | 30 秒，2.3 GB | 165 秒，5.4 GB |

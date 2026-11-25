@@ -5,6 +5,8 @@ import 'package:dartc/native.dart';
 import 'package:dartc/source.dart';
 
 import 'compile.dart';
+import 'files.dart';
+import 'sdk.dart';
 
 const _usage = '''
 Usage: dartc <source.dart> -o <output> [options]
@@ -19,13 +21,13 @@ Usage: dartc <source.dart> -o <output> [options]
 /// A command that cannot be understood.
 final class _UsageError(final String message) implements Exception;
 
-/// Compiles as [arguments] tell, with the SDK that comes with this package or
-/// with [sdk]. Gives the exit code.
+/// Compiles as [arguments] tell, with the SDK that [sdk] gives. Gives the exit
+/// code.
 Future<int> runCommand(
   List<String> arguments, {
   required StringSink output,
   required StringSink errors,
-  SdkFiles? sdk,
+  required Future<SdkFiles> Function() sdk,
 }) async {
   if (arguments.contains('-h') || arguments.contains('--help')) {
     output.writeln(_usage);
@@ -46,7 +48,10 @@ Future<int> runCommand(
   }
 }
 
-final class _Command(List<String> arguments, final SdkFiles? _sdk) {
+final class _Command(
+  List<String> arguments,
+  final Future<SdkFiles> Function() _sdk,
+) {
   late final String _source, _output;
   String? _header;
   LibraryKind? _kind;
@@ -123,22 +128,24 @@ final class _Command(List<String> arguments, final SdkFiles? _sdk) {
   }
 
   Future<void> run() async {
+    final target =
+        _target ??
+        (throw _UsageError('Tell a --target; this machine is none.'));
     final options = CompileOptions(
-      target:
-          _target ??
-          (throw _UsageError('Tell a --target; this machine is none.')),
+      target: target,
       environment: _environment,
       checksAssertions: _checksAssertions,
-      sdk: _sdk,
     );
+    final sdk = sdkFor(target, await _sdk(), environment: _environment);
     final Uint8List bytes;
     final kind = _kind, header = _header;
     if (kind == null) {
-      bytes = await compileProgram(_source, options);
+      bytes = await buildProgram(_source, sdk, options);
     } else {
-      final library = await compileLibrary(
+      final library = await buildLibrary(
         _source,
         kind,
+        sdk,
         name: _output,
         options: options,
       );

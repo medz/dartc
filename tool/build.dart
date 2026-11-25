@@ -3,13 +3,21 @@ import 'dart:io';
 import 'package:dartc/driver.dart';
 import 'package:dartc/source.dart';
 
-/// Builds the compiler as one program that needs no other files.
+const _usage = 'Usage: dart run tool/build.dart [--with=<dartc>] [output]';
+
+/// Builds the compiler as one program that needs no other files, with the
+/// official compiler or with one that was built here.
 Future<void> main(List<String> arguments) async {
-  if (arguments.length > 1) {
-    stderr.writeln('Usage: dart run tool/build.dart [output]');
+  final withOption = arguments.where((a) => a.startsWith('--with='));
+  final rest = arguments.where((a) => !a.startsWith('-'));
+  if (withOption.length > 1 ||
+      rest.length > 1 ||
+      withOption.length + rest.length != arguments.length) {
+    stderr.writeln(_usage);
     exit(64);
   }
-  final output = File(arguments.firstOrNull ?? 'build/dartc');
+  final own = withOption.firstOrNull?.substring('--with='.length);
+  final output = File(rest.firstOrNull ?? 'build/dartc');
   output.parent.createSync(recursive: true);
   // Generated files are found by the package's own configuration there.
   final directory = Directory('.dart_tool/dartc')..createSync(recursive: true);
@@ -17,7 +25,8 @@ Future<void> main(List<String> arguments) async {
     ..writeAsStringSync('''
 import 'dart:io';
 
-import 'package:dartc/driver.dart';
+// The rest of the driver is for where the libraries are files.
+import 'package:dartc/src/driver/command.dart';
 import 'package:dartc/source.dart';
 
 const _sdk = '${packSdkFiles(await packagedSdkFiles())}';
@@ -27,17 +36,19 @@ Future<void> main(List<String> arguments) async {
     arguments,
     output: stdout,
     errors: stderr,
-    sdk: unpackSdkFiles(_sdk),
+    sdk: () async => unpackSdkFiles(_sdk),
   );
 }
 ''');
-  final result = Process.runSync(Platform.resolvedExecutable, [
-    'compile',
-    'exe',
-    main.path,
-    '-o',
-    output.path,
-  ]);
+  final result = own == null
+      ? Process.runSync(Platform.resolvedExecutable, [
+          'compile',
+          'exe',
+          main.path,
+          '-o',
+          output.path,
+        ])
+      : Process.runSync(own, [main.path, '-o', output.path]);
   if (result.exitCode != 0) {
     stderr.write('${result.stdout}${result.stderr}');
     exit(1);
