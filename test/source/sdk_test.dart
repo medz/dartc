@@ -59,6 +59,32 @@ void main() {
     expect(core.element.getClass('_GrowableList'), isNotNull);
   });
 
+  test('only libraries that programs reach are resolved', () async {
+    Future<Set<String>> reached(Map<String, String> files) async {
+      final directory = writeSources(files);
+      final program = await loadProgram(
+        '${directory.path}/main.dart',
+        sdk: await packagedSdk(),
+      );
+      return {for (final library in program.sdk) '${library.element.uri}'};
+    }
+
+    final least = await reached({'main.dart': 'void main() {}'});
+    expect(least, isNot(contains('dart:io')));
+    expect(least, contains('dart:_heap/collector.dart'));
+    for (final files in [
+      {'main.dart': "import 'dart:io';\nvoid main() {}"},
+      {'main.dart': "export 'dart:io';\nvoid main() {}"},
+      {
+        'main.dart': "import 'a.dart';\nvoid main() {}",
+        'a.dart': "export 'b.dart';",
+        'b.dart': "import 'dart:io';",
+      },
+    ]) {
+      expect(await reached(files), {...least, 'dart:io'});
+    }
+  });
+
   test('the files can be packed as one text', () async {
     final files = await packagedSdkFiles();
     final again = unpackSdkFiles(packSdkFiles(files));

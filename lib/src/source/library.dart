@@ -53,7 +53,8 @@ final class SourceLibrary(
 /// A program free of static errors.
 ///
 /// [libraries] starts with the one holding `main` and includes every library
-/// reached outside the SDK. Of the SDK, [sdk] has those that can be compiled.
+/// reached outside the SDK. Of the SDK, [sdk] has those that can be compiled
+/// and are reached, and the runtime.
 final class SourceProgram(
   Iterable<SourceLibrary> libraries,
   Iterable<SourceLibrary> sdk,
@@ -118,7 +119,8 @@ Map<String, CorrectedText> _correct(
 }
 
 /// The library at [path], then every library it reaches outside the SDK. Also
-/// the libraries of the SDK that can be compiled.
+/// the libraries of the SDK that can be compiled, if the program reaches them,
+/// and the runtime.
 Future<(List<ResolvedLibraryResult>, List<ResolvedLibraryResult>)> _resolveAll(
   String path,
   SdkSources sdk,
@@ -149,17 +151,15 @@ Future<(List<ResolvedLibraryResult>, List<ResolvedLibraryResult>)> _resolveAll(
     final results = [first];
     final seen = {first.element};
     for (var i = 0; i < results.length; i++) {
-      final library = results[i].element;
-      for (final next in [
-        for (final fragment in library.fragments) ...fragment.importedLibraries,
-        ...library.exportedLibraries,
-      ]) {
+      for (final next in _reachedBy(results[i].element)) {
         if (next.isInSdk || !seen.add(next)) continue;
         results.add(await _resolve(session, next));
       }
     }
+    final needed = _neededOfSdk(results.map((result) => result.element));
     final core = <ResolvedLibraryResult>[];
     for (final uri in sdk.libraries) {
+      if (!needed.contains(uri) && !sdk.isRuntime(uri)) continue;
       final found = await session.getLibraryByUri(uri);
       if (found is! LibraryElementResult) throw StateError('No library $uri.');
       core.add(await _resolve(session, found.element));
@@ -168,6 +168,25 @@ Future<(List<ResolvedLibraryResult>, List<ResolvedLibraryResult>)> _resolveAll(
   } finally {
     await contexts.dispose();
   }
+}
+
+Iterable<LibraryElement> _reachedBy(LibraryElement library) => [
+  for (final fragment in library.fragments) ...fragment.importedLibraries,
+  ...library.exportedLibraries,
+];
+
+/// The URIs of the libraries of the SDK that [libraries] reach.
+Set<String> _neededOfSdk(Iterable<LibraryElement> libraries) {
+  final pending = [...libraries], seen = {...libraries};
+  while (pending.isNotEmpty) {
+    for (final next in _reachedBy(pending.removeLast())) {
+      if (seen.add(next)) pending.add(next);
+    }
+  }
+  return {
+    for (final library in seen)
+      if (library.isInSdk) '${library.uri}',
+  };
 }
 
 Future<ResolvedLibraryResult> _resolve(

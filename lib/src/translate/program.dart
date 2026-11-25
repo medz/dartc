@@ -210,7 +210,10 @@ final class ProgramTranslator(
   void _addRuntime() {
     if (_closures.closures.isNotEmpty) _dispatch.instantiate(_functionClass);
     if (_links.schedulers.any(_functions.contains)) _needs.addEvents();
-    if (_functions.contains(_links.setExitCode)) _needs.addExitCode();
+    if (_links.setExitCode case final setter?
+        when _functions.contains(setter)) {
+      _needs.addExitCode();
+    }
     _needs.update(_allFunctions);
   }
 
