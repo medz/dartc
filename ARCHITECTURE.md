@@ -52,7 +52,7 @@
 | `graph` | 控制流图的顺序和支配关系 | 无 |
 | `lir` | 机器层 IR：数据、验证、打印、解释 | `graph` |
 | `hir` | Dart 层 IR：数据、验证、打印、解释 | `graph` |
-| `source` | 读标准库（`sdk_files.dart`），把补丁合进去，调用 analyzer | analyzer |
+| `source` | 读标准库（`sdk_files.dart`），把补丁合进去，调用 analyzer。同一进程里，不在包里的程序共用标准库的分析结果（`analysis.dart`）；读到以前读过的文件时重新分析 | analyzer |
 | `world` | 哪些类和调用会相遇 | 无 |
 | `translate` | AST → HIR，按需翻译可达的声明 | `source` `world` `hir` `graph` `native` analyzer |
 | `optimize` | HIR → HIR，做同样的事但更快；每种优化可以关掉，全关时原样返回 | `hir` `graph` |

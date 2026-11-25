@@ -9,7 +9,7 @@ dart run bin/dartc.dart hello.dart -o hello     # compile; see --help
 dart run tool/build.dart                        # build/dartc, one program with the SDK inside
 dart run tool/build.dart --with=build/dartc x   # the same, compiled by that dartc
 dart analyze --fatal-infos                      # has to be clean
-dart test                                       # everything; about 10 minutes
+dart test                                       # everything; about 6 minutes
 dart test test/translate/closures_test.dart     # one file
 dart test test/translate -N 'part of a name'    # by name; -n takes a regular expression
 dart run tool/measure.dart [names] [-inline] [-devirtualize]  # time against official AOT
