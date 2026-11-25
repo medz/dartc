@@ -13,6 +13,7 @@ import 'extension_constructor.dart';
 import 'external.dart';
 import 'levels.dart';
 import 'members.dart';
+import 'native_types.dart';
 import 'origins.dart';
 import 'runtime_links.dart';
 import 'scope.dart';
@@ -114,6 +115,10 @@ final class FunctionTable(
     if (isExternal && _scope.natives.define(builder, element)) {
       // It does only what C does.
     } else if (isExternal && !element.library.isInSdk) {
+      // C has what it stands for.
+      if (nativeAnnotation(variableOfAccessor(element) ?? element) != null) {
+        throw _declarations.unsupported(element, 'this declaration for C');
+      }
       throwExternal(_scope, builder, element);
     } else if (isInitializerElement(element)) {
       ConstructorTranslator(
