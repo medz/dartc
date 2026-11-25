@@ -60,15 +60,27 @@ final class ExtensionTranslator(
         .applicableTo(targetLibrary: _builder.library, targetType: type)
         .single;
     final defaults = defaultTypesOf(owner.typeParameters, _builder.library);
+    final isOwn = _isOwn(node);
     return [
       for (final (i, parameter) in owner.typeParameters.indexed)
         _mentions(owner.extendedType, parameter)
             ? found.substitution.map[parameter]!
-            : _builder.typesOf(owner) == null
-            ? defaults[i]
-            : parameter.instantiate(nullabilitySuffix: .none),
+            : isOwn
+            ? parameter.instantiate(nullabilitySuffix: .none)
+            : defaults[i],
     ];
   }
+
+  /// Whether [node] uses a member of its own extension, rather than one that is
+  /// found by the type of a value.
+  static bool _isOwn(AstNode node) => switch (node) {
+    SimpleIdentifier() => true,
+    MethodInvocation(:final realTarget) => realTarget == null,
+    AssignmentExpression(leftHandSide: final place) ||
+    PostfixExpression(operand: final place) ||
+    PrefixExpression(operand: final place) => place is SimpleIdentifier,
+    _ => false,
+  };
 
   /// What [node] uses [element] on, if it names the extension.
   static ExtensionOverride? _override(AstNode node, ExecutableElement element) {
