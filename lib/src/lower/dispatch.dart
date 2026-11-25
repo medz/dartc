@@ -64,6 +64,10 @@ const _tableSymbol = '.dispatch', _holeSymbol = '.hole';
   return (offsets: offsets, entries: entries);
 }
 
+/// Which bit tells whether a class passes a test. A table has a byte for each
+/// class, and so holds eight tests.
+typedef TestBit = ({String table, int bit});
+
 /// How objects are laid out and where calls on them go.
 final class ObjectLayout(
   final HirModule module,
@@ -213,10 +217,14 @@ final class ObjectLayout(
   bool canReceive(HirSelector selector) =>
       module.dispatch[selector]!.containsKey(module.integers);
 
-  /// Reads the byte for the class with [number] in the table at [symbol].
-  LirValue isInstance(LirBlock block, String symbol, LirValue number) {
-    final table = block.add(SymbolAddress(symbol));
-    return block.add(Load(.u8, table, index: number));
+  /// Reads whether the class with [number] passes [test].
+  LirValue isInstance(LirBlock block, TestBit test, LirValue number) {
+    final table = block.add(SymbolAddress(test.table));
+    final byte = block.add(Load(.u8, table, index: number));
+    final shifted = test.bit == 0
+        ? byte
+        : block.add(IntBinary(.shr, byte, block.add(ConstInt(test.bit))));
+    return block.add(IntBinary(.and, shifted, block.add(ConstInt(1))));
   }
 
   /// The address of what the class with [number] has for [selector].
