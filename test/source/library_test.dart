@@ -204,7 +204,7 @@ void main() {
     test('share the SDK', () async {
       final [one, two] = [
         for (final text in ['one', 'two'])
-          await load("void main() { print('$text'); }"),
+          await load("import 'dart:io'; void main() { print('$text'); }"),
       ];
       expect(two.sdk.first.element, same(one.sdk.first.element));
       expect(two.main.element, isNot(one.main.element));
