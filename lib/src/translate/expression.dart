@@ -449,7 +449,9 @@ final class ExpressionTranslator(
 
   void _throw(Expression expression) {
     final value = valueAs(expression, .reference);
-    _builder.call(HirCall(_scope.runtime('markThrown'), [value]));
+    _builder
+      ..stay()
+      ..call(HirCall(_scope.runtime('markThrown'), [value]));
     _builder.raise(value, _builder.add(_scope.trace));
   }
 

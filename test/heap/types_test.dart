@@ -142,6 +142,8 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   String calledName(Object function) => throw UnimplementedError();
   @override
   String className(int number) => classes[number].displayName;
+  @override
+  void afterCollection() {}
 }
 
 /// Types that differ little.

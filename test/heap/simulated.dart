@@ -95,6 +95,11 @@ final class SimulatedMachine({
 
   /// Lays out [frames] in memory. The first returns outside the program.
   @override
+  int get callBlock => throw UnsupportedError('Calls of C');
+  @override
+  void callNative(int block) => throw UnsupportedError('Calls of C');
+
+  @override
   int get frameAddress {
     collections++;
     var address = _frames + _frameBytes - 16;

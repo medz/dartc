@@ -33,6 +33,9 @@ abstract interface class Program() {
   int get futureNumber;
 
   String className(int number);
+
+  /// Does what has to be done after each collection.
+  void afterCollection();
 }
 
 /// The program that the runtime is part of outside compiled programs.
@@ -48,3 +51,4 @@ int functionNumber() => program.functionNumber;
 int futureNumber() => program.futureNumber;
 int recordNumber() => program.recordNumber;
 String className(int number) => program.className(number);
+void afterCollection() => program.afterCollection();

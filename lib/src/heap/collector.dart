@@ -6,6 +6,7 @@
 // then four up to each power of two. This file uses only what the compiler
 // supports.
 import 'machine.dart';
+import 'program.dart' show afterCollection;
 import 'returns.dart';
 
 /// Where the collector's own state is, or 0 before the first allocation.
@@ -16,15 +17,24 @@ const _flags = 4, _allocated = 1, _marked = 2, _fixed = 4;
 
 // The state: the blocks, the bytes used up since the last collection and how
 // many start the next, the stack of objects to scan, whether any did not fit
-// there, lists of free cells, where cells are that were never used, from
-// somewhere to the end of a block, lists of blocks with more free cells, and
-// the bytes that the free or unused cells were. The last five are for each
-// size, of which there are 57. The first stands for those that have a block
-// each.
+// there, the bytes outside that objects stand for, where the queue of collected
+// entries is, lists of the marked objects of each weak kind, lists of free
+// cells, where cells are that were never used, from somewhere to the end of a
+// block, lists of blocks with more free cells, and the bytes that the free or
+// unused cells were. The last five are for each size, of which there are 57. The
+// first stands for those that have a block each.
 const _blocks = 0, _grown = 8, _limit = 16;
 const _pending = 24, _pendingBytes = 32, _pendingEnd = 40;
-const _missed = 48, _free = 56, _unused = 512, _unusedEnd = 968;
-const _partial = 1424, _given = 1880, _stateBytes = 2336;
+const _missed = 48, _outside = 56, _queue = 64, _weak = 56;
+const _free = 112, _unused = 568, _unusedEnd = 1024;
+const _partial = 1480, _given = 1936, _stateBytes = 2392;
+
+// Kinds of classes, in their records. What is weak is told by the offsets after
+// those of other references. References have a target and a link; properties a
+// key, its value and a link; entries a value, what detaches them, a finalizer,
+// the function of C and what it takes, bytes outside and a link. The queue has
+// only the first entry.
+const _arrays = 1, _references = 2, _properties = 3, _entries = 4, _queues = 5;
 
 // A block: the next one, the size of its cells, its own size, its free cells
 // and their bytes, as long as they are not taken, and the next block of the
@@ -177,22 +187,41 @@ bool _addBlock(int size, int cell) {
   return true;
 }
 
+/// Counts [bytes] outside that an object stands for, which can be negative.
+void countOutside(int bytes) {
+  if (heap == 0 && !_start()) return;
+  store64(heap + _outside, load64(heap + _outside) + bytes);
+  if (bytes > 0) store64(heap + _grown, load64(heap + _grown) + bytes);
+}
+
 /// Frees every object that the program cannot reach.
 void collect() {
   if (heap == 0) return;
+  store64(heap + _queue, 0);
   _markStack();
   final roots = globalRoots(), count = globalRootCount();
   for (var i = 0; i < count; i++) {
     _mark(load64(roots + i * 8));
   }
+  _scanAll();
+  while (_markValues()) {
+    _scanAll();
+  }
+  _clearReferences();
+  _clearProperties();
+  _clearEntries();
+  final kept = _sweep() + load64(heap + _outside);
+  store64(heap + _grown, 0);
+  store64(heap + _limit, kept > _smallestLimit ? kept : _smallestLimit);
+  afterCollection();
+}
+
+void _scanAll() {
   _scan();
   while (load64(heap + _missed) != 0) {
     store64(heap + _missed, 0);
     _scanMarked();
   }
-  final kept = _sweep();
-  store64(heap + _grown, 0);
-  store64(heap + _limit, kept > _smallestLimit ? kept : _smallestLimit);
 }
 
 /// Marks what the functions that are running refer to.
@@ -276,12 +305,140 @@ void _markFields(int object) {
   for (var i = 0; i < count; i++) {
     _mark(load64(object + load32(record + 8 + i * 4)));
   }
-  if (load32(record + 4) == 0) return;
+  final kind = load32(record + 4);
+  if (kind == 0) return;
+  if (kind != _arrays) return _noteWeak(object, record, kind);
   final length = load64(object + _length);
   for (var i = 0; i < length; i++) {
     _mark(load64(object + _elements + i * 8));
   }
 }
+
+/// Notes the marked [object], which is of a weak [kind].
+void _noteWeak(int object, int record, int kind) {
+  if (kind == _queues) {
+    store64(heap + _queue, object + load32(record + 8));
+    return;
+  }
+  final link = object + _offsetOf(object, kind == _entries ? 6 : kind - 1);
+  // It can be scanned again.
+  if (load64(link) != 0) return;
+  final list = heap + _weak + kind * 8, first = load64(list);
+  store64(link, first == 0 ? 1 : first);
+  store64(list, object);
+}
+
+/// Where the weak [object] has a field, of which [index] tells the place among
+/// those that are not marked.
+int _offsetOf(int object, int index) {
+  final table = classTable();
+  final record = table + load32(table + load32(object) * 4);
+  return load32(record + 8 + (load32(record) + index) * 4);
+}
+
+/// What was noted before the object that has [link], or 0.
+int _unlink(int link) {
+  final next = load64(link);
+  store64(link, 0);
+  return next == 1 ? 0 : next;
+}
+
+bool _isAlive(int object) =>
+    object == 0 ||
+    object & 1 != 0 ||
+    load32(object + _flags) & (_marked | _fixed) != 0;
+
+/// Marks the values of the properties whose keys are alive. Returns whether
+/// there were any.
+bool _markValues() {
+  var isAny = false, before = heap + _weak + _properties * 8;
+  var property = load64(before);
+  while (property > 1) {
+    final link = property + _offsetOf(property, 2), next = load64(link);
+    if (_isAlive(load64(property + _offsetOf(property, 0)))) {
+      isAny = true;
+      store64(before, next);
+      store64(link, 0);
+      _mark(load64(property + _offsetOf(property, 1)));
+    } else {
+      before = link;
+    }
+    property = next;
+  }
+  return isAny;
+}
+
+/// The objects of [kind] that are noted, which are no longer.
+int _takeWeak(int kind) {
+  final list = heap + _weak + kind * 8, first = load64(list);
+  store64(list, 0);
+  return first == 1 ? 0 : first;
+}
+
+void _clearReferences() {
+  var reference = _takeWeak(_references);
+  while (reference != 0) {
+    final target = reference + _offsetOf(reference, 0);
+    if (!_isAlive(load64(target))) store64(target, 0);
+    reference = _unlink(reference + _offsetOf(reference, 1));
+  }
+}
+
+/// Clears the properties that are left, as their keys are not alive.
+void _clearProperties() {
+  var property = _takeWeak(_properties);
+  while (property != 0) {
+    store64(property + _offsetOf(property, 0), 0);
+    store64(property + _offsetOf(property, 1), 0);
+    property = _unlink(property + _offsetOf(property, 2));
+  }
+}
+
+/// Puts the entries whose values are not alive into the queue.
+void _clearEntries() {
+  var entry = _takeWeak(_entries);
+  while (entry != 0) {
+    for (var i = 1; i <= 2; i++) {
+      final field = entry + _offsetOf(entry, i);
+      if (!_isAlive(load64(field))) store64(field, 0);
+    }
+    final value = entry + _offsetOf(entry, 0);
+    if (!_isAlive(load64(value))) {
+      store64(value, 0);
+      final bytes = entry + _offsetOf(entry, 5);
+      store64(heap + _outside, load64(heap + _outside) - load64(bytes));
+      store64(bytes, 0);
+      final queue = load64(heap + _queue);
+      if (queue != 0) {
+        // The second of its other references is the next one.
+        final table = classTable();
+        final record = table + load32(table + load32(entry) * 4);
+        store64(entry + load32(record + 12), load64(queue));
+        store64(queue, entry);
+      }
+    }
+    entry = _unlink(entry + _offsetOf(entry, 6));
+  }
+}
+
+/// The first entry of the queue, or 0.
+int firstEntry() {
+  final queue = load64(heap + _queue);
+  return queue == 0 ? 0 : load64(queue);
+}
+
+/// The entry after [entry], or 0.
+int nextEntry(int entry) {
+  final table = classTable();
+  final record = table + load32(table + load32(entry) * 4);
+  return load64(entry + load32(record + 12));
+}
+
+/// Where [entry] has the function of C to call.
+int entryFunction(int entry) => entry + _offsetOf(entry, 3);
+
+/// Where [entry] has what that takes.
+int entryArgument(int entry) => entry + _offsetOf(entry, 4);
 
 /// Marks everything that any marked object refers to.
 void _scanMarked() {

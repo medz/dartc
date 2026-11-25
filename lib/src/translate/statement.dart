@@ -31,6 +31,7 @@ final class StatementTranslator(
 
   void body(FunctionBody body) {
     _body(body);
+    _builder.stay();
     if (_builder.coroutine != null) _end();
   }
 
@@ -52,6 +53,16 @@ final class StatementTranslator(
   }
 
   void statement(Statement node) {
+    final scope = _builder.scope;
+    _statement(node);
+    if (node is VariableDeclarationStatement ||
+        node is PatternVariableDeclarationStatement) {
+      return;
+    }
+    _builder.leave(scope);
+  }
+
+  void _statement(Statement node) {
     switch (node) {
       case Block(:final statements):
         statements.forEach(statement);
@@ -64,10 +75,14 @@ final class StatementTranslator(
       case VariableDeclarationStatement(:final variables):
         expressions.loops.declare(variables);
       case IfStatement(:final expression, :final caseClause):
+        final scope = _builder.scope;
         expressions.patterns.choose(
           node,
           (expression, caseClause),
-          () => statement(node.thenStatement),
+          () {
+            statement(node.thenStatement);
+            _builder.stay(scope);
+          },
           () {
             if (node.elseStatement case final other?) statement(other);
           },
@@ -127,25 +142,28 @@ final class StatementTranslator(
 
   void _goTo((Join, int) target) {
     final (join, depth) = target;
+    _builder.stay();
     _tries.leave(depth, (_) => _builder.jump(join));
   }
 
   void _return(Expression? expression) {
     if (_builder.coroutine != null) {
-      return _leave(
-        expression == null
-            ? _builder.add(HirNull())
-            : expressions.valueAsObject(expression, _builder.returnType!),
-      );
+      final value = expression == null
+          ? _builder.add(HirNull())
+          : expressions.valueAsObject(expression, _builder.returnType!);
+      _builder.stay();
+      return _leave(value);
     }
     final result = _builder.function.result;
     if (result == null) {
       if (expression != null) expressions.effect(expression);
+      _builder.stay();
       _tries.leave(0, (_) => _builder.end(HirReturn()));
     } else {
       final value = expression == null
           ? _builder.fallback?.call() ?? _builder.add(HirNull())
           : expressions.valueTo(expression, _builder.returnType!);
+      _builder.stay();
       _tries.leave(0, (kept) => _builder.end(HirReturn(kept)), value);
     }
   }
@@ -195,7 +213,7 @@ final class StatementTranslator(
   void _switch(SwitchStatement node) {
     final value = expressions.value(node.expression);
     final type = node.expression.staticType!;
-    final exit = _builder.join(node);
+    final exit = _builder.join(node), scope = _builder.scope;
     _breaks[node] = (exit, _tries.depth);
     final groups = _groups(node.members);
     final patterns = [
@@ -206,7 +224,7 @@ final class StatementTranslator(
     expressions.patterns.matching(patterns, () {
       final bodies = [for (final group in groups) _bodyOf(node, group)];
       for (final (i, group) in groups.indexed) {
-        _group(node, group, (value, type), bodies[i], exit);
+        _group(node, group, (value, type), bodies[i], exit, scope);
       }
     });
     _builder
@@ -245,13 +263,15 @@ final class StatementTranslator(
     return body;
   }
 
-  /// Goes to [body] if one of [group] matches, or goes on.
+  /// Goes to [body] if one of [group] matches, or goes on. What is declared
+  /// after [scope] ends with the body.
   void _group(
     SwitchStatement node,
     List<SwitchMember> group,
     (HirValue, DartType) value,
     Join body,
     Join exit,
+    int scope,
   ) {
     final patterns = expressions.patterns;
     for (final member in group) {
@@ -278,6 +298,7 @@ final class StatementTranslator(
       ..jump(after)
       ..enter(body);
     group.last.statements.forEach(statement);
+    _builder.stay(scope);
     _builder
       ..jump(exit)
       ..enter(after);

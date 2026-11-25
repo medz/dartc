@@ -7,7 +7,14 @@ final class HirField(
   final String name,
   final HirType type, {
   final bool isFinal = false,
+
+  /// Whether objects do not keep what it refers to.
+  final bool isWeak = false,
 });
+
+/// What the collector does with objects that do not keep all that they refer
+/// to. Their weak fields and integers have an order that it knows.
+enum HirWeakness() { references, properties, entries, queues }
 
 /// How an array holds one of its elements.
 enum HirElement(
@@ -45,6 +52,7 @@ final class HirClass(
   final HirClass? superclass,
   Iterable<HirField> ownFields, [
   final HirElements? elements,
+  final HirWeakness? weakness,
 ]) {
   final List<HirField> ownFields = .unmodifiable(ownFields);
 

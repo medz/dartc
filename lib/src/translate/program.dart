@@ -288,6 +288,10 @@ final class ProgramTranslator(
   void addCallbacks() => _needs.addCallbacks();
 
   @override
+  void addNativeFinalizers() =>
+      _typeFunctions.finalize ??= runtime('finalizeNative');
+
+  @override
   late final NativeTable natives = NativeTable(this, _unit);
 
   @override

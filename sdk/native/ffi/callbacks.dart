@@ -82,7 +82,7 @@ class _Posted implements EventSource {
 
   void wait(int microseconds) => waitPosted(microseconds);
 
-  void end() => _runFinalizers();
+  void end() => FinalizerBase.eachEntry(_finalize);
 }
 
 final _Posted _posted = _registerPosted();
@@ -151,55 +151,4 @@ void _updateNativeCallableKeepIsolateAliveCounter<NS extends NativeFunction>(
   int delta,
 ) {
   _posted.open += delta;
-}
-
-// Nothing is collected before the program ends, so that is when finalizers are
-// called.
-
-final List<_Finalization> _finalizations = [];
-
-class _Finalization {
-  final Pointer<NativeFinalizerFunction> callback;
-  final Pointer<Void> token;
-  final Object? detach;
-  final Object owner;
-  _Finalization(this.callback, this.token, this.detach, this.owner);
-}
-
-void _runFinalizers() {
-  while (_finalizations.isNotEmpty) {
-    final last = _finalizations.removeAt(0);
-    last.callback.asFunction<void Function(Pointer<Void>)>()(last.token);
-  }
-}
-
-@patch
-abstract final class NativeFinalizer {
-  @patch
-  factory NativeFinalizer(Pointer<NativeFinalizerFunction> callback) = _AtEnd;
-}
-
-final class _AtEnd implements NativeFinalizer {
-  final Pointer<NativeFinalizerFunction> _callback;
-
-  _AtEnd(this._callback);
-
-  Pointer<NativeFinalizerFunction> get callback => _callback;
-
-  void attach(
-    Object value,
-    Pointer<Void> token, {
-    Object? detach,
-    int? externalSize,
-  }) {
-    RangeError.checkNotNegative(externalSize ?? 0, 'externalSize');
-    _posted;
-    _finalizations.add(_Finalization(_callback, token, detach, this));
-  }
-
-  void detach(Object detach) {
-    _finalizations.removeWhere(
-      (one) => identical(one.owner, this) && identical(one.detach, detach),
-    );
-  }
 }

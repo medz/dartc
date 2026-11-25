@@ -9,6 +9,7 @@ import 'assigned.dart';
 import 'captures.dart';
 import 'coroutine.dart';
 import 'levels.dart';
+import 'types.dart';
 
 extension Unsupported on SourceUnit {
   /// The failure to translate [node].
@@ -281,8 +282,35 @@ final class FunctionBuilder(
     _block = HirBlock();
   }
 
+  /// The variables in scope whose objects stay as long as these are.
+  final _kept = <VariableElement>[];
+
+  /// Tells those that are in scope here from ones declared later.
+  int get scope => _kept.length;
+
+  /// Has the objects of the variables that were declared since [scope] stay
+  /// until here.
+  void stay([int scope = 0]) {
+    for (final variable in _kept.skip(scope)) {
+      add(HirMachine(.addressOf, [read(variable)]));
+    }
+    if (scope == 0 && _keepsReceiver) {
+      add(HirMachine(.addressOf, [receiver!]));
+    }
+  }
+
+  late final bool _keepsReceiver =
+      receiver != null && isFinalizable(level?.element.thisType ?? thisType);
+
+  /// Ends the scope of those.
+  void leave(int scope) {
+    stay(scope);
+    _kept.length = scope;
+  }
+
   /// Declares the variable [given], not yet assigned.
   void declare(Object given, HirType type) {
+    if (given is VariableElement && isFinalizable(given.type)) _kept.add(given);
     final variable = _same(given);
     _types[variable] = type;
     _values.remove(variable);

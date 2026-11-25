@@ -1,17 +1,24 @@
-// The collector keeps what these refer to, so nothing is ever finalized.
+// What the collector clears when objects are gone.
 
 @patch
+@pragma('dartc:weak', 'properties')
 class _WeakProperty {
   @patch
+  @pragma('dartc:weak')
   var key;
   @patch
+  @pragma('dartc:weak')
   var value;
+  int _link = 0;
 }
 
 @patch
+@pragma('dartc:weak', 'references')
 class _WeakReference<T> {
   @patch
+  @pragma('dartc:weak')
   T? target;
+  int _link = 0;
 
   @patch
   set _target(T? value) {
@@ -20,20 +27,11 @@ class _WeakReference<T> {
 }
 
 @patch
-abstract class Finalizer<T> {
+class _FinalizerImpl<T> {
   @patch
-  factory Finalizer(void Function(T) callback) = _IdleFinalizer<T>;
-}
+  late void Function(T) _callback;
 
-final class _IdleFinalizer<T> implements Finalizer<T> {
-  _IdleFinalizer(void Function(T) callback);
-
-  void attach(Object value, T finalizationToken, {Object? detach}) {
-    checkValidWeakTarget(value, 'value');
-    if (detach != null) checkValidWeakTarget(detach, 'detach');
-  }
-
-  void detach(Object detach) => checkValidWeakTarget(detach, 'detach');
+  void handleCollected() => _runFinalizers();
 }
 
 @patch

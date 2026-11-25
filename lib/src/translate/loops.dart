@@ -177,8 +177,10 @@ final class LoopTranslator(
     void Function() body,
   ) {
     if (isNever(type)) return _builder.end(HirUnreachable());
+    final scope = _builder.scope;
     _assign(parts, _conversions.coerce(value, valueType(type)!), type);
     body();
+    _builder.leave(scope);
   }
 
   /// What [node] gives, as something to iterate over.

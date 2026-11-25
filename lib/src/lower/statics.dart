@@ -127,18 +127,32 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
   }
 
   /// For each class, where its record is; then each record: the number of
-  /// references in fields, whether elements are references too, and the
-  /// offsets of the former.
+  /// references in fields that it keeps, its kind, their offsets, and those of
+  /// other fields if it is weak.
   LirData classTable() {
     final words = <int>[], starts = <int>[];
     for (final class_ in module.classes) {
-      final offsets = [
+      final kept = [
         for (final field in class_.fields)
-          if (field.type == .reference) _layout.offsetOf(field),
+          if (field.type == .reference && !field.isWeak) field,
       ];
       starts.add((module.classes.length + words.length) * 4);
-      final isArray = class_.elements == .references;
-      words.addAll([offsets.length, isArray ? 1 : 0, ...offsets]);
+      final weakness = class_.weakness;
+      final fields = [
+        ...kept,
+        if (weakness != null)
+          for (final field in class_.fields)
+            if (!kept.contains(field)) field,
+      ];
+      words.addAll([
+        kept.length,
+        weakness != null
+            ? 2 + weakness.index
+            : class_.elements == .references
+            ? 1
+            : 0,
+        for (final field in fields) _layout.offsetOf(field),
+      ]);
     }
     return LirData(
       classTableSymbol,

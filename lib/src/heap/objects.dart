@@ -74,6 +74,9 @@ external int takePosted();
 /// Waits for such a call, for some microseconds at most unless that is negative.
 external void waitPosted(int microseconds);
 
+/// Has functions of C called after collections.
+external void usesNativeFinalizers();
+
 /// Lets the program wait for what [source], an `EventSource`, tells.
 external void registerEvents(Object source);
 
