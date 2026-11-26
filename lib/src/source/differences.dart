@@ -42,6 +42,9 @@ final class _Missed() extends RecursiveAstVisitor<void> {
         isNullAware,
         target,
       ),
+      FunctionExpressionInvocation(:final function) => _canBeShortened(
+        function,
+      ),
       _ => false,
     };
   }
