@@ -1,3 +1,4 @@
+// official: Dart 3.14.0 tells function types apart by the order of named parameters (#60).
 typedef F = void Function<T>({T? a, T? z});
 void top<T>({T? z, T? a}) {}
 void nested<T>({void Function<U extends T>(U, T)? z, T? a}) {}
@@ -16,7 +17,7 @@ void main() {
   // expect: true
   check(local);
   // expect: ({int? a, int? z}) => void
-  // expect: false
+  // expect: true
   final f = nested;
   print(
     f<num>.runtimeType,
