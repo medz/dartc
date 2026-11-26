@@ -1,11 +1,15 @@
-import 'dart:_heap/machine.dart' show classNumber, outputBuffer, store8, write;
+import 'dart:_heap/machine.dart'
+    show addressOf, classNumber, outputBuffer, store8, write;
 import 'dart:_heap/objects.dart' as objects;
 
 @patch
 T unsafeCast<T>(dynamic v) => objects.unsafeCast<T>(v);
 
+/// Keeps [object] until here, also where this is inlined.
 @patch
-void reachabilityFence(Object? object) {}
+void reachabilityFence(Object? object) {
+  if (object != null) addressOf(object);
+}
 
 @patch
 bool get has63BitSmis => true;
