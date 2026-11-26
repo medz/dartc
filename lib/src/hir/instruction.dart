@@ -31,7 +31,23 @@ final class HirNull() extends HirInstruction {
 }
 
 /// An operation that may throw.
-sealed class HirCalling() extends HirInstruction;
+sealed class HirCalling() extends HirInstruction {
+  /// Where in the source it is made, for traces of the stack.
+  HirPlace? place;
+}
+
+/// A place in the source: the function that is there, its file and its line,
+/// and the call that [outer] is at if its body replaced that call.
+final class HirPlace(
+  final String function,
+  final String uri,
+  final int line, [
+  final HirPlace? outer,
+]) {
+  /// This place where its function replaced a call at [site].
+  HirPlace within(HirPlace site) =>
+      HirPlace(function, uri, line, outer?.within(site) ?? site);
+}
 
 /// An object of [target] whose references are null and numbers are unset.
 final class HirNew(final HirClass target) extends HirCalling {

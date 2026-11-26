@@ -210,7 +210,10 @@ final class ExpressionTranslator(
         : _conversions.coerce(result, representation);
   }
 
-  HirValue _value(Expression node, HirType placeholder) {
+  HirValue _value(Expression node, HirType placeholder) =>
+      _builder.atNode(node, () => _valueHere(node, placeholder));
+
+  HirValue _valueHere(Expression node, HirType placeholder) {
     final inner = node.unParenthesized, type = inner.staticType;
     if (_before(inner, placeholder) case final result?) return result;
     switch (inner) {
@@ -447,13 +450,10 @@ final class ExpressionTranslator(
     return result;
   }
 
-  void _throw(Expression expression) {
-    final value = valueAs(expression, .reference);
-    _builder
-      ..stay()
-      ..call(HirCall(_scope.runtime('markThrown'), [value]));
-    _builder.raise(value, _builder.add(_scope.trace));
-  }
+  void _throw(Expression expression) => _builder.throwValue(
+    _scope.runtime('markThrown'),
+    valueAs(expression, .reference),
+  );
 
   HirValue _notNull(Expression operand) =>
       CheckedOperations(_scope, _builder).notNull(value(operand));

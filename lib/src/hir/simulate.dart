@@ -112,6 +112,9 @@ final class HirMachineState(final HirModule _module) {
         return 16;
       case .nativeFrame:
         return 24;
+      case .sourcePlaces:
+        // There are no frames to tell.
+        return 0;
       case .callBlock ||
           .callNative ||
           .callbacks ||

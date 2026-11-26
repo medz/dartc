@@ -151,7 +151,9 @@ final class CoroutineTranslator(
           _ => type,
         },
       );
-      builder.coroutine = Coroutine(kind, suspend, builder.inputs[1]);
+      builder
+        ..coroutine = Coroutine(kind, suspend, builder.inputs[1])
+        ..frameName = outer.frameName;
       for (final parameter in own) {
         if (builder.typeOf(parameter) != null) builder.renew(parameter);
       }

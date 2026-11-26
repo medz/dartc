@@ -110,7 +110,7 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('eventLoop', loop, const [], loop?.result);
   // What it gives, if anything, is not used.
   final uncaught = module.uncaught;
-  check('uncaught', uncaught, [.reference], uncaught?.result);
+  check('uncaught', uncaught, [.reference, .reference], uncaught?.result);
 }
 
 /// Checks constants and those they refer to, which form no cycle.

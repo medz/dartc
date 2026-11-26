@@ -264,7 +264,9 @@ true
       final program = Process.runSync('$path/main', const []);
       expect(program.stdout, official.stdout);
       expect(program.stdout, isNotEmpty);
-      expect(official.stderr, startsWith(program.stderr as String));
+      // Traces of the stack, which follow, are not compared.
+      String told(Object errors) => '$errors'.split('#0 ').first;
+      expect(told(program.stderr), told(official.stderr));
       expect(program.exitCode, official.exitCode);
     }
   });

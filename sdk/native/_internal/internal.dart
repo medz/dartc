@@ -136,3 +136,7 @@ abstract interface class EventSource {
   /// Does what is done when the program ends.
   void end();
 }
+
+/// Where the bodies of `async` functions waited that wait for the one that
+/// runs now, innermost first, for traces of the stack. `dart:async` sets it.
+List<int> Function()? tellAwaiters;

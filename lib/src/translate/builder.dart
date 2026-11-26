@@ -200,8 +200,28 @@ final class FunctionBuilder(
     return _block.add(instruction);
   }
 
+  /// Where in the source what is translated now is, if that is known.
+  int? position;
+
+  /// Does [work] where [node] is in the source.
+  T atNode<T>(Expression node, T Function() work) {
+    final before = position;
+    position = positionOf(node.unParenthesized);
+    try {
+      return work();
+    } finally {
+      position = before;
+    }
+  }
+
+  /// The name that traces of the stack give the function.
+  late String frameName = function.name;
+
   /// Adds [calling], returning its result, if any.
   HirValue? call(HirCalling calling) {
+    if (position case final at?) {
+      calling.place ??= HirPlace(frameName, unit.uri, unit.lineAt(at));
+    }
     if (_handlers.isEmpty) {
       _block.add(calling);
       return calling.type == null ? null : calling;
@@ -219,6 +239,14 @@ final class FunctionBuilder(
   void raise(HirValue exception, HirValue trace) => _handlers.isEmpty
       ? end(HirThrow(exception, trace))
       : jumpWith(_handlers.last, [exception, trace]);
+
+  /// Throws [value] with its trace, which [markThrown] gives.
+  void throwValue(HirFunction markThrown, HirValue value) {
+    final trace = call(HirCall(markThrown, [value]))!;
+    // Objects stay until it is thrown, after the trace is made.
+    stay();
+    raise(value, trace);
+  }
 
   /// A block where throws can go.
   Join handler() => Join._(
@@ -449,3 +477,12 @@ final class FunctionBuilder(
     ifFalse();
   }
 }
+
+/// Where traces of the stack tell that [node] is.
+int positionOf(Expression node) => switch (node) {
+  MethodInvocation(:final methodName) => methodName.offset,
+  PropertyAccess(:final propertyName) => propertyName.offset,
+  PrefixedIdentifier(:final identifier) => identifier.offset,
+  BinaryExpression(:final operator) => operator.offset,
+  _ => node.offset,
+};

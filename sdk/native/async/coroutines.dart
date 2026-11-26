@@ -1,4 +1,7 @@
 // What `async` functions and generators are compiled to use.
+import 'dart:_heap/machine.dart'
+    show codeStart, frameAddress, load64, sourcePlaces;
+import 'dart:_internal' show tellAwaiters;
 
 /// What a function does until it is left or ends, given what it waited for or
 /// an exception.
@@ -32,6 +35,11 @@ class _SuspendState {
   _Body? _body;
   _Starter? _starter;
 
+  /// Where its body waited last, as where that call returns to, and the state
+  /// that waits for what it completes, for traces of the stack.
+  int _awaitedAt = 0;
+  _SuspendState? _awaiter;
+
   @patch
   set _functionData(Object value) {
     _data = value;
@@ -61,10 +69,15 @@ class _SuspendState {
     if (_data is _SyncStarIterator) {
       return _body!(this, value, exception, stackTrace);
     }
+    final before = _running;
+    _running = this;
+    tellAwaiters ??= _awaitersOfRunning;
     try {
       return _body!(this, value, exception, stackTrace);
     } catch (error, trace) {
       return _handleException(this, error, trace);
+    } finally {
+      _running = before;
     }
   }
 
@@ -75,7 +88,23 @@ class _SuspendState {
   static Function _instantiateClosureWithFutureTypeArgument(
     dynamic Function<T>(T) closure,
     Future future,
-  ) => (dynamic value) => closure<dynamic>(value);
+  ) =>
+      (dynamic value) => closure<dynamic>(value);
+}
+
+/// The state whose body goes on after it waited, if one does.
+_SuspendState? _running;
+
+/// Where the bodies that wait for [_running] waited, innermost first.
+List<int> _awaitersOfRunning() => [
+  for (var state = _running?._awaiter; state != null; state = state._awaiter)
+    state._awaitedAt,
+];
+
+@patch
+class _Future {
+  /// The state of the `async` function that completes it, if one does.
+  _SuspendState? _completer;
 }
 
 Future<T> _startAsync<T>(_Body body) {
@@ -83,6 +112,7 @@ Future<T> _startAsync<T>(_Body body) {
   final state = _SuspendState()
     .._data = future
     .._body = body;
+  future._completer = state;
   try {
     body(state, null, null, null);
   } catch (error, trace) {
@@ -96,11 +126,19 @@ void _finishAsync(_SuspendState state, Object? value) {
 }
 
 void _await(_SuspendState state, Object? value) {
+  if (sourcePlaces() != 0) _noteAwait(state, value, load64(frameAddress() + 8));
   state._await(value);
 }
 
 void _awaitChecked<T>(_SuspendState state, Object? value) {
+  if (sourcePlaces() != 0) _noteAwait(state, value, load64(frameAddress() + 8));
   state._awaitWithTypeCheck<T>(value);
+}
+
+/// Notes that [state] waits for [value] at [code], for traces of the stack.
+void _noteAwait(_SuspendState state, Object? value, int code) {
+  state._awaitedAt = code - codeStart();
+  if (value is _Future) value._completer?._awaiter = state;
 }
 
 Stream<T> _startAsyncStar<T>(_Body body) {
@@ -127,7 +165,8 @@ bool _yieldAllAsyncStar(_SuspendState state, Object? stream) =>
     _controllerOf(state).addStream(unsafeCast<Stream>(stream));
 
 Iterable<T> _startSyncStar<T>(_Starter starter) =>
-    _SyncStarIterable<T>().._stateAtStart = (_SuspendState().._starter = starter);
+    _SyncStarIterable<T>()
+      .._stateAtStart = (_SuspendState().._starter = starter);
 
 _SyncStarIterator _iteratorOf(_SuspendState state) =>
     unsafeCast<_SyncStarIterator>(state._data);

@@ -114,7 +114,7 @@ void main() {
         );
         return HirReturn();
       });
-      final uncaught = _ending('uncaught', [.reference], (block) {
+      final uncaught = _ending('uncaught', [.reference, .reference], (block) {
         writeText(block, 1, 'out\n');
         writeText(block, 2, 'a ');
         writeText(block, 2, 'b\n');

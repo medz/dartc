@@ -53,6 +53,7 @@ final class StatementTranslator(
   }
 
   void statement(Statement node) {
+    _builder.position = node.offset;
     final scope = _builder.scope;
     _statement(node);
     if (node is VariableDeclarationStatement ||

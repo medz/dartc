@@ -252,7 +252,19 @@ final class Store(
 sealed class LirCall() extends LirInstruction {
   /// The types of the call's inputs, excluding a callee address.
   LirSignature get signature;
+
+  /// Where in the source it is made, for traces of the stack.
+  LirPlace? place;
 }
+
+/// A place in the source: the function that is there, its file and its line,
+/// and the call that [outer] is at if its body replaced that call.
+final class LirPlace(
+  final String function,
+  final String uri,
+  final int line, [
+  final LirPlace? outer,
+]);
 
 /// Calls a function or external function of this module.
 final class Call(

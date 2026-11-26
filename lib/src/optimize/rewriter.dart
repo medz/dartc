@@ -71,6 +71,9 @@ final class _BodyCopy(
 
   /// The functions whose bodies are around, with this one.
   required final List<HirFunction> around,
+
+  /// Where the call is that this body replaces, if it does.
+  final HirPlace? site,
   required final Handler? handler,
 
   /// Goes on with what the function returns.
@@ -160,9 +163,13 @@ final class _BodyCopy(
 
   HirValue? _add(HirInstruction instruction) {
     final copy = copyInstruction(instruction, _of);
-    if (copy is HirCalling) return _call(copy);
+    if (copy is HirCalling) return _call(copy..place = _within(copy.place));
     return _emitter.add(copy);
   }
+
+  /// [place] in this body, where it replaces a call.
+  HirPlace? _within(HirPlace? place) =>
+      site == null ? place : place?.within(site!) ?? site;
 
   /// Makes [call] and goes on after it, if code comes there.
   HirValue? _call(HirCalling call, {Handler? handler}) {
@@ -178,7 +185,7 @@ final class _BodyCopy(
     if (call is HirCall) {
       final target = call.target;
       if (target is HirFunction) {
-        return _callDirectly(target, call.arguments, ending);
+        return _callDirectly(target, call.arguments, ending, call.place);
       }
     }
     return _make(call, ending);
@@ -187,16 +194,17 @@ final class _BodyCopy(
   HirValue? _callRest(HirVirtualCall call, Targets targets, Handler? ending) =>
       targets.rest == null
       ? _make(call, ending)
-      : _callDirectly(targets.rest!, call.inputs, ending);
+      : _callDirectly(targets.rest!, call.inputs, ending, call.place);
 
   HirValue? _callDirectly(
     HirFunction target,
     List<HirValue> arguments,
     Handler? ending,
+    HirPlace? place,
   ) =>
       !_isCold && _policy.inlines(target, around, (i) => _isKnown(arguments[i]))
-      ? _inline(target, arguments, ending)
-      : _make(HirCall(target, arguments), ending);
+      ? _inline(target, arguments, ending, place)
+      : _make(HirCall(target, arguments)..place = place, ending);
 
   /// Whether code for [value] may be simpler than for others.
   bool _isKnown(HirValue value) =>
@@ -222,7 +230,7 @@ final class _BodyCopy(
       );
       if (condition is HirConst) {
         if (condition.value == false) continue;
-        collect(_callDirectly(target, call.inputs, ending));
+        collect(_callDirectly(target, call.inputs, ending, call.place));
         break;
       }
       final here = _emitter.newBlock(), elsewhere = _emitter.newBlock();
@@ -235,7 +243,7 @@ final class _BodyCopy(
       );
 
       _emitter.place = placeOf(here, holds: true);
-      collect(_callDirectly(target, call.inputs, ending));
+      collect(_callDirectly(target, call.inputs, ending, call.place));
       _emitter.place = placeOf(elsewhere, holds: false);
     }
     if (_emitter.isReachable) {
@@ -271,6 +279,7 @@ final class _BodyCopy(
     HirFunction callee,
     List<HirValue> arguments,
     Handler? handler,
+    HirPlace? place,
   ) {
     final scope = _emitter.place!.scope;
     final returns = <(Place, HirValue?)>[];
@@ -279,6 +288,7 @@ final class _BodyCopy(
       _emitter,
       _policy,
       around: [...around, callee],
+      site: place,
       handler: handler,
       onReturn: (value) {
         returns.add((_emitter.place!, value));
@@ -402,8 +412,9 @@ final class _BodyCopy(
         });
       case HirInvoke(:final call, :final onReturn, :final onThrow):
         final caught = _handler(onThrow);
+        final copy = copyInstruction(call, _of) as HirCalling;
         final result = _call(
-          copyInstruction(call, _of) as HirCalling,
+          copy..place = _within(copy.place),
           handler: caught,
         );
         if (!_emitter.isReachable) return;

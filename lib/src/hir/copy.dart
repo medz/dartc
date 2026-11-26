@@ -66,6 +66,11 @@ HirInstruction copyInstruction(
 HirCalling _copyCalling(
   HirCalling given,
   HirValue Function(HirValue value) of,
+) => _copyCallingOnly(given, of)..place = given.place;
+
+HirCalling _copyCallingOnly(
+  HirCalling given,
+  HirValue Function(HirValue value) of,
 ) => switch (given) {
   HirNew(:final target) => HirNew(target),
   HirBox(:final target, :final value) => HirBox(target, of(value)),

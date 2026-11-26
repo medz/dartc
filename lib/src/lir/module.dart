@@ -35,6 +35,9 @@ final class LirData(
 const textSymbol = '.text', stackMapSymbol = '.stackMaps';
 const handlerSymbol = '.handlers';
 
+/// Where calls are in the source, for traces of the stack.
+const placesSymbol = '.places';
+
 /// Functions that code calls for allocations, throws and overflows.
 const allocateSymbol = '.allocate', throwSymbol = '.throw';
 const stackOverflowSymbol = '.stackOverflow';

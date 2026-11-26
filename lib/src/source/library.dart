@@ -21,6 +21,16 @@ final class SourceUnit(
 ) {
   late final _lines = LineInfo.fromContent(_content.original);
 
+  /// The line that [offset] characters into the text that was resolved are
+  /// on, from 1.
+  int lineAt(int offset) =>
+      _lines.getLocation(_content.originalOffset(offset)).lineNumber;
+
+  /// What traces of the stack call the file.
+  late final String uri = path.startsWith('/dartc-sdk/')
+      ? 'dart:${path.split('/lib/').last.split('/native/').last}'
+      : Uri.file(path).toString();
+
   /// The text of [node] in the file.
   String textOf(AstNode node) => _content.original.substring(
     _content.originalOffset(node.offset),

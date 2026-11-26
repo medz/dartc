@@ -41,6 +41,7 @@ final class MachineLowering(
     .handlers: handlerSymbol,
     .codeStart: textSymbol,
     .stackMaps: stackMapSymbol,
+    .sourcePlaces: placesSymbol,
     .classTable: classTableSymbol,
     .nativeFrame: nativeFrameSymbol,
     .callbacks: callbacksSymbol,

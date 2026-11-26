@@ -83,7 +83,7 @@ List<LirBlock> _guard(
   final failed = LirBlock([.ref, .ref]);
   block.end(Invoke(call, LirEdge(done), LirEdge(failed)));
   failed
-    ..add(Call(uncaught.symbol, uncaught.signature, [failed.parameters.first]))
+    ..add(Call(uncaught.symbol, uncaught.signature, failed.parameters))
     ..add(callSystem('abort', []))
     ..end(Unreachable());
   return [failed];

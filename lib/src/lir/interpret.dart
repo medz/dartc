@@ -170,7 +170,10 @@ final class LirInterpreter(
         return null;
       case SymbolAddress(:final symbol):
         return _addresses[symbol] ??
-            (throw LirFault('$symbol has no address here.'));
+            // There are no frames to tell.
+            (symbol == placesSymbol
+                ? 0
+                : throw LirFault('$symbol has no address here.'));
       case StaticObject(:final symbol):
         return _statics[symbol];
       case FrameAddress() || Resume():
