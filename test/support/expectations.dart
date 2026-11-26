@@ -16,6 +16,8 @@ import 'dart:convert';
 /// Programs marked `long` take too long to collect before every allocation.
 /// An `error` is where a program is refused, with its column. Without one, it
 /// is refused elsewhere, such as in the SDK.
+/// A line `// official: …` tells why the official Dart does something else,
+/// which the language does not mean; the other comments are written by hand.
 ///
 /// `tool/expect.dart` writes and checks them with the official Dart, apart from
 /// the errors.
@@ -33,7 +35,12 @@ final class const Expectations({
 
   /// Whether there are any, apart from `long`.
   final bool isTold = false,
+
+  /// Why the official Dart does something else, if it does.
+  final String? official,
 }) {
+  static final _official = RegExp(r'^// official: (.*)$', multiLine: true);
+
   static final _comment = RegExp(
     r'// (?:(expect|stderr|exit):(?: (.*))?|(long)|error( \d+)?: (.*))$',
   );
@@ -74,6 +81,7 @@ final class const Expectations({
       problems: problems,
       elsewhere: elsewhere,
       isTold: isTold,
+      official: _official.firstMatch(source)?[1],
     );
   }
 

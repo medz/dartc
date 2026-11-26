@@ -3,6 +3,9 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/diagnostic/diagnostic.dart';
+// Only this substitutes the type arguments of an extension.
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type_algebra.dart' show Substitution;
 
 /// The errors of [unit] that only the official compiler finds, with where they
 /// are.
@@ -75,8 +78,58 @@ bool isAccepted(Diagnostic error, CompilationUnit unit) {
   return switch (error.diagnosticCode.lowerCaseName) {
     'unchecked_use_of_nullable_value' => _isOfExtensionType(node()),
     'address_receiver' => _isOwnField(node()),
+    'argument_type_not_assignable' ||
+    'invalid_assignment' => _fitsNamedExtension(node()),
     _ => false,
   };
+}
+
+/// The type of [node] if it uses an operator of an extension that is named
+/// with its type arguments, with those, and the library of the extension.
+(DartType, LibraryElement)? _resultOfNamedExtension(Expression node) {
+  if (node is! BinaryExpression) return null;
+  final override = node.leftOperand.unParenthesized;
+  final operator = node.element;
+  if (override is! ExtensionOverride || operator == null) return null;
+  final types = override.typeArgumentTypes;
+  if (types == null) return null;
+  final extension = override.element;
+  final result = Substitution.fromPairs2(
+    extension.typeParameters,
+    types,
+  ).substituteType(operator.returnType);
+  return (result, extension.library);
+}
+
+/// Whether [node] is the right operand of an operator of an extension that is
+/// named with its type arguments, and fits the parameter with those. The
+/// analyzer takes the parameter as it is declared.
+bool _fitsNamedExtension(AstNode? node) {
+  if (node is! Expression) return false;
+  if (_resultOfNamedExtension(node.unParenthesized)
+      case (final type, final library)?) {
+    final target = switch (node.parent) {
+      VariableDeclaration(:final declaredFragment?) =>
+        declaredFragment.element.type,
+      AssignmentExpression(:final writeType) => writeType,
+      _ => null,
+    };
+    return target != null && library.typeSystem.isAssignableTo(type, target);
+  }
+  final parent = node.parent;
+  if (parent is! BinaryExpression || parent.rightOperand != node) return false;
+  final override = parent.leftOperand.unParenthesized;
+  final operator = parent.element;
+  if (override is! ExtensionOverride || operator == null) return false;
+  final types = override.typeArgumentTypes;
+  final extension = override.element;
+  final given = node.staticType;
+  if (types == null || given == null) return false;
+  final parameter = Substitution.fromPairs2(
+    extension.typeParameters,
+    types,
+  ).substituteType(operator.formalParameters.single.type);
+  return extension.library.typeSystem.isAssignableTo(given, parameter);
 }
 
 /// Whether [node] is a member of an extension type, used on a value whose type

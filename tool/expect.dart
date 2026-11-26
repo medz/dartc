@@ -74,8 +74,9 @@ Future<bool> _handle(
 }) async {
   final source = file.readAsStringSync();
   final expected = Expectations.of(source);
-  // The official Dart does not know what dartc refuses.
-  if (expected.isRefused) return true;
+  // The official Dart does not know what dartc refuses, nor what it does
+  // otherwise as the language means.
+  if (expected.isRefused || expected.official != null) return true;
   final plain = Expectations.removedFrom(source);
   for (final old in place.listSync()) {
     old.deleteSync();

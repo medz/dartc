@@ -1,3 +1,4 @@
+// official: Dart 3.14.0 tells function types apart by the order of named parameters (#60).
 typedef AB = void Function({int? a, int? b});
 typedef BA = void Function({int? b, int? a});
 void ba({int? b, int? a}) {}
@@ -13,12 +14,12 @@ void main() {
   final first = ba.runtimeType, second = ab.runtimeType;
   print(first); // expect: ({int? b, int? a}) => void
   print(second); // expect: ({int? a, int? b}) => void
-  print(first == second); // expect: false
+  print(first == second); // expect: true
   print(C().ba.runtimeType == first); // expect: true
-  print({first: 1, second: 2}[C().ba.runtimeType]); // expect: 1
+  print({first: 1, second: 2}[C().ba.runtimeType]); // expect: 2
   print(BA); // expect: ({int? a, int? b}) => void
   print(AB == BA); // expect: true
-  print(first == BA); // expect: false
+  print(first == BA); // expect: true
   print(second == BA); // expect: true
   Object f = ba;
   print(f is AB); // expect: true
