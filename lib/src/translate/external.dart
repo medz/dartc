@@ -2,6 +2,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'levels.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -23,18 +24,44 @@ void throwExternal(
   final class_ = level == _topLevel ? null : element.enclosingElement;
   HirValue text(String? text) =>
       builder.add(text == null ? HirNull() : scope.text(text));
+  // Members of mixins are those of where they are mixed in.
+  final mixedIn = builder.level;
+  final HirValue receiver;
+  if (mixedIn != null && mixedIn.isMixin && class_ == mixedIn.element) {
+    final application = mixedIn.class_;
+    receiver = application is ClassElement && application.isMixinApplication
+        ? _typeOf(scope, builder, application)
+        : text(_applicationName(mixedIn));
+  } else {
+    receiver = class_ is InterfaceElement
+        ? _typeOf(scope, builder, class_)
+        : text(null);
+  }
   builder
     ..call(
       HirCall(scope.runtime('throwExternal'), [
-        class_ is InterfaceElement
-            ? _typeOf(scope, builder, class_)
-            : text(null),
+        receiver,
         text(name),
         builder.add(HirConst(level << 3 | kind)),
         text(found),
       ]),
     )
     ..end(HirUnreachable());
+}
+
+/// What the official runtime calls the class that [level] of a mixin makes,
+/// which the program does not name: the class, its superclass and the mixins
+/// up to this one.
+String _applicationName(Level level) {
+  final class_ = level.class_;
+  final mixins = [for (final mixin in class_.mixins) mixin.element.displayName];
+  final count = mixins.indexOf(level.element.displayName) + 1;
+  final superclass = class_.supertype?.element.displayName ?? 'Object';
+  return [
+    '_${class_.displayName}',
+    superclass,
+    ...mixins.take(count),
+  ].join('&');
 }
 
 /// The object that the type [class_] is, with the bounds of its parameters.

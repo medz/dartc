@@ -103,7 +103,8 @@ class NoSuchMethodError {
 /// Throws the error for a use of a member called [name], of [class_] if it is
 /// of one, which is declared but not implemented. It is like one that takes
 /// [found].
-Never _throwExternal(Type? class_, String name, int type, String? found) {
+Never _throwExternal(Object? class_, String name, int type, String? found) {
+  if (class_ is String) class_ = _NamedClass(class_);
   final invocation = _InvocationMirror._withType(
     internal.Symbol.unvalidated(name),
     type,
@@ -112,6 +113,13 @@ Never _throwExternal(Type? class_, String name, int type, String? found) {
     const {},
   ).._found = found;
   throw NoSuchMethodError.withInvocation(class_, invocation);
+}
+
+/// A class that the program does not name, as a type in errors.
+final class _NamedClass implements Type {
+  final String _name;
+  _NamedClass(this._name);
+  String toString() => _name;
 }
 
 /// Notes where [error] is thrown, if it keeps that.
