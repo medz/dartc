@@ -8,6 +8,7 @@ import 'package:analyzer/src/dart/element/member.dart'
     show SubstitutedElementImpl;
 import 'package:analyzer/src/dart/resolver/applicable_extensions.dart'
     show ExtensionsExtensions;
+import 'package:analyzer/src/dart/element/type_algebra.dart' show Substitution;
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
@@ -45,10 +46,17 @@ final class ExtensionTranslator(
       }
       return (found as InterfaceType).asInstanceOf(owner)!.typeArguments;
     }
-    // Elements whose types need no type arguments do not tell them.
-    if (_override(node, element)?.typeArgumentTypes case final types?) {
-      return types;
+    final override = _override(node, element);
+    // Inside the extension itself, the analyzer infers what is not given from
+    // its own type parameters, as if they were unknown.
+    if (override case ExtensionOverride(typeArguments: null)
+        when owner is ExtensionElement) {
+      final given =
+          override.argumentList.arguments.single.argumentExpression.staticType!;
+      if (_inferred(owner, given) case final types?) return types;
     }
+    // Elements whose types need no type arguments do not tell them.
+    if (override?.typeArgumentTypes case final types?) return types;
     final substitution = switch (element) {
       SubstitutedElementImpl(:final substitution) => substitution,
       _ =>
@@ -61,6 +69,41 @@ final class ExtensionTranslator(
       for (final parameter in owner.typeParameters)
         substitution.map[parameter]!,
     ];
+  }
+
+  /// The type arguments of [owner] for a receiver of [type], found by matching
+  /// what it extends, then by the bounds of those that are not matched. Null if
+  /// they cannot be matched so.
+  static List<DartType>? _inferred(ExtensionElement owner, DartType type) {
+    final found = <TypeParameterElement, DartType>{};
+    bool match(DartType pattern, DartType actual) {
+      if (pattern is TypeParameterType &&
+          owner.typeParameters.contains(pattern.element)) {
+        found[pattern.element] ??= actual;
+        return true;
+      }
+      if (pattern is! InterfaceType) return pattern == actual;
+      var viewed = actual;
+      while (viewed is TypeParameterType) {
+        viewed = viewed.bound;
+      }
+      if (viewed is! InterfaceType) return false;
+      final view = viewed.asInstanceOf(pattern.element);
+      if (view == null) return false;
+      for (final (i, argument) in pattern.typeArguments.indexed) {
+        if (!match(argument, view.typeArguments[i])) return false;
+      }
+      return true;
+    }
+
+    if (!match(owner.extendedType, type)) return null;
+    // Bounds can name the others, which are known first if they are matched.
+    final dynamic_ = owner.library.typeProvider.dynamicType;
+    for (final parameter in owner.typeParameters) {
+      found[parameter] ??= Substitution.fromMap(found)
+          .substituteType(parameter.bound ?? dynamic_);
+    }
+    return [for (final parameter in owner.typeParameters) found[parameter]!];
   }
 
   /// Whether [node] uses [element] without naming a receiver.
