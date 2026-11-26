@@ -122,11 +122,14 @@ final class _NamedClass implements Type {
   String toString() => _name;
 }
 
-/// Notes [trace] of where [error] is thrown, if it keeps that.
-void _markThrown(Object error, StackTrace trace) {
-  if (!isSubclassOfError(error)) return;
-  final own = unsafeCast<Error>(error);
-  if (own._stackTrace == null) own._stackTrace = trace;
+/// The trace of where [error] is thrown, which it keeps if it does that.
+StackTrace _markThrown(Object error) {
+  final trace = _traceHere();
+  if (isSubclassOfError(error)) {
+    final own = unsafeCast<Error>(error);
+    if (own._stackTrace == null) own._stackTrace = trace;
+  }
+  return trace;
 }
 
 @patch

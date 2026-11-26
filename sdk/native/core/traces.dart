@@ -9,7 +9,7 @@ import 'dart:_heap/machine.dart'
         load8,
         sourcePlaces,
         stackMaps;
-import 'dart:_heap/returns.dart' show findReturn, findStackMap;
+import 'dart:_heap/returns.dart' show findStackMap;
 import 'dart:_internal' show tellAwaiters;
 
 /// The frames when it was made, each as where its call returns to, and where
@@ -48,9 +48,10 @@ StackTrace _traceHere() {
 /// The text of the frames that return to [returns], as the official runtime
 /// writes it in programs compiled ahead of time.
 String _told(List<int> returns, List<int> awaiters) {
-  final table = sourcePlaces();
-  final records = table + 4 + load32(table) * 8;
-  final texts = records + 4 + load32(records) * 16;
+  final table = sourcePlaces(), pages = load32(table);
+  final records = table + 8 + pages * 4 + load32(table + 4 + pages * 4) * 4;
+  final files = records + 4 + load32(records) * 12;
+  final texts = files + 4 + load32(files) * 4;
   String text(int at) => _textAt(texts + at + 4, load32(texts + at));
   final result = StringBuffer();
   var count = 0;
@@ -63,20 +64,23 @@ String _told(List<int> returns, List<int> awaiters) {
   /// Tells the frames of the call returning to [at]. Gives whether that is
   /// where a body goes on after it waited.
   bool tell(int at) {
-    for (var place = findReturn(table, at); place != 0;) {
-      final record = records + 4 + (place - 1) * 16;
-      final function = text(load32(record)), uri = text(load32(record + 4));
-      place = load32(record + 12);
+    for (var place = _placeOf(table, at); place != 0;) {
+      final record = records + 4 + (place - 1) * 12;
+      final function = text(load32(record)), where = load32(record + 4);
+      final uri = text(load32(files + 4 + (where >> 20) * 4));
+      final line = where & 0xfffff;
+      place = load32(record + 8);
       if (function == '_SuspendState._resume') return true;
       // The runtime is not told, nor what makes traces and starts bodies.
       // Nor the functions of the runtime that throw for operations.
       if (uri.startsWith('dart:_heap') ||
           function == 'StackTrace.current' ||
           function == '_startAsync' ||
+          function == '_markThrown' ||
           uri.startsWith('dart:core') && function.startsWith('_throw')) {
         continue;
       }
-      write(function, '$uri:${load32(record + 8)}');
+      write(function, '$uri:$line');
     }
     return false;
   }
@@ -123,4 +127,24 @@ String _textAt(int address, int length) {
     units.add(code);
   }
   return String.fromCharCodes(units);
+}
+
+/// The place plus one of the call returning to [offset] in [table], or 0 if it
+/// has none. The compiler tells how they are encoded.
+int _placeOf(int table, int offset) {
+  final pages = load32(table), page = offset >> 12, starts = table + 4;
+  if (offset < 0 || page >= pages) return 0;
+  final index = starts + pages * 4 + 4, wanted = offset & 0xfff;
+  var low = load32(starts + page * 4), high = load32(starts + page * 4 + 4);
+  while (low < high) {
+    final middle = (low + high) >> 1, word = load32(index + middle * 4);
+    final found = word >> 20;
+    if (found == wanted) return (word & 0xfffff) + 1;
+    if (found < wanted) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return 0;
 }

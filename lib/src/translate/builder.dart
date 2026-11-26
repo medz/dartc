@@ -203,10 +203,10 @@ final class FunctionBuilder(
   /// Where in the source what is translated now is, if that is known.
   int? position;
 
-  /// Does [work] at [offset] in the source.
-  T atPosition<T>(int offset, T Function() work) {
+  /// Does [work] where [node] is in the source.
+  T atNode<T>(Expression node, T Function() work) {
     final before = position;
-    position = offset;
+    position = positionOf(node.unParenthesized);
     try {
       return work();
     } finally {
@@ -239,6 +239,14 @@ final class FunctionBuilder(
   void raise(HirValue exception, HirValue trace) => _handlers.isEmpty
       ? end(HirThrow(exception, trace))
       : jumpWith(_handlers.last, [exception, trace]);
+
+  /// Throws [value] with its trace, which [markThrown] gives.
+  void throwValue(HirFunction markThrown, HirValue value) {
+    final trace = call(HirCall(markThrown, [value]))!;
+    // Objects stay until it is thrown, after the trace is made.
+    stay();
+    raise(value, trace);
+  }
 
   /// A block where throws can go.
   Join handler() => Join._(
