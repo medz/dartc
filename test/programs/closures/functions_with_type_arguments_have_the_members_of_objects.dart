@@ -51,7 +51,7 @@ void main() {
   // expect: true
   // expect: (Invocation) => dynamic
   // expect: (Invocation) => dynamic
-  // expect: false
+  // expect: true
   Object o = f;
   print(
     o.toString(),
@@ -94,5 +94,5 @@ void more() {
   print(z.hashCode == null.hashCode);
   print((z.noSuchMethod).runtimeType);
   print(y.noSuchMethod.runtimeType);
-  print(identical(y.toString, y.toString));
+  print(y.toString == y.toString);
 }
