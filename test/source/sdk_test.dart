@@ -81,7 +81,7 @@ void main() {
         'b.dart': "import 'dart:io';",
       },
     ]) {
-      expect(await reached(files), {...least, 'dart:io'});
+      expect(await reached(files), {...least, 'dart:io', 'dart:_http'});
     }
   });
 
