@@ -30,7 +30,7 @@ final class ClosureTable(
   final _selectors = <String, HirSelector>{};
   final _entries = <HirSelector, Map<HirClass, HirFunction>>{};
   final _static = <ExecutableElement, Closure>{};
-  final _tearOffs = <Implementation, Closure>{};
+  final _tearOffs = <(Implementation, InterfaceElement?), Closure>{};
 
   /// Functions made here.
   final List<HirFunction> made = [];
@@ -115,7 +115,9 @@ final class ClosureTable(
           : at < shape.positional;
       if (!isGiven) return builder.add(_scope.defaultOf(parameter));
       final value = given[at], type = parameter.type;
-      if (!closure.isTearOff || !isUnchecked(parameter)) {
+      final isChecked =
+          isUnchecked(parameter) || closure.unchecked.contains(parameter);
+      if (!closure.isTearOff || !isChecked) {
         return value;
       }
       return conversions.cast(
@@ -366,11 +368,16 @@ final class ClosureTable(
     Implementation found,
     HirValue receiver, {
     required bool isForwarder,
+    InterfaceElement? class_,
   }) {
     final (:element, :level) = found;
-    final closure = _tearOffs[found] ??= () {
-      // What is not implemented there is declared by a supertype.
-      final viewed = isForwarder ? viewedAt(level, element) : element;
+    // What is not implemented there is declared by a supertype.
+    final viewed = isForwarder ? viewedAt(level, element) : element;
+    final unchecked = class_ == null
+        ? const <FormalParameterElement>{}
+        : uncheckedIn(class_, viewed);
+    final key = (found, unchecked.isEmpty ? null : class_);
+    final closure = _tearOffs[key] ??= () {
       final field = HirField('receiver', .reference, isFinal: true);
       final made = Closure(
         HirClass('tear-off ${element.displayName}', null, [field]),
@@ -392,12 +399,18 @@ final class ClosureTable(
             builder.add(HirLoad(field, builder.inputs.single)),
             level,
           );
-          return _scope.tearOffType(builder, viewed, instanceMethod: true)!;
+          return _scope.tearOffType(
+            builder,
+            viewed,
+            instanceMethod: true,
+            unchecked: unchecked,
+          )!;
         },
         typeParameters: viewed.typeParameters,
         name: _qualified(element),
         text: " from Function '${element.displayName}':.",
         isTearOff: true,
+        unchecked: unchecked,
       );
       add(made);
       return made;

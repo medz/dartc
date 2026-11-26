@@ -49,6 +49,10 @@ final class Closure(
 
   /// Whether closures of one object's method are equal.
   final bool isTearOff = false,
+
+  /// The parameters that the class of the object lets get values that are not
+  /// of their type, besides those of the method itself.
+  final Set<FormalParameterElement> unchecked = const {},
 }) {
   String nameOf(FormalParameterElement parameter) =>
       parameterName?.call(parameters.indexOf(parameter)) ?? '${parameter.name}';

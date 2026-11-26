@@ -251,6 +251,7 @@ final class DispatchBuilder(
           found,
           receiver,
           isForwarder: own == null,
+          class_: class_,
         );
       });
     }

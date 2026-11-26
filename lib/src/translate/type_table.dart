@@ -168,6 +168,7 @@ final class TypeTable(
     FunctionType type, {
     ExecutableElement? declaration,
     DartType? widened,
+    Set<FormalParameterElement> unchecked = const {},
   }) {
     final all = type.formalParameters;
     final declared = declaration?.formalParameters ?? all;
@@ -186,7 +187,9 @@ final class TypeTable(
       ]);
     }
     DartType own(FormalParameterElement p) =>
-        widened != null && isUnchecked(p) ? widened : p.type;
+        widened != null && (isUnchecked(p) || unchecked.contains(p))
+        ? widened
+        : p.type;
     return (
       types: all.map(own).toList(),
       shape: _object('FunctionShape', [
@@ -310,6 +313,7 @@ final class TypeTable(
     ExecutableElement element, {
     FunctionType? asType,
     bool instanceMethod = false,
+    Set<FormalParameterElement> unchecked = const {},
   }) {
     final type = asType ?? element.type;
     final parameters = _parameters(
@@ -318,6 +322,7 @@ final class TypeTable(
       widened: instanceMethod
           ? builder.library.typeProvider.objectQuestionType
           : null,
+      unchecked: unchecked,
     );
     final constant = _constantFunction(type, parameters, null);
     return constant == null
