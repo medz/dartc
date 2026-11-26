@@ -18,6 +18,15 @@ const arrayClass = 4;
 /// The bytes of an object of each class.
 const sizes = [16, 16, 32, 24, 24];
 
+/// Weak classes, after these: their kind, the references that they keep, and
+/// their other fields.
+const weakClasses = <(int, List<int>, List<int>)>[
+  (2, [], [8, 16]),
+  (3, [], [8, 16, 24]),
+  (4, [8, 16], [24, 32, 40, 48, 56, 64, 72]),
+  (5, [8], []),
+];
+
 /// Ends a simulated throw.
 final class const Resumed() implements Exception;
 
@@ -60,14 +69,21 @@ final class SimulatedMachine({
     for (final (i, offsets) in classes.indexed) {
       words.addAll([offsets.length, i == arrayClass ? 1 : 0, ...offsets]);
     }
-    _classes = mapMemory((classes.length + words.length) * 4);
-    var at = classes.length * 4;
-    for (final (i, offsets) in classes.indexed) {
+    for (final (kind, kept, others) in weakClasses) {
+      words.addAll([kept.length, kind, ...kept, ...others]);
+    }
+    final count = classes.length + weakClasses.length;
+    _classes = mapMemory((count + words.length) * 4);
+    var at = count * 4;
+    for (final (i, fields) in [
+      for (final offsets in classes) offsets.length,
+      for (final (_, kept, others) in weakClasses) kept.length + others.length,
+    ].indexed) {
       store32(_classes + i * 4, at);
-      at += 8 + offsets.length * 4;
+      at += 8 + fields * 4;
     }
     for (final (i, word) in words.indexed) {
-      store32(_classes + (classes.length + i) * 4, word);
+      store32(_classes + (count + i) * 4, word);
     }
     _makeMaps();
     mostMapped = mapped;
@@ -249,4 +265,13 @@ final class SimulatedMachine({
 
   @override
   Never trap() => throw StateError('Trapped.');
+}
+
+/// A program that does nothing after collections.
+final class SimulatedProgram() implements Program {
+  @override
+  void afterCollection() {}
+
+  @override
+  Object? noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }

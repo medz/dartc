@@ -68,11 +68,9 @@ void main() { exit(1 + 2 * 3); }
 | 限制 | 何时解决 |
 | --- | --- |
 | 堆栈的文字是空的 | 第 14 步之后，要有源码位置表 |
-| `Expando`、`WeakReference`、`Finalizer` 会一直保留对象 | 同上，要改回收器 |
 | SIMD 类型（`Float32x4` 等）的运算 | 需要时再做 |
 | 函数类型的文字里，命名参数按字母排序；官方按声明的顺序 | 需要时再做 |
 | 网络、子进程、信号、压缩、监视文件、`dart:isolate` | 第 13 步之后 |
-| 没有关闭的文件，对象没人用了也不关，程序结束时才关 | 和 `Finalizer` 一起 |
 | `Platform.version` 写的是 dartc，不是官方的编译日期 | 不改 |
 | analyzer 和官方的差别，见 [specs](specs/README.md) | 需要时再做 |
 

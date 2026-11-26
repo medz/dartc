@@ -4,7 +4,16 @@
 /// on a simulated machine.
 library;
 
-export 'src/heap/collector.dart' show allocate, collect, heap;
+export 'src/heap/collector.dart'
+    show
+        allocate,
+        collect,
+        countOutside,
+        entryArgument,
+        entryFunction,
+        firstEntry,
+        heap,
+        nextEntry;
 export 'src/heap/machine.dart' show Machine, machine;
 export 'src/heap/numbers.dart';
 export 'src/heap/program.dart' show Program, program;

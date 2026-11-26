@@ -13,6 +13,7 @@ void _start({bool collectsAlways = false, int available = 1 << 40}) {
     available: available,
   );
   machine = _machine;
+  program = SimulatedProgram();
   heap = 0;
 }
 
@@ -23,8 +24,113 @@ int _create(int class_) {
   return object;
 }
 
+/// A new object of a weak class, whose fields are [values] by their offsets.
+int _createWeak(int kind, Map<int, int> values) {
+  final object = allocate(80);
+  _machine.store32(object, classes.length + kind);
+  values.forEach((offset, value) => _machine.store64(object + offset, value));
+  return object;
+}
+
+int _load(int object, int offset) => _machine.load64(object + offset);
+
+void _weakTests() {
+  test('references are cleared when their targets are gone', () {
+    final kept = _create(0), dropped = _create(0);
+    final weak = [
+      for (final target in [kept, dropped, 0, 7]) _createWeak(0, {8: target}),
+    ];
+    _machine.frames.add([kept, weak[0], weak[1], weak[2], weak[3]]);
+    for (var i = 0; i < 3; i++) {
+      collect();
+      expect([for (final one in weak) _load(one, 8)], [kept, 0, 0, 7]);
+      expect([for (final one in weak) _load(one, 16)], everyElement(0));
+    }
+  });
+
+  test('properties keep their values as long as their keys', () {
+    final keys = [for (var i = 0; i < 4; i++) _create(0)];
+    final other = _create(0), value = _create(0);
+    // A chain, in both orders, and one whose key only it has.
+    final weak = [
+      _createWeak(1, {8: keys[2], 16: keys[3]}),
+      _createWeak(1, {8: keys[0], 16: keys[1]}),
+      _createWeak(1, {8: keys[1], 16: keys[2]}),
+      _createWeak(1, {8: other, 16: other}),
+    ];
+    _machine
+      ..frames.add([keys[0], weak[0], weak[1], weak[2], weak[3]])
+      ..setGlobal(0, _createWeak(1, {8: keys[3], 16: value}));
+    for (var i = 0; i < 3; i++) {
+      collect();
+      expect(_load(weak[0], 16), keys[3]);
+      expect(_load(weak[3], 8), 0);
+      expect(_load(weak[3], 16), 0);
+      expect(_load(_machine.global(0), 16), value);
+      expect(_machine.load32(value + 4), isNot(0));
+    }
+    _machine.frames.single[0] = 0;
+    collect();
+    expect([for (final one in weak) _load(one, 16)], everyElement(0));
+    expect(_load(_machine.global(0), 16), 0);
+  });
+
+  test('entries are queued when their values are gone', () {
+    final kept = _create(0), dropped = _create(0), token = _create(0);
+    final finalizer = _create(0), queue = _createWeak(3, {});
+    int entry(int value) => _createWeak(2, {
+      8: token,
+      24: value,
+      32: value,
+      40: finalizer,
+      48: 123,
+      56: 456,
+      64: 1000,
+    });
+    final entries = [entry(kept), entry(dropped), entry(dropped)];
+    _machine.frames.add([queue, ...entries, kept]);
+    _machine.setGlobal(0, finalizer);
+    countOutside(3000);
+    collect();
+    expect(_load(entries[0], 24), kept);
+    expect(_load(entries[0], 64), 1000);
+    final queued = <int>[];
+    for (var at = firstEntry(); at != 0; at = nextEntry(at)) {
+      queued.add(at);
+      expect(_load(at, 8), token);
+      expect(_load(at, 24), 0);
+      expect(_load(at, 32), 0);
+      expect(_load(at, 40), finalizer);
+      expect(_load(at, 64), 0);
+      expect(_machine.load64(entryFunction(at)), 123);
+      expect(_machine.load64(entryArgument(at)), 456);
+    }
+    expect(queued, unorderedEquals([entries[1], entries[2]]));
+    // They are not queued again.
+    collect();
+    expect(firstEntry(), queued[0]);
+    expect(nextEntry(queued[0]), queued[1]);
+    expect(nextEntry(queued[1]), 0);
+    _machine.setGlobal(0, 0);
+    collect();
+    expect(_load(entries[0], 40), 0);
+  });
+
+  test('what objects stand for outside starts collections', () {
+    _create(0);
+    final before = _machine.collections;
+    countOutside(5 << 20);
+    for (var i = 0; i < 20000; i++) {
+      _create(0);
+    }
+    expect(_machine.collections, greaterThan(before));
+  });
+}
+
 void main() {
   setUp(_start);
+
+  group('weak', _weakTests);
 
   group('allocation', () {
     test('gives separate, aligned, zeroed memory', () {
