@@ -24,8 +24,12 @@ List<LirFunction> runtimeFunctions(
 ];
 
 /// What checks of the stack read.
-LirStatic stackLimit() =>
-    LirStatic(stackLimitSymbol, List.filled(8, 0), writable: true);
+LirStatic stackLimit() => LirStatic(
+  stackLimitSymbol,
+  List.filled(8, 0),
+  writable: true,
+  isolated: true,
+);
 
 /// Finds out how far the stack may reach.
 void setStackLimit(LirBlock block, SystemCalls system) {

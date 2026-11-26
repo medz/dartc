@@ -118,6 +118,12 @@ final class X64Machine(
   void callRegister(int register) => _assembler.unary(.call, register);
 
   @override
+  void enterIsolate() {
+    if (_assembler.isolated.isEmpty) return;
+    _assembler.address(x64Registers.isolate, isolateSymbol);
+  }
+
+  @override
   void resume() => _assembler
     ..mov(_rbp, x64Registers.resumedFrame)
     ..unary(.jmp, x64Registers.callee);

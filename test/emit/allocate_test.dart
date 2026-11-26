@@ -84,7 +84,7 @@ void main() {
       longest = p[0];
       // One more value than there are registers.
       final values = [
-        for (var i = 0; i < 24; i++) block.add(ConstInt(_large + i)),
+        for (var i = 0; i < 23; i++) block.add(ConstInt(_large + i)),
       ];
       LirValue sum = values.first;
       for (final value in values.skip(1)) {
@@ -102,7 +102,7 @@ void main() {
     final made = function('f', [.i64], .i64, (block, p) {
       final values = [
         p[0],
-        for (var i = 0; i < 23; i++) block.add(ConstInt(_large + i)),
+        for (var i = 0; i < 22; i++) block.add(ConstInt(_large + i)),
       ];
       newest = block.add(ConstInt(_large + 99));
       LirValue sum = values.first;
@@ -129,8 +129,18 @@ void main() {
 
     check(
       .word,
-      [calleeScratch, leftScratch, rightScratch, farScratch, 18, 29, 30, 31],
-      [for (var i = 19; i <= 28; i++) i],
+      [
+        calleeScratch,
+        leftScratch,
+        rightScratch,
+        farScratch,
+        18,
+        28,
+        29,
+        30,
+        31,
+      ],
+      [for (var i = 19; i <= 27; i++) i],
     );
     check(
       .float,
@@ -142,7 +152,7 @@ void main() {
   test('doubles and words do not compete for registers', () {
     final made = function('f', [.i64, .f64], .f64, (block, p) {
       final words = [
-        for (var i = 0; i < 23; i++) block.add(ConstInt(_large + i)),
+        for (var i = 0; i < 22; i++) block.add(ConstInt(_large + i)),
       ];
       final floats = [
         for (var i = 0; i < 28; i++) block.add(ConstFloat(1.0 * i)),

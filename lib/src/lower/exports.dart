@@ -15,7 +15,7 @@ const _messageSymbol = '.threadMessage';
 
 /// What a library needs to be called.
 List<LirData> exportData() => [
-  LirData(_depthSymbol, List.filled(8, 0), writable: true),
+  LirData(_depthSymbol, List.filled(8, 0), writable: true, isolated: true),
   LirData(_messageSymbol, _message.codeUnits),
 ];
 
@@ -63,7 +63,7 @@ LirFunction _export(
     entry,
     done,
     ...failed,
-  ]);
+  ], isEntered: true);
 }
 
 /// Lets [block] end with [call], after which [done] follows. What it throws

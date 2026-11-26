@@ -25,6 +25,7 @@ sealed class SystemCalls() {
         systemBufferSymbol,
         List.filled(systemBufferBytes, 0),
         writable: true,
+        isolated: true,
       ),
     if (_usesFormat) LirData(_formatSymbol, _format.codeUnits),
   ];

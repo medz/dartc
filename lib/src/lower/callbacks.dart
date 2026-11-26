@@ -114,7 +114,7 @@ LirFunction _enter(String symbol, LirSignature handler) {
     elsewhere,
     done,
     failed,
-  ]);
+  ], isEntered: true);
 }
 
 const callbackMessageSymbol = '.callbackMessage';

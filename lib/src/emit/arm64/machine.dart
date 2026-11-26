@@ -140,6 +140,12 @@ final class Arm64Machine(final Arm64Assembler _assembler) implements Machine {
   void callRegister(int register) => _assembler.callRegister(register);
 
   @override
+  void enterIsolate() {
+    if (_assembler.isolated.isEmpty) return;
+    _assembler.address(arm64Registers.isolate, isolateSymbol);
+  }
+
+  @override
   void resume() => _assembler
     ..mov(_frame, arm64Registers.resumedFrame)
     ..jumpRegister(arm64Registers.callee);

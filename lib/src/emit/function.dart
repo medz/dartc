@@ -60,6 +60,8 @@ final class FunctionEmitter(
           if (InRegister(bank, number) case final register
               when catches || used.contains(register))
             register,
+      // What calls it from C has a value of its own there.
+      if (function.isEntered) InRegister(.word, _registers.isolate),
     ];
   }
 
@@ -86,6 +88,7 @@ final class FunctionEmitter(
       onCheck: () => stackMaps.add(StackMap(_machine.offset, const [])),
     );
     _accessSaved(store: true);
+    if (function.isEntered) _machine.enterIsolate();
     final incoming = _registers.argumentLocations(
       function.signature,
       .incoming,
