@@ -17,11 +17,33 @@ final class _Missed() extends RecursiveAstVisitor<void> {
 
   @override
   void visitFunctionReference(FunctionReference node) {
-    final function = node.function;
-    if (function is PropertyAccess && function.isNullAware) {
+    if (_canBeShortened(node.function)) {
       errors.add((node.offset, 'What gets type arguments here can be null.'));
     }
     super.visitFunctionReference(node);
+  }
+
+  /// Whether [node] is in a chain that a `?.` can cut short. The official
+  /// compiler ignores `this?.`, which is never null.
+  static bool _canBeShortened(Expression node) {
+    bool isShort(bool isNullAware, Expression? target) =>
+        isNullAware && target is! ThisExpression ||
+        target != null && _canBeShortened(target);
+    return switch (node) {
+      PropertyAccess(:final isNullAware, :final target) => isShort(
+        isNullAware,
+        target,
+      ),
+      MethodInvocation(:final isNullAware, :final target) => isShort(
+        isNullAware,
+        target,
+      ),
+      IndexExpression(:final isNullAware, :final target) => isShort(
+        isNullAware,
+        target,
+      ),
+      _ => false,
+    };
   }
 
   @override
