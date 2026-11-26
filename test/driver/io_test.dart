@@ -14,6 +14,7 @@ import '../support/compiler.dart';
 import 'io_compression.dart';
 import 'io_files.dart';
 import 'io_processes.dart';
+import 'io_watching.dart';
 import 'io_system.dart';
 
 const _environment = {'DARTC_TEST': 'é=1'};
@@ -103,6 +104,37 @@ void main() {
     });
 
     test('the environment', () => _agrees(environmentProgram));
+
+    test('watching files', () async {
+      final directory = writeSources({'main.dart': watchingProgram});
+      final path = '${directory.path}/main.dart';
+      final program = '${directory.path}/program';
+      for (final host in Host.all) {
+        writeProgram(
+          await compileProgram(path, CompileOptions(target: host.target)),
+          program,
+        );
+        final lines = (await host.run(
+          program,
+          place: directory.path,
+        )).output.split('\n');
+        if (host.isLinux) {
+          // There is no official runtime there to compare with.
+          var at = 0;
+          for (final line in lines) {
+            if (at < linuxEvents.length && line == linuxEvents[at]) at++;
+          }
+          expect(
+            linuxEvents.skip(at),
+            isEmpty,
+            reason: '${host.target}\n$lines',
+          );
+          continue;
+        }
+        final official = await _official(path, directory.path, '');
+        expect(lines.join('\n'), official.output, reason: '${host.target}');
+      }
+    });
 
     test('what only the system knows', () async {
       final directory = writeSources({'main.dart': platformProgram});
