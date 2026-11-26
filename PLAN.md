@@ -70,7 +70,8 @@ void main() { exit(1 + 2 * 3); }
 | 堆栈里标准库的帧，名字和行号是 dartc 自己的标准库的，不是官方补丁的 | 不改 |
 | SIMD 类型（`Float32x4` 等）用普通的 Dart 算，不用机器的向量指令 | 需要时再做 |
 | 函数类型的文字里，命名参数按字母排序；官方按声明的顺序 | 需要时再做 |
-| TLS（`SecureSocket`、https）、`dart:isolate` | 第 13 步之后 |
+| macOS 上 dartc 做 TLS 服务端时不协商 ALPN（Secure Transport 没有这个功能），也只到 TLS 1.2；带密码的私钥、macOS 上不是 RSA 的私钥、`keyLog` 还不支持 | 需要时再做 |
+| `dart:isolate` | 第 13 步之后 |
 | `Platform.version` 写的是 dartc，不是官方的编译日期 | 不改 |
 | analyzer 和官方的差别，见 [specs](specs/README.md) | 需要时再做 |
 

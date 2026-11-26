@@ -207,7 +207,9 @@ final class ClosureTranslator(
     final positional = <HirValue>[];
     final named = <String, HirValue>{};
     for (final argument in list.arguments) {
-      final parameter = argument.correspondingParameter!;
+      final parameter =
+          argument.correspondingParameter ??
+          _unsupported(argument, 'an argument of no parameter');
       final expression = argument.argumentExpression;
       if (valueType(parameter.type) == null) {
         _unsupported(expression, 'a parameter of type ${parameter.type}');

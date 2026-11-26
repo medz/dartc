@@ -181,7 +181,8 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 压缩 | `zlib`、`gzip` 和 `RawZLibFilter` 用 Dart 写（`sdk/native/io/inflate.dart`、`deflate.dart`），不依赖系统的 zlib。压出来的字节和官方的不一定相同，但互相能解开；级别、窗口、策略、字典和错误按官方的做：裸的流不用字典，gzip 的校验一到就比较，出错之后一直出错 |
 | 子进程和信号 | `posix_spawnp` 启动，管道接到事件循环。进程结束时 macOS 的 kqueue、Linux 的 pidfd 可读，信号用 kqueue 或 signalfd，都由 `select` 等。程序和目录先检查，因为有的系统（模拟的 x64）不告诉 exec 失败 |
 | 监视文件 | 官方的 Dart 部分（`_WatchedPath`、事件的换算）不变，只换掉原生的部分。Linux 用 inotify，文件由事件循环等。macOS 用 FSEvents，流放在主线程的 run loop 上，有监视时由一个 20 毫秒的定时器驱动；标志的换算照官方的 C++ 做 |
-| 网络 | 官方的 `_NativeSocket` 和其上的 `Socket`、`HttpServer`、`HttpClient`、`WebSocket` 不变，只换掉原生函数和它与事件处理器之间的端口：BSD socket 不阻塞，由事件循环用 `select` 等。读到或写不完时才再等，像官方边沿触发那样；没有销毁的 socket 让程序继续，和官方一样。在同一处监听要 `shared`，官方的这条规则也照做。TLS 还没有 |
+| 网络 | 官方的 `_NativeSocket` 和其上的 `Socket`、`HttpServer`、`HttpClient`、`WebSocket` 不变，只换掉原生函数和它与事件处理器之间的端口：BSD socket 不阻塞，由事件循环用 `select` 等。读到或写不完时才再等，像官方边沿触发那样；没有销毁的 socket 让程序继续，和官方一样。在同一处监听要 `shared`，官方的这条规则也照做 |
+| TLS | 官方的 `_RawSecureSocket` 不变；过滤器在四个缓冲区和系统的 TLS 之间搬字节：Linux 用 OpenSSL 3 的内存 BIO，macOS 用 Secure Transport，读写回调接到程序的队列。证书的信任在握手中途查（macOS 用 SecTrust，Linux 看 OpenSSL 的验证结果），不信任时问 `onBadCertificate`。证书的 DER、主题、有效期、SHA-1 都用 Dart 自己算，两个系统一样 |
 | 退出码 | 程序设过 `exitCode` 时，事件循环结束后用它退出 |
 | 目标平台 | `native` 的 `Target`。传值规则、系统函数、文件格式按它选；`sdk/native/<库>/<系统>/` 里的补丁只给那个系统 |
 | Linux | 只依赖 libc 和 libm，不带符号版本。`.linuxEntry` 调用 `__libc_start_main`。所有导入在启动时绑定，之后只读 |
