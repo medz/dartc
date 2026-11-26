@@ -122,11 +122,11 @@ final class _NamedClass implements Type {
   String toString() => _name;
 }
 
-/// Notes where [error] is thrown, if it keeps that.
-void _markThrown(Object error) {
+/// Notes [trace] of where [error] is thrown, if it keeps that.
+void _markThrown(Object error, StackTrace trace) {
   if (!isSubclassOfError(error)) return;
   final own = unsafeCast<Error>(error);
-  if (own._stackTrace == null) own._stackTrace = StackTrace.empty;
+  if (own._stackTrace == null) own._stackTrace = trace;
 }
 
 @patch
@@ -141,8 +141,9 @@ class Error {
   }
 }
 
-/// Reports what ends the program.
-void _reportUncaught(Object error) {
+/// Reports what ends the program, and where it was thrown.
+void _reportUncaught(Object error, Object trace) {
   writeText(2, 'Unhandled exception:', true);
   writeText(2, error.toString(), true);
+  writeText(2, trace.toString(), false);
 }

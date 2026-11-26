@@ -160,6 +160,8 @@ final class SimulatedMachine({
   @override
   int get stackMaps => _maps;
   @override
+  int get sourcePlaces => 0;
+  @override
   int get classTable => _classes;
   @override
   int get globalRoots => _globals;

@@ -5,6 +5,7 @@ import 'arm64/backend.dart';
 import 'backend.dart';
 import 'code.dart';
 import 'function.dart';
+import 'places.dart';
 import 'stack_maps.dart';
 import 'support.dart';
 import 'x64/backend.dart';
@@ -34,10 +35,12 @@ EmittedCode emitCode(
   final machine = backend.machine;
   final functions = <String, int>{textSymbol: 0};
   final maps = <StackMap>[], targets = <ThrowTarget>[];
+  final places = <(int, LirPlace)>[];
   for (final function in module.functions) {
     functions[function.name] = machine.offset;
     final emitter = FunctionEmitter(function, machine)..emit();
     maps.addAll(emitter.stackMaps);
+    places.addAll(emitter.places);
     targets.addAll(emitter.throwTargets);
   }
   if (functions.containsKey(callbackEntrySymbol)) {
@@ -68,6 +71,7 @@ EmittedCode emitCode(
       if (_uses(module, stackMapSymbol)) stackMapSymbol: encodeStackMaps(maps),
       if (_uses(module, handlerSymbol))
         handlerSymbol: encodeThrowTargets(targets),
+      if (_uses(module, placesSymbol)) placesSymbol: encodePlaces(places),
     },
     tables: {for (final table in module.tables) table.name: table.functions},
     objects: {

@@ -46,7 +46,7 @@ final class HirInterpreter(
       return exit.code;
     } on _Thrown catch (thrown) {
       final uncaught = module.uncaught ?? (throw StateError('Uncaught.'));
-      _call(uncaught, [thrown.exception]);
+      _call(uncaught, [thrown.exception, thrown.trace]);
       return 255;
     }
   }

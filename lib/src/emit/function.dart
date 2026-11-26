@@ -18,6 +18,9 @@ final class FunctionEmitter(
 
   /// What the calls keep alive, and where they continue if they throw.
   final List<StackMap> stackMaps = [];
+
+  /// Where calls return to, and where they are in the source.
+  final List<(int, LirPlace)> places = [];
   final List<ThrowTarget> throwTargets = [];
   late final _selection = Selection(function, _machine);
   late final _liveness = Liveness(function, _selection);
@@ -277,6 +280,7 @@ final class FunctionEmitter(
         _machine.call(allocateSymbol, call.signature);
     }
     stackMaps.add(StackMap(_machine.offset, _references(call)));
+    if (call.place case final place?) places.add((_machine.offset, place));
   }
 
   /// Where references alive across [call] are, from the frame address.

@@ -88,6 +88,8 @@ final class ClosureTranslator(
           _unsupported(node, 'a result of type ${element.returnType}'),
     );
     _scope.addLocalFunction(function);
+    final frameName =
+        '${outerName(node)}.${name?.displayName ?? '<anonymous closure>'}';
     _scope.addClosure(
       Closure(
         class_,
@@ -95,8 +97,7 @@ final class ClosureTranslator(
         () => function,
         (_, self) => [self],
         typeParameters: element.typeParameters,
-        name:
-            '${outerName(node)}.${name?.displayName ?? '<anonymous closure>'}',
+        name: frameName,
         bind: environment.bindTypes,
         typeValue: (builder) => type == null
             ? _scope.typeValue(builder, element.type)!
@@ -110,7 +111,7 @@ final class ClosureTranslator(
         element.formalParameters,
         typeOwners: [if (isGeneric) element],
         returnType: element.returnType,
-      );
+      )..frameName = frameName;
       if (name != null) {
         builder.bind(name, builder.inputs.first, .reference);
       }

@@ -204,7 +204,7 @@ void main() {
 
   test('a program ends with what nothing catches', () {
     final thrower = _throwing(_b);
-    final uncaught = _function('uncaught', [.reference], (block) {
+    final uncaught = _function('uncaught', [.reference, .reference], (block) {
       writeText(block, 2, 'error é ');
       writeText(block, 2, 'b\n');
       return HirReturn();

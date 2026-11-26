@@ -398,11 +398,10 @@ void main() {}
       const source =
           "class A { String toString() => 'a'; }\n"
           "void main() { print([A(), const {'x': 1}]); }";
-      Future<List<int>> build(SdkSources sdk) => buildProgram(
-        '${writeSources({'main.dart': source}).path}/main.dart',
-        sdk,
-        const CompileOptions(),
-      );
+      // Traces of the stack tell where the file is.
+      final path = '${writeSources({'main.dart': source}).path}/main.dart';
+      Future<List<int>> build(SdkSources sdk) =>
+          buildProgram(path, sdk, const CompileOptions());
       final files = await packagedSdkFiles();
       final alone = await build(sdkFor(.macosArm64, files));
       final sdk = await packagedSdk();

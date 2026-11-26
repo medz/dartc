@@ -49,6 +49,7 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   frameAddress([], .integer),
   codeStart([], .integer),
   stackMaps([], .integer),
+  sourcePlaces([], .integer),
   handlers([], .integer),
   classTable([], .integer),
   globalRoots([], .integer),

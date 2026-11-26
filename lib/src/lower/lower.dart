@@ -161,11 +161,7 @@ LirFunction _startFunction(
     final failed = LirBlock([.ref, .ref]);
     start.end(Invoke(main, LirEdge(done), LirEdge(failed)));
     failed
-      ..add(
-        Call(symbols[uncaught]!, signatureOf(uncaught), [
-          failed.parameters.first,
-        ]),
-      )
+      ..add(Call(symbols[uncaught]!, signatureOf(uncaught), failed.parameters))
       ..add(callSystem('exit', [failed.add(ConstInt(_uncaughtCode))]))
       ..end(Unreachable());
     blocks.add(failed);

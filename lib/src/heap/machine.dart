@@ -44,6 +44,10 @@ abstract interface class Machine() {
   /// The encoded stack maps of the program's calls.
   int get stackMaps;
 
+  /// The encoded places in the source of the program's calls, or 0 where
+  /// there are no frames.
+  int get sourcePlaces;
+
   /// The encoded places where calls that throw continue.
   int get handlers;
 
@@ -96,6 +100,7 @@ Never resume(int frame, int code, Object exception, Object trace) =>
 int frameAddress() => machine.frameAddress;
 int codeStart() => machine.codeStart;
 int stackMaps() => machine.stackMaps;
+int sourcePlaces() => machine.sourcePlaces;
 int handlers() => machine.handlers;
 int classTable() => machine.classTable;
 int globalRoots() => machine.globalRoots;

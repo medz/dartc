@@ -70,7 +70,10 @@ Future<void> _check(String path, Expectations expected) async {
   final module = await _translate(path);
   void agrees(String level, int code, String output, String errors) {
     expect(Expectations.linesOf(output), expected.output, reason: level);
-    expect(Expectations.linesOf(errors), expected.errors, reason: level);
+    // Stack traces, which follow, are not compared, as in tool/expect.dart.
+    final told = Expectations.linesOf(errors)
+        .takeWhile((line) => !line.startsWith('#0 '));
+    expect(told, expected.errors, reason: level);
     expect(code, expected.exitCode, reason: level);
   }
 

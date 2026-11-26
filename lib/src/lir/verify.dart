@@ -40,6 +40,7 @@ void verifyModule(LirModule module) {
     textSymbol,
     stackMapSymbol,
     handlerSymbol,
+    placesSymbol,
     callbacksSymbol,
   ]);
   for (final table in module.tables) {

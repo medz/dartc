@@ -200,8 +200,28 @@ final class FunctionBuilder(
     return _block.add(instruction);
   }
 
+  /// Where in the source what is translated now is, if that is known.
+  int? position;
+
+  /// Does [work] at [offset] in the source.
+  T atPosition<T>(int offset, T Function() work) {
+    final before = position;
+    position = offset;
+    try {
+      return work();
+    } finally {
+      position = before;
+    }
+  }
+
+  /// The name that traces of the stack give the function.
+  late String frameName = function.name;
+
   /// Adds [calling], returning its result, if any.
   HirValue? call(HirCalling calling) {
+    if (position case final at?) {
+      calling.place ??= HirPlace(frameName, unit.uri, unit.lineAt(at));
+    }
     if (_handlers.isEmpty) {
       _block.add(calling);
       return calling.type == null ? null : calling;
@@ -449,3 +469,12 @@ final class FunctionBuilder(
     ifFalse();
   }
 }
+
+/// Where traces of the stack tell that [node] is.
+int positionOf(Expression node) => switch (node) {
+  MethodInvocation(:final methodName) => methodName.offset,
+  PropertyAccess(:final propertyName) => propertyName.offset,
+  PrefixedIdentifier(:final identifier) => identifier.offset,
+  BinaryExpression(:final operator) => operator.offset,
+  _ => node.offset,
+};

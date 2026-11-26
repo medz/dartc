@@ -37,5 +37,5 @@ class _FinalizerImpl<T> {
 @patch
 class StackTrace {
   @patch
-  static StackTrace get current => StackTrace.empty;
+  static StackTrace get current => _traceHere();
 }

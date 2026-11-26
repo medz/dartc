@@ -199,7 +199,10 @@ final class FunctionLowering(
       _continue(_boxes.classNumber(_block, object, mayBeInteger: mayBeInteger));
 
   /// The call that [calling] makes, not yet part of a block.
-  LirCall _call(HirCalling calling) {
+  LirCall _call(HirCalling calling) =>
+      _callOnly(calling)..place = _placeOf(calling.place);
+
+  LirCall _callOnly(HirCalling calling) {
     final block = _block;
     switch (calling) {
       case HirBox(:final target):
@@ -292,3 +295,15 @@ final class FunctionLowering(
     }
   }
 }
+
+final _places = Expando<LirPlace>();
+
+/// [place] as LIR tells it.
+LirPlace? _placeOf(HirPlace? place) => place == null
+    ? null
+    : _places[place] ??= LirPlace(
+        place.function,
+        place.uri,
+        place.line,
+        _placeOf(place.outer),
+      );
