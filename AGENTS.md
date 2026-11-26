@@ -29,7 +29,7 @@ Format files one by one. Never format `sdk/std`, which is the unmodified officia
 
 ## Rules of the design
 
-- **The official `dart` is the oracle.** What programs of the tests do is told by comments in them, which `tool/expect.dart` writes and checks with the official `dart`. They are not written from memory.
+- **The official `dart` is the oracle.** What programs of the tests do is told by comments in them, which `tool/expect.dart` writes and checks with the official `dart`. They are not written from memory. Where an issue decides to follow the language specification instead, the program says so with `// official: …`.
 - **Correctness does not depend on optimization.** Without any optimization, programs compile and run right. Nothing may need facts about the whole program's heap, and every stage ends for a stated reason, not by a budget or timeout.
 - **What is not supported is refused** with its position (`Not supported yet: …`). Never guess or generate code that may be wrong. A static error must stop compilation whatever comments or `analysis_options.yaml` say.
 - Later stages never ask earlier ones to start again.
@@ -64,7 +64,7 @@ print(1 + 1); // expect: 2
 external int x; // error 14: Not supported yet: external variables.
 ```
 
-`programs(area)` in `test/support/programs.dart` runs each with the HIR interpreter, the LIR interpreter, the interpreter after optimizing, and compiled, also when collecting before every allocation. When levels disagree, the first one that differs has the bug. A program with `// long` depends on time or creates too much to always collect. To add one, write the program, then run `dart run tool/expect.dart --update <file>` and look at what the official `dart` does. Only `error` is written by hand.
+`programs(area)` in `test/support/programs.dart` runs each with the HIR interpreter, the LIR interpreter, the interpreter after optimizing, and compiled, also when collecting before every allocation. When levels disagree, the first one that differs has the bug. A program with `// long` depends on time or creates too much to always collect. To add one, write the program, then run `dart run tool/expect.dart --update <file>` and look at what the official `dart` does. Only `error` is written by hand, and the comments of a program with a line `// official: …`, which tells why the official `dart` does something else than the language means; this is only for what the issues decide.
 
 The text of stack traces is not compared. `test/driver/random_*.dart` generate programs; new seeds are a good check after changes to `translate` or `optimize`.
 
