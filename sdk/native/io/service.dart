@@ -238,6 +238,7 @@ class _IOService {
     socketLookup => _lookUpHost(data[0], data[1]),
     socketListInterfaces => _listInterfaces(data[0]),
     socketReverseLookup => _lookUpName(data[0]),
+    sslProcessFilter => _processFilter(data),
     _ => _answerDirectory(request, data),
   };
 
