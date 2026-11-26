@@ -35,6 +35,62 @@ class _ProcessUtils {
 
   @patch
   static int _pid(Process? process) => process?.pid ?? _processNumber();
+
+  @patch
+  static Stream<ProcessSignal> _watchSignal(ProcessSignal signal) {
+    const watched = [
+      ProcessSignal.sighup,
+      ProcessSignal.sigint,
+      ProcessSignal.sigterm,
+      ProcessSignal.sigusr1,
+      ProcessSignal.sigusr2,
+      ProcessSignal.sigwinch,
+    ];
+    if (!watched.contains(signal)) {
+      throw SignalException('Listening for signal $signal is not supported');
+    }
+    return (_watches[signal.signalNumber] ??= _SignalWatch(signal)).stream;
+  }
+}
+
+/// The signals that are listened for, by their numbers.
+final Map<int, _SignalWatch> _watches = {};
+
+/// Tells when a signal comes, while it is listened for.
+final class _SignalWatch extends _Task {
+  final ProcessSignal _signal;
+  late final StreamController<ProcessSignal> _controller =
+      StreamController.broadcast(onListen: _start, onCancel: _stop);
+  int _file = -1;
+
+  _SignalWatch(this._signal);
+
+  Stream<ProcessSignal> get stream => _controller.stream;
+
+  int get file => _file;
+
+  void _start() {
+    _file = _signalFile(_signal.signalNumber);
+    if (_file < 0) {
+      _controller.addError(SignalException('Failed to listen for $_signal'));
+      return;
+    }
+    _Tasks._instance.add(this);
+  }
+
+  void _stop() {
+    if (_file < 0) return;
+    _Tasks._instance.remove(this);
+    _endSignalFile(_signal.signalNumber, _file);
+    _file = -1;
+  }
+
+  bool advance() {
+    for (var count = _signalsOf(_file); count > 0; count--) {
+      _controller.add(_signal);
+    }
+    return false;
+  }
 }
 
 @Native<Int32 Function(Int32, Int64)>(symbol: 'getrusage')
