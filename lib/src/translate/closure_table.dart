@@ -1,5 +1,8 @@
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
+// Only this renames type parameters.
+// ignore: implementation_imports
+import 'package:analyzer/src/dart/element/type_algebra.dart' show Substitution;
 import 'package:dartc/hir.dart';
 import 'package:dartc/source.dart';
 
@@ -201,6 +204,22 @@ final class ClosureTable(
     });
   }
 
+  /// Whether the type parameters of [type], which an alias of [class_] has,
+  /// have the bounds of those of [class_], so that the alias is a rename.
+  static bool _hasBounds(InterfaceElement class_, FunctionType type) {
+    final own = class_.typeParameters, other = type.typeParameters;
+    final renamed = Substitution.fromPairs2(own, [
+      for (final parameter in other)
+        parameter.instantiate(nullabilitySuffix: .none),
+    ]);
+    final anything = class_.library.typeProvider.objectQuestionType;
+    for (final (i, parameter) in own.indexed) {
+      final bound = renamed.substituteType(parameter.bound ?? anything);
+      if (bound != (other[i].bound ?? anything)) return false;
+    }
+    return true;
+  }
+
   /// The object that the generic function or constructor [element] is.
   ///
   /// As what an alias names, a constructor can be of another [type].
@@ -213,7 +232,8 @@ final class ClosureTable(
         type.typeParameters.length == given.length &&
             type.typeParameters.indexed.every(
               (e) => isParameter(given[e.$1], e.$2),
-            );
+            ) &&
+            _hasBounds(element.enclosingElement as InterfaceElement, type);
     final key = (element, takesOwn ? null : describeType(type));
     return _constants[key] ??= () {
       final made = Closure(

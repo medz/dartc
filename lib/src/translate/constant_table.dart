@@ -111,8 +111,17 @@ final class ConstantTable(
     final element = object.toFunctionValue();
     if (element == null) return null;
     final state = (object as DartObjectImpl).state as FunctionState;
+    final given = state.typeArguments;
+    // A constructor of an alias that is not a rename, given type arguments, is
+    // not one of the class. The state only tells that by being unequal.
+    final isGeneric = (object.type as FunctionType).typeParameters.isNotEmpty;
+    if (given != null &&
+        !isGeneric &&
+        state != FunctionState(state.element, typeArguments: given)) {
+      return null;
+    }
     // For constructors they can be those of an alias.
-    final types = element is ConstructorElement ? null : state.typeArguments;
+    final types = element is ConstructorElement ? null : given;
     return _functionObject(element.baseElement, object.type, types);
   }
 
