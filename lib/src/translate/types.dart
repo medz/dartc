@@ -268,6 +268,10 @@ bool isBottom(DartType? type) {
 
 /// Whether objects of [type] stay as long as variables that have them.
 bool isFinalizable(DartType? type) {
+  // So is `FutureOr` of one, as the official compiler takes it.
+  if (type is InterfaceType && type.isDartAsyncFutureOr) {
+    return isFinalizable(type.typeArguments.single);
+  }
   final bound = type == null ? null : boundOf(type);
   if (bound is! InterfaceType || bound.element.library.isDartCore) return false;
   final element = bound.element;

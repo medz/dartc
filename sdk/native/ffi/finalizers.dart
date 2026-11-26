@@ -1,6 +1,7 @@
 // Functions of C that are called when objects are gone, or the program ends.
 import 'dart:_heap/objects.dart' show usesNativeFinalizers;
-import 'dart:_internal' show FinalizerBase, FinalizerEntry;
+import 'dart:_internal'
+    show FinalizerBase, FinalizerEntry, reachabilityFence;
 
 @patch
 final class _NativeFinalizer {
@@ -43,6 +44,8 @@ final class _NativeFinalizer {
     allEntries.add(entry);
     if (externalSize > 0) entry.setExternalSize(externalSize);
     if (detach != null) (detachments[detach] ??= <FinalizerEntry>{}).add(entry);
+    // The value is weak in the entry, and has to stay until it is complete.
+    reachabilityFence(value);
   }
 
   void handleCollected() => _removeEntries();

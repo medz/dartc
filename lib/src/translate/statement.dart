@@ -142,8 +142,10 @@ final class StatementTranslator(
 
   void _goTo((Join, int) target) {
     final (join, depth) = target;
-    _builder.stay();
-    _tries.leave(depth, (_) => _builder.jump(join));
+    _tries.leave(depth, (_) {
+      _builder.stay();
+      _builder.jump(join);
+    });
   }
 
   void _return(Expression? expression) {
@@ -157,14 +159,19 @@ final class StatementTranslator(
     final result = _builder.function.result;
     if (result == null) {
       if (expression != null) expressions.effect(expression);
-      _builder.stay();
-      _tries.leave(0, (_) => _builder.end(HirReturn()));
+      // Objects stay through what `finally` does, too.
+      _tries.leave(0, (_) {
+        _builder.stay();
+        _builder.end(HirReturn());
+      });
     } else {
       final value = expression == null
           ? _builder.fallback?.call() ?? _builder.add(HirNull())
           : expressions.valueTo(expression, _builder.returnType!);
-      _builder.stay();
-      _tries.leave(0, (kept) => _builder.end(HirReturn(kept)), value);
+      _tries.leave(0, (kept) {
+        _builder.stay();
+        _builder.end(HirReturn(kept));
+      }, value);
     }
   }
 

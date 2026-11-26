@@ -292,7 +292,11 @@ final class FunctionBuilder(
   /// until here.
   void stay([int scope = 0]) {
     for (final variable in _kept.skip(scope)) {
-      add(HirMachine(.addressOf, [read(variable)]));
+      // What is bound can be a cell, which is kept without being read.
+      final value = _bound.contains(variable)
+          ? _values[_same(variable)]!
+          : read(variable);
+      add(HirMachine(.addressOf, [value]));
     }
     if (scope == 0 && _keepsReceiver) {
       add(HirMachine(.addressOf, [receiver!]));
@@ -317,8 +321,15 @@ final class FunctionBuilder(
     if (_isCell(variable)) _values[variable] = create(cells(type));
   }
 
+  /// The variables of [_kept] that are bound, not declared.
+  final _bound = <VariableElement>{};
+
   /// Declares [variable], of which [value] is the value or the cell.
   void bind(Object variable, HirValue value, HirType type) {
+    if (variable is VariableElement && isFinalizable(variable.type)) {
+      _kept.add(variable);
+      _bound.add(variable);
+    }
     _types[variable] = type;
     _values[variable] = value;
   }
