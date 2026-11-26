@@ -13,6 +13,7 @@ import '../support/hosts.dart';
 import '../support/compiler.dart';
 import 'io_compression.dart';
 import 'io_files.dart';
+import 'io_processes.dart';
 import 'io_system.dart';
 
 const _environment = {'DARTC_TEST': 'é=1'};
@@ -94,7 +95,10 @@ Future<void> _compare(
 
 void main() {
   group('dart:io', () {
-    ({...filePrograms, ...systemPrograms}).forEach((name, source) {
+    ({...filePrograms, ...systemPrograms, ...processPrograms}).forEach((
+      name,
+      source,
+    ) {
       test(name, () => _agrees(source));
     });
 

@@ -47,3 +47,60 @@ int _residentBytes() {
   final [_, pages, ...] = latin1.decode(_bytesAt(_buffer, count)).split(' ');
   return int.parse(pages) * _pageBytes();
 }
+
+@Native<Int64 Function(Int64, VarArgs<(Int64, Int64)>)>(symbol: 'syscall')
+external int _systemCall(int number, int first, int second);
+
+@Native<Int32 Function(Int32, Int64, Int64)>(symbol: 'sigprocmask')
+external int _maskSignals(int how, int set, int old);
+
+@Native<Int32 Function(Int32, Int64, Int32)>(symbol: 'signalfd')
+external int _openSignalFile(int file, int set, int flags);
+
+const _spawnSignalDefaults = 0x04, _spawnSignalMask = 0x08;
+const _spawnSession = 0x80;
+
+/// A file that is ready when the program [pid] ends, or -1 if there is none.
+int _whenEnded(int pid) {
+  const openProcess = 434;
+  final file = _systemCall(openProcess, pid, 0);
+  return file < 0 ? -1 : file;
+}
+
+/// Does [how] with the set of [signal] alone.
+void _withSignalSet(int signal, void Function(int set) use) {
+  final set = _allocateBytes(128);
+  _emptySignals(set);
+  _addSignal(set, signal);
+  use(set);
+  _freeBytes(set);
+}
+
+/// A file that is ready when [signal] comes, which then does nothing else.
+int _signalFile(int signal) {
+  const block = 0, noWait = 0x800, closeOnExec = 0x80000;
+  var file = -1;
+  _withSignalSet(signal, (set) {
+    _maskSignals(block, set, 0);
+    file = _openSignalFile(-1, set, noWait | closeOnExec);
+  });
+  return file;
+}
+
+/// How many times the signal of [file] came since this was last asked.
+int _signalsOf(int file) {
+  const record = 128;
+  final buffer = _allocateBytes(record);
+  var count = 0;
+  while (_readFile(file, buffer, record) == record) {
+    count++;
+  }
+  _freeBytes(buffer);
+  return count;
+}
+
+void _endSignalFile(int signal, int file) {
+  const unblock = 1;
+  _closeFile(file);
+  _withSignalSet(signal, (set) => _maskSignals(unblock, set, 0));
+}

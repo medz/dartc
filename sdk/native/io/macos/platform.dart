@@ -80,3 +80,73 @@ int _residentBytes() {
   if (result != 0) throw OSError('task_info failed', result);
   return load64(_buffer + 8 + resident);
 }
+
+@Native<Int32 Function()>(symbol: 'kqueue')
+external int _kernelQueue();
+
+@Native<Int32 Function(Int32, Int64, Int32, Int64, Int32, Int64)>(
+  symbol: 'kevent',
+)
+external int _kernelEvents(
+  int queue,
+  int changes,
+  int changeCount,
+  int events,
+  int eventCount,
+  int timeout,
+);
+
+@Native<Int64 Function(Int32, Int64)>(symbol: 'signal')
+external int _setSignalAction(int signal, int action);
+
+const _spawnSignalDefaults = 0x04, _spawnSignalMask = 0x08;
+const _spawnSession = 0x0400;
+
+/// A queue of the kernel that tells about [ident] of [filter] at [address].
+int _kernelQueueFor(int ident, int filter, int flags, int notes) {
+  final queue = _kernelQueue();
+  if (queue < 0) return -1;
+  final event = _allocateBytes(32);
+  store64(event, ident);
+  store16(event + 8, filter & 0xffff);
+  store16(event + 10, flags);
+  store32(event + 12, notes);
+  store64(event + 16, 0);
+  store64(event + 24, 0);
+  final result = _kernelEvents(queue, event, 1, 0, 0, 0);
+  _freeBytes(event);
+  if (result >= 0) return queue;
+  _closeFile(queue);
+  return -1;
+}
+
+/// A file that is ready when the program [pid] ends, or -1 if it has.
+int _whenEnded(int pid) {
+  const process = -5, add = 0x1, once = 0x10, exit = 0x80000000;
+  return _kernelQueueFor(pid, process, add | once, exit);
+}
+
+/// A file that is ready when [signal] comes, which then does nothing else.
+int _signalFile(int signal) {
+  const kind = -6, add = 0x1, ignore = 1;
+  _setSignalAction(signal, ignore);
+  return _kernelQueueFor(signal, kind, add, 0);
+}
+
+/// How many times the signal of [file] came since this was last asked.
+int _signalsOf(int file) {
+  final event = _allocateBytes(48);
+  // It does not wait.
+  store64(event + 32, 0);
+  store64(event + 40, 0);
+  final result = _kernelEvents(file, 0, 0, event, 1, event + 32);
+  final count = result > 0 ? load64(event + 16) : 0;
+  _freeBytes(event);
+  return count;
+}
+
+void _endSignalFile(int signal, int file) {
+  const usual = 0;
+  _closeFile(file);
+  _setSignalAction(signal, usual);
+}
