@@ -28,7 +28,7 @@ final class SdkSources(
   static const _hidden = ['_compact_hash', '_vm'];
 
   /// The libraries that need no more than the official patches.
-  static const _whole = ['collection', '_http'];
+  static const _whole = ['collection', 'nativewrappers'];
 
   /// The libraries without the official patches. These would make programs
   /// reach `dart:io`, for what is not supported.

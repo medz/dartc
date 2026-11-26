@@ -13,6 +13,7 @@ import '../support/hosts.dart';
 import '../support/compiler.dart';
 import 'io_compression.dart';
 import 'io_files.dart';
+import 'io_network.dart';
 import 'io_processes.dart';
 import 'io_watching.dart';
 import 'io_system.dart';
@@ -96,10 +97,12 @@ Future<void> _compare(
 
 void main() {
   group('dart:io', () {
-    ({...filePrograms, ...systemPrograms, ...processPrograms}).forEach((
-      name,
-      source,
-    ) {
+    ({
+      ...filePrograms,
+      ...systemPrograms,
+      ...processPrograms,
+      ...networkPrograms,
+    }).forEach((name, source) {
       test(name, () => _agrees(source));
     });
 
