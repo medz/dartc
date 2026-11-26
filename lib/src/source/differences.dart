@@ -17,7 +17,7 @@ final class _Missed() extends RecursiveAstVisitor<void> {
 
   @override
   void visitFunctionReference(FunctionReference node) {
-    if (_canBeShortened(node.function)) {
+    if (node.typeArguments != null && _canBeShortened(node.function)) {
       errors.add((node.offset, 'What gets type arguments here can be null.'));
     }
     super.visitFunctionReference(node);
