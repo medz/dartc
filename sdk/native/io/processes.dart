@@ -72,7 +72,7 @@ external int _access(int path, int mode);
 @Native<Void Function(Int64)>(symbol: 'free')
 external void _freeBytes(int address);
 
-const _noHang = 1, _setDescriptorFlags = 2, _closeOnExec = 1;
+const _noHang = 1, _setDescriptorFlags = 2, _closeOnRun = 1;
 
 /// The bytes of [text] that a 0 ends, outside the heap.
 int _cString(String text) {
@@ -117,8 +117,8 @@ int _codeOf(int status) {
   }
   final read = load32(ends), write = load32(ends + 4);
   _freeBytes(ends);
-  _controlFile(read, _setDescriptorFlags, _closeOnExec);
-  _controlFile(write, _setDescriptorFlags, _closeOnExec);
+  _controlFile(read, _setDescriptorFlags, _closeOnRun);
+  _controlFile(write, _setDescriptorFlags, _closeOnRun);
   return (read, write);
 }
 
