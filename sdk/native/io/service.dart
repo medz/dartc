@@ -96,7 +96,10 @@ class _Tasks implements EventSource {
 
   void remove(_Task task) => _waiting.remove(task);
 
-  bool get keepsAlive => _waiting.isNotEmpty;
+  /// How many keep the program going besides what waits.
+  int keepers = 0;
+
+  bool get keepsAlive => _waiting.isNotEmpty || keepers > 0;
 
   int get happened => _waiting.length;
 
@@ -232,6 +235,9 @@ class _IOService {
           : _answerPath(request, data),
     fileLock => _SystemFile(data[0]).lock(data[1], data[2], data[3]),
     fileCreatePipe => _File._createPipe(_Namespace._namespace),
+    socketLookup => _lookUpHost(data[0], data[1]),
+    socketListInterfaces => _listInterfaces(data[0]),
+    socketReverseLookup => _lookUpName(data[0]),
     _ => _answerDirectory(request, data),
   };
 
