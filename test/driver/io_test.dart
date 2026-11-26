@@ -3,6 +3,7 @@
 @Timeout.factor(8)
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dartc/driver.dart';
@@ -10,6 +11,7 @@ import 'package:test/test.dart';
 
 import '../support/hosts.dart';
 import '../support/compiler.dart';
+import 'io_compression.dart';
 import 'io_files.dart';
 import 'io_system.dart';
 
@@ -118,6 +120,35 @@ void main() {
         if (isLinux) continue;
         final official = await _official(path, directory.path, '');
         expect(official.output.split('\n').take(6), lines.take(6));
+      }
+    });
+
+    test('compression', () {
+      final data = [
+        ...utf8.encode('the quick brown fox ' * 200),
+        for (var i = 0; i < 3000; i++) i * i ~/ 7 & 0xff,
+      ];
+      return _agrees(compressionProgram, input: officialInput(data));
+    });
+
+    test('what the official runtime decompresses', () async {
+      final directory = writeSources({'main.dart': compressedProgram});
+      final path = '${directory.path}/main.dart';
+      final program = '${directory.path}/program';
+      for (final host in Host.all) {
+        writeProgram(
+          await compileProgram(path, CompileOptions(target: host.target)),
+          program,
+        );
+        final [data, ...ways] = LineSplitter.split(
+          (await host.run(program)).output,
+        ).toList();
+        expect(ways, hasLength(27));
+        for (final way in ways) {
+          final [name, text] = way.split(' = ');
+          final back = officialDecoder(name).convert(base64.decode(text));
+          expect(base64.encode(back), data, reason: '${host.target} $name');
+        }
       }
     });
 
