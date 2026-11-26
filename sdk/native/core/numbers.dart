@@ -87,6 +87,8 @@ class _Double {
 
   @patch
   int get hashCode {
+    // The official runtime converts it to the largest int, which is as near.
+    if (this == 9223372036854775808.0) return 9223372036854775807.hashCode;
     if (this >= -9223372036854775808.0 && this < 9223372036854775808.0) {
       final whole = floatToInt(this);
       if (intToFloat(whole) == this) return whole.hashCode;
