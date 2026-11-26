@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dartc/lir.dart';
 import 'package:dartc/native.dart';
 
@@ -32,6 +34,8 @@ EmittedCode emitCode(
     .arm64 => Arm64Backend(),
     .x64 => X64Backend(Set.of(externals)),
   };
+  final isolate = _isolateData(module);
+  backend.isolated = isolate.offsets;
   final machine = backend.machine;
   final functions = <String, int>{textSymbol: 0};
   final maps = <StackMap>[], targets = <ThrowTarget>[];
@@ -76,14 +80,16 @@ EmittedCode emitCode(
     tables: {for (final table in module.tables) table.name: table.functions},
     objects: {
       for (final data in module.data)
-        if (data.writable)
+        if (data.writable && !data.isolated)
           data.name: EmittedObject(data.bytes, const {}, writable: true),
+      isolateSymbol: ?isolate.object,
       for (final object in module.statics)
-        object.name: EmittedObject(
-          object.bytes,
-          object.references,
-          writable: object.writable,
-        ),
+        if (!object.isolated)
+          object.name: EmittedObject(
+            object.bytes,
+            object.references,
+            writable: object.writable,
+          ),
     },
     stackMaps: maps,
     throwTargets: targets,
@@ -103,3 +109,33 @@ bool _uses(LirModule module, String symbol) => module.functions.any(
     ),
   ),
 );
+
+/// The data that each isolate has a copy of, in one object, and where each
+/// symbol of it is there.
+({Map<String, int> offsets, EmittedObject? object}) _isolateData(
+  LirModule module,
+) {
+  final offsets = <String, int>{}, references = <int, String>{};
+  final bytes = BytesBuilder();
+  void add(String name, Uint8List data, Map<int, String> referring) {
+    while (bytes.length % 16 != 0) {
+      bytes.addByte(0);
+    }
+    offsets[name] = bytes.length;
+    referring.forEach((at, target) => references[bytes.length + at] = target);
+    bytes.add(data);
+  }
+
+  for (final data in module.data) {
+    if (data.isolated) add(data.name, data.bytes, const {});
+  }
+  for (final object in module.statics) {
+    if (object.isolated) add(object.name, object.bytes, object.references);
+  }
+  return (
+    offsets: offsets,
+    object: offsets.isEmpty
+        ? null
+        : EmittedObject(bytes.takeBytes(), references, writable: true),
+  );
+}

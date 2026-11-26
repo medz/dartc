@@ -12,6 +12,9 @@ final class Arm64Backend() implements Backend {
   final _assembler = Arm64Assembler();
 
   @override
+  set isolated(Map<String, int> offsets) => _assembler.isolated = offsets;
+
+  @override
   late final Machine machine = Arm64Machine(_assembler);
 
   @override

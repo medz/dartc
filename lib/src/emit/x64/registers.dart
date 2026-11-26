@@ -8,13 +8,13 @@ const freeScratch = 0, leftScratch = 10, rightScratch = 11;
 /// The double registers that hold a value only within one operation.
 const leftFloatScratch = 14, rightFloatScratch = 15;
 
-/// Values cannot be in rsp and rbp, which form the frame, or in scratch
-/// registers. Calls preserve no doubles.
+/// Values cannot be in rsp and rbp, which form the frame, in r15, which has
+/// where the data of the isolate is, or in scratch registers. Calls preserve no doubles.
 const x64Registers = MachineRegisters(
   values: {
     .word: RegisterSet(
       volatile: [1, 2, 6, 7, 8, 9],
-      preserved: [3, 12, 13, 14, 15],
+      preserved: [3, 12, 13, 14],
     ),
     .float: RegisterSet(
       volatile: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
@@ -35,4 +35,5 @@ const x64Registers = MachineRegisters(
   callee: freeScratch,
   resumedFrame: 1,
   caught: [7, 6],
+  isolate: 15,
 );

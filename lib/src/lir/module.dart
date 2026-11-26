@@ -12,6 +12,9 @@ final class LirFunction(
   final LirSignature signature,
   Iterable<LirBlock> blocks, {
   final bool checksStack = false,
+
+  /// Whether C calls it, so that it finds where the data of the isolate is.
+  final bool isEntered = false,
 }) {
   final List<LirBlock> blocks = .unmodifiable(blocks);
   LirBlock get entry => blocks.first;
@@ -21,10 +24,13 @@ final class LirFunction(
 final class LirExternal(final String name, final LirSignature signature);
 
 /// Initialized native bytes, never traced by the collector.
+///
+/// What is [isolated] is writable, and each isolate has a copy of its own.
 final class LirData(
   final String name,
   List<int> bytes, {
   final bool writable = false,
+  final bool isolated = false,
 }) {
   final Uint8List bytes = Uint8List.fromList(bytes).asUnmodifiableView();
 }
@@ -37,6 +43,9 @@ const handlerSymbol = '.handlers';
 
 /// Where calls are in the source, for traces of the stack.
 const placesSymbol = '.places';
+
+/// The data that each isolate has a copy of, for the first isolate.
+const isolateSymbol = '.isolate';
 
 /// Functions that code calls for allocations, throws and overflows.
 const allocateSymbol = '.allocate', throwSymbol = '.throw';
@@ -66,6 +75,9 @@ final class LirStatic(
   List<int> bytes, {
   Map<int, String> references = const {},
   final bool writable = false,
+
+  /// Whether each isolate has a copy of its own, which is writable.
+  final bool isolated = false,
 }) {
   final Uint8List bytes = Uint8List.fromList(bytes).asUnmodifiableView();
   final Map<int, String> references = .unmodifiable(references);

@@ -11,6 +11,9 @@ abstract interface class Backend() {
   Machine get machine;
   List<Relocation> get relocations;
 
+  /// Tells where the symbols of the data of the isolate are in it.
+  set isolated(Map<String, int> offsets);
+
   /// The function that makes the call which a block describes.
   void emitNativeCall();
 

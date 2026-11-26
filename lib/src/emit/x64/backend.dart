@@ -12,6 +12,9 @@ final class X64Backend(final Set<String> _externals) implements Backend {
   final _assembler = X64Assembler();
 
   @override
+  set isolated(Map<String, int> offsets) => _assembler.isolated = offsets;
+
+  @override
   late final Machine machine = X64Machine(_assembler, _externals);
 
   @override

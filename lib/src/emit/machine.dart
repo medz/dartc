@@ -33,6 +33,10 @@ final class const MachineRegisters({
   /// Those where an exception and its trace are when they are caught, which are
   /// the first ones that pass arguments.
   required final List<int> caught,
+
+  /// The one that has where the data of the isolate is, which calls of C keep
+  /// and values never occupy.
+  required final int isolate,
 }) {
   /// Where a call's arguments are passed, in order.
   ///
@@ -120,6 +124,10 @@ abstract interface class Machine() implements Abilities {
 
   void call(String symbol, LirSignature signature);
   void callRegister(int register);
+
+  /// Makes the register of the isolate have where the data of the program's
+  /// first isolate is.
+  void enterIsolate();
 
   /// Continues at the address in one register with a frame in another.
   void resume();

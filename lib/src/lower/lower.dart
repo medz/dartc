@@ -83,18 +83,29 @@ LirModule lowerProgram(
     data: [
       ...statics.tables,
       if (machine.usesBuffer)
-        LirData(bufferSymbol, List.filled(bufferBytes, 0), writable: true),
+        LirData(
+          bufferSymbol,
+          List.filled(bufferBytes, 0),
+          writable: true,
+          isolated: true,
+        ),
       if (needsThread) mainThread(),
       if (exports != null) ...exportData(),
       ...calls.data,
       if (module.callback != null) ...[...callbackData(calls), callbackMessage],
       if (machine.keepsNativeFrame)
-        LirData(nativeFrameSymbol, List.filled(8, 0), writable: true),
+        LirData(
+          nativeFrameSymbol,
+          List.filled(8, 0),
+          writable: true,
+          isolated: true,
+        ),
       if (machine.callsNative)
         LirData(
           callBlockSymbol,
           List.filled(CallBlock.size, 0),
           writable: true,
+          isolated: true,
         ),
       if (machine.usesArguments)
         LirData(
@@ -172,5 +183,5 @@ LirFunction _startFunction(
   }
   done.end(Return(done.add(ConstInt(0))));
   final signature = LirSignature(start.parameters.map((p) => p.type), .i64);
-  return LirFunction(entrySymbol, signature, blocks);
+  return LirFunction(entrySymbol, signature, blocks, isEntered: true);
 }

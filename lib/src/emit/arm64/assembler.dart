@@ -331,7 +331,21 @@ final class Arm64Assembler() {
     _emit(0x94000000);
   }
 
+  /// Where symbols of the data of the isolate are in it, which x28 has.
+  Map<String, int> isolated = const {};
+
   void address(int d, String symbol) {
+    if (isolated[symbol] case final at?) {
+      const isolate = 28;
+      if (at >= 1 << 24) throw StateError('The data of isolates is too large.');
+      if (at >= 1 << 12) {
+        _emit(0x91400000 | (at >> 12) << 10 | isolate << 5 | d);
+        addImmediate(d, d, at & 0xfff);
+      } else {
+        addImmediate(d, isolate, at);
+      }
+      return;
+    }
     relocations.add(Relocation(offset, .page21, symbol));
     _emit(0x90000000 | d);
     relocations.add(Relocation(offset, .pageOffset12, symbol));

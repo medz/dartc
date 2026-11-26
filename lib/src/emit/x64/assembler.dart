@@ -360,8 +360,19 @@ final class X64Assembler() {
     _symbol(.call32, symbol);
   }
 
+  /// Where symbols of the data of the isolate are in it, which r15 has.
+  Map<String, int> isolated = const {};
+
   /// Emits an instruction of [opcode] with [reg] and the memory at [symbol].
   void _atSymbol(int opcode, int reg, String symbol) {
+    if (isolated[symbol] case final offset?) {
+      const isolate = 15;
+      _rex(reg, isolate);
+      _byte(opcode);
+      _byte(0x80 | (reg & 7) << 3 | (isolate & 7));
+      _word32(offset);
+      return;
+    }
     _rex(reg, 0);
     _byte(opcode);
     _byte((reg & 7) << 3 | 5);

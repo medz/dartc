@@ -8,13 +8,13 @@ const calleeScratch = 8, leftScratch = 15, rightScratch = 16, farScratch = 17;
 const leftFloatScratch = 29, rightFloatScratch = 30;
 
 /// Values cannot be in x8 and x15 to x17, which are scratch, x18, which belongs
-/// to the system, and x29 to x31, which form the frame, or in d29 and d30,
-/// which are scratch.
+/// to the system, x28, which has where the data of the isolate is, and x29 to
+/// x31, which form the frame, or in d29 and d30, which are scratch.
 const arm64Registers = MachineRegisters(
   values: {
     .word: RegisterSet(
       volatile: [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14],
-      preserved: [19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+      preserved: [19, 20, 21, 22, 23, 24, 25, 26, 27],
     ),
     .float: RegisterSet(
       volatile: [
@@ -38,4 +38,5 @@ const arm64Registers = MachineRegisters(
   callee: calleeScratch,
   resumedFrame: 9,
   caught: [0, 1],
+  isolate: 28,
 );

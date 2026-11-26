@@ -40,7 +40,7 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
       for (final global in _globals) {
         _set(words, _offsets[global]!, global.initial);
       }
-      _objects.add(words.build(globalsSymbol, writable: true));
+      _objects.add(words.build(globalsSymbol, isolated: true));
     }
   }
 
@@ -165,10 +165,15 @@ final class _Words(int bytes) {
   final ByteData data = ByteData(bytes);
   final Map<int, String> references = {};
 
-  LirStatic build(String name, {required bool writable}) => LirStatic(
+  LirStatic build(
+    String name, {
+    bool writable = false,
+    bool isolated = false,
+  }) => LirStatic(
     name,
     data.buffer.asUint8List(),
     references: references,
-    writable: writable,
+    writable: writable || isolated,
+    isolated: isolated,
   );
 }
