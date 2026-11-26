@@ -61,3 +61,22 @@ String? _preferredLanguage() {
       >('CFStringGetCString')(first, _buffer, _bufferBytes, isUtf8);
   return result == 0 ? null : _textAt(_buffer);
 }
+
+/// The task of the program.
+@Native<Uint32>(symbol: 'mach_task_self_')
+external int _task;
+
+@Native<Int32 Function(Uint32, Int32, Int64, Int64)>(symbol: 'task_info')
+external int _taskInfo(int task, int flavor, int info, int count);
+
+/// What the largest resident size is counted in.
+const _largestUnit = 1;
+
+int _residentBytes() {
+  // `struct mach_task_basic_info` has 12 words; the resident size is second.
+  const basicInfo = 20, words = 12, resident = 8;
+  store32(_buffer, words);
+  final result = _taskInfo(_task, basicInfo, _buffer + 8, _buffer);
+  if (result != 0) throw OSError('task_info failed', result);
+  return load64(_buffer + 8 + resident);
+}

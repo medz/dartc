@@ -29,3 +29,21 @@ int _environmentStart() {
 }
 
 String _language() => Platform.environment['LANG'] ?? 'en_US';
+
+@Native<Int32 Function()>(symbol: 'getpagesize')
+external int _pageBytes();
+
+/// What the largest resident size is counted in.
+const _largestUnit = 1024;
+
+int _residentBytes() {
+  // The second number is how many pages are resident.
+  final path = FileSystemEntity._toUtf8Array('/proc/self/statm');
+  final file = _openPath(dataAddress(path), 0, 0);
+  if (file < 0) throw _failure();
+  final count = _readFile(file, _buffer, _bufferBytes);
+  _closeFile(file);
+  if (count < 0) throw _failure();
+  final [_, pages, ...] = latin1.decode(_bytesAt(_buffer, count)).split(' ');
+  return int.parse(pages) * _pageBytes();
+}

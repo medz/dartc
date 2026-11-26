@@ -36,3 +36,20 @@ class _ProcessUtils {
   @patch
   static int _pid(Process? process) => process?.pid ?? _processNumber();
 }
+
+@Native<Int32 Function(Int32, Int64)>(symbol: 'getrusage')
+external int _resourceUse(int who, int usage);
+
+@patch
+class ProcessInfo {
+  @patch
+  static int get maxRss {
+    // The largest resident size follows two times in `struct rusage`.
+    const self = 0, largest = 32;
+    if (_resourceUse(self, _buffer) < 0) throw _failure();
+    return load64(_buffer + largest) * _largestUnit;
+  }
+
+  @patch
+  static int get currentRss => _residentBytes();
+}

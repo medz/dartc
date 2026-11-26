@@ -190,8 +190,9 @@ final class NativeTable(final ProgramScope _scope, final SourceUnit _unit)
     final annotation = nativeAnnotation(element);
     if (annotation == null) return null;
     final (:symbol, :asset) = annotation;
-    // What the SDK declares is there from the start.
-    if (element.library!.isInSdk) {
+    // Functions that the SDK declares are there from the start. Variables are
+    // looked up, since only functions are linked so.
+    if (element.library!.isInSdk && element is! PropertyInducingElement) {
       return builder.add(HirNativeFunction(symbol));
     }
     final global = _addresses[element] ??= HirGlobal(
