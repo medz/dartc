@@ -94,6 +94,52 @@ Future<void> _compare(
   }
 }
 
+Future<Run> _runWatching(
+  Host host,
+  Directory directory, {
+  Duration? limit,
+}) async {
+  final program = '${directory.path}/program';
+  writeProgram(
+    await compileProgram(
+      '${directory.path}/main.dart',
+      CompileOptions(target: host.target),
+    ),
+    program,
+  );
+  return host.run(program, place: directory.path, limit: limit);
+}
+
+void _watchingRegressions() {
+  for (final (name, source, output, linux) in const [
+    ('watching the filesystem root', rootWatchingProgram, 'true\n', false),
+    ('watching a missing directory', failedWatchingProgram, 'true\n', true),
+    (
+      'watching one path with different masks',
+      sharedWatchingProgram,
+      'true true\ntrue true\n',
+      true,
+    ),
+  ]) {
+    final hosts = Host.all.where((host) => host.isLinux == linux);
+    test(name, () async {
+      final directory = writeSources({'main.dart': source});
+      for (final host in hosts) {
+        final run = await _runWatching(
+          host,
+          directory,
+          limit: const Duration(seconds: 8),
+        );
+        expect(run, (
+          code: 0,
+          output: output,
+          errors: '',
+        ), reason: '${host.target}');
+      }
+    }, skip: hosts.isEmpty);
+  }
+}
+
 void main() {
   group('dart:io', () {
     ({...filePrograms, ...systemPrograms, ...processPrograms}).forEach((
@@ -108,16 +154,8 @@ void main() {
     test('watching files', () async {
       final directory = writeSources({'main.dart': watchingProgram});
       final path = '${directory.path}/main.dart';
-      final program = '${directory.path}/program';
       for (final host in Host.all) {
-        writeProgram(
-          await compileProgram(path, CompileOptions(target: host.target)),
-          program,
-        );
-        final lines = (await host.run(
-          program,
-          place: directory.path,
-        )).output.split('\n');
+        final lines = (await _runWatching(host, directory)).output.split('\n');
         if (host.isLinux) {
           // There is no official runtime there to compare with.
           var at = 0;
@@ -135,6 +173,7 @@ void main() {
         expect(lines.join('\n'), official.output, reason: '${host.target}');
       }
     });
+    _watchingRegressions();
 
     test('what only the system knows', () async {
       final directory = writeSources({'main.dart': platformProgram});

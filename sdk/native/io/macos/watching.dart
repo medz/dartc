@@ -166,7 +166,7 @@ void _takeEvents(
     final path = load64(paths + i * 8);
     final full = _bytesAt(path, _lengthAt(path));
     var start = node.baseLength;
-    if (start < full.length) start++;
+    if (start < full.length && full[start] == 0x2f) start++;
     final relative = utf8.decode(full.sublist(start), allowMalformed: true);
     if (!node.recursive && relative.contains('/')) continue;
     final isSelf = relative.isEmpty;

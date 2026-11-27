@@ -14,12 +14,33 @@ class _WatchedPath {
     isClosed = true;
     return source?.cancel();
   }
+
+  @patch
+  String fullPathOf(_NativeFSEvent event) {
+    assert(event.pathId == pathId);
+    if (event.relativePath case final relative? when relative.isNotEmpty) {
+      final separator = path.endsWith('/') ? '' : '/';
+      return '$path$separator$relative';
+    }
+    return path;
+  }
 }
 
 @patch
 abstract class _FileSystemWatcher {
   @patch
   static bool get isSupported => true;
+
+  @patch
+  static Stream<FileSystemEvent> _watch(
+    String path,
+    int events,
+    bool recursive,
+  ) {
+    final stream = _watcher._watchImpl(path, events, recursive);
+    if (events == FileSystemEvent.all) return stream;
+    return stream.where((event) => event.type & events != 0);
+  }
 
   @patch
   Stream<List<_NativeFSEvent>> _eventsStreamFromSocket(
@@ -74,6 +95,27 @@ abstract class _FileSystemWatcher {
 
   @patch
   static int _getSocketId(int watcherId, int pathId) => watcherId;
+}
+
+@patch
+abstract class _MultiplexingFileSystemWatcher extends _FileSystemWatcher {
+  @patch
+  _WatchedPath _startWatching(String path, int events, bool recursive) {
+    _ensureWatcherIsRunning();
+    try {
+      final pathId = super._watchPath(path, events, recursive);
+      assert(Platform.isLinux || !_watchedPaths.containsKey(pathId));
+      // Inotify can reuse a path. Each returned stream applies its own mask.
+      return _watchedPaths[pathId] ??= _WatchedPath(
+        pathId,
+        path,
+        FileSystemEvent.all,
+      );
+    } on FileSystemException {
+      if (_watchedPaths.isEmpty) _stopWatcher();
+      rethrow;
+    }
+  }
 }
 
 /// Reads what a watcher has whenever its file is ready.

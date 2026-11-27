@@ -13,7 +13,7 @@ external int _removeNotifyWatch(int file, int watch);
 const _inModify = 0x2, _inAttributes = 0x4, _inCloseWrite = 0x8;
 const _inMovedTo = 0x80, _inMove = 0xc0, _inCreate = 0x100, _inDelete = 0x200;
 const _inDeleteSelf = 0x400, _inMoveSelf = 0x800, _inIgnored = 0x8000;
-const _inIsDirectory = 0x40000000;
+const _inMaskAdd = 0x20000000, _inIsDirectory = 0x40000000;
 
 _FileSystemWatcher _systemWatcher() => _InotifyFileSystemWatcher();
 
@@ -25,7 +25,7 @@ int _startWatcher() {
 }
 
 int _watchPathOf(int watcher, String path, int events, bool recursive) {
-  var mask = _inDeleteSelf | _inMoveSelf;
+  var mask = _inMaskAdd | _inDeleteSelf | _inMoveSelf;
   if (events & FileSystemEvent.create != 0) mask |= _inCreate;
   if (events & FileSystemEvent.modify != 0) {
     mask |= _inCloseWrite | _inAttributes | _inModify;

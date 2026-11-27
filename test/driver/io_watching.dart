@@ -55,3 +55,70 @@ const linuxEvents = [
   'FileSystemModifyEvent /f false',
   'FileSystemDeleteEvent /f false',
 ];
+
+/// Dart 3.14.0 on macOS drops the first byte after the root slash.
+const rootWatchingProgram = r'''
+import 'dart:async';
+import 'dart:io';
+
+Future<void> main() async {
+  final name = 'watch-root-$pid';
+  final directory = Directory.current.resolveSymbolicLinksSync();
+  final file = File('$directory/$name');
+  final change = Directory('/')
+      .watch(events: FileSystemEvent.create, recursive: true)
+      .firstWhere((event) => event.path.endsWith('/$name'));
+  await Future<void>.delayed(const Duration(milliseconds: 250));
+  file.writeAsStringSync('watch');
+  print((await change).path == file.path);
+}
+''';
+
+/// A failed first watch reports the error and lets the program exit.
+const failedWatchingProgram = r'''
+import 'dart:io';
+
+Future<void> main() async {
+  try {
+    await Directory('missing').watch().first;
+  } on FileSystemException catch (error) {
+    print(error.osError?.errorCode == 2);
+  }
+}
+''';
+
+/// Watches of one directory receive their own events in either order.
+const sharedWatchingProgram = r'''
+import 'dart:io';
+
+Future<void> check(int first, int second) async {
+  final directory = Directory('watched')..createSync();
+  final file = File('watched/file');
+  Future<List<int>> typesUntilWrite(int mask) async {
+    final seen = <int>[];
+    await for (final event in directory.watch(events: mask)) {
+      if (event.path != file.path) continue;
+      seen.add(event.type);
+      if (event is FileSystemModifyEvent && event.contentChanged) break;
+    }
+    return seen;
+  }
+
+  final seen = Future.wait([typesUntilWrite(first), typesUntilWrite(second)]);
+  try {
+    await Directory('missing').watch().first;
+  } on FileSystemException {
+    file.writeAsStringSync('watch');
+  }
+  final [left, right] = await seen;
+  final (all, modify) = first == FileSystemEvent.all ? (left, right) : (right, left);
+  print('${all.contains(FileSystemEvent.create)} '
+      '${modify.every((type) => type == FileSystemEvent.modify)}');
+  directory.deleteSync(recursive: true);
+}
+
+Future<void> main() async {
+  await check(FileSystemEvent.all, FileSystemEvent.modify);
+  await check(FileSystemEvent.modify, FileSystemEvent.all);
+}
+''';
