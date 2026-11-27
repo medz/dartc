@@ -272,9 +272,33 @@ bool isSameType(RuntimeType a, RuntimeType b) {
   }
   return a is FunctionType &&
       b is FunctionType &&
-      isSame(a.shape, b.shape) &&
+      _haveSameParameters(a.shape, b.shape) &&
       isSameType(a.result, b.result) &&
       areSameTypes(a.parameters, b.parameters);
+}
+
+/// Whether [a] and [b] take the same parameters. The order in which named ones
+/// are declared, which their text keeps, does not matter.
+bool _haveSameParameters(FunctionShape a, FunctionShape b) {
+  if (isSame(a, b)) return true;
+  if (a.required != b.required || a.positional != b.positional) return false;
+  var left = a.names, right = b.names;
+  while (left != null && right != null) {
+    if (left.name != right.name || left.isRequired != right.isRequired) {
+      return false;
+    }
+    left = left.tail;
+    right = right.tail;
+  }
+  return left == null && right == null;
+}
+
+int _hashOfParameters(FunctionShape shape) {
+  var hash = shape.required * 31 + shape.positional;
+  for (var at = shape.names; at != null; at = at.tail) {
+    hash = (hash * 7 + at.name.length + (at.isRequired ? 1 : 0)) & 0x3fffffff;
+  }
+  return hash;
 }
 
 /// Whether [a] and [b] are equal, one by one.
@@ -306,7 +330,7 @@ int hashOfType(RuntimeType type) {
   if (type is! FunctionType) return 0;
   return (hashOfType(type.result) +
           hashOfTypes(type.parameters) * 5 +
-          identityHashCode(type.shape)) &
+          _hashOfParameters(type.shape)) &
       0x3fffffff;
 }
 
