@@ -45,18 +45,32 @@ final class ExtensionTranslator(
       }
       return (found as InterfaceType).asInstanceOf(owner)!.typeArguments;
     }
-    // Elements whose types need no type arguments do not tell them.
-    if (_override(node, element)?.typeArgumentTypes case final types?) {
-      return types;
-    }
+    final override = _override(node, element);
+    // Applicability uses fresh type parameters so that inference can also use
+    // the extension's own type parameters from the receiver.
+    final given = switch (override) {
+      ExtensionOverride(typeArguments: null, :final argumentList)
+          when _builder.typesOf(owner) != null =>
+        argumentList.arguments.single.argumentExpression.staticType!,
+      _ => null,
+    };
+    final resolved = override?.typeArgumentTypes;
+    if (given == null && resolved != null) return resolved;
     final substitution = switch (element) {
-      SubstitutedElementImpl(:final substitution) => substitution,
+      SubstitutedElementImpl(:final substitution) when given == null =>
+        substitution,
       _ =>
         [owner as ExtensionElement]
-            .applicableTo(targetLibrary: _builder.library, targetType: type)
-            .single
-            .substitution,
+            .applicableTo(
+              targetLibrary: _builder.library,
+              targetType: given ?? type,
+            )
+            .singleOrNull
+            ?.substitution,
     };
+    if (substitution == null) {
+      return resolved ?? _unsupported(node, 'these type arguments');
+    }
     return [
       for (final parameter in owner.typeParameters)
         substitution.map[parameter]!,
