@@ -1,39 +1,33 @@
 import 'dart:math' as math;
 
-// Values of several numbers, in plain Dart. Lanes of Float32x4 are rounded to
-// single precision as the machine does.
+// Values of several numbers, in plain Dart.
 
-final _single = Float32List(4);
-final _singleBits = _single.buffer.asInt32List();
+final _single = Float32List(1);
 final _doubleBits = Float64List(2).buffer.asByteData();
 
 double _toSingle(double value) {
-  _single[0] = value;
-  return _single[0];
+  storeFloat32(_single, 0, value);
+  return loadFloat32(_single, 0);
 }
 
 int _bitsOfSingle(double value) {
-  _single[0] = value;
-  return _singleBits[0];
+  storeFloat32(_single, 0, value);
+  return loadInt32(_single, 0);
 }
 
 double _singleOfBits(int bits) {
-  _singleBits[0] = bits;
-  return _single[0];
+  storeInt32(_single, 0, bits);
+  return loadFloat32(_single, 0);
 }
+
+const _singleSignBit = -0x80000000;
+
+int _signOfSingle(int bits) => bits >> 31 & 1;
 
 int _signOf(double value) {
   _doubleBits.setFloat64(0, value);
   return _doubleBits.getUint8(0) >> 7;
 }
-
-/// The lane [index] of four.
-T _lane<T>(int index, T x, T y, T z, T w) => switch (index) {
-  0 => x,
-  1 => y,
-  2 => z,
-  _ => w,
-};
 
 void _checkMask(int mask) {
   if (mask < 0 || mask > 255) throw RangeError.range(mask, 0, 255, 'mask');
@@ -47,54 +41,56 @@ class Float32x4 {
     double y,
     double z,
     double w,
-  ) => _Float32x4._(_toSingle(x), _toSingle(y), _toSingle(z), _toSingle(w));
-
-  @patch
-  static _Float32x4 _Float32x4Splat(double v) {
-    final value = _toSingle(v);
-    return _Float32x4._(value, value, value, value);
-  }
-
-  @patch
-  factory Float32x4.zero() => _Float32x4._(0.0, 0.0, 0.0, 0.0);
-
-  @patch
-  factory Float32x4.fromInt32x4Bits(Int32x4 x) => _Float32x4._(
-    _singleOfBits(x.x),
-    _singleOfBits(x.y),
-    _singleOfBits(x.z),
-    _singleOfBits(x.w),
+  ) => _Float32x4._(
+    _bitsOfSingle(x),
+    _bitsOfSingle(y),
+    _bitsOfSingle(z),
+    _bitsOfSingle(w),
   );
 
   @patch
+  static _Float32x4 _Float32x4Splat(double v) {
+    final bits = _bitsOfSingle(v);
+    return _Float32x4._(bits, bits, bits, bits);
+  }
+
+  @patch
+  factory Float32x4.zero() => _Float32x4._(0, 0, 0, 0);
+
+  @patch
+  factory Float32x4.fromInt32x4Bits(Int32x4 x) =>
+      _Float32x4._(x.x, x.y, x.z, x.w);
+
+  @patch
   factory Float32x4.fromFloat64x2(Float64x2 xy) =>
-      _Float32x4._(_toSingle(xy.x), _toSingle(xy.y), 0.0, 0.0);
+      _Float32x4._(_bitsOfSingle(xy.x), _bitsOfSingle(xy.y), 0, 0);
 }
 
 @patch
 final class _Float32x4 {
-  final double _x, _y, _z, _w;
-  _Float32x4._(this._x, this._y, this._z, this._w);
+  // The signed 32-bit words that store the exact bits of each lane.
+  final int _xBits, _yBits, _zBits, _wBits;
+  _Float32x4._(this._xBits, this._yBits, this._zBits, this._wBits);
 
   /// Each lane of this and [other] through [f], rounded.
   Float32x4 _each(Float32x4 other, double Function(double, double) f) =>
-      Float32x4(f(_x, other.x), f(_y, other.y), f(_z, other.z), f(_w, other.w));
+      Float32x4(f(x, other.x), f(y, other.y), f(z, other.z), f(w, other.w));
 
   Float32x4 _map(double Function(double) f) =>
-      Float32x4(f(_x), f(_y), f(_z), f(_w));
+      Float32x4(f(x), f(y), f(z), f(w));
 
   Int32x4 _test(Float32x4 other, bool Function(double, double) f) =>
-      Int32x4.bool(
-        f(_x, other.x),
-        f(_y, other.y),
-        f(_z, other.z),
-        f(_w, other.w),
-      );
+      Int32x4.bool(f(x, other.x), f(y, other.y), f(z, other.z), f(w, other.w));
 
   @patch
   Float32x4 operator +(Float32x4 other) => _each(other, (a, b) => a + b);
   @patch
-  Float32x4 operator -() => _map((a) => -a);
+  Float32x4 operator -() => _Float32x4._(
+    _xBits ^ _singleSignBit,
+    _yBits ^ _singleSignBit,
+    _zBits ^ _singleSignBit,
+    _wBits ^ _singleSignBit,
+  );
   @patch
   Float32x4 operator -(Float32x4 other) => _each(other, (a, b) => a - b);
   @patch
@@ -120,52 +116,72 @@ final class _Float32x4 {
   }
 
   @patch
-  Float32x4 abs() => _map((a) => a.abs());
+  Float32x4 abs() => _Float32x4._(
+    _xBits & ~_singleSignBit,
+    _yBits & ~_singleSignBit,
+    _zBits & ~_singleSignBit,
+    _wBits & ~_singleSignBit,
+  );
   @patch
   Float32x4 clamp(Float32x4 lowerLimit, Float32x4 upperLimit) =>
       max(lowerLimit).min(upperLimit);
   @patch
-  double get x => _x;
+  double get x => _singleOfBits(_xBits);
   @patch
-  double get y => _y;
+  double get y => _singleOfBits(_yBits);
   @patch
-  double get z => _z;
+  double get z => _singleOfBits(_zBits);
   @patch
-  double get w => _w;
+  double get w => _singleOfBits(_wBits);
   @patch
   int get signMask =>
-      _signOf(_x) | _signOf(_y) << 1 | _signOf(_z) << 2 | _signOf(_w) << 3;
+      _signOfSingle(_xBits) |
+      _signOfSingle(_yBits) << 1 |
+      _signOfSingle(_zBits) << 2 |
+      _signOfSingle(_wBits) << 3;
+
+  int _laneBits(int index) => switch (index) {
+    0 => _xBits,
+    1 => _yBits,
+    2 => _zBits,
+    _ => _wBits,
+  };
 
   @patch
   Float32x4 shuffle(int mask) {
     _checkMask(mask);
     return _Float32x4._(
-      _lane(mask & 3, _x, _y, _z, _w),
-      _lane(mask >> 2 & 3, _x, _y, _z, _w),
-      _lane(mask >> 4 & 3, _x, _y, _z, _w),
-      _lane(mask >> 6 & 3, _x, _y, _z, _w),
+      _laneBits(mask & 3),
+      _laneBits(mask >> 2 & 3),
+      _laneBits(mask >> 4 & 3),
+      _laneBits(mask >> 6 & 3),
     );
   }
 
   @patch
   Float32x4 shuffleMix(Float32x4 zw, int mask) {
     _checkMask(mask);
+    final other = zw as _Float32x4;
     return _Float32x4._(
-      _lane(mask & 3, _x, _y, _z, _w),
-      _lane(mask >> 2 & 3, _x, _y, _z, _w),
-      _lane(mask >> 4 & 3, zw.x, zw.y, zw.z, zw.w),
-      _lane(mask >> 6 & 3, zw.x, zw.y, zw.z, zw.w),
+      _laneBits(mask & 3),
+      _laneBits(mask >> 2 & 3),
+      other._laneBits(mask >> 4 & 3),
+      other._laneBits(mask >> 6 & 3),
     );
   }
 
   @patch
-  Float32x4 _withX(double x) => _Float32x4._(_toSingle(x), _y, _z, _w);
+  Float32x4 _withX(double x) =>
+      _Float32x4._(_bitsOfSingle(x), _yBits, _zBits, _wBits);
   @patch
-  Float32x4 _withY(double y) => _Float32x4._(_x, _toSingle(y), _z, _w);
+  Float32x4 _withY(double y) =>
+      _Float32x4._(_xBits, _bitsOfSingle(y), _zBits, _wBits);
   @patch
-  Float32x4 _withZ(double z) => _Float32x4._(_x, _y, _toSingle(z), _w);
+  Float32x4 _withZ(double z) =>
+      _Float32x4._(_xBits, _yBits, _bitsOfSingle(z), _wBits);
   @patch
-  Float32x4 _withW(double w) => _Float32x4._(_x, _y, _z, _toSingle(w));
+  Float32x4 _withW(double w) =>
+      _Float32x4._(_xBits, _yBits, _zBits, _bitsOfSingle(w));
   @patch
   Float32x4 min(Float32x4 other) => _each(other, (a, b) => a < b ? a : b);
   @patch
@@ -189,12 +205,10 @@ class Int32x4 {
   );
 
   @patch
-  factory Int32x4.fromFloat32x4Bits(Float32x4 x) => _Int32x4._(
-    _bitsOfSingle(x.x),
-    _bitsOfSingle(x.y),
-    _bitsOfSingle(x.z),
-    _bitsOfSingle(x.w),
-  );
+  factory Int32x4.fromFloat32x4Bits(Float32x4 x) {
+    final value = x as _Float32x4;
+    return _Int32x4._(value._xBits, value._yBits, value._zBits, value._wBits);
+  }
 }
 
 @patch
@@ -213,14 +227,15 @@ final class _Int32x4 {
 
   @patch
   Float32x4 select(Float32x4 trueValue, Float32x4 falseValue) {
-    double one(int mask, double ifTrue, double ifFalse) => _singleOfBits(
-      _bitsOfSingle(ifTrue) & mask | _bitsOfSingle(ifFalse) & ~mask,
-    );
+    final whenTrue = trueValue as _Float32x4;
+    final whenFalse = falseValue as _Float32x4;
+    int one(int mask, int ifTrue, int ifFalse) =>
+        ifTrue & mask | ifFalse & ~mask;
     return _Float32x4._(
-      one(_x, trueValue.x, falseValue.x),
-      one(_y, trueValue.y, falseValue.y),
-      one(_z, trueValue.z, falseValue.z),
-      one(_w, trueValue.w, falseValue.w),
+      one(_x, whenTrue._xBits, whenFalse._xBits),
+      one(_y, whenTrue._yBits, whenFalse._yBits),
+      one(_z, whenTrue._zBits, whenFalse._zBits),
+      one(_w, whenTrue._wBits, whenFalse._wBits),
     );
   }
 }
@@ -421,18 +436,19 @@ class _UnmodifiableFloat64x2ArrayView {
 @patch
 class _TypedList {
   @patch
-  Float32x4 _getFloat32x4(int offsetInBytes) => Float32x4(
-    _getFloat32(offsetInBytes),
-    _getFloat32(offsetInBytes + 4),
-    _getFloat32(offsetInBytes + 8),
-    _getFloat32(offsetInBytes + 12),
+  Float32x4 _getFloat32x4(int offsetInBytes) => _Float32x4._(
+    _getInt32(offsetInBytes),
+    _getInt32(offsetInBytes + 4),
+    _getInt32(offsetInBytes + 8),
+    _getInt32(offsetInBytes + 12),
   );
   @patch
   void _setFloat32x4(int offsetInBytes, Float32x4 value) {
-    _setFloat32(offsetInBytes, value.x);
-    _setFloat32(offsetInBytes + 4, value.y);
-    _setFloat32(offsetInBytes + 8, value.z);
-    _setFloat32(offsetInBytes + 12, value.w);
+    final lanes = value as _Float32x4;
+    _setInt32(offsetInBytes, lanes._xBits);
+    _setInt32(offsetInBytes + 4, lanes._yBits);
+    _setInt32(offsetInBytes + 8, lanes._zBits);
+    _setInt32(offsetInBytes + 12, lanes._wBits);
   }
 
   @patch
