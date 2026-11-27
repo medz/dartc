@@ -7,7 +7,7 @@ import 'conversions.dart';
 import 'scope.dart';
 
 /// Ways to leave a `try` that its `finally` block comes before.
-final class _Finally(final Join join) {
+final class _Finally(final Join join, final int scope) {
   /// What to do after the block, given the value that the function returns.
   final exits = <void Function(HirValue value)>[];
 }
@@ -40,6 +40,8 @@ final class TryTranslator(
     innermost.exits.add((kept) {
       leave(depth, exit, value == null ? null : kept);
     });
+    // Locals of the protected body leave scope before its finally runs.
+    _builder.stay(innermost.scope);
     _enterFinally(innermost, number, value: value);
   }
 
@@ -65,6 +67,7 @@ final class TryTranslator(
         .reference,
         result ?? .integer,
       ]),
+      _builder.scope,
     );
     final caught = _builder.joinAll(node, const [.reference, .reference]);
     _finallies.add(scope);
@@ -150,6 +153,7 @@ final class TryTranslator(
   }
 
   void _catch(CatchClause clause, HirValue exception, HirValue trace) {
+    final scope = _builder.scope;
     for (final (parameter, value) in [
       (clause.exceptionParameter, exception),
       (clause.stackTraceParameter, trace),
@@ -163,5 +167,6 @@ final class TryTranslator(
     _builder.caught.add((exception, trace));
     _statement(clause.body);
     _builder.caught.removeLast();
+    _builder.leave(scope);
   }
 }

@@ -38,6 +38,8 @@ final class ExtensionConstructorTranslator(
         ..thisType = owner.thisType
         ..fallback = () => value;
       _statements.body(body);
+    } else {
+      _builder.stay();
     }
     _builder.end(HirReturn(value));
   }

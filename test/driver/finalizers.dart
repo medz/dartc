@@ -100,6 +100,181 @@ uint8_t *makeMemory(int32_t n) { return calloc(n, 1); }
 void freeMemory(void *p) { total += 1000; free(p); }
 ''';
 
+const finalizableExitsDart = r'''
+import 'dart:ffi';
+
+final lib = DynamicLibrary.open('LIBRARY');
+final sum = lib.lookupFunction<Int64 Function(), int Function()>('sum');
+final finalizer = NativeFinalizer(lib.lookup('finalize'));
+
+class P implements Finalizable {}
+
+P attach(int token) {
+  final value = P();
+  finalizer.attach(value, Pointer.fromAddress(token));
+  return value;
+}
+
+List<int>? garbage;
+
+void probe(int tokens) {
+  garbage = List.filled(16, tokens);
+  print(sum() & tokens);
+}
+
+void stopAtSecond(int round) {
+  if (round == 2) throw 'stop';
+}
+
+void infiniteLoop() {
+  final local = attach(512);
+  var round = 0;
+  for (;;) {
+    probe(512);
+    stopAtSecond(++round);
+  }
+}
+
+Never stopAfterProbe(int token) {
+  probe(token);
+  throw 'stop';
+}
+
+class Stopper {
+  Never stop(int token) => stopAfterProbe(token);
+}
+
+void boundedNever<T extends Never>(T Function() stop) {
+  final local = attach(4096);
+  stop().unreachable;
+}
+
+void neverCalls(Stopper stopper) {
+  try {
+    final local = attach(1024);
+    stopAfterProbe(1024);
+  } on String {}
+  try {
+    final local = attach(2048);
+    stopper.stop(2048);
+  } on String {}
+  try {
+    boundedNever(() => stopAfterProbe(4096));
+  } on String {}
+}
+
+P? forget(int token) {
+  probe(token);
+  return null;
+}
+
+void overwritesLocal() {
+  P? local = attach(8192);
+  local = forget(8192);
+}
+
+void overwritesCaptured() {
+  P? captured = attach(16384);
+  // Makes this a shared cell even when the closure is removed.
+  void clear() {
+    captured = null;
+  }
+
+  captured = forget(16384);
+}
+
+int duringInitialization(int token) {
+  probe(token);
+  return token;
+}
+
+class ConstructorProbe {
+  final int token;
+  ConstructorProbe(P kept) : token = duringInitialization(32768);
+  ConstructorProbe.redirect(P kept) : this._(65536);
+  ConstructorProbe._(int token) : token = duringInitialization(token);
+}
+
+extension type ExtensionProbe(int token) {
+  ExtensionProbe.initializer(P kept) : token = duringInitialization(131072);
+}
+
+int returns() {
+  final outer = attach(2);
+  try {
+    final middle = attach(4);
+    try {
+      final inner = attach(8);
+      probe(14);
+      return 17;
+    } finally {
+      probe(6);
+    }
+  } finally {
+    probe(2);
+  }
+}
+
+void loops() {
+  for (var i = 0; i < 2; i++) {
+    final token = 16 << i;
+    try {
+      final local = attach(token);
+      probe(token);
+      if (i == 0) continue;
+      break;
+    } finally {
+      print(i);
+    }
+  }
+}
+
+Future<int> asyncReturn() async {
+  final outer = attach(64);
+  try {
+    return 23;
+  } finally {
+    await Future<void>.value();
+    probe(64);
+  }
+}
+
+void catches() {
+  try {
+    throw attach(128);
+  } on P catch (p) {
+    probe(128);
+  }
+  try {
+    try {
+      throw 'again';
+    } catch (_) {
+      final local = attach(256);
+      probe(256);
+      rethrow;
+    }
+  } catch (error) {
+    print(error);
+  }
+}
+
+void main() async {
+  try {
+    infiniteLoop();
+  } on String {}
+  print(returns());
+  loops();
+  print(await asyncReturn());
+  catches();
+  neverCalls(Stopper());
+  overwritesLocal();
+  overwritesCaptured();
+  ConstructorProbe(attach(32768));
+  ConstructorProbe.redirect(attach(65536));
+  ExtensionProbe.initializer(attach(131072));
+}
+''';
+
 const finalizersDart = r'''
 import 'dart:ffi';
 import 'dart:typed_data';
