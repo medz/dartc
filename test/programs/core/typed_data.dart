@@ -24,6 +24,12 @@ void main() {
   print(b.sublist(2)); // expect: [205, 171]
   b.setRange(1, 4, b);
   print(b); // expect: [44, 44, 255, 205]
+  final bytes = Uint8List.fromList([for (var i = 0; i < 16; i++) i]);
+  Uint8List.sublistView(
+    bytes,
+    3,
+  ).setRange(0, 10, Uint8List.sublistView(bytes, 1));
+  print(bytes); // expect: [0, 1, 2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 14, 15]
   print(Int64List.fromList([1 << 62, -1])); // expect: [4611686018427387904, -1]
   try {
     b[4];

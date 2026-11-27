@@ -25,7 +25,7 @@ final class _BlockWriter {
   /// What was written, but for a part of a byte, or null if there is nothing.
   Uint8List? take() {
     if (_end == 0) return null;
-    final result = Uint8List.sublistView(_out, 0, _end).sublist(0);
+    final result = _out.sublist(0, _end);
     _end = 0;
     return result;
   }
@@ -34,13 +34,16 @@ final class _BlockWriter {
     _bits |= value << _bitCount;
     _bitCount += count;
     while (_bitCount >= 8) {
-      if (_end == _out.length) {
-        _out = Uint8List(_end * 2)..setRange(0, _end, _out);
-      }
+      if (_end == _out.length) _grow(_end + 1);
       _out[_end++] = _bits;
       _bits >>= 8;
       _bitCount -= 8;
     }
+  }
+
+  void _grow(int needed) {
+    final twice = _out.length * 2;
+    _out = Uint8List(twice < needed ? needed : twice)..setRange(0, _end, _out);
   }
 
   void writeBig(int value) {
@@ -101,9 +104,9 @@ final class _BlockWriter {
       toByte();
       write(length, 16);
       write(~length & 0xffff, 16);
-      for (var i = 0; i < length; i++) {
-        write(window[at + i], 8);
-      }
+      if (_end + length > _out.length) _grow(_end + length);
+      _out.setRange(_end, _end + length, window, at);
+      _end += length;
       at += length;
     } while (at < end);
   }

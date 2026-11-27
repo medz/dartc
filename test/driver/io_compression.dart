@@ -97,6 +97,14 @@ Future<void> main() async {
       .transform(gzip.decoder)
       .fold(0, (sum, piece) => sum + piece.length);
   print('streamed $streamed');
+  final stored = List<int>.generate(2 * 65536 + 17, (i) => i * i ~/ 7 & 0xff);
+  final repeated = utf8.encode('abc' * 500);
+  final members = [
+    ...GZipCodec(level: 0).encode(stored),
+    ...gzip.encode(repeated),
+  ];
+  final joined = inPieces(gzip.decoder, members, 4093);
+  print('stored members ${joined.length} ${hash(joined) == hash([...stored, ...repeated])}');
   final small = [1, 2, 3, 1, 2, 3, 1, 2, 3];
   attempt('two', () => gzip.decode([...gzip.encode([1]), ...gzip.encode([2])]));
   attempt('rest', () => gzip.decode([...gzip.encode([1]), 7, 8]));
@@ -105,7 +113,9 @@ Future<void> main() async {
   attempt('empty', () => gzip.decode([]));
   attempt('zlib of gzip', () => zlib.decode(gzip.encode(small)));
   attempt('bad', () => zlib.decode([1, 2, 3, 4]));
-  attempt('bad check', () => gzip.decode(gzip.encode(small)..[14] ^= 1));
+  final badCheck = gzip.encode(small);
+  badCheck[badCheck.length - 8] ^= 1;
+  attempt('bad check', () => gzip.decode(badCheck.sublist(0, badCheck.length - 4)));
   attempt('bad adler', () => zlib.decode(zlib.encode(small)..last ^= 1));
   attempt('bad data', () => zlib.decode([0x78, 0x9c, 0x07, 0, 0]));
   attempt('no dictionary', () =>

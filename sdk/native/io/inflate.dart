@@ -28,7 +28,7 @@ final class _Inflater {
   /// The output, with up to 32 KB before what was not taken yet, and where that
   /// starts and ends.
   Uint8List _output = Uint8List(1 << 16);
-  int _start = 0, _end = 0;
+  int _start = 0, _end = 0, _checked = 0;
 
   /// What comes next. Gives whether there was enough input.
   late bool Function() _step = _readHeader;
@@ -127,7 +127,7 @@ final class _Inflater {
     for (var i = from; i < dictionary.length; i++) {
       _output[_end++] = dictionary[i];
     }
-    _start = _end;
+    _start = _checked = _end;
   }
 
   int _readBig() {
@@ -177,6 +177,7 @@ final class _Inflater {
     switch (kind) {
       case 0:
         _toByte();
+        // The two lengths also consume any bytes already in the bit buffer.
         final length = _read(16), inverted = _read(16);
         if (inverted == _needsMore) return false;
         if (length != ~inverted & 0xffff) _fail();
@@ -306,7 +307,6 @@ final class _Inflater {
     if (symbol < 256) {
       _room(1);
       _output[_end++] = symbol;
-      _took(1);
       return true;
     }
     if (symbol == 256) {
@@ -329,30 +329,30 @@ final class _Inflater {
       _output[_end] = _output[_end - distance];
       _end++;
     }
-    _took(length);
     return true;
   }
 
   bool _copyStored() {
-    var isAny = false;
-    while (_rest > 0) {
-      final byte = _read(8);
-      // What was copied stays.
-      if (byte == _needsMore) return isAny;
-      isAny = true;
-      _room(1);
-      _output[_end++] = byte;
-      _took(1);
-      _rest--;
-      if (_end - _start >= _largestPiece) return true;
+    if (_rest == 0) {
+      _step = _readBlockHeader;
+      return true;
     }
-    _step = _readBlockHeader;
+    final available = _input.length - _at;
+    if (available == 0) return false;
+    _room(1);
+    final room = min(_output.length - _end, _largestPiece - (_end - _start));
+    final count = min(min(_rest, available), room);
+    _output.setRange(_end, _end + count, _input, _at);
+    _at += count;
+    _end += count;
+    _rest -= count;
     return true;
   }
 
   /// Makes room for [count] bytes.
   void _room(int count) {
     if (_end + count <= _output.length) return;
+    _checkOutput();
     // What can be referred to stays, and what was not taken.
     final kept = _end - _window < _start ? _end - _window : _start;
     final from = kept < 0 ? 0 : kept;
@@ -364,16 +364,20 @@ final class _Inflater {
     _output = target;
     _start -= from;
     _end -= from;
+    _checked = _end;
   }
 
-  void _took(int count) {
-    _total += count;
-    if (_wrapping != _Wrapping.raw) {
-      _check.add(_output, _end - count, _end, isCrc: _wrapping == .gzip);
+  /// Checks the span before it can be moved or compared with the trailer.
+  void _checkOutput() {
+    if (_checked < _end && _wrapping != _Wrapping.raw) {
+      _check.add(_output, _checked, _end, isCrc: _wrapping == .gzip);
+      _total += _end - _checked;
     }
+    _checked = _end;
   }
 
   bool _readTrailer() {
+    _checkOutput();
     switch (_wrapping!) {
       case _Wrapping.raw:
         break;
@@ -472,11 +476,15 @@ final class _Check {
       return;
     }
     var a = _a, b = _b;
-    for (var i = start; i < end; i++) {
-      a += data[i] & 0xff;
-      if (a >= 65521) a -= 65521;
-      b += a;
-      if (b >= 65521) b -= 65521;
+    // Keep both sums within 64 bits by reducing after each span.
+    while (start < end) {
+      final limit = end - start < 65536 ? end : start + 65536;
+      for (; start < limit; start++) {
+        a += data[start] & 0xff;
+        b += a;
+      }
+      a %= 65521;
+      b %= 65521;
     }
     _a = a;
     _b = b;
