@@ -103,6 +103,8 @@ final class HirMachineState(final HirModule _module) {
         return _module.classes.indexOf((inputs.single as HirObject).target);
       case .addressOf:
         return _addresses[inputs.single] ??= ++_numbered * 16;
+      case .objectAt:
+        throw UnsupportedError('Objects at addresses.');
       case .mapMemory:
         return (_mapped += number(0) + 4096) - number(0);
       case .outputBuffer:

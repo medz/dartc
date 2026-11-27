@@ -19,6 +19,12 @@ final class TestTable(final ClassTable _classes) {
   HirTypeTest testOf(InterfaceElement class_) =>
       _tests[class_] ??= HirTypeTest(class_.displayName);
 
+  HirTypeTest? _unsendable;
+
+  /// Whether objects are of classes that the official runtime refuses to send
+  /// to other isolates, as they or their supertypes are marked so.
+  HirTypeTest get unsendable => _unsendable ??= HirTypeTest('unsendable');
+
   /// The classes that pass each test, of [classes] and of those that functions
   /// are, which are like [functionClass].
   Map<HirTypeTest, Set<HirClass>> results(
@@ -39,5 +45,21 @@ final class TestTable(final ClassTable _classes) {
           if (_classes.levels.of(class_).chain.any((l) => l.element == tested))
             _classes.classOf(class_),
       },
+    ?_unsendable: {
+      for (final class_ in classes)
+        if (_isUnsendable(class_)) _classes.classOf(class_),
+    },
   };
+
+  static bool _isUnsendable(InterfaceElement class_) => [
+    class_,
+    for (final type in class_.allSupertypes) type.element,
+  ].any(_isMarked);
+
+  static bool _isMarked(Element element) =>
+      element.metadata.annotations.any((annotation) {
+        final value = annotation.computeConstantValue();
+        return value?.type?.element?.name == 'pragma' &&
+            value?.getField('name')?.toStringValue() == 'vm:isolate-unsendable';
+      });
 }

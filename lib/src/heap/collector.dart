@@ -36,6 +36,9 @@ const _partial = 1480, _given = 1936, _stateBytes = 2392;
 // only the first entry.
 const _arrays = 1, _references = 2, _properties = 3, _entries = 4, _queues = 5;
 
+/// The bits of the kind in its word, above which there is more about the class.
+const _kindBits = 127;
+
 // A block: the next one, the size of its cells, its own size, its free cells
 // and their bytes, as long as they are not taken, and the next block of the
 // size that has any.
@@ -305,7 +308,7 @@ void _markFields(int object) {
   for (var i = 0; i < count; i++) {
     _mark(load64(object + load32(record + 8 + i * 4)));
   }
-  final kind = load32(record + 4);
+  final kind = load32(record + 4) & _kindBits;
   if (kind == 0) return;
   if (kind != _arrays) return _noteWeak(object, record, kind);
   final length = load64(object + _length);

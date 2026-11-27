@@ -60,6 +60,10 @@ final class OperationTranslator(
         return _builder.add(
           HirIsInstance(_scope.errorTest, argument(0, .reference)),
         );
+      case 'isUnsendable':
+        return _builder.add(
+          HirIsInstance(_scope.unsendableTest, argument(0, .reference)),
+        );
       case 'applyFunction':
         return _builder.call(
           HirVirtualCall(_scope.applySelector, argument(0, .reference), [

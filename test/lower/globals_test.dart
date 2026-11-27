@@ -162,7 +162,10 @@ void main() {
     }
 
     expect(offsets(0), [16]);
-    expect(words.getUint32(words.getUint32(0, .little) + 4, .little), 0);
+    // The kind is in the low bits, the size of the fields above bit 8.
+    final kind = words.getUint32(words.getUint32(0, .little) + 4, .little);
+    expect(kind & 127, 0);
+    expect(kind >> 8, 24);
     expect(offsets(1), [16]);
   });
 
