@@ -1,24 +1,24 @@
 {
   "bodies": {
-    "ratio": 2.39,
-    "spread": 0.0093,
+    "ratio": 2.359,
+    "spread": 0.0038,
     "bytes": 479272,
-    "compiling": 1213,
-    "memory": 223150080
+    "compiling": 1118,
+    "memory": 221970432
   },
   "calls": {
-    "ratio": 0.938,
-    "spread": 0.0058,
+    "ratio": 0.933,
+    "spread": 0.0079,
     "bytes": 462759,
-    "compiling": 1145,
-    "memory": 240959488
+    "compiling": 1091,
+    "memory": 218152960
   },
   "dartc": {
-    "ratio": 3.458,
-    "spread": 0.016,
+    "ratio": 3.456,
+    "spread": 0.0037,
     "bytes": 30697497,
-    "compiling": 32356,
-    "memory": 2077523968
+    "compiling": 31197,
+    "memory": 2187624448
   },
   "dartc-self": {
     "ratio": 4.66,
@@ -27,73 +27,73 @@
     "memory": 2486468608
   },
   "encoding": {
-    "ratio": 2.659,
-    "spread": 0.0186,
+    "ratio": 2.687,
+    "spread": 0.0083,
     "bytes": 594858,
-    "compiling": 1236,
-    "memory": 231194624
+    "compiling": 1204,
+    "memory": 222298112
   },
   "flips": {
-    "ratio": 1.227,
-    "spread": 0.0175,
+    "ratio": 1.248,
+    "spread": 0.0053,
     "bytes": 479271,
-    "compiling": 1106,
-    "memory": 220217344
+    "compiling": 1104,
+    "memory": 221233152
   },
   "maps": {
-    "ratio": 2.128,
-    "spread": 0.0126,
+    "ratio": 2.172,
+    "spread": 0.0093,
     "bytes": 512294,
-    "compiling": 1246,
-    "memory": 227033088
+    "compiling": 1137,
+    "memory": 224559104
   },
   "norm": {
-    "ratio": 2.183,
-    "spread": 0.0307,
+    "ratio": 2.245,
+    "spread": 0.0077,
     "bytes": 479270,
-    "compiling": 1132,
-    "memory": 219611136
+    "compiling": 1115,
+    "memory": 221724672
   },
   "shapes": {
-    "ratio": 1.045,
-    "spread": 0.0186,
+    "ratio": 1.064,
+    "spread": 0.0268,
     "bytes": 446248,
-    "compiling": 1125,
-    "memory": 217677824
+    "compiling": 1086,
+    "memory": 220839936
   },
   "sieve": {
-    "ratio": 0.921,
-    "spread": 0.0245,
+    "ratio": 0.917,
+    "spread": 0.0086,
     "bytes": 479271,
-    "compiling": 1138,
-    "memory": 233242624
+    "compiling": 1112,
+    "memory": 228212736
   },
   "sorting": {
-    "ratio": 1.592,
-    "spread": 0.025,
+    "ratio": 1.576,
+    "spread": 0.0056,
     "bytes": 578345,
-    "compiling": 1183,
-    "memory": 229195776
+    "compiling": 1173,
+    "memory": 226787328
   },
   "texts": {
     "ratio": 2.393,
-    "spread": 0.0137,
+    "spread": 0.0069,
     "bytes": 941607,
-    "compiling": 1407,
-    "memory": 242073600
+    "compiling": 1387,
+    "memory": 245006336
   },
   "trees": {
-    "ratio": 2.676,
-    "spread": 0.0137,
+    "ratio": 2.793,
+    "spread": 0.0143,
     "bytes": 462759,
-    "compiling": 1195,
-    "memory": 221216768
+    "compiling": 1100,
+    "memory": 224657408
   },
   "waiting": {
-    "ratio": 1.246,
-    "spread": 0.0089,
+    "ratio": 1.252,
+    "spread": 0.0092,
     "bytes": 677465,
-    "compiling": 1237,
-    "memory": 232767488
+    "compiling": 1228,
+    "memory": 232161280
   }
 }

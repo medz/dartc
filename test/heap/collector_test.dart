@@ -486,7 +486,8 @@ void main() {
       final lost = _create(1);
       _machine.store64(lost + 8, kept);
       _create(1);
-      expect(_isAllocated(kept), isTrue);
+      // The allocation swept the block, which unmarked what is kept.
+      expect(_machine.load32(kept + 4), 1 | 16 << 4);
       expect(_machine.collections, 3);
       // The same memory serves again, and held garbage in between.
       final again = _create(1);
@@ -517,10 +518,12 @@ void main() {
   }
 }
 
-/// Whether the cell at [address] is in use, where it is still mapped.
+/// Whether the cell at [address] is in use right after a collection, where it
+/// is still mapped. Until its block is swept, a small one is marked.
 bool _isAllocated(int address) {
   try {
-    return _machine.load32(address + 4) & 1 != 0;
+    final flags = _machine.load32(address + 4);
+    return flags & 1 != 0 && (flags & 2 != 0 || flags >> 8 == 0);
   } on StateError {
     return false;
   }
@@ -551,7 +554,7 @@ void _randomGraph(Random random, int steps) {
     model.removeWhere((object, _) => !alive.contains(object));
     model.forEach((object, expected) {
       expect(_machine.load32(object), expected.class_);
-      expect(_machine.load32(object + 4) & 3, 1);
+      expect(_machine.load32(object + 4) & 1, 1);
       expected.fields.forEach((offset, target) {
         expect(_machine.load64(object + offset), target);
       });
