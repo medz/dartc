@@ -10,13 +10,12 @@ final class RuntimeNeeds(
 ) {
   HirFunction? get allocate => _allocate;
   HirFunction? get raise => _raise;
-  HirFunction? get outOfMemory => _outOfMemory;
   HirFunction? get stackOverflow => _stackOverflow;
   HirFunction? get uncaught => _uncaught;
   HirFunction? get eventLoop => _eventLoop;
   HirFunction? get callback => _callback;
   HirFunction? get spawned => _spawned;
-  HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
+  HirFunction? _allocate, _raise, _stackOverflow, _uncaught;
   HirFunction? get exitCode => _exitCode;
   HirFunction? _eventLoop, _callback, _exitCode, _spawned;
 
@@ -58,8 +57,6 @@ final class RuntimeNeeds(
     _stackOverflow ??= _links.exhaustion('StackOverflowError');
     _raise ??= _runtime('raise');
     _uncaught ??= _runtime('reportUncaught');
-    if (_allocate == null) return;
-    _outOfMemory ??= _links.exhaustion('OutOfMemoryError');
   }
 
   /// Whether [function] throws, or calls what may use up the stack.

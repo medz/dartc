@@ -19,11 +19,14 @@ import 'system_calls.dart';
 /// It may take the number of arguments and their address.
 const entrySymbol = '.start';
 
-/// The symbol of each function of [module].
+/// The symbol of each function of [module]. Allocations call that of the
+/// runtime directly.
 Map<HirFunction, String> functionSymbols(HirModule module) => {
   // Numbers keep functions apart, and apart from system functions.
   for (final (i, function) in module.functions.indexed)
-    function: 'dart.$i.${function.name}',
+    function: function == module.allocate
+        ? allocateSymbol
+        : 'dart.$i.${function.name}',
 };
 
 /// The exit code of a program that throws what nothing catches.

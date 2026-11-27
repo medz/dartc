@@ -109,7 +109,6 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('allocate', module.allocate, [.integer], .integer);
   check('raise', module.raise, [.reference, .reference]);
   check('stackOverflow', module.stackOverflow, []);
-  check('outOfMemory', module.outOfMemory, []);
   final callback = module.callback;
   check('callback', callback, [.integer, .integer, .integer], callback?.result);
   final spawned = module.spawned;

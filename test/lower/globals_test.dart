@@ -176,7 +176,7 @@ void main() {
         return HirReturn();
       }, allocate: _allocate()),
     );
-    expect(module.signatures['.allocate'], LirSignature([.i64], .ref));
+    expect(module.signatures['.allocate'], LirSignature([.i64], .i64));
   });
 
   group('machine operations', () {
@@ -210,7 +210,8 @@ void main() {
       final bytes = Uint8List.fromList([
         for (var i = 0; i < 32; i++) 0xf8 + i & 0xff,
       ]);
-      return interpreter.call('dart.1.f', [interpreter.memory.map(bytes)]);
+      // The function given as [HirModule.allocate] is called by its symbol.
+      return interpreter.call('.allocate', [interpreter.memory.map(bytes)]);
     }
 
     HirValue at(HirBlock block, HirValue address, int offset) =>
@@ -316,7 +317,7 @@ void main() {
           HirModule(main.main, main.functions, allocate: function),
         );
         final code = module.functions
-            .singleWhere((function) => function.name == 'dart.1.f')
+            .singleWhere((function) => function.name == '.allocate')
             .blocks
             .single
             .instructions;
@@ -345,7 +346,7 @@ void main() {
           HirModule(main.main, main.functions, allocate: function),
           collectsAlways: always,
         );
-        expect(LirInterpreter(lowered).call('dart.1.f', [0]), always ? 1 : 0);
+        expect(LirInterpreter(lowered).call('.allocate', [0]), always ? 1 : 0);
       }
     });
 
@@ -358,7 +359,7 @@ void main() {
         HirModule(main.main, main.functions, allocate: function),
       );
       expect(
-        () => LirInterpreter(lowered).call('dart.1.f', [0]),
+        () => LirInterpreter(lowered).call('.allocate', [0]),
         throwsA(isA<LirFault>()),
       );
     });

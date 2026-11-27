@@ -184,8 +184,8 @@ void main() {
     final code = emitCode(
       LirModule(
         functions: [
-          function(allocateSymbol, [.i64], .ref, (block, _) {
-            return block.add(ConstNull());
+          function(allocateSymbol, [.i64], .i64, (block, _) {
+            return block.add(ConstInt(0));
           }),
           LirFunction('f', LirSignature([.i64]), [entry, normal, handler]),
         ],
@@ -244,8 +244,8 @@ void main() {
           block.add(Alloc(block.add(ConstInt(16))));
           return p[0];
         }),
-        function('.allocate', [.i64], .ref, (block, _) {
-          return block.add(ConstNull());
+        function('.allocate', [.i64], .i64, (block, _) {
+          return block.add(ConstInt(0));
         }),
       ],
     );

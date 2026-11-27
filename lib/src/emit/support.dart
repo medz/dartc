@@ -20,7 +20,7 @@ void checkSupported(LirModule module) {
   }
 
   final allocate = module.signatures[allocateSymbol];
-  final canAllocate = allocate == LirSignature([.i64], .ref);
+  final canAllocate = allocate == LirSignature([.i64], .i64);
   final thrower = module.signatures[throwSymbol];
   final canThrow = thrower == LirSignature([.ref, .ref]);
   for (final function in module.functions) {

@@ -150,7 +150,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 启动 isolate | `Isolate.spawn` 用 `malloc` 拷一份 `.isolate` 的初始字节（lower 时另存一份只读的 `.isolateTemplate`，布局和发码用同一个函数 `isolateData`），再用 pthread 开一个 8 MB 栈的线程。线程从 `.isolateEntry` 开始：它的参数指着一个字，里面是这份数据的地址，函数先把它放进 isolate 的寄存器，设好栈界限，再调用 `sdk/native/isolate` 的 `_runSpawned`。回收器的状态是一个全局变量，所以每个 isolate 有自己的堆，结束时全部还回去。新 isolate 先把控制端口和能力发给父亲，再像官方那样给自己发一条消息来调用入口函数。名字默认是入口函数带类名的全名。C 来的回调只能进第一个 isolate，别的 isolate 做回调时抛 `UnsupportedError` |
 | 控制 isolate | 发到控制端口的消息（暂停、继续、ping、kill、监听退出和错误、错误是否致命）不排队，事件循环每次取消息时先处理，暂停时也处理。暂停时（`EventOrder.isPaused`）不处理别的消息、定时器和其他来源。`kill` 在下一次取消息时、`Isolate.exit` 当场用 `raiseTo` 直接跳回 `_runSpawned` 的 `catch`，中间函数的 `catch` 和 `finally` 都不运行，和官方的不可捕获一样；第一个 isolate 照官方写一行 `isolate terminated by …`，退出码 255。没有捕获的错误先由事件循环交给 `EventOrder.uncaught`：发给错误的监听者，不致命时继续循环；致命时结束 isolate，没有监听者才把错误写到 stderr。结束时先关收件箱，再告诉退出的监听者 |
 | 堆栈 | HIR 的调用记着源码的位置（函数、文件、行），内联时连成一串；发码时和栈表一起记下返回地址到位置的表（`.places`）。`throw` 和 `StackTrace.current` 只沿帧指针收下返回地址，要文字时才查表，格式照官方 AOT（只有行号）。`async` 函数恢复以后，用协程记下的等待者接上 `<asynchronous suspension>`。帧走到不是程序的调用为止 |
-| 分配 | 调用模块里的函数 `.allocate`，它来自 `heap` 的 `allocate`；内存不够时抛异常 |
+| 分配 | 调用处只有一次调用：`heap` 的 `allocate` 本身就叫 `.allocate`，空闲链表有格子就直接给，否则走慢路径（收集、加块）。慢路径没有内存时调用程序的钩子 `outOfMemory`，编译出的程序在那里抛预先做好的 `OutOfMemoryError`，所以调用处不检查 0，也没有中间的包装函数；栈表还是那次调用的。`collectsAlways` 时总走慢路径。不把快路径复制到每个调用处：texts 有约 2,300 处，每处约 60 字节，程序会大很多。也不省掉构造函数里存 0 的指令：构造函数变小后被内联到更多地方，dartc 反而多 82 KB（代码和栈表），速度在噪声内 |
 | 格子的大小 | 到 512 字节每 16 字节一档，再到 32 KB 每翻一倍四档，各档的格子放在 256 KB 的块里；更大的对象自己一块 |
 | 弱引用 | 类的表里有种类：`WeakReference` 的目标；`Expando` 的项，键活着值才活着；`Finalizer` 的项，值没了就放进一个队列，由事件循环调用 Dart 的函数。标记时把这些对象连成链，标记完再处理（`heap/collector.dart`） |
 | 何时回收 | 上次回收后用掉的格子和块（不论新的还是回收来的）和上次留下的一样多时，至少 4 MB |

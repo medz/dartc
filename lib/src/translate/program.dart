@@ -186,7 +186,6 @@ final class ProgramTranslator(
       allocate: _needs.allocate,
       raise: _needs.raise,
       stackOverflow: _needs.stackOverflow,
-      outOfMemory: _needs.outOfMemory,
       uncaught: _needs.uncaught,
       callback: _needs.callback,
       spawned: _needs.spawned,
@@ -484,7 +483,9 @@ final class ProgramTranslator(
   HirFunction? functionOf(ExecutableElement element) {
     final library = element.library;
     if ('${library.uri}' == 'dart:_heap/program.dart') {
-      return _typeFunctions.named(element.displayName);
+      final name = element.displayName;
+      if (name == 'outOfMemory') return _links.exhaustion('OutOfMemoryError');
+      return _typeFunctions.named(name);
     }
     return _declarations[element] == null ? null : _functions.of(element);
   }

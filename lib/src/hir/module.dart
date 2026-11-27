@@ -51,8 +51,9 @@ final class HirFunction(
 /// Integers are boxed in objects of [integers], or in references themselves.
 ///
 /// The remaining functions do the work of the runtime. [allocate] gives the
-/// address of memory for an object, of the size it takes, or 0. [raise] throws
-/// an exception with its trace. [stackOverflow] and [outOfMemory] throw theirs.
+/// address of memory for an object, of the size it takes, and throws where
+/// none is left. [raise] throws an exception with its trace. [stackOverflow]
+/// throws its error.
 /// [uncaught] reports an exception that ends the program. [callback] does what
 /// a function of C that the program made does, given its number, the address
 /// of the block of the call, and that of what is passed on the stack.
@@ -73,7 +74,6 @@ final class HirModule(
   final HirFunction? allocate,
   final HirFunction? raise,
   final HirFunction? stackOverflow,
-  final HirFunction? outOfMemory,
   final HirFunction? uncaught,
   final HirFunction? callback,
   final HirFunction? spawned,

@@ -194,6 +194,8 @@ void main() {
       expect(count, greaterThan(1 << 16));
       expect(allocate(16), 0);
       expect(allocate(1 << 22), 0);
+      // The program is told each time, as compiled programs throw then.
+      expect((program as SimulatedProgram).exhaustions, 3);
       // All kept objects are whole.
       var found = 0;
       for (
@@ -214,6 +216,7 @@ void main() {
         _start(available: SimulatedMachine.ownBytes + available);
         expect(allocate(16), 0);
         expect(allocate(16), 0);
+        expect((program as SimulatedProgram).exhaustions, 2);
         expect(heap, 0);
         expect(_machine.mapped, SimulatedMachine.ownBytes);
       }
