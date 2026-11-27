@@ -88,6 +88,9 @@ final class _Encoder {
   /// The copies made in the heap, until they are copied out.
   final List<Object> _kept = [];
 
+  /// The bytes that move with the copy, once it is made.
+  final List<_TransferableTypedDataImpl> _transferred = [];
+
   /// Where weak references are in the copy, and what they refer to.
   final List<int> _weak = [];
 
@@ -108,6 +111,9 @@ final class _Encoder {
     }
     store64(_buffer, _objects.length);
     store64(_buffer + 8, root);
+    for (final bytes in _transferred) {
+      bytes._isGone = true;
+    }
     // What is copied is found through addresses only.
     reachabilityFence(message);
     return _buffer;
@@ -123,6 +129,15 @@ final class _Encoder {
     final object = objectAt(value);
     if (_refusal(object) case final refusal?) {
       throw ArgumentError('Illegal argument in isolate message: $refusal\n');
+    }
+    if (object is _TransferableTypedDataImpl) {
+      if (object._isGone) {
+        throw ArgumentError(
+          'Illegal argument in isolate message : (TransferableTypedData has '
+          'been transferred already)\n',
+        );
+      }
+      _transferred.add(object);
     }
     final index = _objects.length;
     _indexes[value] = index;
