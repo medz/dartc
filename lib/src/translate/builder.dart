@@ -302,12 +302,14 @@ final class FunctionBuilder(
       final value = _bound.contains(variable)
           ? _values[_same(variable)]!
           : read(variable);
-      add(HirMachine(.addressOf, [value]));
+      _stayValue(value);
     }
     if (scope == 0 && _keepsReceiver) {
-      add(HirMachine(.addressOf, [receiver!]));
+      _stayValue(receiver!);
     }
   }
+
+  void _stayValue(HirValue value) => add(HirMachine(.addressOf, [value]));
 
   late final bool _keepsReceiver =
       receiver != null && isFinalizable(level?.element.thisType ?? thisType);
@@ -387,6 +389,11 @@ final class FunctionBuilder(
     final variable = _same(given);
     if (value.type != _types[variable]) {
       throw StateError('Assigned ${value.type} to $variable.');
+    }
+    if (_values[variable] case final previous?
+        when variable is VariableElement && isFinalizable(variable.type)) {
+      // A captured variable's cell still holds the previous value here.
+      _stayValue(previous);
     }
     if (_isCell(variable)) {
       final field = cells(_types[variable]!).fields.single;

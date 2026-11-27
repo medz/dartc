@@ -163,6 +163,26 @@ void neverCalls(Stopper stopper) {
   } on String {}
 }
 
+P? forget(int token) {
+  probe(token);
+  return null;
+}
+
+void overwritesLocal() {
+  P? local = attach(8192);
+  local = forget(8192);
+}
+
+void overwritesCaptured() {
+  P? captured = attach(16384);
+  // Makes this a shared cell even when the closure is removed.
+  void clear() {
+    captured = null;
+  }
+
+  captured = forget(16384);
+}
+
 int returns() {
   final outer = attach(2);
   try {
@@ -231,6 +251,8 @@ void main() async {
   print(await asyncReturn());
   catches();
   neverCalls(Stopper());
+  overwritesLocal();
+  overwritesCaptured();
 }
 ''';
 
