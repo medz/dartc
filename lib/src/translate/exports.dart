@@ -135,7 +135,7 @@ final class ExportTable(final ProgramScope _scope) {
     final passing = _scope.natives.types.passing(signature);
     final function = HirFunction('export $name', const [.integer, .integer]);
     final target = _scope.functionOf(element)!;
-    _scope.schedule(() {
+    _scope.schedule(function, () {
       final builder = FunctionBuilder(unit, function, const []);
       final values = NativeValues(_scope, builder);
       final conversions = Conversions(_scope, builder);

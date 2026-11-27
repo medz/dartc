@@ -19,6 +19,13 @@ import 'system_calls.dart';
 /// It may take the number of arguments and their address.
 const entrySymbol = '.start';
 
+/// The symbol of each function of [module].
+Map<HirFunction, String> functionSymbols(HirModule module) => {
+  // Numbers keep functions apart, and apart from system functions.
+  for (final (i, function) in module.functions.indexed)
+    function: 'dart.$i.${function.name}',
+};
+
 /// The exit code of a program that throws what nothing catches.
 const _uncaughtCode = 255;
 
@@ -32,11 +39,7 @@ LirModule lowerProgram(
   OperatingSystem system = .macos,
 }) {
   verifyHir(module);
-  // Numbers keep functions apart, and apart from system functions.
-  final symbols = <HirCallable, String>{
-    for (final (i, function) in module.functions.indexed)
-      function: 'dart.$i.${function.name}',
-  };
+  final Map<HirCallable, String> symbols = functionSymbols(module);
   final layout = ObjectLayout(module, symbols);
   final statics = StaticData(module, layout);
   final calls = SystemCalls.of(system);

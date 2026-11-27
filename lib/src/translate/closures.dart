@@ -105,7 +105,7 @@ final class ClosureTranslator(
       ),
     );
     if (name != null) _builder.locals.functions[name] = function;
-    _scope.schedule(() {
+    _scope.schedule(function, () {
       final builder = environment.build(
         function,
         element.formalParameters,

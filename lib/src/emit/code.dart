@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:dartc/lir.dart' show textSymbol;
+import 'package:dartc/lir.dart'
+    show handlerSymbol, placesSymbol, stackMapSymbol, textSymbol;
 import 'package:dartc/native.dart';
 
 import 'stack_maps.dart';
@@ -85,3 +86,10 @@ final class EmittedCode(
   Iterable<String> get functionNames =>
       functions.keys.where((name) => name != textSymbol);
 }
+
+/// What each part of [EmittedCode.data] that emitting adds is, by its name.
+const emittedData = {
+  stackMapSymbol: 'stack maps',
+  handlerSymbol: 'where throws continue',
+  placesSymbol: 'places in the source',
+};

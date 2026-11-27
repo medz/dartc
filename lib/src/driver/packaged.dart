@@ -7,6 +7,7 @@ import 'package:dartc/source.dart';
 
 import 'compile.dart';
 import 'sdk.dart';
+import 'sizes.dart';
 
 // What finds the standard libraries in this package. The standalone compiler
 // has them inside and uses none of this.
@@ -65,3 +66,13 @@ Future<({Uint8List bytes, String header})> compileLibrary(
   name: name,
   options: options,
 );
+
+/// What the bytes of the program at [path] are made of, and why each function
+/// is part of it.
+///
+/// Throws [CompileFailure] if the program has an error or is not supported
+/// yet.
+Future<ProgramSizes> measureProgram(
+  String path, [
+  CompileOptions options = const CompileOptions(),
+]) async => measureSizes(path, await _sdkOf(options), options);

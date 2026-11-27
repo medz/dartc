@@ -12,6 +12,9 @@ const globalsSymbol = '.globals';
 /// What the collector needs to know of each class.
 const classTableSymbol = '.classes';
 
+/// What the names of the bits of tests of types start with.
+const typeTestsPrefix = '.is.';
+
 /// Where the first global variable is. References come before all others.
 const firstGlobal = 8;
 
@@ -59,7 +62,7 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
     return (table: _testSymbol(number ~/ 8), bit: bit);
   });
 
-  static String _testSymbol(int number) => '.is.$number';
+  static String _testSymbol(int number) => '$typeTestsPrefix$number';
 
   /// The tables that tests read, once the program's functions are lowered.
   List<LirData> get tables => [

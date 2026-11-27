@@ -28,7 +28,9 @@ final class FunctionTable(
   final _functions = <(ExecutableElement, Level?), HirFunction>{};
   final _origins = Origins();
 
-  Iterable<HirFunction> get all => _functions.values;
+  /// The functions, in the order they were made.
+  List<HirFunction> get all => _all;
+  final _all = <HirFunction>[];
 
   /// Whether [element] is part of the program.
   bool contains(ExecutableElement element) =>
@@ -41,11 +43,10 @@ final class FunctionTable(
     final level = given ?? _ownLevel(element);
     return _functions.putIfAbsent((element, level), () {
       final by = _origins.current;
-      _scope.schedule(() => _translate(element, level, by));
       final owner = element.enclosingElement;
       final result = element.returnType;
       final isInitializer = isInitializerElement(element);
-      return HirFunction(
+      final function = HirFunction(
         owner is InstanceElement
             ? '${owner.displayName}.${element.lookupName}'
             : element.displayName,
@@ -77,8 +78,17 @@ final class FunctionTable(
                   )),
         !RuntimeLinks.isRuntime(element.library),
       );
+      _scope.schedule(function, () => _translate(element, level, by));
+      _all.add(function);
+      return function;
     });
   }
+
+  /// The functions of declarations, with what declares each.
+  Iterable<(Element, HirFunction)> get declared => [
+    for (final MapEntry(key: (element, _), :value) in _functions.entries)
+      (element, value),
+  ];
 
   /// The level that a function works on objects of, if it is not a mixin's.
   Level? _ownLevel(ExecutableElement element) => hasReceiver(element)

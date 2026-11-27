@@ -209,8 +209,8 @@ abstract interface class ProgramScope() {
   /// The constant string [value].
   HirInstruction text(String value);
 
-  /// Has [work] done later.
-  void schedule(void Function() work);
+  /// Has [work], which defines [function], done later.
+  void schedule(HirFunction function, void Function() work);
 
   /// The class of the objects holding values of [type].
   HirClass boxClass(HirType type);

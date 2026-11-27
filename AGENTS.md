@@ -14,6 +14,7 @@ dart test test/translate/closures_test.dart     # one file
 dart test test/translate -N 'part of a name'    # by name; -n takes a regular expression
 dart run tool/expect.dart [--update] [files]     # checks or writes what programs of the tests do
 dart run tool/measure.dart [names] [-inline] [-devirtualize]  # time against official AOT
+dart run tool/size.dart <program> [function]   # what the bytes are; why a function is there
 ```
 
 With `DARTC_SELF_HOSTING=1`, `test/driver/build_test.dart` also lets the compiler compile itself, which takes many minutes and gigabytes of memory.
