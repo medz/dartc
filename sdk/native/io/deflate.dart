@@ -4,7 +4,7 @@
 final class _Deflater {
   final int _level, _strategy, _windowBits;
   final _Wrapping _wrapping;
-  final List<int>? _dictionary;
+  late final int? _dictionaryId;
   final _BlockWriter _blocks;
 
   _Deflater(
@@ -16,22 +16,25 @@ final class _Deflater {
     this._wrapping,
   ) : _level = level < 0 ? 6 : level,
       _windowBits = windowBits == 8 ? 9 : windowBits,
-      _dictionary = dictionary?.isNotEmpty == true ? dictionary : null,
       _blocks = _BlockWriter(1 << (memLevel + 6)) {
     _blocks.isFixed = _strategy == ZLibOption.strategyFixed;
     // Only zlib streams tell that there is one.
-    if (_dictionary case final dictionary? when _wrapping == _Wrapping.zlib) {
-      final from = dictionary.length > _size - _leastLeft
-          ? dictionary.length - (_size - _leastLeft)
-          : 0;
-      for (var i = from; i < dictionary.length; i++) {
-        _window[_at++] = dictionary[i];
-      }
+    _dictionaryId =
+        _wrapping == .zlib && dictionary != null && dictionary.isNotEmpty
+        ? _setDictionary(Uint8List.fromList(dictionary))
+        : null;
+  }
+
+  int _setDictionary(Uint8List dictionary) {
+    if (_level != 0) {
+      _at = min(dictionary.length, _size - _leastLeft);
+      _window.setRange(0, _at, dictionary, dictionary.length - _at);
       for (var i = 0; i + 2 < _at; i++) {
         _insert(i);
       }
       _blockStart = _at;
     }
+    return (_Check()..add(dictionary, 0, dictionary.length)).adler;
   }
 
   static const _size = 32768, _shortest = 3, _longest = 258;
@@ -54,53 +57,53 @@ final class _Deflater {
   /// starts. Places in the tables are one higher.
   int _at = 0, _left = 0, _blockStart = 0;
 
-  List<int> _input = const [];
-  int _inputAt = 0, _inputEnd = 0, _total = 0;
+  static final _emptyInput = Uint8List(0);
+  Uint8List _input = _emptyInput;
+  int _inputAt = 0, _total = 0;
   final _check = _Check();
   bool _hasHeader = false, _isDone = false;
 
-  /// Whether there is input left.
-  bool get hasInput => _inputAt < _inputEnd;
+  bool get _hasInput => _inputAt < _input.length;
 
   // What was found one place before, where a match can be longer one place on.
   int _foundLength = 2, _foundAt = 0;
   bool _hasPending = false;
 
   void add(List<int> data, int start, int end) {
-    _input = data;
-    _inputAt = start;
-    _inputEnd = end;
-    _total += end - start;
-    switch (_wrapping) {
-      case _Wrapping.raw:
-        break;
-      case _Wrapping.zlib:
-        _check.add(data, start, end);
-      case _Wrapping.gzip:
-        _check.add(data, start, end, isCrc: true);
+    if (_isDone) return;
+    final count = end - start;
+    _input = Uint8List(count)..setRange(0, count, data, start);
+    _inputAt = 0;
+    _wasFed = _wasFed || count != 0;
+    _total += count;
+    if (_wrapping != .raw) {
+      _check.add(_input, 0, count, isCrc: _wrapping == .gzip);
     }
   }
 
   /// Compresses what was added. Gives null if there is nothing to take.
   Uint8List? next({required bool flush, required bool end}) {
-    if (_isDone) return null;
+    if (_blocks.hasOutput || _isDone) return _blocks.take();
     if (!_hasHeader) {
       _hasHeader = true;
       _writeHeader();
     }
-    if (_level == 0) {
-      _store();
-    } else {
-      _compress(isAll: flush || end);
+    final consumed = _level == 0
+        ? _store(flush: flush, end: end)
+        : _compress(isAll: flush || end);
+    if (!_hasInput) {
+      _input = _emptyInput;
+      _inputAt = 0;
     }
+    if (!consumed) return _blocks.take();
     if (end) {
-      _endBlock(isLast: true);
+      if (_level != 0) _endBlock(isLast: true);
       _blocks.toByte();
       _writeTrailer();
       _isDone = true;
-    } else if (flush && (_wasFed || _at > _blockStart)) {
+    } else if (flush && _wasFed) {
       _wasFed = false;
-      _endBlock();
+      if (_level != 0) _endBlock();
       _blocks.store(_window, 0, 0, isLast: false);
     }
     return _blocks.take();
@@ -128,16 +131,13 @@ final class _Deflater {
             : _level == 6
             ? 2
             : 3;
-        final dictionary = _dictionary;
-        var second = kind << 6 | (dictionary == null ? 0 : 32);
+        final dictionaryId = _dictionaryId;
+        var second = kind << 6 | (dictionaryId == null ? 0 : 32);
         second += 31 - (first << 8 | second) % 31;
         out
           ..write(first, 8)
           ..write(second, 8);
-        if (dictionary != null) {
-          final check = _Check()..add(dictionary, 0, dictionary.length);
-          out.writeBig(check.adler);
-        }
+        if (dictionaryId != null) out.writeBig(dictionaryId);
       case _Wrapping.gzip:
         final kind = _level == 9
             ? 2
@@ -180,33 +180,31 @@ final class _Deflater {
         }
       }
     }
-    final room = _window.length - _at - _left, given = _inputEnd - _inputAt;
+    final room = _window.length - _at - _left, given = _input.length - _inputAt;
     final count = room < given ? room : given;
     if (count == 0) return;
-    _wasFed = true;
     _window.setRange(_at + _left, _at + _left + count, _input, _inputAt);
     _inputAt += count;
     _left += count;
   }
 
-  /// Makes blocks of the input as it is.
-  void _store() {
-    while (true) {
-      _fill();
-      if (_left == 0) return;
-      _at += _left;
-      _left = 0;
-      if (_at - _blockStart >= _size - 1) _endBlock();
+  /// Fills and writes at most one stored block, without sliding the window.
+  bool _store({required bool flush, required bool end}) {
+    const limit = _BlockWriter._largestStored;
+    final count = min(limit - _at, _input.length - _inputAt);
+    _window.setRange(_at, _at + count, _input, _inputAt);
+    _at += count;
+    _inputAt += count;
+    if (_at == limit || end || (flush && _at != 0)) {
+      _blocks.store(_window, 0, _at, isLast: end && !_hasInput);
+      _at = 0;
     }
+    return !_hasInput;
   }
 
   void _endBlock({bool isLast = false}) {
     final start = _blockStart, end = _hasPending ? _at - 1 : _at;
-    if (_level == 0) {
-      if (end > start || isLast) {
-        _blocks.store(_window, start, end, isLast: isLast);
-      }
-    } else if (_blocks.isUsed || isLast) {
+    if (_blocks.isUsed || isLast) {
       _blocks.end(start < 0 ? null : _window, start, end, isLast: isLast);
     }
     _blockStart = end;
@@ -223,12 +221,13 @@ final class _Deflater {
     return before - 1;
   }
 
-  void _compress({required bool isAll}) {
+  /// Finishes the requested input or pauses after writing a block.
+  bool _compress({required bool isAll}) {
     final isLazy = _level > 3;
     while (true) {
       if (_left < _leastLeft) {
         _fill();
-        if (_left < _leastLeft && !isAll && _inputAt == _inputEnd) return;
+        if (_left < _leastLeft && !isAll && !_hasInput) return true;
         if (_left == 0) break;
       }
       if (isLazy) {
@@ -236,13 +235,17 @@ final class _Deflater {
       } else {
         _step();
       }
-      if (_blocks.isFull) _endBlock();
+      if (_blocks.isFull) {
+        _endBlock();
+        return false;
+      }
     }
     if (_hasPending) {
       _blocks.addByte(_window[_at - 1]);
       _hasPending = false;
     }
     _foundLength = 2;
+    return true;
   }
 
   int get _farthest => (1 << _windowBits) - _leastLeft;

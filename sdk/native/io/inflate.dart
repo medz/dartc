@@ -10,7 +10,7 @@ const _needsMore = -1;
 ///
 /// What takes more than the input that there is starts again when there is more.
 final class _Inflater {
-  List<int>? _dictionary;
+  Uint8List? _dictionary;
   final int _windowBits;
   final bool _concatenates;
 
@@ -19,20 +19,23 @@ final class _Inflater {
 
   _Inflater(
     this._windowBits,
-    this._dictionary, {
+    List<int>? dictionary, {
     required bool isRaw,
     required bool concatenates,
   }) : _concatenates = concatenates,
-       _wrapping = isRaw ? _Wrapping.raw : null {
+       _wrapping = isRaw ? _Wrapping.raw : null,
+       _dictionary = isRaw || dictionary == null
+           ? null
+           : Uint8List.fromList(dictionary) {
     // Raw streams do not use the dictionary, as officially.
     if (isRaw) _step = _readBlockHeader;
   }
 
-  Uint8List _input = Uint8List(0);
+  static final _noInput = Uint8List(0);
+  Uint8List _input = _noInput;
   int _at = 0, _bits = 0, _bitCount = 0;
 
-  /// The output, with up to 32 KB before what was not taken yet, and where that
-  /// starts and ends.
+  /// The undelivered output and the retained history before it.
   Uint8List _output = Uint8List(1 << 16);
   int _start = 0, _end = 0, _checked = 0, _historyStart = 0;
 
@@ -45,22 +48,20 @@ final class _Inflater {
   _Check? _headerCheck;
   int _headerText = 0;
 
-  static const _window = 32768, _largestPiece = 65536;
+  static const _largestPiece = 65536;
+  int get _window => 1 << _windowBits;
 
-  /// Whether the input ran out in the middle of something.
-  bool _isStarved = false;
-
-  /// Whether there is input left that can be used.
-  bool get hasInput => !_isDone && !_isStarved && _at < _input.length;
+  /// The window limits history from earlier pieces, not the current output.
+  int get _availableFrom => max(_historyStart, _start - _window);
 
   void add(List<int> data, int start, int end) {
+    if (_isDone || _isWrong) return;
     final left = _input.length - _at;
     final input = Uint8List(left + end - start);
     input.setRange(0, left, _input, _at);
     input.setRange(left, input.length, data, start);
     _input = input;
     _at = 0;
-    _isStarved = false;
   }
 
   /// Decompresses some of the input. Gives null if there is nothing left.
@@ -73,7 +74,6 @@ final class _Inflater {
       _at = at;
       _bits = bits;
       _bitCount = bitCount;
-      _isStarved = true;
       break;
     }
     if (_start == _end) return null;
@@ -89,6 +89,8 @@ final class _Inflater {
 
   Never _fail() {
     _isWrong = true;
+    _input = _noInput;
+    _at = 0;
     throw const FormatException('Filter error, bad data');
   }
 
@@ -316,7 +318,7 @@ final class _Inflater {
       return known >> 4;
     }
     var code = 0, first = 0, index = 0;
-    for (var length = 1; length <= 15; length++) {
+    for (var length = 1; length <= codes._longest; length++) {
       final bit = _read(1);
       if (bit == _needsMore) return _needsMore;
       code |= bit;
@@ -365,7 +367,7 @@ final class _Inflater {
     if (more == _needsMore) return false;
     final length = _lengthBases[symbol - 257] + extra;
     final distance = _distanceBases[code] + more;
-    if (distance > _end - _historyStart || distance > 1 << _windowBits) _fail();
+    if (distance > _end - _availableFrom) _fail();
     _room(length);
     for (var i = 0; i < length; i++) {
       _output[_end] = _output[_end - distance];
@@ -395,9 +397,7 @@ final class _Inflater {
   void _room(int count) {
     if (_end + count <= _output.length) return;
     _checkOutput();
-    // What can be referred to stays, and what was not taken.
-    final kept = _end - _window < _start ? _end - _window : _start;
-    final from = kept < 0 ? 0 : kept;
+    final from = _availableFrom;
     var target = _output;
     if (_end - from + count > target.length) {
       target = Uint8List((_end - from + count) * 2);
@@ -406,7 +406,7 @@ final class _Inflater {
     _output = target;
     _start -= from;
     _end -= from;
-    _historyStart = max(0, _historyStart - from);
+    _historyStart = 0;
     _checked = _end;
   }
 
@@ -447,6 +447,8 @@ final class _Inflater {
       _memberEnded = _start != _end;
     } else {
       _isDone = true;
+      _input = _noInput;
+      _at = 0;
     }
     return true;
   }
@@ -458,6 +460,8 @@ final class _Codes {
   final List<int> counts = List.filled(16, 0);
   final List<int> symbols = [];
   int _left = 1;
+  // Even an invalid entry with no codes takes one bit to read.
+  int _longest = 1;
 
   /// For what the next bits can be, a symbol and the length of its code below
   /// that, or 0 if it is longer.
@@ -467,6 +471,7 @@ final class _Codes {
   _Codes(List<int> lengths) {
     for (final length in lengths) {
       counts[length]++;
+      _longest = max(_longest, length);
     }
     counts[0] = 0;
     for (var length = 1; length < 16; length++) {

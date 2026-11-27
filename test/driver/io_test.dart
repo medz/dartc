@@ -131,6 +131,16 @@ void main() {
       return _agrees(compressionProgram, input: officialInput(data));
     });
 
+    for (final (kind, source) in [
+      ('encoder', encoderReviewProgram),
+      ('decoder', decoderReviewProgram),
+    ]) {
+      test(
+        'compression $kind filter',
+        () => _compare(source, '', collectsAlways: false),
+      );
+    }
+
     test('what the official runtime decompresses', () async {
       final directory = writeSources({'main.dart': compressedProgram});
       final path = '${directory.path}/main.dart';
@@ -140,9 +150,9 @@ void main() {
           await compileProgram(path, CompileOptions(target: host.target)),
           program,
         );
-        final [data, ...ways] = LineSplitter.split(
-          (await host.run(program)).output,
-        ).toList();
+        final result = await host.run(program);
+        expect(result.code, 0, reason: result.errors);
+        final [data, ...ways] = LineSplitter.split(result.output).toList();
         expect(ways, hasLength(28));
         for (final way in ways) {
           final [name, text] = way.split(' = ');

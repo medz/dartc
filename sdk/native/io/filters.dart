@@ -11,8 +11,16 @@ class RawZLibFilter {
     int strategy,
     List<int>? dictionary,
     bool raw,
-  ) => _Compressing(
-    _Deflater(
+  ) {
+    try {
+      _validateZLibeLevel(level);
+      _validateZLibWindowBits(windowBits);
+      _validateZLibMemLevel(memLevel);
+      _validateZLibStrategy(strategy);
+    } on ArgumentError {
+      throw _InternalError('Failed to create ZLibDeflateFilter');
+    }
+    final deflater = _Deflater(
       level,
       strategy,
       windowBits,
@@ -23,8 +31,12 @@ class RawZLibFilter {
           : gzip
           ? _Wrapping.gzip
           : _Wrapping.zlib,
-    ),
-  );
+    );
+    return _Filter(
+      deflater.add,
+      (flush, end) => deflater.next(flush: flush, end: end),
+    );
+  }
 
   @patch
   static RawZLibFilter _makeZLibInflateFilter(
@@ -32,13 +44,16 @@ class RawZLibFilter {
     int windowBits,
     List<int>? dictionary,
     bool raw,
-  ) => _Decompressing(
-    _Inflater(windowBits, dictionary, isRaw: raw, concatenates: gzip),
-  );
+  ) {
+    final inflater = _Inflater(
+      windowBits,
+      dictionary,
+      isRaw: raw,
+      concatenates: gzip,
+    );
+    return _Filter(inflater.add, (_, _) => inflater.next());
+  }
 }
-
-Never _throwUnfinished() =>
-    throw _InternalError('Call to Process while still processing data');
 
 class _InternalError extends Error {
   final String _message;
@@ -46,30 +61,25 @@ class _InternalError extends Error {
   String toString() => "InternalError: '$_message'";
 }
 
-final class _Compressing implements RawZLibFilter {
-  final _Deflater _deflater;
-  _Compressing(this._deflater);
+final class _Filter(
+  final void Function(List<int>, int, int) _add,
+  final List<int>? Function(bool, bool) _next,
+) implements RawZLibFilter {
+  bool _needsDrain = false;
 
   void process(List<int> data, int start, int end) {
     RangeError.checkValidRange(start, end, data.length);
-    if (_deflater.hasInput) _throwUnfinished();
-    _deflater.add(data, start, end);
+    if (_needsDrain) {
+      throw _InternalError('Call to Process while still processing data');
+    }
+    _add(data, start, end);
+    _needsDrain = true;
   }
 
-  List<int>? processed({bool flush = true, bool end = false}) =>
-      _deflater.next(flush: flush, end: end);
-}
-
-final class _Decompressing implements RawZLibFilter {
-  final _Inflater _inflater;
-  _Decompressing(this._inflater);
-
-  void process(List<int> data, int start, int end) {
-    RangeError.checkValidRange(start, end, data.length);
-    if (_inflater.hasInput) _throwUnfinished();
-    _inflater.add(data, start, end);
+  List<int>? processed({bool flush = true, bool end = false}) {
+    _needsDrain = false;
+    final output = _next(flush, end);
+    _needsDrain = output != null;
+    return output;
   }
-
-  List<int>? processed({bool flush = true, bool end = false}) =>
-      _inflater.next();
 }

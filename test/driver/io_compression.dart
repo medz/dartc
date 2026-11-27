@@ -158,6 +158,17 @@ Future<void> main() async {
       ZLibDecoder(windowBits: 9).convert(zlib.encode(small)));
   attempt('level', () => ZLibCodec(level: 10));
   attempt('strategy', () => ZLibCodec(strategy: 9));
+  attempt('raw deflate level', () => RawZLibFilter.deflateFilter(level: 10));
+  for (final (name, draining, data) in [
+    ('deflate', RawZLibFilter.deflateFilter(), small),
+    ('inflate', RawZLibFilter.inflateFilter(), zlib.encode(small)),
+  ]) {
+    draining.process(data, 0, data.length);
+    if (draining.processed(flush: false) == null) throw StateError('No output');
+    attempt('$name before drained', () => draining.process([], 0, 0));
+    while (draining.processed(flush: false) != null) {}
+    attempt('$name after drained', () => draining.process([], 0, 0));
+  }
   final filter = RawZLibFilter.inflateFilter();
   filter.process([1, 2, 3], 0, 3);
   attempt('filter', () => filter.processed());
@@ -200,6 +211,50 @@ void main() {
 }
 ''';
 
+/// Checks how much history is available and when input bytes are copied.
+const decoderReviewProgram = r'''
+import 'dart:convert';
+import 'dart:io';
+
+void attempt(String name, Object? Function() run) {
+  try { print('$name: ${run()}'); } catch (e) { print('$name: $e'); }
+}
+
+void main() {
+  final prefix = List<int>.generate(300, (i) => i & 255);
+  // A stored block followed by a fixed-code match of length 3 at distance 300.
+  final data = [0, 44, 1, 211, 254, ...prefix, 3, 134, 21, 0];
+  final gzipOfExpected = gzip.encode([...prefix, 0, 1, 2]);
+  final wrapped = [
+    ...gzipOfExpected.take(10), ...data,
+    ...gzipOfExpected.skip(gzipOfExpected.length - 8),
+  ];
+  final raw = ZLibDecoder(raw: true, windowBits: 8);
+  attempt('raw in current output', () => raw.convert(data).sublist(300));
+  attempt('gzip in current output', () =>
+      ZLibDecoder(windowBits: 8).convert(wrapped).sublist(300));
+  attempt('raw outside retained history', () {
+    final sink = raw.startChunkedConversion(ByteConversionSink.withCallback((_) {}));
+    sink.addSlice(data, 0, 305, false);
+    sink.addSlice(data, 305, data.length, true);
+    return 'accepted';
+  });
+
+  final dictionary = [65, 66, 67];
+  final bytes = ZLibEncoder(dictionary: dictionary).convert(dictionary);
+  final filter = RawZLibFilter.inflateFilter(dictionary: dictionary);
+  dictionary[0] = 90;
+  filter.process(bytes, 0, bytes.length);
+  attempt('dictionary snapshot', filter.processed);
+
+  // Neither block defines a distance code. Only the first needs one.
+  const match = [13, 192, 129, 8, 0, 0, 0, 0, 32, 127, 235, 47];
+  const literal = [5, 192, 129, 8, 0, 0, 0, 0, 32, 182, 253, 165, 78];
+  attempt('match with no distance codes', () => raw.convert(match));
+  attempt('literal with no distance codes', () => raw.convert(literal));
+}
+''';
+
 final _dictionary = utf8.encode('alpha beta gamma delta');
 
 /// Decoders of the official runtime for the names of the programs above.
@@ -228,3 +283,60 @@ String officialInput(List<int> data) => [
   'dictionary = '
       '${base64.encode(ZLibEncoder(dictionary: _dictionary).convert(data))}',
 ].join('\n');
+
+/// Exercises the encoder's input ownership and direct filter output.
+const encoderReviewProgram = r'''
+import 'dart:io';
+import 'dart:typed_data';
+
+void drain(RawZLibFilter filter, BytesBuilder output, {bool end = false}) {
+  while (true) {
+    final chunk = filter.processed(flush: false, end: end);
+    if (chunk == null) return;
+    if (chunk.length > 65536) throw StateError('output chunk exceeds 64 KiB');
+    output.add(chunk);
+  }
+}
+
+bool same(List<int> actual, List<int> expected) {
+  if (actual.length != expected.length) return false;
+  for (var i = 0; i < actual.length; i++) {
+    if (actual[i] != expected[i]) return false;
+  }
+  return true;
+}
+
+void main() {
+  final input = [0, 1, 2, 0];
+  final gzipFilter = RawZLibFilter.deflateFilter(gzip: true);
+  final output = BytesBuilder(copy: false);
+  gzipFilter.process(input, 1, 3);
+  input[1] = 9;
+  drain(gzipFilter, output, end: true);
+  print('input snapshot: ${same(gzip.decode(output.takeBytes()), [1, 2])}');
+
+  final dictionary = [65, 66, 67];
+  final withDictionary = RawZLibFilter.deflateFilter(dictionary: dictionary);
+  dictionary[0] = 90;
+  withDictionary.process([65, 66, 67], 0, 3);
+  drain(withDictionary, output, end: true);
+  final decoder = ZLibDecoder(dictionary: [65, 66, 67]);
+  print('dictionary snapshot: ${same(decoder.convert(output.takeBytes()), [65, 66, 67])}');
+
+  final data = Uint8List(2 * 65536 + 17);
+  for (var i = 0; i < data.length; i++) data[i] = i;
+  final split = RawZLibFilter.deflateFilter(level: 0);
+  const first = 32767, limit = first + 32507;
+  split.process(data, 0, first);
+  drain(split, output);
+  split.process(data, first, limit);
+  drain(split, output);
+  drain(split, output, end: true);
+  print('chunked stored blocks: ${same(zlib.decode(output.takeBytes()), data.sublist(0, limit))}');
+
+  final large = RawZLibFilter.deflateFilter(level: 0);
+  large.process(data, 0, data.length);
+  drain(large, output, end: true);
+  print('bounded output: ${same(zlib.decode(output.takeBytes()), data)}');
+}
+''';
