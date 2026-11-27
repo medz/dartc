@@ -33,6 +33,53 @@ Future<int> _run(String source, {bool collectsAlways = false}) async {
 
 const _megabyte = 1 << 20;
 
+/// Uses what is weak, for which [count] objects are created again and again.
+String weakSource(int count) =>
+    '''
+class P { int n; Object? other; P(this.n); }
+final expando = Expando<P>();
+final finalized = <int>{};
+final finalizer = Finalizer<int>((n) {
+  if (!finalized.add(n)) print('twice');
+});
+List<Object?> garbage() => [
+  for (var i = 0; i < 3; i++) [for (var j = 0; j < $count; j++) P(j)],
+];
+List<P> kept = [];
+List<WeakReference<P>> ofKept = [], ofOthers = [];
+void make() {
+  for (var i = 0; i < $count; i++) {
+    final a = P(i), b = P(i + 1);
+    expando[a] = b;
+    expando[b] = a;
+    a.other = b;
+    finalizer.attach(a, i, detach: b);
+    if (i % 5 == 0) {
+      kept.add(a);
+      ofKept.add(WeakReference(b));
+      if (i % 10 == 0) finalizer.detach(b);
+    } else {
+      ofOthers.add(WeakReference(b));
+    }
+  }
+}
+void main() async {
+  make();
+  for (var i = 0; i < 20; i++) { garbage(); }
+  await Future(() {});
+  await Future(() {});
+  for (final a in kept) {
+    if (expando[a]!.n != a.n + 1 || expando[expando[a]!] != a) return;
+  }
+  for (final (i, weak) in ofKept.indexed) {
+    if (weak.target!.n != kept[i].n + 1) return;
+  }
+  if (ofOthers.any((weak) => weak.target != null)) return;
+  if (finalized.any((n) => n % 5 == 0)) return;
+  if (finalized.length == $count - kept.length) print('ok');
+}
+''';
+
 void main() {
   void limited(String name, int megabytes, String source) =>
       test(name, () async {
@@ -126,6 +173,12 @@ void main() {
       if (sum > 199000) print('ok');
     }
   ''');
+
+  test('what is weak is cleared, and only that', () async {
+    for (final always in [true, false]) {
+      await _run(weakSource(always ? 20 : 20000), collectsAlways: always);
+    }
+  }, skip: skipExecution);
 
   limited('variables, fields and arguments keep their objects', 12, '''
     class P { int n; P? next; P(this.n, [this.next]); int get sum => n; }

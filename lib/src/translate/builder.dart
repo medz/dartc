@@ -9,6 +9,7 @@ import 'assigned.dart';
 import 'captures.dart';
 import 'coroutine.dart';
 import 'levels.dart';
+import 'types.dart';
 
 extension Unsupported on SourceUnit {
   /// The failure to translate [node].
@@ -211,6 +212,12 @@ final class FunctionBuilder(
     return next.parameters.firstOrNull;
   }
 
+  /// Ends a path that cannot return, keeping its variables live across the call.
+  void endNever() {
+    stay();
+    end(HirUnreachable());
+  }
+
   /// Creates an object of [class_].
   HirValue create(HirClass class_) => call(HirNew(class_))!;
 
@@ -281,16 +288,66 @@ final class FunctionBuilder(
     _block = HirBlock();
   }
 
+  /// The variables in scope whose objects stay as long as these are.
+  final _kept = <VariableElement>[];
+
+  /// Tells those that are in scope here from ones declared later.
+  int get scope => _kept.length;
+
+  /// Has the objects of the variables that were declared since [scope] stay
+  /// until here.
+  void stay([int scope = 0]) {
+    for (final variable in _kept.skip(scope)) {
+      // What is bound can be a cell, which is kept without being read.
+      final value = _bound.contains(variable)
+          ? _values[_same(variable)]!
+          : read(variable);
+      _stayValue(value);
+    }
+    if (scope == 0 && _keepsReceiver) {
+      _stayValue(receiver!);
+    }
+  }
+
+  void _stayValue(HirValue value) => add(HirMachine(.addressOf, [value]));
+
+  late final bool _keepsReceiver =
+      receiver != null && isFinalizable(level?.element.thisType ?? thisType);
+
+  /// Ends the scope of those.
+  void leave(int scope) {
+    stay(scope);
+    _kept.length = scope;
+  }
+
+  /// Keeps a finalizable variable's value for its scope.
+  void keep(VariableElement variable) {
+    if (isFinalizable(variable.type)) _kept.add(variable);
+  }
+
+  /// Gives a future join parameter its type before the variable is declared.
+  void declareType(VariableElement variable, HirType type) {
+    _types[_same(variable)] = type;
+  }
+
   /// Declares the variable [given], not yet assigned.
   void declare(Object given, HirType type) {
+    if (given is VariableElement) keep(given);
     final variable = _same(given);
     _types[variable] = type;
     _values.remove(variable);
     if (_isCell(variable)) _values[variable] = create(cells(type));
   }
 
+  /// The variables of [_kept] that are bound, not declared.
+  final _bound = <VariableElement>{};
+
   /// Declares [variable], of which [value] is the value or the cell.
   void bind(Object variable, HirValue value, HirType type) {
+    if (variable is VariableElement && isFinalizable(variable.type)) {
+      _kept.add(variable);
+      _bound.add(variable);
+    }
     _types[variable] = type;
     _values[variable] = value;
   }
@@ -333,6 +390,11 @@ final class FunctionBuilder(
     if (value.type != _types[variable]) {
       throw StateError('Assigned ${value.type} to $variable.');
     }
+    if (_values[variable] case final previous?
+        when variable is VariableElement && isFinalizable(variable.type)) {
+      // A captured variable's cell still holds the previous value here.
+      _stayValue(previous);
+    }
     if (_isCell(variable)) {
       final field = cells(_types[variable]!).fields.single;
       add(HirStore(field, raw(variable), value));
@@ -372,6 +434,12 @@ final class FunctionBuilder(
       HirEdge(join._block, [...results, ...join._variables.map(raw)]);
 
   void jump(Join join, [HirValue? result]) => jumpWith(join, [?result]);
+
+  /// Keeps the variables in scope alive across a loop's backedge.
+  void repeat(Join head) {
+    stay();
+    jump(head);
+  }
 
   void jumpWith(Join join, List<HirValue> results) =>
       end(HirJump(_edge(join, results)));

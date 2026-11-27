@@ -148,8 +148,10 @@ final class ExpressionTranslator(
     switch (inner) {
       case MethodInvocation():
         if (_deferred.use(inner) == null) calls.invocation(inner);
+        if (isNever(inner.staticType)) _builder.endNever();
       case DotShorthandInvocation():
         calls.shorthand(inner);
+        if (isNever(inner.staticType)) _builder.endNever();
       case FunctionExpressionInvocation():
         closures.invocation(inner);
       case ConditionalExpression(:final DartType staticType)
@@ -202,7 +204,7 @@ final class ExpressionTranslator(
     final representation = type == null || never ? null : valueType(type);
     final result = _value(node, representation ?? placeholder);
     if (never) {
-      _builder.end(HirUnreachable());
+      _builder.endNever();
       return _builder.placeholder(placeholder);
     }
     return representation == null
@@ -273,6 +275,7 @@ final class ExpressionTranslator(
         return _builder.placeholder(placeholder);
       case RethrowExpression():
         final (exception, trace) = _builder.caught.last;
+        _builder.stay();
         _builder.raise(exception, trace);
         return _builder.placeholder(placeholder);
       default:
@@ -317,7 +320,7 @@ final class ExpressionTranslator(
     };
     if (!isBottom(part?.staticType)) return false;
     value(part!);
-    _builder.end(HirUnreachable());
+    _builder.endNever();
     return true;
   }
 
@@ -350,7 +353,11 @@ final class ExpressionTranslator(
   /// Calls something by its name, or creates an object.
   HirValue _invocation(Expression inner, HirType placeholder) {
     HirValue result(HirValue? given, Element? element) =>
-        given ?? _neverResult(element, placeholder) ?? _builder.add(HirNull());
+        given ??
+        (element is ExecutableElement && isNever(element.returnType)
+            ? _builder.placeholder(placeholder)
+            : _builder.add(HirNull()));
+
     switch (inner) {
       case InstanceCreationExpression(
             constructorName: ConstructorName(:final element),
@@ -417,14 +424,6 @@ final class ExpressionTranslator(
     }
   }
 
-  /// What stands for the result of calling [element], if that never returns.
-  ///
-  /// The call itself is of another type where it can be skipped.
-  HirValue? _neverResult(Element? element, HirType placeholder) =>
-      element is ExecutableElement && isNever(element.returnType)
-      ? _builder.placeholder(placeholder)
-      : null;
-
   HirValue _cascade(CascadeExpression node) {
     final target = node.target.unParenthesized;
     final result = value(target);
@@ -449,7 +448,9 @@ final class ExpressionTranslator(
 
   void _throw(Expression expression) {
     final value = valueAs(expression, .reference);
-    _builder.call(HirCall(_scope.runtime('markThrown'), [value]));
+    _builder
+      ..stay()
+      ..call(HirCall(_scope.runtime('markThrown'), [value]));
     _builder.raise(value, _builder.add(_scope.trace));
   }
 

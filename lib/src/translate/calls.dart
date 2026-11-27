@@ -222,7 +222,7 @@ final class CallTranslator(
           _conversions.coerce(argument, function.parameters[i]),
       ]),
     );
-    if (isNever(element.returnType)) _builder.end(HirUnreachable());
+    if (isNever(element.returnType)) _builder.endNever();
     return result;
   }
 
@@ -407,7 +407,7 @@ final class CallTranslator(
       return _orNull(node, receiver, base, selector, arguments, call);
     }
     final result = call();
-    if (isNever(element.returnType)) _builder.end(HirUnreachable());
+    if (isNever(element.returnType)) _builder.endNever();
     return result;
   }
 

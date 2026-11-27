@@ -68,6 +68,9 @@ final class TypeFunctions(
   ];
   final _isDefined = <HirFunction>{};
 
+  /// What is done after collections, if anything is.
+  HirFunction? finalize;
+
   /// The function that the runtime calls [name].
   HirFunction named(String name) => _named.putIfAbsent(name, () {
     final table = _ofFunctions.where((table) => table.name == name);
@@ -79,6 +82,7 @@ final class TypeFunctions(
         false,
       ),
       'superTypesOf' => HirFunction(name, const [.integer], .reference, false),
+      'afterCollection' => HirFunction(name, const [], null, false),
       'functionNumber' ||
       'recordNumber' ||
       'futureNumber' => HirFunction(name, const [], .integer, false),
@@ -217,6 +221,13 @@ final class TypeFunctions(
               _ => _scope.functionClass,
             });
             builder.end(HirReturn(builder.add(HirConst(number))));
+          });
+        case 'afterCollection':
+          _define(function, (builder) {
+            if (finalize case final finalize?) {
+              builder.call(HirCall(finalize, const []));
+            }
+            builder.end(HirReturn());
           });
         case 'className':
           _names(function, _types.classes.map(_nameOf).toList());

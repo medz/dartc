@@ -266,6 +266,25 @@ bool isBottom(DartType? type) {
   return isNever(found);
 }
 
+/// Whether objects of [type] stay as long as variables that have them.
+bool isFinalizable(DartType? type) {
+  // So is `FutureOr` of one, as the official compiler takes it.
+  if (type is InterfaceType && type.isDartAsyncFutureOr) {
+    return isFinalizable(type.typeArguments.single);
+  }
+  final bound = type == null ? null : boundOf(type);
+  if (bound is! InterfaceType || bound.element.library.isDartCore) return false;
+  final element = bound.element;
+  return _finalizable[element] ??= [element.thisType, ...element.allSupertypes]
+      .any(
+        (type) =>
+            type.element.name == 'Finalizable' &&
+            '${type.element.library.uri}' == 'dart:ffi',
+      );
+}
+
+final _finalizable = Expando<bool>();
+
 /// The type arguments that make the generic [element] a function of [type].
 List<DartType> typeArgumentsOf(ExecutableElement element, FunctionType type) {
   final owner = element.enclosingElement;

@@ -233,8 +233,10 @@ void main() {
   print(nested(Pointer.fromFunction(back, -1), 6)); final arr = malloc(40).cast<Int32>(); arr.asTypedList(10).setAll(0, [5, 3, 9, 1, 7, 2, 8, 0, 6, 4]); qsort(arr.cast(), 10, 4, Pointer.fromFunction(cmp, 0)); print(arr.asTypedList(10)); print(Pointer.fromFunction<Int32 Function(Int32)>(dbl, 0).asFunction<int Function(int)>()(8));
   lib.lookupFunction<Void Function(Pointer<NativeFunction<Void Function(Int32)>>), void Function(Pointer<NativeFunction<Void Function(Int32)>>)>('store')(NativeCallable<Void Function(Int32)>.isolateLocal((int n) => print('stored $n')).let((c) { c.keepIsolateAlive = false; return c.nativeFunction; })); lib.lookupFunction<Void Function(Int32), void Function(int)>('call')(77);
   for (var i = 0; i < 3000; i++) { final k = NativeCallable<Int32 Function(Int32)>.isolateLocal((int x) => x + i, exceptionalReturn: 0); if (apply(k.nativeFunction, 1) != i + 2) print('wrong $i'); k.close(); }
-  final fin = NativeFinalizer(lib.lookup('finalize')); final o = Big2(); fin.attach(o, malloc(4).cast<Int32>().let((m) { m.value = 5; return m.cast(); })); fin.attach(o, nullptr, detach: o); fin.detach(o);
+  final fin = NativeFinalizer(lib.lookup('finalize')); final o = Big2(); fin.attach(o, malloc(4).cast<Int32>().let((m) { m.value = 5; return m.cast(); })); fin.attach(o, nullptr, detach: o); fin.detach(o); kept = fin;
 }
+// A finalizer that is gone calls nothing, also at the end.
+Object? kept;
 class Big2 implements Finalizable {}
 extension<T> on T { R let<R>(R Function(T) f) => f(this); }
 ''';

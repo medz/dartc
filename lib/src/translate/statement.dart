@@ -1,8 +1,8 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
-import 'assigned.dart';
 import 'assertions.dart';
 import 'builder.dart';
 import 'coroutine_body.dart';
@@ -31,14 +31,17 @@ final class StatementTranslator(
 
   void body(FunctionBody body) {
     _body(body);
+    _builder.stay();
     if (_builder.coroutine != null) _end();
   }
 
   /// Ends a function that can be left in the middle.
   void _end() => _leave(_builder.add(HirNull()));
 
-  void _leave(HirValue value) =>
-      _tries.leave(0, (kept) => _coroutine.finish(kept!), value);
+  void _leave(HirValue value) => _tries.leave(0, (kept) {
+    _builder.stay();
+    _coroutine.finish(kept!);
+  }, value);
 
   void _body(FunctionBody body) {
     switch (body) {
@@ -52,6 +55,16 @@ final class StatementTranslator(
   }
 
   void statement(Statement node) {
+    final scope = _builder.scope;
+    _statement(node);
+    if (node is VariableDeclarationStatement ||
+        node is PatternVariableDeclarationStatement) {
+      return;
+    }
+    _builder.leave(scope);
+  }
+
+  void _statement(Statement node) {
     switch (node) {
       case Block(:final statements):
         statements.forEach(statement);
@@ -127,26 +140,35 @@ final class StatementTranslator(
 
   void _goTo((Join, int) target) {
     final (join, depth) = target;
-    _tries.leave(depth, (_) => _builder.jump(join));
+    _tries.leave(depth, (_) {
+      _builder.stay();
+      _builder.jump(join);
+    });
   }
 
   void _return(Expression? expression) {
     if (_builder.coroutine != null) {
-      return _leave(
-        expression == null
-            ? _builder.add(HirNull())
-            : expressions.valueAsObject(expression, _builder.returnType!),
-      );
+      final value = expression == null
+          ? _builder.add(HirNull())
+          : expressions.valueAsObject(expression, _builder.returnType!);
+      return _leave(value);
     }
     final result = _builder.function.result;
     if (result == null) {
       if (expression != null) expressions.effect(expression);
-      _tries.leave(0, (_) => _builder.end(HirReturn()));
+      // Objects stay through what `finally` does, too.
+      _tries.leave(0, (_) {
+        _builder.stay();
+        _builder.end(HirReturn());
+      });
     } else {
       final value = expression == null
           ? _builder.fallback?.call() ?? _builder.add(HirNull())
           : expressions.valueTo(expression, _builder.returnType!);
-      _tries.leave(0, (kept) => _builder.end(HirReturn(kept)), value);
+      _tries.leave(0, (kept) {
+        _builder.stay();
+        _builder.end(HirReturn(kept));
+      }, value);
     }
   }
 
@@ -173,7 +195,7 @@ final class StatementTranslator(
       ..enter(head);
     _whileTrue(node.condition, exit, () {
       statement(node.body);
-      _builder.jump(head);
+      _builder.repeat(head);
     });
   }
 
@@ -189,13 +211,13 @@ final class StatementTranslator(
     _builder
       ..jump(test)
       ..enter(test);
-    _whileTrue(node.condition, exit, () => _builder.jump(head));
+    _whileTrue(node.condition, exit, () => _builder.repeat(head));
   }
 
   void _switch(SwitchStatement node) {
     final value = expressions.value(node.expression);
     final type = node.expression.staticType!;
-    final exit = _builder.join(node);
+    final exit = _builder.join(node), scope = _builder.scope;
     _breaks[node] = (exit, _tries.depth);
     final groups = _groups(node.members);
     final patterns = [
@@ -206,7 +228,7 @@ final class StatementTranslator(
     expressions.patterns.matching(patterns, () {
       final bodies = [for (final group in groups) _bodyOf(node, group)];
       for (final (i, group) in groups.indexed) {
-        _group(node, group, (value, type), bodies[i], exit);
+        _group(node, group, (value, type), bodies[i], exit, scope);
       }
     });
     _builder
@@ -229,36 +251,39 @@ final class StatementTranslator(
     return groups;
   }
 
-  /// Where the statements of [group] start.
-  Join _bodyOf(SwitchStatement node, List<SwitchMember> group) {
-    final patterns = [
-      for (final member in group)
-        if (member is SwitchPatternCase) member.guardedPattern.pattern,
-    ];
-    expressions.patterns.declareIn(patterns);
-    final body = _builder.joinAll(node, const [], [
-      ...patterns.expand(declaredIn),
-    ]);
+  /// Where the statements of [group] start and which bindings they receive.
+  (Join, Set<VariableElement>) _bodyOf(
+    SwitchStatement node,
+    List<SwitchMember> group,
+  ) {
+    final patterns = group.whereType<SwitchPatternCase>().map(
+      (member) => member.guardedPattern.pattern,
+    );
+    final variables = expressions.patterns.prepareBody(patterns);
+    final body = _builder.joinAll(node, const [], [...variables]);
     for (final member in group) {
       _continues[member] = (body, _tries.depth);
     }
-    return body;
+    return (body, variables);
   }
 
-  /// Goes to [body] if one of [group] matches, or goes on.
+  /// Enters the shared body if one of [group] matches, or goes on. Bindings
+  /// declared after [scope] end with the body.
   void _group(
     SwitchStatement node,
     List<SwitchMember> group,
     (HirValue, DartType) value,
-    Join body,
+    (Join, Set<VariableElement>) target,
     Join exit,
+    int scope,
   ) {
+    final (body, variables) = target;
     final patterns = expressions.patterns;
     for (final member in group) {
       switch (member) {
         case SwitchPatternCase(:final guardedPattern):
           final next = patterns.join(node);
-          patterns.match(guardedPattern, value.$1, value.$2, next);
+          patterns.match(guardedPattern, value.$1, value.$2, next, () {});
           _builder
             ..jump(body)
             ..enter(next);
@@ -277,7 +302,9 @@ final class StatementTranslator(
     _builder
       ..jump(after)
       ..enter(body);
+    variables.forEach(_builder.keep);
     group.last.statements.forEach(statement);
+    _builder.leave(scope);
     _builder
       ..jump(exit)
       ..enter(after);

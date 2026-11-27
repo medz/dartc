@@ -134,6 +134,9 @@ abstract interface class ProgramScope() {
   /// Says that C calls the program.
   void addCallbacks();
 
+  /// Says that collections have C do something.
+  void addNativeFinalizers();
+
   /// The functions of C that the program calls.
   NativeScope get natives;
 

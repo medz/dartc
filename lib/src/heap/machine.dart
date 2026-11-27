@@ -48,13 +48,17 @@ abstract interface class Machine() {
   int get handlers;
 
   /// A 32-bit word for each class, giving where its record is in the table.
-  /// A record is the number of its references, whether it has elements that
-  /// are references, and the offsets of the former.
+  /// A record is the number of its references, what kind it is, and the offsets
+  /// of the former. Kinds that are weak have others after these.
   int get classTable;
 
   /// The global variables that hold references.
   int get globalRoots;
   int get globalRootCount;
+
+  /// Where calls of C functions are prepared, and the call of one from there.
+  int get callBlock;
+  void callNative(int block);
 
   /// Where the frame of the innermost call of a C function is, or 0. The frame
   /// of the one before is 8 bytes below it.
@@ -104,3 +108,5 @@ int addressOf(Object object) => machine.addressOf(object);
 /// Whether [a] and [b] are at the same place.
 bool isSame(Object? a, Object? b) => identical(a, b);
 int nativeFrame() => machine.nativeFrame;
+int callBlock() => machine.callBlock;
+void callNative(int block) => machine.callNative(block);

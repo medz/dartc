@@ -132,12 +132,3 @@ int _resolveNative(String symbol, String asset) {
     "Attempted to fallback to process lookup. ${_textAt(_dlerror())}.",
   );
 }
-
-// Nothing is collected before the program ends.
-@patch
-void _attachAsTypedListFinalizer(
-  Pointer<NativeFinalizerFunction> callback,
-  Object typedList,
-  Pointer pointer,
-  int? externalSize,
-) {}

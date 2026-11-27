@@ -27,6 +27,7 @@ final class ConstructorTranslator(
     for (final redirect
         in initializers.whereType<RedirectingConstructorInvocation>()) {
       _run(redirect.element!, redirect.argumentList, element);
+      _builder.stay();
       return;
     }
     final level = _builder.level!;
@@ -69,7 +70,11 @@ final class ConstructorTranslator(
     } else {
       _setMixinFields(level);
     }
-    if (body != null && body is! EmptyFunctionBody) _statements.body(body);
+    if (body == null || body is EmptyFunctionBody) {
+      _builder.stay();
+    } else {
+      _statements.body(body);
+    }
   }
 
   static bool _isObject(ConstructorElement element) =>

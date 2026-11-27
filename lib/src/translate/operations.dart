@@ -77,6 +77,9 @@ final class OperationTranslator(
             for (var i = 0; i < 3; i++) argument(i, .integer),
           ]),
         );
+      case 'usesNativeFinalizers':
+        _scope.addNativeFinalizers();
+        return null;
       case 'currentUri':
         return _builder.call(HirCall(_scope.runtime(name), const []));
       case 'exit':

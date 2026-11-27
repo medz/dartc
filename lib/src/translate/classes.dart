@@ -104,9 +104,20 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
         null => null,
       };
 
+  /// How objects of [class_] are weak, if they are.
+  HirWeakness? weaknessOf(InterfaceElement class_) =>
+      switch (pragmaOf(class_, 'dartc:weak')) {
+        final kind? => HirWeakness.values.byName(kind),
+        null => null,
+      };
+
   /// What the annotation `@pragma` of [element] says about [name].
   String? pragmaOf(Element element, String name) {
-    final node = _nodes[element]?.$2;
+    final node = switch (_nodes[element]?.$2) {
+      VariableDeclaration(parent: VariableDeclarationList(:final parent)) =>
+        parent,
+      final node => node,
+    };
     if (node is! AnnotatedNode) return null;
     for (final annotation in node.metadata) {
       final arguments = annotation.arguments?.arguments ?? const <Argument>[];
@@ -118,6 +129,9 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
             stringValue,
       ];
       if (annotation.name.name == 'pragma' && texts.firstOrNull == name) {
+        if (name == 'dartc:weak' && !element.library!.isInSdk) {
+          throw unsupported(element, 'the dartc:weak pragma outside the SDK');
+        }
         return texts.elementAtOrNull(1) ?? '';
       }
     }
@@ -194,6 +208,7 @@ final class ClassTable(final Declarations _declarations) {
         for (final field in instanceFields(element)) ..._field(level, field),
       ],
       level.isMixin ? null : _declarations.elementsOf(class_),
+      level.isMixin ? null : _declarations.weaknessOf(class_),
     );
   }
 
@@ -236,6 +251,7 @@ final class ClassTable(final Declarations _declarations) {
       name,
       type,
       isFinal: element.isFinal && !element.isLate,
+      isWeak: _declarations.pragmaOf(element, 'dartc:weak') != null,
     );
     final isSet = element.isLate ? HirField('$name is set', .boolean) : null;
     _fields[(level, element)] = (value: value, isSet: isSet);
