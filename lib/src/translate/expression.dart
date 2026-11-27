@@ -273,6 +273,7 @@ final class ExpressionTranslator(
         return _builder.placeholder(placeholder);
       case RethrowExpression():
         final (exception, trace) = _builder.caught.last;
+        _builder.stay();
         _builder.raise(exception, trace);
         return _builder.placeholder(placeholder);
       default:

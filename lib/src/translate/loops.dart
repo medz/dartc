@@ -116,7 +116,7 @@ final class LoopTranslator(
         ..enter(update);
       _ownVariables(parts).forEach(_builder.renew);
       parts.updaters.forEach(_evaluator.effect);
-      _builder.jump(head);
+      _builder.repeat(head);
     }
 
     final condition = parts.condition;
@@ -208,7 +208,7 @@ final class LoopTranslator(
     final isOne = _calls.invoke(node, iterator, class_.thisType, method)!;
     _builder.branch(isOne, () {
       body(_use(node, iterator, class_, 'current'));
-      _builder.jump(next);
+      _builder.repeat(next);
     }, () => _builder.jump(exit));
     _builder.enter(exit);
   }

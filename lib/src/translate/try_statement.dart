@@ -153,6 +153,7 @@ final class TryTranslator(
   }
 
   void _catch(CatchClause clause, HirValue exception, HirValue trace) {
+    final scope = _builder.scope;
     for (final (parameter, value) in [
       (clause.exceptionParameter, exception),
       (clause.stackTraceParameter, trace),
@@ -166,5 +167,6 @@ final class TryTranslator(
     _builder.caught.add((exception, trace));
     _statement(clause.body);
     _builder.caught.removeLast();
+    _builder.leave(scope);
   }
 }

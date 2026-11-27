@@ -412,6 +412,12 @@ final class FunctionBuilder(
 
   void jump(Join join, [HirValue? result]) => jumpWith(join, [?result]);
 
+  /// Keeps the variables in scope alive across a loop's backedge.
+  void repeat(Join head) {
+    stay();
+    jump(head);
+  }
+
   void jumpWith(Join join, List<HirValue> results) =>
       end(HirJump(_edge(join, results)));
 

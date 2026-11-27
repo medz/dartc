@@ -77,14 +77,10 @@ final class StatementTranslator(
       case VariableDeclarationStatement(:final variables):
         expressions.loops.declare(variables);
       case IfStatement(:final expression, :final caseClause):
-        final scope = _builder.scope;
         expressions.patterns.choose(
           node,
           (expression, caseClause),
-          () {
-            statement(node.thenStatement);
-            _builder.stay(scope);
-          },
+          () => statement(node.thenStatement),
           () {
             if (node.elseStatement case final other?) statement(other);
           },
@@ -199,7 +195,7 @@ final class StatementTranslator(
       ..enter(head);
     _whileTrue(node.condition, exit, () {
       statement(node.body);
-      _builder.jump(head);
+      _builder.repeat(head);
     });
   }
 
@@ -215,7 +211,7 @@ final class StatementTranslator(
     _builder
       ..jump(test)
       ..enter(test);
-    _whileTrue(node.condition, exit, () => _builder.jump(head));
+    _whileTrue(node.condition, exit, () => _builder.repeat(head));
   }
 
   void _switch(SwitchStatement node) {

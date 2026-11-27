@@ -122,6 +122,19 @@ void probe(int tokens) {
   print(sum() & tokens);
 }
 
+void stopAtSecond(int round) {
+  if (round == 2) throw 'stop';
+}
+
+void infiniteLoop() {
+  final local = attach(512);
+  var round = 0;
+  for (;;) {
+    probe(512);
+    stopAtSecond(++round);
+  }
+}
+
 int returns() {
   final outer = attach(2);
   try {
@@ -162,10 +175,33 @@ Future<int> asyncReturn() async {
   }
 }
 
+void catches() {
+  try {
+    throw attach(128);
+  } on P catch (p) {
+    probe(128);
+  }
+  try {
+    try {
+      throw 'again';
+    } catch (_) {
+      final local = attach(256);
+      probe(256);
+      rethrow;
+    }
+  } catch (error) {
+    print(error);
+  }
+}
+
 void main() async {
+  try {
+    infiniteLoop();
+  } on String {}
   print(returns());
   loops();
   print(await asyncReturn());
+  catches();
 }
 ''';
 

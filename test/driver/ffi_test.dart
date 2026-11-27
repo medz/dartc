@@ -81,7 +81,7 @@ void main() {
       await _agrees(finalizersDart, finalizersC, isLong: true);
     });
 
-    test('finalizable locals across exits through finally', () async {
+    test('finalizable locals in loops and across scope exits', () async {
       await _agrees(finalizableExitsDart, finalizersC);
     });
 

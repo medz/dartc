@@ -101,9 +101,12 @@ final class PatternTranslator(
       final value = _evaluator.value(expression);
       final guarded = clause.guardedPattern;
       matching([guarded.pattern], () {
-        final other = join(node);
+        final other = join(node), scope = _builder.scope;
         match(guarded, value, expression.staticType!, other);
-        part(ifTrue);
+        part(() {
+          ifTrue();
+          _builder.leave(scope);
+        });
         _builder.enter(other);
         part(ifFalse);
       });
