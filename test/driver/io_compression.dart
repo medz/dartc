@@ -106,7 +106,41 @@ Future<void> main() async {
   final joined = inPieces(gzip.decoder, members, 4093);
   print('stored members ${joined.length} ${hash(joined) == hash([...stored, ...repeated])}');
   final small = [1, 2, 3, 1, 2, 3, 1, 2, 3];
-  attempt('two', () => gzip.decode([...gzip.encode([1]), ...gzip.encode([2])]));
+  final twoGzip = [...gzip.encode([1]), ...gzip.encode([2])];
+  final twoZlib = [...zlib.encode([1]), ...zlib.encode([2])];
+  attempt('two gzip with concatenation', () => gzip.decode(twoGzip));
+  attempt('two gzip without concatenation', () => zlib.decode(twoGzip));
+  attempt('two zlib with concatenation', () => gzip.decode(twoZlib));
+  attempt('dictionary after a member', () =>
+      ZLibDecoder(gzip: true, dictionary: dictionary).convert([
+        ...zlib.encode([1]),
+        ...ZLibEncoder(dictionary: dictionary).convert([2]),
+      ]));
+  final raw = ZLibEncoder(raw: true);
+  final twoRaw = [...raw.convert([1]), ...raw.convert([2])];
+  attempt('two raw with concatenation', () =>
+      ZLibDecoder(raw: true, gzip: true).convert(twoRaw));
+  final gzipSmall = gzip.encode(small);
+  final header = [
+    0x1f, 0x8b, 8, 0x1e, 0, 0, 0, 0, 0, 255,
+    7, 0, 65, 66, 3, 0, 1, 2, 3,
+    ...List<int>.filled(32768, 0x78), 0,
+    ...List<int>.filled(348, 0x79), 0,
+  ];
+  // The low 16 bits of the CRC-32 of the header, split between input chunks.
+  final withHeader = [...header, 0xb6, 0xf2, ...gzipSmall.skip(10)];
+  attempt('chunked gzip with optional fields', () => inPieces(gzip.decoder, withHeader, 263));
+  withHeader[header.length] ^= 1;
+  attempt('bad gzip header checksum', () => gzip.decode(withHeader));
+  final threeAs = gzip.encode([65, 65, 65]);
+  final orphanMatch = [
+    ...threeAs.take(10),
+    // A match before any literal in this member.
+    0x03, 0x02, 0,
+    ...threeAs.skip(threeAs.length - 8),
+  ];
+  attempt('gzip member without its own history', () =>
+      gzip.decode([...gzip.encode([65]), ...orphanMatch]));
   attempt('rest', () => gzip.decode([...gzip.encode([1]), 7, 8]));
   attempt('zlib rest', () => zlib.decode([...zlib.encode([1]), 7, 8]));
   attempt('cut', () => gzip.decode(gzip.encode(small).sublist(0, 12)));
@@ -148,12 +182,21 @@ const compressedProgram =
     _common +
     r'''
 void main() {
-  final data = payload(20000);
+  var x = 7;
+  final data = <int>[];
+  // The incompressible prefix makes the small token buffer choose stored blocks.
+  for (var i = 0; i < 1024; i++) {
+    x = (x * 1103515245 + 12345) & 0x7fffffff;
+    data.add(x >> 8 & 0xff);
+  }
+  data.addAll(payload(20000));
   print(base64.encode(data));
   codecs().forEach((name, codec) {
     final (encoder, _) = codec;
     print('$name = ${base64.encode(encoder.convert(data))}');
   });
+  final withoutDictionary = ZLibEncoder(dictionary: []).convert(data);
+  print('empty dictionary = ${base64.encode(withoutDictionary)}');
 }
 ''';
 

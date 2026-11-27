@@ -12,10 +12,11 @@ final class _Deflater {
     this._strategy,
     int windowBits,
     int memLevel,
-    this._dictionary,
+    List<int>? dictionary,
     this._wrapping,
   ) : _level = level < 0 ? 6 : level,
       _windowBits = windowBits == 8 ? 9 : windowBits,
+      _dictionary = dictionary?.isNotEmpty == true ? dictionary : null,
       _blocks = _BlockWriter(1 << (memLevel + 6)) {
     _blocks.isFixed = _strategy == ZLibOption.strategyFixed;
     // Only zlib streams tell that there is one.
@@ -200,15 +201,15 @@ final class _Deflater {
   }
 
   void _endBlock({bool isLast = false}) {
-    final start = _blockStart;
+    final start = _blockStart, end = _hasPending ? _at - 1 : _at;
     if (_level == 0) {
-      if (_at > start || isLast) {
-        _blocks.store(_window, start, _at, isLast: isLast);
+      if (end > start || isLast) {
+        _blocks.store(_window, start, end, isLast: isLast);
       }
     } else if (_blocks.isUsed || isLast) {
-      _blocks.end(start < 0 ? null : _window, start, _at, isLast: isLast);
+      _blocks.end(start < 0 ? null : _window, start, end, isLast: isLast);
     }
-    _blockStart = _at;
+    _blockStart = end;
   }
 
   int _hash(int at) =>

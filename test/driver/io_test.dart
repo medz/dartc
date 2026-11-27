@@ -143,7 +143,7 @@ void main() {
         final [data, ...ways] = LineSplitter.split(
           (await host.run(program)).output,
         ).toList();
-        expect(ways, hasLength(27));
+        expect(ways, hasLength(28));
         for (final way in ways) {
           final [name, text] = way.split(' = ');
           final back = officialDecoder(name).convert(base64.decode(text));

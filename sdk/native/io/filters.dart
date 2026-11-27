@@ -32,7 +32,9 @@ class RawZLibFilter {
     int windowBits,
     List<int>? dictionary,
     bool raw,
-  ) => _Decompressing(_Inflater(windowBits, dictionary, isRaw: raw));
+  ) => _Decompressing(
+    _Inflater(windowBits, dictionary, isRaw: raw, concatenates: gzip),
+  );
 }
 
 Never _throwUnfinished() =>
