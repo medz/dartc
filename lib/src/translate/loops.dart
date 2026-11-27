@@ -94,6 +94,7 @@ final class LoopTranslator(
     void Function() body,
     void Function(Join exit, Join next)? within,
   ) {
+    final scope = _builder.scope;
     switch (parts) {
       case ForPartsWithDeclarations(:final variables):
         if (variables.isLate) _unsupported(variables, 'late loop variables');
@@ -126,7 +127,9 @@ final class LoopTranslator(
       final value = _evaluator.valueTo(condition, _conversions.types.boolType);
       _builder.branch(value, round, () => _builder.jump(exit));
     }
-    _builder.enter(exit);
+    _builder
+      ..enter(exit)
+      ..leave(scope);
   }
 
   void _forIn(

@@ -183,6 +183,22 @@ void overwritesCaptured() {
   captured = forget(16384);
 }
 
+int duringInitialization(int token) {
+  probe(token);
+  return token;
+}
+
+class ConstructorProbe {
+  final int token;
+  ConstructorProbe(P kept) : token = duringInitialization(32768);
+  ConstructorProbe.redirect(P kept) : this._(65536);
+  ConstructorProbe._(int token) : token = duringInitialization(token);
+}
+
+extension type ExtensionProbe(int token) {
+  ExtensionProbe.initializer(P kept) : token = duringInitialization(131072);
+}
+
 int returns() {
   final outer = attach(2);
   try {
@@ -253,6 +269,9 @@ void main() async {
   neverCalls(Stopper());
   overwritesLocal();
   overwritesCaptured();
+  ConstructorProbe(attach(32768));
+  ConstructorProbe.redirect(attach(65536));
+  ExtensionProbe.initializer(attach(131072));
 }
 ''';
 
