@@ -269,10 +269,16 @@ final class SimulatedMachine({
   Never trap() => throw StateError('Trapped.');
 }
 
-/// A program that does nothing after collections.
+/// A program that does nothing after collections, and counts how often no
+/// memory was left.
 final class SimulatedProgram() implements Program {
+  var exhaustions = 0;
+
   @override
   void afterCollection() {}
+
+  @override
+  void outOfMemory() => exhaustions++;
 
   @override
   Object? noSuchMethod(Invocation invocation) => throw UnimplementedError();

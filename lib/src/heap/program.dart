@@ -37,6 +37,10 @@ abstract interface class Program() {
 
   /// Does what has to be done after each collection.
   void afterCollection();
+
+  /// Says that no memory is left for an object. Compiled programs throw
+  /// `OutOfMemoryError` here; elsewhere allocation then gives 0.
+  void outOfMemory();
 }
 
 /// The program that the runtime is part of outside compiled programs.
@@ -53,3 +57,4 @@ int futureNumber() => program.futureNumber;
 int recordNumber() => program.recordNumber;
 String className(int number) => program.className(number);
 void afterCollection() => program.afterCollection();
+void outOfMemory() => program.outOfMemory();

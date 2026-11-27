@@ -15,8 +15,8 @@ final LirFunction allocateFunction = () {
   final address = block.add(
     Call('calloc', callocExternal.signature, [one, block.parameters.single]),
   );
-  block.end(Return(block.add(Convert(.intToRef, address))));
-  return LirFunction('.allocate', LirSignature([.i64], .ref), [block]);
+  block.end(Return(address));
+  return LirFunction('.allocate', LirSignature([.i64], .i64), [block]);
 }();
 
 const _limit = 250;

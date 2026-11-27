@@ -6,7 +6,7 @@
 // then four up to each power of two. This file uses only what the compiler
 // supports.
 import 'machine.dart';
-import 'program.dart' show afterCollection;
+import 'program.dart' show afterCollection, outOfMemory;
 import 'returns.dart';
 
 /// Where the collector's own state is, or 0 before the first allocation.
@@ -55,7 +55,8 @@ const _sharedBlock = 262144, _smallCell = 512, _largestCell = 32768;
 const _smallestLimit = 4194304;
 const _firstPendingBytes = 65536, _garbage = 0x5bad5bad5bad5bad;
 
-/// Zeroed memory for an object of [bytes] bytes, marked as in use, or 0.
+/// Zeroed memory for an object of [bytes] bytes, marked as in use. Where none
+/// is left, it tells [outOfMemory], and gives 0 if that returns.
 int allocate(int bytes) {
   final cell = (bytes + 15) & ~15;
   if (cell <= _smallCell && heap != 0 && !collectsAlways()) {
@@ -77,6 +78,13 @@ int allocate(int bytes) {
 }
 
 int _allocateSlowly(int bytes) {
+  final found = _found(bytes);
+  if (found == 0) outOfMemory();
+  return found;
+}
+
+/// A cell for [bytes] bytes, marked as in use, or 0 if no memory is left.
+int _found(int bytes) {
   if (heap == 0 && !_start()) return 0;
   if (collectsAlways() || load64(heap + _grown) >= load64(heap + _limit)) {
     collect();

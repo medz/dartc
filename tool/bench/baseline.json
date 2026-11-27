@@ -1,21 +1,21 @@
 {
   "bodies": {
-    "ratio": 2.462,
+    "ratio": 2.418,
     "bytes": 479272,
-    "compiling": 1195,
-    "memory": 221151232
+    "compiling": 1189,
+    "memory": 223068160
   },
   "calls": {
-    "ratio": 0.906,
+    "ratio": 0.921,
     "bytes": 462759,
-    "compiling": 1191,
-    "memory": 227901440
+    "compiling": 1113,
+    "memory": 219283456
   },
   "dartc": {
-    "ratio": 3.667,
+    "ratio": 3.496,
     "bytes": 30697497,
-    "compiling": 32972,
-    "memory": 2486468608
+    "compiling": 31892,
+    "memory": 2514288640
   },
   "dartc-self": {
     "ratio": 4.66,
@@ -24,63 +24,63 @@
     "memory": 2486468608
   },
   "encoding": {
-    "ratio": 2.5,
+    "ratio": 2.744,
     "bytes": 594858,
-    "compiling": 1298,
-    "memory": 230080512
+    "compiling": 1211,
+    "memory": 223592448
   },
   "flips": {
-    "ratio": 1.251,
+    "ratio": 1.258,
     "bytes": 479271,
-    "compiling": 1206,
-    "memory": 221741056
+    "compiling": 1097,
+    "memory": 221036544
   },
   "maps": {
-    "ratio": 2.039,
+    "ratio": 2.125,
     "bytes": 512294,
-    "compiling": 1219,
-    "memory": 224854016
+    "compiling": 1156,
+    "memory": 224051200
   },
   "norm": {
-    "ratio": 2.076,
+    "ratio": 2.21,
     "bytes": 479270,
-    "compiling": 1177,
-    "memory": 221184000
+    "compiling": 1131,
+    "memory": 218464256
   },
   "shapes": {
-    "ratio": 1.014,
+    "ratio": 1.042,
     "bytes": 446248,
-    "compiling": 1171,
-    "memory": 219791360
+    "compiling": 1132,
+    "memory": 216104960
   },
   "sieve": {
-    "ratio": 0.908,
+    "ratio": 0.907,
     "bytes": 479271,
-    "compiling": 1236,
-    "memory": 221134848
+    "compiling": 1135,
+    "memory": 232603648
   },
   "sorting": {
-    "ratio": 1.635,
+    "ratio": 1.559,
     "bytes": 578345,
-    "compiling": 1242,
-    "memory": 231768064
+    "compiling": 1202,
+    "memory": 227606528
   },
   "texts": {
-    "ratio": 2.395,
+    "ratio": 2.388,
     "bytes": 941607,
-    "compiling": 1518,
-    "memory": 243826688
+    "compiling": 1460,
+    "memory": 248463360
   },
   "trees": {
-    "ratio": 2.536,
+    "ratio": 2.436,
     "bytes": 462759,
-    "compiling": 1241,
-    "memory": 218644480
+    "compiling": 1133,
+    "memory": 222904320
   },
   "waiting": {
-    "ratio": 1.366,
+    "ratio": 1.288,
     "bytes": 677465,
-    "compiling": 1337,
-    "memory": 233537536
+    "compiling": 1264,
+    "memory": 233701376
   }
 }

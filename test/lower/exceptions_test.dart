@@ -29,7 +29,6 @@ HirModule _module(
   HirCalling Function(HirBlock block) call,
   List<HirFunction> others, {
   HirFunction? stackOverflow,
-  HirFunction? outOfMemory,
   HirFunction? allocate,
   HirFunction? raise,
   List<HirGlobal> globals = const [],
@@ -63,7 +62,7 @@ HirModule _module(
     ..define([entry, normal, handler, more, ...exits]);
   return HirModule(
     main,
-    [main, ...others, ?stackOverflow, ?outOfMemory, ?allocate, ?raise],
+    [main, ...others, ?stackOverflow, ?allocate, ?raise],
     classes: [_a, _b, _c],
     tests: {
       _isA: {_a, _b},
@@ -71,7 +70,6 @@ HirModule _module(
     },
     globals: globals,
     stackOverflow: stackOverflow,
-    outOfMemory: outOfMemory,
     allocate: allocate,
     raise: raise,
   );
@@ -282,35 +280,22 @@ void main() {
     });
   });
 
-  test('a program without memory throws', () {
-    HirFunction allocate(int address) => _function(
+  test('allocations call the function of the runtime itself', () {
+    final allocate = _function(
       'allocate',
       [.integer],
-      (block) => HirReturn(block.add(HirConst(address))),
+      (block) => HirReturn(block.add(HirConst(32))),
       result: .integer,
     );
-    LirFunction made(HirFunction? outOfMemory) => lowerProgram(
-      _module(
-        (_) => HirNew(_a),
-        [],
-        allocate: allocate(0),
-        outOfMemory: outOfMemory,
-      ),
-    ).functions.firstWhere((function) => function.name == allocateSymbol);
-    expect(made(null).blocks, hasLength(1));
-    final outOfMemory = _throwing(_b, name: 'full');
     final lowered = lowerProgram(
-      _module(
-        (_) => HirNew(_a),
-        [],
-        allocate: allocate(0),
-        outOfMemory: outOfMemory,
-      ),
+      _module((_) => HirNew(_a), [], allocate: allocate),
     );
-    expect(
-      () => LirInterpreter(lowered).call(allocateSymbol, [16]),
-      throwsA(isA<LirException>()),
-    );
+    final [made] = [
+      for (final function in lowered.functions)
+        if (function.name == allocateSymbol) function,
+    ];
+    expect(made.signature, LirSignature([.i64], .i64));
+    expect(LirInterpreter(lowered).call(allocateSymbol, [16]), 32);
   });
 
   test('machine code throws through the runtime', () {

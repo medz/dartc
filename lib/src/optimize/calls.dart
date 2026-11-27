@@ -66,7 +66,6 @@ final class Calls(
     ?_module.allocate,
     ?_module.raise,
     ?_module.stackOverflow,
-    ?_module.outOfMemory,
     ?_module.uncaught,
     ?_module.callback,
     ?_module.spawned,

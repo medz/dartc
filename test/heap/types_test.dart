@@ -38,6 +38,9 @@ final class _Program(final List<analyzer.InterfaceElement> classes)
   }
 
   @override
+  void outOfMemory() {}
+
+  @override
   int get functionNumber =>
       classes.indexWhere((class_) => class_.name == 'Function');
 

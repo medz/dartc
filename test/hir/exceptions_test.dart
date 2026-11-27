@@ -34,12 +34,11 @@ HirModule _module(
   HirFunction? stackOverflow,
   HirFunction? uncaught,
   HirFunction? raise,
-  HirFunction? outOfMemory,
   List<HirClass>? classes,
   Map<HirTypeTest, Set<HirClass>>? tests,
 }) => HirModule(
   main,
-  [main, ...others, ?stackOverflow, ?uncaught, ?raise, ?outOfMemory],
+  [main, ...others, ?stackOverflow, ?uncaught, ?raise],
   classes: classes ?? [_a, _b],
   tests:
       tests ??
@@ -49,7 +48,6 @@ HirModule _module(
   stackOverflow: stackOverflow,
   uncaught: uncaught,
   raise: raise,
-  outOfMemory: outOfMemory,
 );
 
 /// Exits with what a call of `raise` gives, or with 100 and more if it throws.
@@ -352,7 +350,6 @@ void main() {
     HirFunction main() => _ending('main', [], (_) => HirReturn());
     for (final (name, build) in <(String, HirModule Function(HirFunction f))>[
       ('stackOverflow', (f) => _module(main(), [], stackOverflow: f)),
-      ('outOfMemory', (f) => _module(main(), [], outOfMemory: f)),
       ('uncaught', (f) => _module(main(), [], uncaught: f)),
       ('raise', (f) => _module(main(), [], raise: f)),
     ]) {
