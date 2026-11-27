@@ -199,6 +199,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 泛型的检查 | 参数的类型含类的 `T` 时，由适配函数检查；结果里函数的参数含 `T` 时，由调用处检查 |
 | 运行时实现 | 用 Dart 写，走同一条流水线 |
 | 标准库 | `sdk/std` 是官方源码；先合上官方给 VM 的补丁（`dart:developer` 除外，它会带来 `dart:io`），再合上 `sdk/native` 的补丁。`dart:collection` 和 `dart:_http` 只用官方的补丁。合并只在内存里，按文字替换声明 |
+| `UserTag` | 按标签名复用对象。达到 256 个（含 `Default`）后，创建新标签会抛出 `UnsupportedError`。公开常量 `UserTag.maxUserTags` 的值为 64。两者都与官方 Dart 3.14 一致 |
 | 运行时的库 | `lib/src/heap` 就是 `dart:_heap`。`machine.dart` 和 `objects.dart` 里的函数各是一条操作 |
 | 数组 | 有元素的类：头、一个字段、元素个数、元素。元素是引用或字节。由 `@pragma('dartc:elements')` 标出 |
 | 字符串 | `_OneByteString` `_TwoByteString` 本身就是字节数组，另有一个字段存哈希值 |
