@@ -24,13 +24,7 @@ final class Scope([final Scope? _outer]) {
     for (Scope? scope = this; scope != null; scope = scope._outer) {
       if (scope._classes[value] case final classes?) return classes;
     }
-    return switch (value) {
-      HirNew(:final target) ||
-      HirNewArray(:final target) ||
-      HirBox(:final target) => {target},
-      HirStatic(:final object) => {object.target},
-      _ => null,
-    };
+    return classesOfMade(value);
   }
 
   void setClasses(HirValue value, Set<HirClass> classes) =>
@@ -47,17 +41,18 @@ final class Memory() {
     .._fields = Map.of(_fields)
     .._globals = Map.of(_globals);
 
-  HirValue? field(HirField field, HirValue object) => _fields[(field, object)];
+  HirValue? field(HirField field, HirValue object) =>
+      _fields[(field, unrefined(object))];
   HirValue? global(HirGlobal global) => _globals[global];
 
   void setField(HirField field, HirValue object, HirValue value) {
     // Other values may be the same object.
     _fields.removeWhere((key, _) => key.$1 == field);
-    _fields[(field, object)] = value;
+    _fields[(field, unrefined(object))] = value;
   }
 
   void readField(HirField field, HirValue object, HirValue value) =>
-      _fields[(field, object)] = value;
+      _fields[(field, unrefined(object))] = value;
 
   void setGlobal(HirGlobal global, HirValue value) => _globals[global] = value;
 
@@ -67,6 +62,20 @@ final class Memory() {
     _globals.clear();
   }
 }
+
+/// What [Scope] knows for this key of an object: an unboxing of it.
+Object unboxingOf(HirValue object) => ('unboxing', unrefined(object));
+
+/// The classes that [value] can be of unless it is null, if how it is made
+/// tells them.
+Set<HirClass>? classesOfMade(HirValue value) => switch (value) {
+  HirNew(:final target) ||
+  HirNewArray(:final target) ||
+  HirBox(:final target) => {target},
+  HirStatic(:final object) => {object.target},
+  HirRefine(:final classes) => classes,
+  _ => null,
+};
 
 /// What tells that [instruction] always gives the same as others with an equal
 /// key, or null if it may not.
@@ -109,5 +118,6 @@ Object _part(HirValue value) => switch (value) {
   HirConst(:final value) => ('constant', value),
   HirNull() => 'null',
   HirStatic(:final object) => object,
+  HirRefine(:final value) => _part(value),
   _ => value,
 };

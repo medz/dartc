@@ -174,13 +174,13 @@ final class HirInterpreter(
       case HirMachine(:final op):
         return _machine.run(op, inputs);
       case HirIsInstance(:final test):
-        final object = inputs.single;
-        if (object is! HirObject) throw StateError('$object has no class.');
-        return module.tests[test]!.contains(object.target);
+        return module.tests[test]!.contains(_classOf(inputs.single));
       case HirHasClass(:final target):
-        final object = inputs.single;
-        if (object is! HirObject) throw StateError('$object has no class.');
-        return object.target == target;
+        return _classOf(inputs.single) == target;
+      case HirRefine(:final classes):
+        return classes.contains(_classOf(inputs.single))
+            ? inputs.single
+            : throw StateError('${inputs.single} is of another class.');
       case HirNew(:final target):
         return HirObject(target);
       case HirBox(:final target):
@@ -261,6 +261,11 @@ final class HirInterpreter(
     if (value is HirObject && value.target.fields.contains(field)) return value;
     throw StateError('No field ${field.name} in $value.');
   }
+
+  /// The class of [value], which must be an object.
+  HirClass _classOf(Object value) => value is HirObject
+      ? value.target
+      : throw StateError('$value has no class.');
 
   /// The array [value].
   HirObject _array(Object value) =>

@@ -15,6 +15,10 @@ abstract interface class CallPolicy() {
   /// Whether integers without an object can receive calls of [selector].
   bool mayBeInteger(HirSelector selector);
 
+  /// Whether calls of the runtime's test of types are answered where the
+  /// class of the object decides them.
+  bool get decidesTypes;
+
   /// Whether calls of [callee] are replaced by its body, where functions
   /// [around], the last one first, are replaced already. Larger ones are, too, if
   /// the parameters that the body branches on include one of which something
@@ -175,7 +179,7 @@ final class _BodyCopy(
   HirValue? _call(HirCalling call, {Handler? handler}) {
     final ending = handler ?? this.handler;
     if (call is HirVirtualCall) {
-      final classes = _emitter.place!.scope.classesOf(call.receiver);
+      final classes = _emitter.classesOf(call.receiver);
       final targets = _policy.targetsOf(call, classes);
       if (_isCold && targets.first.isNotEmpty) return _make(call, ending);
       return targets.first.isEmpty
@@ -183,6 +187,9 @@ final class _BodyCopy(
           : _choose(call, targets, ending);
     }
     if (call is HirCall) {
+      if (_policy.decidesTypes) {
+        if (_emitter.answerOf(call) case final answer?) return answer;
+      }
       final target = call.target;
       if (target is HirFunction) {
         return _callDirectly(target, call.arguments, ending, call.place);
@@ -209,8 +216,7 @@ final class _BodyCopy(
   /// Whether code for [value] may be simpler than for others.
   bool _isKnown(HirValue value) =>
       value is HirConst ||
-      value.type == .reference &&
-          _emitter.place!.scope.classesOf(value)?.length == 1;
+      value.type == .reference && _emitter.classesOf(value)?.length == 1;
 
   /// Makes [call] for each of the classes of [targets] apart.
   HirValue? _choose(HirVirtualCall call, Targets targets, Handler? ending) {

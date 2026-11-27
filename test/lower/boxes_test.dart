@@ -115,6 +115,17 @@ void main() {
     ];
   });
 
+  _agrees('refined boxes are the same boxes', (block) {
+    return [
+      for (final value in _values)
+        () {
+          final box = block.add(HirBox(_integers, block.add(HirConst(value))));
+          final refined = block.add(HirRefine(box, {_integers}));
+          return equal(block, block.add(HirUnbox(_value, refined)), value);
+        }(),
+    ];
+  });
+
   _agrees('fields hold boxes and objects', (block) {
     final holder = block.add(HirNew(_holder));
     return [

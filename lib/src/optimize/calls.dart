@@ -45,6 +45,7 @@ final class Calls(
   final HirModule _module, {
   required final bool devirtualizes,
   required final bool inlinesSmall,
+  @override required final bool decidesTypes,
 }) implements CallPolicy {
   /// The largest functions whose bodies replace calls, and the most functions
   /// one in the other.
@@ -196,6 +197,7 @@ final class Calls(
 
   static int _costOf(HirInstruction instruction) => switch (instruction) {
     HirConst() || HirNull() || HirStatic() || HirClassNumber() => 0,
+    HirRefine() => 0,
     HirCall(:final arguments) => 1 + arguments.length ~/ 2,
     HirVirtualCall() => 3,
     HirNew() || HirNewArray() || HirBox() => 2,

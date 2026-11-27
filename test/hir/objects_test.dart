@@ -98,6 +98,16 @@ void main() {
       }
     });
 
+    test('refinements give the object that they are of', () {
+      final code = run((block) {
+        final object = block.add(HirNew(_derived));
+        final refined = block.add(HirRefine(object, {_base, _derived}));
+        block.add(HirStore(_x, refined, block.add(HirConst(4))));
+        return HirExit(block.add(HirLoad(_x, object)));
+      });
+      expect(code, 4);
+    });
+
     test('broken programs are errors', () {
       final errors = <HirTerminator Function(HirBlock block)>[
         // A number read before it is stored.
@@ -125,6 +135,15 @@ void main() {
         (block) {
           final none = block.add(HirNull()), one = block.add(HirConst(1));
           return HirExit(block.add(HirVirtualCall(_get, none, [one])));
+        },
+        // A refinement that is wrong.
+        (block) {
+          block.add(HirRefine(block.add(HirNew(_base)), {_derived}));
+          return HirReturn();
+        },
+        (block) {
+          block.add(HirRefine(block.add(HirNull()), {_base}));
+          return HirReturn();
         },
         // No implementation.
         (block) {
@@ -189,6 +208,20 @@ void main() {
         final one = block.add(HirConst(1));
         block.add(HirStore(_x, one, one));
       });
+    });
+    rejects('a refinement to no class', () {
+      return with_((block, object) => block.add(HirRefine(object, {})));
+    });
+    rejects('unlisted class Other', () {
+      return _module((block) {
+        block.add(HirRefine(block.add(HirNew(_base)), {_other}));
+        return HirReturn();
+      }, classes: [_base, _derived]);
+    });
+    rejects('refined: expected reference', () {
+      return with_(
+        (block, _) => block.add(HirRefine(block.add(HirConst(1)), {_base})),
+      );
     });
     rejects('field x: expected int', () {
       return with_((block, object) => block.add(HirStore(_x, object, object)));
@@ -262,7 +295,8 @@ void main() {
       final one = block.add(HirConst(1));
       block
         ..add(HirLoad(_next, object))
-        ..add(HirVirtualCall(_get, object, [one]));
+        ..add(HirVirtualCall(_get, object, [one]))
+        ..add(HirRefine(object, {_base, _derived}));
       return HirReturn();
     });
     expect(
@@ -274,6 +308,7 @@ void main() {
   v2 = 1
   v3 = v0.next
   v4 = v0->get(v2)
+  v5 = v0 as Base | Derived
 '''),
     );
     expect(

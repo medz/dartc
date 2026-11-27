@@ -19,9 +19,10 @@ HirValue reduce(HirInstruction instruction) => switch (instruction) {
   HirUnbox(:final field, object: HirBox(:final target, :final value))
       when target.fields.single == field =>
     value,
+  // What is known of the box stays known of the object.
   HirBox(:final target, value: HirUnbox(:final field, :final object))
       when target.fields.single == field =>
-    object,
+    HirRefine(object, {target}),
   HirMachine(op: .isSame, arguments: [final left, final right]) => reduce(
     HirCompare(.equal, left, right),
   ),
@@ -198,12 +199,18 @@ bool isObject(HirValue value) =>
     value is HirNew ||
     value is HirNewArray ||
     value is HirBox ||
+    value is HirRefine ||
     value is HirStatic;
+
+/// [value] without what [HirRefine] says of it.
+HirValue unrefined(HirValue value) =>
+    value is HirRefine ? unrefined(value.value) : value;
 
 HirValue _identity(HirCompare compare) {
   final HirCompare(:relation, :left, :right) = compare;
   final bool isSame;
-  if (identical(left, right) || left is HirNull && right is HirNull) {
+  if (identical(unrefined(left), unrefined(right)) ||
+      left is HirNull && right is HirNull) {
     isSame = true;
   } else if (left is HirNull && isObject(right) ||
       right is HirNull && isObject(left)) {

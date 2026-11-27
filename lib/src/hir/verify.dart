@@ -304,6 +304,10 @@ final class _FunctionVerifier(
           _fail('${target.name} is no box');
         }
         _expect(value, target.fields.single.type, target.name);
+      case HirRefine(:final value, :final classes):
+        if (classes.isEmpty) _fail('a refinement to no class');
+        classes.forEach(_checkClass);
+        _expect(value, .reference, 'refined');
       case HirLoad(:final object) || HirUnbox(:final object):
         _expect(object, .reference, 'object');
       case HirStore(:final field, :final object, :final value):

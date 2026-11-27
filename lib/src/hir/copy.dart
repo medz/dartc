@@ -29,6 +29,7 @@ HirInstruction copyInstruction(
   HirMachine(:final op, :final arguments) => HirMachine(op, arguments.map(of)),
   HirLoad(:final field, :final object) => HirLoad(field, of(object)),
   HirUnbox(:final field, :final object) => HirUnbox(field, of(object)),
+  HirRefine(:final value, :final classes) => HirRefine(of(value), classes),
   HirStore(:final field, :final object, :final value) => HirStore(
     field,
     of(object),
