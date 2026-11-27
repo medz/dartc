@@ -23,6 +23,12 @@ final class FieldTable(
   /// The functions that initialize `late` fields.
   Iterable<HirFunction> get functions => _getters.values;
 
+  /// The functions of fields, with the field of each.
+  Iterable<(Element, HirFunction)> get declared => [
+    for (final MapEntry(key: (_, element), :value) in _getters.entries)
+      (element, value),
+  ];
+
   HirValue load(
     FunctionBuilder builder,
     Level level,
@@ -73,7 +79,7 @@ final class FieldTable(
           [.reference],
           value.type,
         );
-        _scope.schedule(() => _define(function, level, element));
+        _scope.schedule(function, () => _define(function, level, element));
         return function;
       }();
 

@@ -20,7 +20,7 @@ final class GlobalTable(
   final ConstantTable _constants,
 
   /// Has work done later.
-  final void Function(void Function() work) _schedule,
+  final void Function(HirFunction function, void Function() work) _schedule,
 ) {
   final _variables = <PropertyInducingElement, GlobalVariable>{};
 
@@ -34,6 +34,12 @@ final class GlobalTable(
   /// The functions that read variables that may not be set yet.
   Iterable<HirFunction> get getters =>
       _variables.values.map((variable) => variable.getter).nonNulls;
+
+  /// The functions that read variables, with the variable of each.
+  Iterable<(Element, HirFunction?)> get declared => [
+    for (final MapEntry(:key, :value) in _variables.entries)
+      (key, value.getter),
+  ];
 
   /// The variable [element], or null if the program does not declare it.
   GlobalVariable? of(PropertyInducingElement element) =>
@@ -68,7 +74,10 @@ final class GlobalTable(
       HirFunction(name, const [], type),
     );
     _variables[element] = variable;
-    _schedule(() => _defineGetter(variable, unit, node, element));
+    _schedule(
+      variable.getter!,
+      () => _defineGetter(variable, unit, node, element),
+    );
     return variable;
   }
 

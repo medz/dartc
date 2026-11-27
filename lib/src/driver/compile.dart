@@ -55,21 +55,24 @@ Future<Uint8List> buildProgram(
     target: target,
     checksAssertions: options.checksAssertions,
   );
-  final code = _emit(module, options, entry: entrySymbol);
-  return switch (target.system) {
-    .macos => linkMacho(
-      code,
-      entry: entrySymbol,
-      identifier: Uri.file(path).pathSegments.last,
-      namesFunctions: options.namesFunctions,
-    ),
-    .linux => linkElf(
-      code,
-      entry: linuxEntrySymbol,
-      namesFunctions: options.namesFunctions,
-    ),
-  };
+  return linkProgram(_emit(module, options, entry: entrySymbol), path, options);
 }
+
+/// The executable of the program at [path], whose code is [code].
+Uint8List linkProgram(EmittedCode code, String path, CompileOptions options) =>
+    switch (options.target.system) {
+      .macos => linkMacho(
+        code,
+        entry: entrySymbol,
+        identifier: Uri.file(path).pathSegments.last,
+        namesFunctions: options.namesFunctions,
+      ),
+      .linux => linkElf(
+        code,
+        entry: linuxEntrySymbol,
+        namesFunctions: options.namesFunctions,
+      ),
+    };
 
 /// What can be made of a library.
 enum LibraryKind() {

@@ -137,6 +137,8 @@ Linux 的程序要 glibc 2.34 以上。测试在 Docker 容器里运行，见 `t
 
 - 14n（完成）：`--symbols` 时，可执行文件和动态库带每个函数的名字，`sample`、Instruments、`perf` 能直接显示函数名。默认不带，因为 `hello` 在 macOS 上会多 34 KB（446 KB → 480 KB），在 Linux ARM64 上多 40 KB。
 
+- 14o（完成）：`dart run tool/size.dart <程序> [函数]` 列出文件各部分、最大的函数、各个库和类的字节；给了函数时，列出从 `main`（或运行时的入口、`ProgramTranslator` 的某一步）到它的那串函数。这串函数在翻译时记下，不要时不记，产物逐字节相同。`hello`（446,247 字节）：代码 61.5%，加载器的头、对齐和表 11.3%，源码位置 11.1%，栈表 6.8%，常量对象 6.8%；最大的函数是 `NoSuchMethodError.toString`（14 KB），因为 `print` 的字符串插值可能遇到任何对象的 `toString`。
+
 没有做：循环不变量外提；对象的逃逸分析。
 
 **15 换掉旧编译器。** 分小步：

@@ -174,12 +174,16 @@ final class DispatchBuilder(
     ];
   }
 
-  /// Adds the entries found since the last time. Returns whether there were any.
-  bool update() {
+  /// Adds the entries found since the last time, each through [around].
+  /// Returns whether there were any.
+  bool update(
+    void Function(InterfaceElement, HirSelector, void Function()) around,
+  ) {
     final entries = _world.takeEntries();
-    for (final (found, selector) in entries) {
-      final class_ = found;
-      _entries[selector]![class_] = _entry(class_, selector);
+    for (final (class_, selector) in entries) {
+      around(class_, selector, () {
+        _entries[selector]![class_] = _entry(class_, selector);
+      });
     }
     return entries.isNotEmpty;
   }

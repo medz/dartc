@@ -85,7 +85,7 @@ final class CoroutineTranslator(
       .reference,
     ], .reference);
     _addClosure(class_, function, 'Starter');
-    _scope.schedule(() {
+    _scope.schedule(function, () {
       final builder = environment.build(function, const []);
       final made = _create(builder, body, .syncStar, type, parameters);
       builder
@@ -140,7 +140,7 @@ final class CoroutineTranslator(
         .reference,
     ], .reference);
     _addClosure(class_, function, 'Body');
-    _scope.schedule(() {
+    _scope.schedule(function, () {
       final suspend = HirFunction('suspend', const [.reference], .reference);
       final types = _conversions.types;
       final builder = environment.build(

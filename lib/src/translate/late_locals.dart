@@ -45,7 +45,7 @@ final class LateTranslator(
     _builder.locals.lates[variable] = LateLocal(value, isSet, getter);
     if (getter != null) {
       _scope.addLocalFunction(getter);
-      _scope.schedule(() {
+      _scope.schedule(getter, () {
         final builder = environment!.build(
           getter,
           const [],

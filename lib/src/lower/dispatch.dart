@@ -9,7 +9,9 @@ const _headerBytes = 8, _fieldBytes = 8;
 /// where those are.
 const lengthOffset = 16, elementsOffset = 24;
 
-const _tableSymbol = '.dispatch', _holeSymbol = '.hole';
+/// The table of functions that calls on objects find theirs in.
+const dispatchSymbol = '.dispatch';
+const _holeSymbol = '.hole';
 
 /// Overlays sparse [rows] in one list, so that entry c of row i is at its
 /// offset plus c. Offsets can be negative; indexes of entries are not.
@@ -102,7 +104,7 @@ final class ObjectLayout(
 
   /// The tables the program needs.
   List<LirTable> get tables => [
-    if (module.dispatch.isNotEmpty) LirTable(_tableSymbol, _entries),
+    if (module.dispatch.isNotEmpty) LirTable(dispatchSymbol, _entries),
   ];
 
   /// The functions that [tables] need beyond the program's own.
@@ -232,7 +234,7 @@ final class ObjectLayout(
     final row = block.add(ConstInt(_selectorOffsets[selector]!));
     final entry = block.add(IntBinary(.add, number, row));
     final index = block.add(IntBinary(.shl, entry, block.add(ConstInt(2))));
-    final table = block.add(SymbolAddress(_tableSymbol));
+    final table = block.add(SymbolAddress(dispatchSymbol));
     final distance = block.add(Load(.i32, table, index: index));
     return block.add(PtrAdd(table, distance));
   }

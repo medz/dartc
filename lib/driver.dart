@@ -6,3 +6,4 @@ export 'src/driver/compile.dart';
 export 'src/driver/files.dart';
 export 'src/driver/packaged.dart';
 export 'src/driver/sdk.dart';
+export 'src/driver/sizes.dart';
