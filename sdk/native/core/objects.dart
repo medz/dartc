@@ -41,9 +41,7 @@ class _Closure {
   bool operator ==(Object other) {
     if (isSame(this, other)) return true;
     final receiver = receiverOf(this), types = typesOf(this);
-    if (receiver == null && types == null ||
-        other is! _Closure ||
-        classNumber(this) != classNumber(other)) {
+    if (other is! _Closure || classNumber(this) != classNumber(other)) {
       return false;
     }
     final otherReceiver = receiverOf(other);
@@ -58,11 +56,7 @@ class _Closure {
   int get hashCode {
     final receiver = receiverOf(this);
     final types = typesOf(this);
-    if (types == null) {
-      return receiver == null
-          ? addressOf(this) >> 4
-          : identityHashCode(receiver) + classNumber(this);
-    }
+    if (types == null) return identityHashCode(receiver) + classNumber(this);
     return receiver.hashCode + classNumber(this) + hashOfTypes(types);
   }
 }

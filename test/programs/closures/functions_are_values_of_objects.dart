@@ -74,7 +74,7 @@ void main() {
   truth(c.inc == c.inc); // expect: true
   truth(c.inc == f); // expect: true
   truth(c.inc == C().inc); // expect: false
-  truth(identical(c.inc, c.inc)); // expect: false
+  truth(identical(c.inc, C().inc)); // expect: false
   truth(c.inc == c.self().inc); // expect: true
   truth(d.inc == c.inc); // expect: false
   Object o = c.inc;

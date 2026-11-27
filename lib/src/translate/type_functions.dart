@@ -149,7 +149,10 @@ final class TypeFunctions(
     if (closure.part case final part?) {
       return builder.add(HirLoad(part.function, object));
     }
-    if (!closure.isTearOff) return builder.add(HirNull());
+    // Others without types stand for themselves, which only they equal.
+    if (!closure.isTearOff) {
+      return closure.types == null ? object : builder.add(HirNull());
+    }
     final receiver = closure.leading(builder, object).single;
     return Conversions(_scope, builder).coerce(receiver, .reference);
   }

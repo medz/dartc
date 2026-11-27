@@ -8,7 +8,8 @@ abstract interface class Program() {
   RuntimeType typeOf(Object object);
 
   /// The object whose method [function] is, or the generic function that it is
-  /// with type arguments, if it is one.
+  /// with type arguments, if it is one. Other functions give themselves, or null
+  /// if they have type arguments.
   Object? receiverOf(Object function);
 
   /// The types that [function] has been given, if it is generic.
