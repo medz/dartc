@@ -144,4 +144,63 @@ void main() async {
   port.close();
 }
 ''',
+  'transferring bytes': r'''
+import 'dart:isolate';
+import 'dart:typed_data';
+void main() async {
+  final bytes = Uint8List.fromList([1, 2, 3]);
+  final t = TransferableTypedData.fromList([bytes, Int16List.fromList([-1, 256]), ByteData(2)..setUint8(1, 9), Uint8List.fromList([5,6,7,8]).buffer.asUint8List(1, 2)]);
+  bytes[0] = 100;
+  print(t.runtimeType);
+  final b = t.materialize();
+  print(b.runtimeType); print(b.lengthInBytes); print(b.asUint8List());
+  try { t.materialize(); } catch (e) { print(e); }
+  final p = ReceivePort();
+  final t2 = TransferableTypedData.fromList([Uint8List(4)..[0] = 1]);
+  p.sendPort.send(t2);
+  try { t2.materialize(); } catch (e) { print('after send: $e'); }
+  try { p.sendPort.send(t2); } catch (e) { print('send again: $e'); }
+  final got = await p.first as TransferableTypedData;
+  print(got.materialize().asUint8List());
+  print(TransferableTypedData.fromList([]).materialize().lengthInBytes);
+  final p2 = ReceivePort();
+  final t3 = TransferableTypedData.fromList([Uint8List(2)]);
+  p2.sendPort.send([t3, t3]);
+  final l = await p2.first as List;
+  print(identical(l[0], l[1]));
+  print(l[0].materialize().lengthInBytes);
+  try { l[1].materialize(); } catch (e) { print(e); }
+  try { TransferableTypedData.fromList([null as dynamic]); } catch (e) { print(e.runtimeType); }
+}
+''',
+  'transferring bytes between isolates': r'''
+import 'dart:isolate';
+import 'dart:typed_data';
+
+void produce(SendPort port) {
+  final chunks = [
+    for (var i = 0; i < 4; i++) Uint8List.fromList(List.generate(1000, (j) => i + j)),
+  ];
+  final bytes = TransferableTypedData.fromList(chunks);
+  port.send(bytes);
+  try {
+    bytes.materialize();
+  } on ArgumentError catch (error) {
+    port.send(error.message);
+  }
+}
+
+void main() async {
+  final port = ReceivePort();
+  final messages = port.asBroadcastStream();
+  await Isolate.spawn(produce, port.sendPort);
+  final bytes = await messages.first as TransferableTypedData;
+  print(await messages.first);
+  final list = bytes.materialize().asUint8List();
+  print([list.length, list[0], list[999], list[1000], list[3999]]);
+  final back = await Isolate.run(() => TransferableTypedData.fromList([Float64List.fromList([0.5, 2])]));
+  print(back.materialize().asFloat64List());
+  port.close();
+}
+''',
 };

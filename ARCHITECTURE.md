@@ -175,7 +175,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 事件循环 | `main` 返回后，`sdk/native/async/events.dart` 运行微任务和定时器，直到没有要等的 |
 | 端口 | `dart:isolate` 不用官方的补丁（它靠 VM 的端口），`sdk/native/isolate` 自己写。每个 isolate 有一个收件箱，在 C 的内存里：锁、消息的链、一个叫醒它的管道，别的 isolate 也能往里放。`SendPort` 记着端口的编号（随机）和收件箱的地址；发给自己 isolate 的消息直接排进本地的队列。收件箱是事件循环的一个来源，消息交给端口的处理函数 |
 | 消息和定时器的顺序 | 官方的零时定时器、到时的定时器也是消息，和端口的消息按来的先后处理。`dart:_internal` 的 `EventOrder` 给零时定时器、刚发现到时的定时器和来的消息编号，事件循环按编号先后处理 |
-| 消息的复制 | 发送时把对象图拷到 C 的内存（`sdk/native/isolate/copies.dart`），收的一方在自己的堆里建出来，同一个 isolate 里也拷。大小和引用按类的表：种类那个字的第 7 位说明是字节数组，第 8 位以上是字段的字节数。映像里的对象（常量）大家共享，不拷。同一性的哈希是地址，所以收到的 `LinkedHashMap`、`LinkedHashSet` 重建索引；`HashMap` 和官方一样不重建。弱引用的目标只在消息里另有强引用时留下。外面的 typed data 拷成堆里的。不能发的：`RawReceivePort`、`Finalizer`、`NativeFinalizer`、`DynamicLibrary`、`UserTag`，和自己或父类型标着 `@pragma('vm:isolate-unsendable')` 的类，后者编译时算成一个类型测试 |
+| 消息的复制 | 发送时把对象图拷到 C 的内存（`sdk/native/isolate/copies.dart`），收的一方在自己的堆里建出来，同一个 isolate 里也拷。大小和引用按类的表：种类那个字的第 7 位说明是字节数组，第 8 位以上是字段的字节数。映像里的对象（常量）大家共享，不拷。同一性的哈希是地址，所以收到的 `LinkedHashMap`、`LinkedHashSet` 重建索引；`HashMap` 和官方一样不重建。弱引用的目标只在消息里另有强引用时留下。外面的 typed data 拷成堆里的。`TransferableTypedData` 创建时把字节拷到 `malloc` 的内存，对象只记地址和长度，所以复制对象就是转交；发出去或 `materialize` 以后原来的对象作废。不能发的：`RawReceivePort`、`Finalizer`、`NativeFinalizer`、`DynamicLibrary`、`UserTag`，和自己或父类型标着 `@pragma('vm:isolate-unsendable')` 的类，后者编译时算成一个类型测试 |
 | `void` | 函数仍然返回值，因为调用者可能不知道它是 `void` |
 | `Never` | 和别的类型一样用引用表示。确定表达式的类型或操作数的上限链为不可空的 `Never` 时，求值后结束当前块。上限链可空时仍可得到 `null`。不可达路径需要占位值时，按该位置所需的表示生成 |
 | `external` | 有 `@Native` 的是 C 的函数或变量；标准库的 C 函数在链接时就有，C 变量和程序的一样，第一次用时在进程里找；`external` 变量只是 getter 和 setter。没有实现的抛 `NoSuchMethodError`。静态分派到这类变量的 setter 时，显式或继承的 `covariant` 仍会检查参数；无需检查的参数也无需拆箱。标准库里没有实现的声明在编译时拒绝 |

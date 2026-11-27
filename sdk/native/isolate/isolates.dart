@@ -139,12 +139,5 @@ final class Isolate {
   }
 }
 
-@patch
-abstract final class TransferableTypedData {
-  @patch
-  factory TransferableTypedData.fromList(List<TypedData> list) =>
-      throw _unsupported('TransferableTypedData');
-}
-
 UnsupportedError _unsupported(String what) =>
     UnsupportedError('Isolate.$what is not supported yet.');
