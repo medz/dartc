@@ -31,8 +31,8 @@ final class SdkSources(
   static const _whole = ['collection', 'nativewrappers'];
 
   /// The libraries without the official patches. These would make programs
-  /// reach `dart:io`, for what is not supported.
-  static const _unpatched = ['developer'];
+  /// reach `dart:io`, for what is not supported, or use ports of the VM.
+  static const _unpatched = ['developer', 'isolate'];
 
   /// Where [install] makes the files be found. The analyzer takes them from
   /// there.

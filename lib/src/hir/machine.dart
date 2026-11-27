@@ -58,6 +58,9 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   isSame([.reference, .reference], .boolean),
   classNumber([.reference], .integer),
   addressOf([.reference], .integer),
+
+  /// The object at an address, which has to be one.
+  objectAt([.integer], .reference),
   sine([.float], .float),
   cosine([.float], .float),
   tangent([.float], .float),

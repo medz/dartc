@@ -18,6 +18,9 @@ const firstGlobal = 8;
 /// Marks objects that the collector leaves alone, after their class number.
 const _fixedFlag = 4;
 
+/// What the word of the kind of a class has besides that.
+const _bytesFlag = 128, _sizeShift = 8;
+
 /// Objects that exist from the start of the program.
 final class StaticData(final HirModule module, final ObjectLayout _layout) {
   final _constants = <HirConstObject, String>{};
@@ -129,6 +132,9 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
   /// For each class, where its record is; then each record: the number of
   /// references in fields that it keeps, its kind, their offsets, and those of
   /// other fields if it is weak.
+  ///
+  /// The word of the kind also has bit 7 set for arrays of bytes, and the size
+  /// of the fields above bit 8, for copying objects.
   LirData classTable() {
     final words = <int>[], starts = <int>[];
     for (final class_ in module.classes) {
@@ -144,13 +150,15 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
           for (final field in class_.fields)
             if (!kept.contains(field)) field,
       ];
+      final kind = weakness != null
+          ? 2 + weakness.index
+          : class_.elements == .references
+          ? 1
+          : 0;
+      final bytes = class_.elements == .bytes ? _bytesFlag : 0;
       words.addAll([
         kept.length,
-        weakness != null
-            ? 2 + weakness.index
-            : class_.elements == .references
-            ? 1
-            : 0,
+        kind | bytes | _layout.sizeOf(class_) << _sizeShift,
         for (final field in fields) _layout.offsetOf(field),
       ]);
     }

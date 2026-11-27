@@ -137,6 +137,21 @@ abstract interface class EventSource {
   void end();
 }
 
+/// Numbers timers that wait for no time and messages to ports of the isolate,
+/// which the official runtime handles in the order in which they come.
+abstract final class EventOrder {
+  /// The number that the next one takes.
+  static int next = 0;
+
+  /// The number of the first timer that waits for no time, or of none.
+  static int Function() firstTimer = _none;
+
+  /// The number of the first message that has come, or of none.
+  static int Function() firstMessage = _none;
+
+  static int _none() => 0x7fffffffffffffff;
+}
+
 /// Where the bodies of `async` functions waited that wait for the one that
 /// runs now, innermost first, for traces of the stack. `dart:async` sets it.
 List<int> Function()? tellAwaiters;

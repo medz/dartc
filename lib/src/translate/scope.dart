@@ -227,6 +227,9 @@ abstract interface class ProgramScope() {
   /// Whether objects are of classes that extend `Error`.
   HirTypeTest get errorTest;
 
+  /// Whether objects are of classes that are not sent to other isolates.
+  HirTypeTest get unsendableTest;
+
   /// An instance member's own body at [level], taking the receiver first.
   HirFunction memberOf(Level level, ExecutableElement element);
 

@@ -33,6 +33,12 @@ abstract class _LinkedHashImmutableBase {
   /// Where in [_indexes] this has its own.
   int _place = 0;
 
+  /// Takes a place of its own in this isolate, after it was copied.
+  void _adopt() {
+    _place = ~_madeIndexes.length;
+    _madeIndexes.add(null);
+  }
+
   @patch
   List get _data => super._data;
 
@@ -98,3 +104,16 @@ final class _ConstMap<K, V> {
 @patch
 _ConstMap<K, V> createConstMapFromMapOfDeeplyImmutables<K, V>(Map<K, V> map) =>
     _ConstMap._of(map);
+
+/// Makes [object], copied from another isolate, work here if it is a map or a
+/// set, whose index depends on where its keys are.
+void adoptCopy(Object object) {
+  if (object is _LinkedHashImmutableBase) {
+    // It makes its index when it is first used.
+    if (object._place < 0) object._adopt();
+  } else if (object is _HashBase) {
+    final _HashBase map = object;
+    map._hashMask = 0;
+    map._regenerateIndex();
+  }
+}

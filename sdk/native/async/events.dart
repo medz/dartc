@@ -1,6 +1,6 @@
 // What is done after `main`.
 import 'dart:_heap/objects.dart' show pause, steadyTime;
-import 'dart:_internal' show EventSource;
+import 'dart:_internal' show EventOrder, EventSource;
 
 @patch
 void _beforeScheduleMicrotaskCallback() {}
@@ -112,6 +112,9 @@ class _EventTimer implements Timer {
   int _id;
   int _tick = 0;
 
+  /// Where it is among messages, if it waits for no time.
+  int _number = 0;
+
   _EventTimer(int milliseconds, this._callback, this._repeats)
     : _milliseconds = milliseconds < 0 ? 0 : milliseconds,
       _id = _count++,
@@ -126,7 +129,9 @@ class _EventTimer implements Timer {
 
   void _enqueue() {
     if (_milliseconds == 0) {
+      _number = EventOrder.next++;
       _immediate.add(this);
+      EventOrder.firstTimer = _firstNumber;
       return;
     }
     var at = _waiting.length;
@@ -134,6 +139,17 @@ class _EventTimer implements Timer {
       at--;
     }
     _waiting.insert(at, this);
+  }
+
+  /// Where the timers whose time has come are among messages, once that is
+  /// found out, or else -1.
+  static int _dueNumber = -1;
+
+  static int _firstNumber() {
+    final immediate = _immediate.isEmpty
+        ? 0x7fffffffffffffff
+        : _immediate.first._number;
+    return _dueNumber >= 0 && _dueNumber < immediate ? _dueNumber : immediate;
   }
 
   bool get isActive => _callback != null;
@@ -150,19 +166,32 @@ class _EventTimer implements Timer {
   static bool _runNext({bool waits = true}) {
     final pending = <_EventTimer>[];
     if (_immediate.isNotEmpty) {
+      // Those due that come first are handled with it.
+      _dueNumber = -1;
+      // Messages that came before it are handled first.
+      if (EventOrder.firstMessage() < _immediate.first._number) return true;
       final first = _immediate.removeAt(0);
       while (_waiting.isNotEmpty && _waiting.first._isBefore(first)) {
         pending.add(_waiting.removeAt(0));
       }
       pending.add(first);
     } else {
+      final rest = _waiting.isEmpty ? 1 : _waiting.first._wakeup - _now;
+      // What was due can be canceled.
+      if (rest > 0) _dueNumber = -1;
       if (_waiting.isEmpty) return false;
-      final rest = _waiting.first._wakeup - _now;
       if (rest > 0) {
         // What happens outside comes first.
         if (waits) _wait(rest > 1000 ? 1000000 : rest * 1000);
         return true;
       }
+      // Messages that came before they were found due are handled first.
+      if (_dueNumber < 0) {
+        _dueNumber = EventOrder.next++;
+        EventOrder.firstTimer = _firstNumber;
+      }
+      if (EventOrder.firstMessage() < _dueNumber) return true;
+      _dueNumber = -1;
       final now = _now;
       while (_waiting.isNotEmpty && _waiting.first._wakeup <= now) {
         pending.add(_waiting.removeAt(0));

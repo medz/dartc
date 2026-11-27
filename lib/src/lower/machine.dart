@@ -132,6 +132,8 @@ final class MachineLowering(
         return block.add(Load(.u32, arguments.single, offset: classOffset));
       case .addressOf:
         return block.add(Convert(.refToInt, arguments.single));
+      case .objectAt:
+        return block.add(Convert(.intToRef, arguments.single));
       case .resume:
         final [frame, code, exception, trace] = arguments;
         block.add(Resume(frame, code, exception, trace));

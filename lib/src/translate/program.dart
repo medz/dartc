@@ -479,6 +479,9 @@ final class ProgramTranslator(
   HirTypeTest get errorTest => _tests.extendsOf(_core.getClass('Error')!);
 
   @override
+  HirTypeTest get unsendableTest => _tests.unsendable;
+
+  @override
   HirTypeTest testOf(InterfaceElement class_) => _tests.testOf(class_);
 
   @override

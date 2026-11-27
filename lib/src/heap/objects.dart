@@ -83,6 +83,9 @@ external void registerEvents(Object source);
 /// Where the bytes of [typedData] are.
 external int dataAddress(Object typedData);
 
+/// The object at [address], which has to be one.
+external Object objectAt(int address);
+
 /// Typed data of [length] elements at [address].
 external T listAt<T>(int kind, int address, int length);
 
@@ -108,6 +111,10 @@ external void pause(int microseconds);
 /// Whether [object] is of a class that extends `Error`, rather than implements
 /// it.
 external bool isSubclassOfError(Object object);
+
+/// Whether [object] is of a class that is not sent to other isolates, as it or
+/// one of its supertypes is marked `@pragma('vm:isolate-unsendable')`.
+external bool isUnsendable(Object object);
 
 /// Calls [function] with [arguments], of which the first is itself and the last
 /// have [names].

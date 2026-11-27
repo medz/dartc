@@ -171,6 +171,9 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 独立的编译器 | `tool/build.dart` 生成一个入口，里面有压缩的标准库文字，再用官方编译，或者用 `--with` 给的 dartc。标准库总是从内存里的文件读，不管在不在磁盘上。它只用 dartc 支持的东西：解压自己写（`source/inflate.dart`），改文件的权限直接调用 C，不用 `dart:isolate` |
 | `async`、生成器 | 函数体是另一个函数，在等待处拆开：等待之后还要用的值放在一个帧对象里，再进入时按编号跳到原处（`hir/coroutine.dart`）。运行时用官方的 `_SuspendState` 等类，所以微任务的次序相同 |
 | 事件循环 | `main` 返回后，`sdk/native/async/events.dart` 运行微任务和定时器，直到没有要等的 |
+| 端口 | `dart:isolate` 不用官方的补丁（它靠 VM 的端口），`sdk/native/isolate` 自己写。每个 isolate 有一个收件箱，在 C 的内存里：锁、消息的链、一个叫醒它的管道，别的 isolate 也能往里放。`SendPort` 记着端口的编号（随机）和收件箱的地址；发给自己 isolate 的消息直接排进本地的队列。收件箱是事件循环的一个来源，消息交给端口的处理函数 |
+| 消息和定时器的顺序 | 官方的零时定时器、到时的定时器也是消息，和端口的消息按来的先后处理。`dart:_internal` 的 `EventOrder` 给零时定时器、刚发现到时的定时器和来的消息编号，事件循环按编号先后处理 |
+| 消息的复制 | 发送时把对象图拷到 C 的内存（`sdk/native/isolate/copies.dart`），收的一方在自己的堆里建出来，同一个 isolate 里也拷。大小和引用按类的表：种类那个字的第 7 位说明是字节数组，第 8 位以上是字段的字节数。映像里的对象（常量）大家共享，不拷。同一性的哈希是地址，所以收到的 `LinkedHashMap`、`LinkedHashSet` 重建索引；`HashMap` 和官方一样不重建。弱引用的目标只在消息里另有强引用时留下。外面的 typed data 拷成堆里的。不能发的：`RawReceivePort`、`Finalizer`、`NativeFinalizer`、`DynamicLibrary`、`UserTag`，和自己或父类型标着 `@pragma('vm:isolate-unsendable')` 的类，后者编译时算成一个类型测试 |
 | `void` | 函数仍然返回值，因为调用者可能不知道它是 `void` |
 | `Never` | 和别的类型一样用引用表示。确定表达式的类型或操作数的上限链为不可空的 `Never` 时，求值后结束当前块。上限链可空时仍可得到 `null`。不可达路径需要占位值时，按该位置所需的表示生成 |
 | `external` | 有 `@Native` 的是 C 的函数或变量；标准库的 C 函数在链接时就有，C 变量和程序的一样，第一次用时在进程里找；`external` 变量只是 getter 和 setter。没有实现的抛 `NoSuchMethodError`。静态分派到这类变量的 setter 时，显式或继承的 `covariant` 仍会检查参数；无需检查的参数也无需拆箱。标准库里没有实现的声明在编译时拒绝 |
@@ -203,7 +206,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 运行时类型 | `heap/types.dart` 里的对象。已知的在编译时建好；含 `T` 的运行时建。顶层函数、方法和构造函数的提取保留命名参数的声明顺序，局部函数和函数类型标注按名字排序。函数形状在编译时共享，记录打印顺序；命名参数的类型按名字排列。类型相等要求形状相同，判断子类型时按名字顺序扫描一次 |
 | 泛型的检查 | 参数的类型含类的 `T` 时，由适配函数检查；结果里函数的参数含 `T` 时，由调用处检查 |
 | 运行时实现 | 用 Dart 写，走同一条流水线 |
-| 标准库 | `sdk/std` 是官方源码；先合上官方给 VM 的补丁（`dart:developer` 除外，它会带来 `dart:io`），再合上 `sdk/native` 的补丁。`dart:collection` 和 `dart:_http` 只用官方的补丁。合并只在内存里，按文字替换声明 |
+| 标准库 | `sdk/std` 是官方源码；先合上官方给 VM 的补丁（`dart:developer` 除外，它会带来 `dart:io`；`dart:isolate` 也除外，它靠 VM 的端口），再合上 `sdk/native` 的补丁。`dart:collection` 和 `dart:_http` 只用官方的补丁。合并只在内存里，按文字替换声明 |
 | 运行时的库 | `lib/src/heap` 就是 `dart:_heap`。`machine.dart` 和 `objects.dart` 里的函数各是一条操作 |
 | 数组 | 有元素的类：头、一个字段、元素个数、元素。元素是引用或字节。由 `@pragma('dartc:elements')` 标出 |
 | 字符串 | `_OneByteString` `_TwoByteString` 本身就是字节数组，另有一个字段存哈希值 |
