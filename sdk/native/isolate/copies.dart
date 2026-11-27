@@ -187,8 +187,8 @@ int _encode(Object? message) => _Encoder().encode(message);
 
 void _freeCopy(int data) => _free(data);
 
-/// Makes objects of the copy [data], and frees it.
-Object? _decode(int data) {
+/// Makes objects of the copy [data], and frees it if it [frees].
+Object? _decode(int data, {bool frees = true}) {
   final count = load64(data);
   final objects = List<Object?>.filled(count, null);
   final starts = List<int>.filled(count, 0);
@@ -208,7 +208,7 @@ Object? _decode(int data) {
     _connect(addressOf(objects[i]!), starts[i], resolve);
   }
   final root = resolve(load64(data + 8));
-  _freeCopy(data);
+  if (frees) _freeCopy(data);
   for (var i = 0; i < count; i++) {
     adoptCopy(objects[i]!);
   }

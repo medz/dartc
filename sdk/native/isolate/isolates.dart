@@ -1,4 +1,4 @@
-// What a program knows of isolates. It has only the first one so far.
+// What a program knows of isolates.
 
 @patch
 final class Isolate {
@@ -17,7 +17,9 @@ final class Isolate {
   static Isolate get current => _current;
 
   @patch
-  String? get debugName => controlPort == _current.controlPort ? 'main' : null;
+  String? get debugName => controlPort == _current.controlPort
+      ? _isolateName
+      : _nameOf((controlPort as _SendPortImpl)._inbox);
 
   @patch
   static Future<Uri?> get packageConfig => throw _unsupported('packageConfig');
@@ -42,7 +44,19 @@ final class Isolate {
     SendPort? onExit,
     SendPort? onError,
     String? debugName,
-  }) => throw _unsupported('spawn');
+  }) async {
+    if (paused || !errorsAreFatal || onExit != null || onError != null) {
+      throw _unsupported('spawn with these arguments');
+    }
+    final ready = RawReceivePort(null, 'Isolate.spawn ready');
+    try {
+      _spawn(ready.sendPort, entryPoint, message, debugName);
+      return await _spawnCommon(ready);
+    } catch (error) {
+      ready.close();
+      rethrow;
+    }
+  }
 
   @patch
   static Future<Isolate> spawnUri(

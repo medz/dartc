@@ -28,13 +28,17 @@ external int _readPipe(int file, int address, int count);
 @Native<Int64 Function(Int32, Int64, Int64)>(symbol: 'write')
 external int _writePipe(int file, int address, int count);
 
+@Native<Int32 Function(Int32)>(symbol: 'close')
+external int _closeFile(int file);
+
 @Native<Int32 Function(Int64, Int64, Int32)>(symbol: 'poll')
 external int _poll(int files, int count, int milliseconds);
 
 // An inbox: a lock, the first and the last message, the ends of a pipe that
-// wakes its isolate, and its state. The lock guards all but the reading end.
+// wakes its isolate, its state, and a copy of the name of its isolate. The
+// lock guards all but the reading end.
 const _first = 64, _last = 72, _reading = 80, _writing = 88, _state = 96;
-const _inboxBytes = 104;
+const _name = 104, _inboxBytes = 112;
 
 // Its states: whether its isolate takes messages, and whether there is a byte
 // in the pipe.
@@ -59,8 +63,44 @@ int _newInbox() {
   store64(inbox + _first, 0);
   store64(inbox + _last, 0);
   store64(inbox + _state, _isOpen);
+  store64(inbox + _name, 0);
   _initLock(inbox, 0);
   return inbox;
+}
+
+/// The inbox that the isolate is given when it starts, or 0 for the first one.
+int _givenInbox = 0;
+
+/// The name of the isolate of [inbox], while it is running.
+String? _nameOf(int inbox) {
+  _lock(inbox);
+  final name = load64(inbox + _name);
+  final isOpen = load64(inbox + _state) & _isOpen != 0;
+  final result = isOpen && name != 0 ? _decode(name, frees: false) : null;
+  _unlock(inbox);
+  return result as String?;
+}
+
+/// Lets [inbox] take no more messages, and frees those it has. Its memory is
+/// kept for the ports of other isolates that refer to it.
+void _closeInbox(int inbox) {
+  _lock(inbox);
+  var message = load64(inbox + _first);
+  final name = load64(inbox + _name);
+  store64(inbox + _first, 0);
+  store64(inbox + _last, 0);
+  store64(inbox + _state, 0);
+  store64(inbox + _name, 0);
+  _unlock(inbox);
+  _closeFile(load64(inbox + _reading));
+  _closeFile(load64(inbox + _writing));
+  if (name != 0) _freeCopy(name);
+  while (message != 0) {
+    final next = load64(message + _nextMessage);
+    _freeCopy(load64(message + _messageData));
+    _free(message);
+    message = next;
+  }
 }
 
 /// Gives [data], a message for the port [port], to [inbox] to handle. It is
@@ -92,7 +132,9 @@ final class _Arrived(final int number, final int port, final int data);
 
 /// The messages of this isolate, and its ports.
 final class _Inbox implements EventSource {
-  static final _Inbox current = _Inbox(_newInbox());
+  static final _Inbox current = _Inbox(
+    _givenInbox != 0 ? _givenInbox : _newInbox(),
+  );
 
   /// Where its messages come in.
   final int address;
@@ -163,6 +205,16 @@ final class _Inbox implements EventSource {
   }
 
   void end() {}
+
+  /// Ends what this isolate takes.
+  void close() {
+    for (final message in _arrived) {
+      _freeCopy(message.data);
+    }
+    _arrived.clear();
+    _closeInbox(address);
+    _free(_waiting);
+  }
 
   /// Moves what other isolates gave to [_arrived].
   void _takeMessages() {

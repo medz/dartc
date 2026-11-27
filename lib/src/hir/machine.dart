@@ -36,6 +36,12 @@ enum HirMachineOp(final List<HirType> parameters, final HirType? result) {
   takePosted([], .integer),
   waitPosted([.integer], null),
 
+  /// A copy of the data that each isolate has, as it is at the start, in
+  /// memory that `malloc` gave, or 0; and the function of C that runs an
+  /// isolate, given the address of a word that has where that is.
+  newIsolate([], .integer),
+  isolateEntry([], .integer),
+
   /// Where the frame of the innermost call of a C function is.
   nativeFrame([], .integer),
   outputBuffer([], .integer),

@@ -504,3 +504,18 @@ int _sweepBlock(int block) {
   store64(block + _freeBytes, freeBytes);
   return used;
 }
+
+/// Gives back all the memory of the heap, when its isolate ends. Nothing may be
+/// allocated after this.
+void releaseHeap() {
+  if (heap == 0) return;
+  var block = load64(heap + _blocks);
+  while (block != 0) {
+    final next = load64(block + _next);
+    unmapMemory(block, load64(block + _blockBytes));
+    block = next;
+  }
+  unmapMemory(load64(heap + _pending), load64(heap + _pendingBytes));
+  unmapMemory(heap, _stateBytes);
+  heap = 0;
+}

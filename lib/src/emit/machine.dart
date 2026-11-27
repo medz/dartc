@@ -126,8 +126,8 @@ abstract interface class Machine() implements Abilities {
   void callRegister(int register);
 
   /// Makes the register of the isolate have where the data of the program's
-  /// first isolate is.
-  void enterIsolate();
+  /// first isolate is, or else what the word at the first argument has.
+  void enterIsolate({bool fromArgument = false});
 
   /// Continues at the address in one register with a frame in another.
   void resume();

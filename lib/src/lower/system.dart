@@ -68,6 +68,7 @@ final systemFunctions = {
   'pthread_self': LirSignature([], .i64),
   'abort': LirSignature([]),
   'malloc': LirSignature([.i64], .ptr),
+  'free': LirSignature([.ptr]),
 
   /// memcpy(to, from, bytes).
   'memcpy': LirSignature([.ptr, .ptr, .i64]),

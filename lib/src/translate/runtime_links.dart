@@ -77,7 +77,7 @@ final class RuntimeLinks(
   TopLevelFunctionElement function(String name) {
     final found = [
       _core.getTopLevelFunction('_$name'),
-      for (final uri in const ['async', 'typed_data', 'ffi', 'io'])
+      for (final uri in const ['async', 'typed_data', 'ffi', 'io', 'isolate'])
         _libraryIfReached('dart:$uri')?.getTopLevelFunction('_$name'),
       for (final library in _heap) library.getTopLevelFunction(name),
     ].nonNulls.where((function) => !function.isExternal).toList();

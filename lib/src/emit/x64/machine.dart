@@ -118,9 +118,13 @@ final class X64Machine(
   void callRegister(int register) => _assembler.unary(.call, register);
 
   @override
-  void enterIsolate() {
+  void enterIsolate({bool fromArgument = false}) {
     if (_assembler.isolated.isEmpty) return;
-    _assembler.address(x64Registers.isolate, isolateSymbol);
+    if (fromArgument) {
+      _assembler.load(x64Registers.isolate, Memory(X64Assembler.rdi));
+    } else {
+      _assembler.address(x64Registers.isolate, isolateSymbol);
+    }
   }
 
   @override

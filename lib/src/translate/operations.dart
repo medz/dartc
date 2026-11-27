@@ -72,6 +72,8 @@ final class OperationTranslator(
             argument(3, .reference),
           ]),
         );
+      case 'runEvents':
+        return _builder.call(HirCall(_scope.runtime('runEventLoop'), const []));
       case 'dataAddress' || 'registerEvents':
         final function = _scope.runtime(name);
         return _builder.call(HirCall(function, [argument(0, .reference)]));
@@ -109,6 +111,7 @@ final class OperationTranslator(
   ) {
     final op = HirMachineOp.values.byName(name);
     if (_forCallbacks.contains(op)) _scope.addCallbacks();
+    if (op == .isolateEntry) _scope.addSpawning();
     final call = _builder.add(
       HirMachine(op, [
         for (final (i, type) in op.parameters.indexed) argument(i, type),

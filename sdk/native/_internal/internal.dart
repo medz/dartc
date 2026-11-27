@@ -137,6 +137,9 @@ abstract interface class EventSource {
   void end();
 }
 
+/// Whether the isolate that runs is the first one, which runs `main`.
+bool isFirstIsolate = true;
+
 /// Numbers timers that wait for no time and messages to ports of the isolate,
 /// which the official runtime handles in the order in which they come.
 abstract final class EventOrder {

@@ -122,7 +122,9 @@ final class HirMachineState(final HirModule _module) {
           .callbacks ||
           .callbackInfo ||
           .takePosted ||
-          .waitPosted:
+          .waitPosted ||
+          .newIsolate ||
+          .isolateEntry:
         throw UnsupportedError('Calls of C functions.');
       case .write:
         (number(0) == 1 ? _output : _errors).add(_read(number(1), number(2)));

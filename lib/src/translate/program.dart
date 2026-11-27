@@ -186,6 +186,7 @@ final class ProgramTranslator(
         outOfMemory: _needs.outOfMemory,
         uncaught: _needs.uncaught,
         callback: _needs.callback,
+        spawned: _needs.spawned,
         exports: exports,
         eventLoop: _needs.eventLoop,
       );
@@ -286,6 +287,9 @@ final class ProgramTranslator(
 
   @override
   void addCallbacks() => _needs.addCallbacks();
+
+  @override
+  void addSpawning() => _needs.addSpawning();
 
   @override
   void addNativeFinalizers() =>

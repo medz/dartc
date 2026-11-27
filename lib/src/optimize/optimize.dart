@@ -56,6 +56,7 @@ HirModule _withoutUnused(HirModule module) {
     module.outOfMemory,
     module.uncaught,
     module.callback,
+    module.spawned,
     module.eventLoop,
     ...module.exports.values,
   ].forEach(need);
@@ -89,6 +90,7 @@ HirModule _withoutUnused(HirModule module) {
     outOfMemory: module.outOfMemory,
     uncaught: module.uncaught,
     callback: module.callback,
+    spawned: module.spawned,
     exports: module.exports,
     eventLoop: module.eventLoop,
   );

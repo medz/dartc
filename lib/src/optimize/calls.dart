@@ -68,6 +68,7 @@ final class Calls(
     ?_module.outOfMemory,
     ?_module.uncaught,
     ?_module.callback,
+    ?_module.spawned,
     ?_module.eventLoop,
     ..._module.exports.values,
   };
