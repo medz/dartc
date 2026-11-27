@@ -37,8 +37,16 @@ void _registerEvents(EventSource source) => _outside.add(source);
 
 /// Runs all that is left, until there is nothing to wait for.
 void _runEventLoop() {
-  _runImmediate();
-  while (_runOutside() || _EventTimer._runNext() || _waitOutside()) {}
+  while (true) {
+    try {
+      _runImmediate();
+      while (_runOutside() || _EventTimer._runNext() || _waitOutside()) {}
+      break;
+    } catch (error, trace) {
+      // Errors may not end the isolate.
+      if (!(EventOrder.uncaught?.call(error, trace) ?? false)) rethrow;
+    }
+  }
   for (final source in _outside) {
     source.end();
   }
@@ -47,6 +55,14 @@ void _runEventLoop() {
 /// Handles what has happened outside, then the timers whose time has come.
 /// Returns whether there was anything outside.
 bool _runOutside() {
+  if (EventOrder.isPaused) {
+    // Only messages to the control port are handled.
+    for (final source in _outside) {
+      source.happened;
+    }
+    // What is resumed goes on.
+    return !EventOrder.isPaused;
+  }
   var isAny = false;
   for (var i = 0; i < _outside.length; i++) {
     // What happens meanwhile comes after the timers.
@@ -164,6 +180,11 @@ class _EventTimer implements Timer {
   /// Runs the timers that come next, or waits for the first one. Returns
   /// whether there were any.
   static bool _runNext({bool waits = true}) {
+    if (EventOrder.isPaused) {
+      if (_immediate.isEmpty && _waiting.isEmpty) return false;
+      if (waits) _wait(2000);
+      return true;
+    }
     final pending = <_EventTimer>[];
     if (_immediate.isNotEmpty) {
       // Those due that come first are handled with it.
@@ -197,8 +218,16 @@ class _EventTimer implements Timer {
         pending.add(_waiting.removeAt(0));
       }
     }
-    for (var i = 0; i < pending.length; i++) {
-      pending[i]._run();
+    var i = 0;
+    try {
+      for (; i < pending.length; i++) {
+        pending[i]._run();
+      }
+    } finally {
+      // Those after one that threw come again.
+      for (i++; i < pending.length; i++) {
+        pending[i]._enqueue();
+      }
     }
     return true;
   }

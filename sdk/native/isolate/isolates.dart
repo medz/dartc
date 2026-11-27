@@ -6,8 +6,9 @@ final class Isolate {
 
   static Isolate _makeCurrent() {
     final inbox = _Inbox.current;
+    inbox.control = inbox.newPort();
     return Isolate(
-      _SendPortImpl(inbox.newPort(), inbox.address),
+      _SendPortImpl(inbox.control, inbox.address),
       pauseCapability: Capability(),
       terminateCapability: Capability(),
     );
@@ -45,12 +46,14 @@ final class Isolate {
     SendPort? onError,
     String? debugName,
   }) async {
-    if (paused || !errorsAreFatal || onExit != null || onError != null) {
-      throw _unsupported('spawn with these arguments');
-    }
     final ready = RawReceivePort(null, 'Isolate.spawn ready');
     try {
-      _spawn(ready.sendPort, entryPoint, message, debugName);
+      _spawn(ready.sendPort, entryPoint, message, debugName, [
+        paused,
+        errorsAreFatal,
+        onExit,
+        onError,
+      ]);
       return await _spawnCommon(ready);
     } catch (error) {
       ready.close();
@@ -77,44 +80,63 @@ final class Isolate {
   }) => throw _unsupported('spawnUri');
 
   @patch
-  void _pause(Capability resumeCapability) => throw _unsupported('pause');
+  void _pause(Capability resumeCapability) => _sendControl(controlPort, [
+    _pauseMessage,
+    pauseCapability,
+    resumeCapability,
+  ]);
 
   @patch
-  void resume(Capability resumeCapability) => throw _unsupported('resume');
+  void resume(Capability resumeCapability) => _sendControl(controlPort, [
+    _resumeMessage,
+    pauseCapability,
+    resumeCapability,
+  ]);
 
   @patch
   void addOnExitListener(SendPort responsePort, {Object? response}) =>
-      throw _unsupported('addOnExitListener');
+      _sendControl(controlPort, [_addExitMessage, responsePort, response]);
 
   @patch
   void removeOnExitListener(SendPort responsePort) =>
-      throw _unsupported('removeOnExitListener');
+      _sendControl(controlPort, [_removeExitMessage, responsePort]);
 
   @patch
-  void setErrorsFatal(bool errorsAreFatal) =>
-      throw _unsupported('setErrorsFatal');
+  void setErrorsFatal(bool errorsAreFatal) => _sendControl(controlPort, [
+    _fatalMessage,
+    terminateCapability,
+    errorsAreFatal,
+  ]);
 
   @patch
-  void kill({int priority = beforeNextEvent}) => throw _unsupported('kill');
+  void kill({int priority = beforeNextEvent}) =>
+      _sendControl(controlPort, [_killMessage, terminateCapability, priority]);
 
   @patch
   void ping(
     SendPort responsePort, {
     Object? response,
     int priority = immediate,
-  }) => throw _unsupported('ping');
+  }) => _sendControl(controlPort, [
+    _pingMessage,
+    responsePort,
+    priority,
+    response,
+  ]);
 
   @patch
   void addErrorListener(SendPort port) =>
-      throw _unsupported('addErrorListener');
+      _sendControl(controlPort, [_addErrorMessage, port]);
 
   @patch
   void removeErrorListener(SendPort port) =>
-      throw _unsupported('removeErrorListener');
+      _sendControl(controlPort, [_removeErrorMessage, port]);
 
   @patch
-  static Never exit([SendPort? finalMessagePort, Object? message]) =>
-      throw _unsupported('exit');
+  static Never exit([SendPort? finalMessagePort, Object? message]) {
+    finalMessagePort?.send(message);
+    _terminate('Isolate.exit');
+  }
 }
 
 @patch

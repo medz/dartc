@@ -152,6 +152,13 @@ abstract final class EventOrder {
   /// The number of the first message that has come, or of none.
   static int Function() firstMessage = _none;
 
+  /// Whether the isolate handles nothing but messages to its control port.
+  static bool isPaused = false;
+
+  /// Tells about an error that nothing caught, and returns whether the isolate
+  /// goes on. `dart:isolate` sets it.
+  static bool Function(Object error, StackTrace trace)? uncaught;
+
   static int _none() => 0x7fffffffffffffff;
 }
 

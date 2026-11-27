@@ -46,9 +46,7 @@ void main() {
   });
 
   test('a program that cannot be compiled is reported', () async {
-    final directory = writeSources({
-      'main.dart': 'void main() { f(); }',
-    });
+    final directory = writeSources({'main.dart': 'void main() { f(); }'});
     await expectLater(
       compileProgram('${directory.path}/main.dart'),
       throwsA(isA<CompileFailure>()),

@@ -147,6 +147,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | GC | 精确、不移动的标记清除；根来自栈表和全局变量。不创建对象的程序没有回收器 |
 | isolate 的数据 | 每个 isolate 要有一份的可写数据（全局变量和静态字段、输出缓冲、调用 C 的块、栈界限等）在 LIR 里标成 `isolated`，发码时排进一个 `.isolate` 对象。代码通过一个专用寄存器（arm64 的 x28、x64 的 r15，调用 C 时都会保存）找到它；C 调进来的函数先存下这个寄存器，再指到第一个 isolate 的数据 |
 | 启动 isolate | `Isolate.spawn` 用 `malloc` 拷一份 `.isolate` 的初始字节（lower 时另存一份只读的 `.isolateTemplate`，布局和发码用同一个函数 `isolateData`），再用 pthread 开一个 8 MB 栈的线程。线程从 `.isolateEntry` 开始：它的参数指着一个字，里面是这份数据的地址，函数先把它放进 isolate 的寄存器，设好栈界限，再调用 `sdk/native/isolate` 的 `_runSpawned`。回收器的状态是一个全局变量，所以每个 isolate 有自己的堆，结束时全部还回去。新 isolate 先把控制端口和能力发给父亲，再像官方那样给自己发一条消息来调用入口函数。名字默认是入口函数带类名的全名。C 来的回调只能进第一个 isolate，别的 isolate 做回调时抛 `UnsupportedError` |
+| 控制 isolate | 发到控制端口的消息（暂停、继续、ping、kill、监听退出和错误、错误是否致命）不排队，事件循环每次取消息时先处理，暂停时也处理。暂停时（`EventOrder.isPaused`）不处理别的消息、定时器和其他来源。`kill` 在下一次取消息时、`Isolate.exit` 当场用 `raiseTo` 直接跳回 `_runSpawned` 的 `catch`，中间函数的 `catch` 和 `finally` 都不运行，和官方的不可捕获一样；第一个 isolate 照官方写一行 `isolate terminated by …`，退出码 255。没有捕获的错误先由事件循环交给 `EventOrder.uncaught`：发给错误的监听者，不致命时继续循环；致命时结束 isolate，没有监听者才把错误写到 stderr。结束时先关收件箱，再告诉退出的监听者 |
 | 堆栈 | HIR 的调用记着源码的位置（函数、文件、行），内联时连成一串；发码时和栈表一起记下返回地址到位置的表（`.places`）。`throw` 和 `StackTrace.current` 只沿帧指针收下返回地址，要文字时才查表，格式照官方 AOT（只有行号）。`async` 函数恢复以后，用协程记下的等待者接上 `<asynchronous suspension>`。帧走到不是程序的调用为止 |
 | 分配 | 调用模块里的函数 `.allocate`，它来自 `heap` 的 `allocate`；内存不够时抛异常 |
 | 格子的大小 | 到 512 字节每 16 字节一档，再到 32 KB 每翻一倍四档，各档的格子放在 256 KB 的块里；更大的对象自己一块 |

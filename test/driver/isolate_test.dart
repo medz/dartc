@@ -8,6 +8,7 @@ import 'package:test/test.dart';
 
 import '../support/compiler.dart';
 import '../support/hosts.dart';
+import 'isolate_control.dart';
 import 'isolate_ports.dart';
 import 'isolate_spawning.dart';
 
@@ -47,8 +48,31 @@ Future<void> _agrees(String source) async {
 
 void main() {
   group('dart:isolate', () {
-    ({...portPrograms, ...spawningPrograms}).forEach((name, source) {
+    ({...portPrograms, ...spawningPrograms, ...controlPrograms}).forEach((
+      name,
+      source,
+    ) {
       test(name, () => _agrees(source));
+    });
+
+    test('an error that nothing listens for', () async {
+      final directory = writeSources({'main.dart': uncaughtProgram});
+      final path = '${directory.path}/main.dart';
+      final program = '${directory.path}/program';
+      for (final host in Host.all) {
+        writeProgram(
+          await compileProgram(path, CompileOptions(target: host.target)),
+          program,
+        );
+        final run = await host.run(program);
+        expect(run.output, 'failing\nnull\nmain goes on\n');
+        expect(run.code, 0);
+        // The trace follows, whose text differs.
+        expect(
+          run.errors,
+          startsWith('Unhandled exception:\nBad state: boom\n#0 '),
+        );
+      }
     });
   }, skip: Host.missing);
 }

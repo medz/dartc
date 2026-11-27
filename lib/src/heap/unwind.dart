@@ -14,3 +14,17 @@ Never raise(Object exception, Object trace) {
   }
   trap();
 }
+
+/// Throws [exception] with [trace] to the function with [frame], skipping the
+/// handlers of those it calls.
+Never raiseTo(int frame, Object exception, Object trace) {
+  var at = frameAddress();
+  while (at != 0) {
+    final target = findReturn(handlers(), load64(at + 8) - codeStart());
+    at = load64(at);
+    if (target != 0 && at == frame) {
+      resume(at, codeStart() + target, exception, trace);
+    }
+  }
+  trap();
+}
