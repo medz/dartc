@@ -234,7 +234,7 @@ final class ClosureTranslator(
         for (final name in names) named[name]!,
       ]),
     );
-    if (isNever(node.staticType)) _builder.end(HirUnreachable());
+    if (isNever(node.staticType)) _builder.endNever();
     return result;
   }
 }

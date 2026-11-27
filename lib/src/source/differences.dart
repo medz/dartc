@@ -83,27 +83,38 @@ bool isAccepted(Diagnostic error, CompilationUnit unit) {
 /// is a type parameter that extends this. The analyzer takes that for null.
 bool _isOfExtensionType(AstNode? node) {
   final use = node is SimpleIdentifier ? node.parent : node;
-  final (Expression? target, Element? element) = switch (use) {
+  final (DartType? target, Element? element) = switch (use) {
     MethodInvocation(:final realTarget, :final methodName) => (
-      realTarget,
+      realTarget?.staticType,
       methodName.element,
     ),
     PropertyAccess(:final realTarget, :final propertyName) => (
-      realTarget,
+      realTarget.staticType,
       propertyName.element ?? _written(use),
     ),
     PrefixedIdentifier(:final prefix, :final identifier) => (
-      prefix,
+      prefix.staticType,
       identifier.element ?? _written(use),
     ),
     BinaryExpression(:final leftOperand, :final element) => (
-      leftOperand,
+      leftOperand.staticType,
       element,
     ),
+    // What `+=` and `++` read has its type only here.
+    AssignmentExpression(:final readType, :final element) => (
+      readType,
+      element,
+    ),
+    PrefixExpression(:final operand, :final readType, :final element) ||
+    PostfixExpression(
+      :final operand,
+      :final readType,
+      :final element,
+    ) => (readType ?? operand.staticType, element),
     _ => (null, null),
   };
   return element?.enclosingElement is ExtensionTypeElement &&
-      _extendsExtensionType(target?.staticType);
+      _extendsExtensionType(target);
 }
 
 Element? _written(AstNode place) => switch (place.parent) {

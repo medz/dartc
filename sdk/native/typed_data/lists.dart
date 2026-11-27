@@ -53,9 +53,17 @@ class _TypedListBase {
     final first = from.offsetInBytes + skip * size;
     final to = offsetInBytes + start * size, bytes = count * size;
     final isBackward = first < to;
-    for (var i = 0; i < bytes; i++) {
-      final at = isBackward ? bytes - 1 - i : i;
-      if (source._isOutside || target._isOutside) {
+    final isOutside = source._isOutside || target._isOutside;
+    var copied = 0;
+    if (!isOutside) {
+      for (; copied + 8 <= bytes; copied += 8) {
+        final at = isBackward ? bytes - 8 - copied : copied;
+        storeInt64(target, to + at, loadInt64(source, first + at));
+      }
+    }
+    for (; copied < bytes; copied++) {
+      final at = isBackward ? bytes - 1 - copied : copied;
+      if (isOutside) {
         target._setUint8(to + at, source._getUint8(first + at));
       } else {
         storeUint8(target, to + at, loadUint8(source, first + at));

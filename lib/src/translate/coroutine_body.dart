@@ -139,7 +139,7 @@ final class CoroutineBody(
         );
         _builder.branch(_conversions.coerce(more, .boolean), () {
           body(_call('currentOfStream', [iterator]));
-          _builder.jump(next);
+          _builder.repeat(next);
         }, () => _builder.jump(exit));
         _builder.enter(exit);
       },
