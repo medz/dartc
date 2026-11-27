@@ -32,6 +32,17 @@ final class TypeValues(
     return HirStatic(_constants.strings(names));
   }
 
+  /// The objects of the types that no class but their own is of, which
+  /// type arguments often are, and the tests for these classes.
+  Map<HirConstObject, HirTypeTest> sealedTypes() {
+    _prepare();
+    return {
+      for (final name in const ['int', 'String', 'double', 'bool'])
+        if (_core.getClass(name) case final class_?)
+          _types.constant(class_.thisType)!: _scope.testOf(class_),
+    };
+  }
+
   HirValue? value(FunctionBuilder builder, DartType type) {
     _prepare();
     return _types.value(builder, type);

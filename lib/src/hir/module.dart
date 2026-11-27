@@ -58,6 +58,9 @@ final class HirFunction(
 /// of the block of the call, and that of what is passed on the stack.
 /// [spawned] runs an isolate other than the first on a thread of its own, given
 /// the address of a word that has where the data of the isolate is.
+/// [isInstance] tells whether an object is of a type that the program made;
+/// where that type is a key of [sealedTypes], no class is of it but those
+/// that pass the test it gives.
 final class HirModule(
   final HirFunction main,
   Iterable<HirFunction> functions, {
@@ -76,7 +79,12 @@ final class HirModule(
   final HirFunction? spawned,
   Map<String, HirFunction> exports = const {},
   final HirFunction? eventLoop,
+  final HirFunction? isInstance,
+  Map<HirConstObject, HirTypeTest> sealedTypes = const {},
 }) {
+  final Map<HirConstObject, HirTypeTest> sealedTypes = .unmodifiable(
+    sealedTypes,
+  );
   final Map<String, HirFunction> exports = .unmodifiable(exports);
   final Map<HirTypeTest, Set<HirClass>> tests = .unmodifiable(tests);
   final List<HirGlobal> globals = .unmodifiable(globals);

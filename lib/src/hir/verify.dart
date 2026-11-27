@@ -52,6 +52,15 @@ void verifyHir(HirModule module) {
       throw HirError('test ${test.name}: unlisted class ${class_.name}');
     }
   });
+  if (module.isInstance == null && module.sealedTypes.isNotEmpty) {
+    throw HirError('sealed types without isInstance');
+  }
+  module.sealedTypes.forEach((type, test) {
+    constants.check(type);
+    if (!module.tests.containsKey(test)) {
+      throw HirError('sealed type: unlisted test ${test.name}');
+    }
+  });
   module.dispatch.forEach((selector, entries) {
     entries.forEach((class_, function) {
       Never fail(String message) =>
@@ -108,6 +117,7 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   module.exports.forEach((name, function) {
     check('export $name', function, [.integer, .integer], function.result);
   });
+  check('isInstance', module.isInstance, [.reference, .reference], .boolean);
   final loop = module.eventLoop;
   check('eventLoop', loop, const [], loop?.result);
   // What it gives, if anything, is not used.

@@ -4,6 +4,7 @@ import 'package:dartc/lir.dart';
 
 import 'boxes.dart';
 import 'dispatch.dart';
+import 'instance_tests.dart';
 import 'machine.dart';
 import 'operators.dart';
 import 'statics.dart';
@@ -38,6 +39,12 @@ final class FunctionLowering(
   final _blocks = <HirBlock, LirBlock>{};
   final _added = <LirBlock>[];
   late final _boxes = BoxLowering(layout, _added.add);
+  late final _instanceTests = InstanceTests(
+    layout,
+    statics,
+    _boxes,
+    _added.add,
+  );
 
   /// The block that code is added to.
   late LirBlock _block;
@@ -149,6 +156,7 @@ final class FunctionLowering(
       case HirUnbox(:final field, :final object):
         return _continue(_boxes.unbox(block, field, _value(object)));
       case HirVirtualCall() || HirCall():
+        if (_testsInstance(instruction) case final tested?) return tested;
         // Finding what is called can end the block.
         final call = _call(instruction as HirCalling);
         return _block.add(call);
@@ -160,6 +168,20 @@ final class FunctionLowering(
         final number = _classNumber(_value(object));
         return layout.isInstance(_block, statics.test(test), number);
     }
+  }
+
+  /// Whether an object is of a type, if [instruction] asks that and the class
+  /// of the object may tell.
+  LirValue? _testsInstance(HirInstruction instruction) {
+    if (instruction
+        case HirCall(:final target, arguments: [final object, final type])
+        when _instanceTests.lowers(target, type)) {
+      final call = _call(instruction);
+      return _continue(
+        _instanceTests.lower(_block, _value(object), type, _value(type), call),
+      );
+    }
+    return null;
   }
 
   LirValue? _constant(LirBlock block, HirInstruction instruction) {

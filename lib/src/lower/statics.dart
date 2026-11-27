@@ -12,6 +12,9 @@ const globalsSymbol = '.globals';
 /// What the collector needs to know of each class.
 const classTableSymbol = '.classes';
 
+/// For each class, the type that decides by class that its objects are of.
+const _sealedSymbol = '.sealed';
+
 /// What the names of the bits of tests of types start with.
 const typeTestsPrefix = '.is.';
 
@@ -77,6 +80,21 @@ final class StaticData(final HirModule module, final ObjectLayout _layout) {
       module.globals.where((global) => global.type == .reference).length;
 
   int offsetOf(HirGlobal global) => _offsets[global]!;
+
+  /// The symbol of an object that has, after a word, for each class the type
+  /// of [HirModule.sealedTypes] that its objects are of, or null.
+  late final String sealedTypes = () {
+    final words = _Words(8 + module.classes.length * 8);
+    words.data.setUint32(classOffset + 4, _fixedFlag, .little);
+    module.sealedTypes.forEach((type, test) {
+      final passing = module.tests[test]!, symbol = constant(type);
+      for (final (i, class_) in module.classes.indexed) {
+        if (passing.contains(class_)) words.references[8 + i * 8] = symbol;
+      }
+    });
+    _objects.add(words.build(_sealedSymbol));
+    return _sealedSymbol;
+  }();
 
   /// The bits of the reference that [object] is, if it is an integer that needs
   /// no object.
