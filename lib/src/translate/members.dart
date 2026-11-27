@@ -211,7 +211,7 @@ Set<FormalParameterElement> uncheckedIn(
   final parameters = method.formalParameters;
   for (final type in [class_.thisType, ...class_.allSupertypes]) {
     final other = type.element.getMethod(method.name!);
-    if (other == null || other.isStatic) continue;
+    if (other == null || other.isStatic || !_sameName(other, method)) continue;
     if (other.baseElement == method) continue;
     for (final (i, parameter) in parameters.indexed) {
       if (isUnchecked(parameter)) continue;
