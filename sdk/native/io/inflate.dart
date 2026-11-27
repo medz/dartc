@@ -10,61 +10,70 @@ const _needsMore = -1;
 ///
 /// What takes more than the input that there is starts again when there is more.
 final class _Inflater {
-  final List<int>? _dictionary;
+  Uint8List? _dictionary;
   final int _windowBits;
+  final bool _concatenates;
 
   /// Null until the header tells.
   _Wrapping? _wrapping;
 
-  _Inflater(this._windowBits, this._dictionary, {required bool isRaw})
-    : _wrapping = isRaw ? _Wrapping.raw : null {
+  _Inflater(
+    this._windowBits,
+    List<int>? dictionary, {
+    required bool isRaw,
+    required bool concatenates,
+  }) : _concatenates = concatenates,
+       _wrapping = isRaw ? _Wrapping.raw : null,
+       _dictionary = isRaw || dictionary == null
+           ? null
+           : Uint8List.fromList(dictionary) {
     // Raw streams do not use the dictionary, as officially.
     if (isRaw) _step = _readBlockHeader;
   }
 
-  Uint8List _input = Uint8List(0);
+  static final _noInput = Uint8List(0);
+  Uint8List _input = _noInput;
   int _at = 0, _bits = 0, _bitCount = 0;
 
-  /// The output, with up to 32 KB before what was not taken yet, and where that
-  /// starts and ends.
+  /// The undelivered output and the retained history before it.
   Uint8List _output = Uint8List(1 << 16);
-  int _start = 0, _end = 0;
+  int _start = 0, _end = 0, _checked = 0, _historyStart = 0;
 
   /// What comes next. Gives whether there was enough input.
   late bool Function() _step = _readHeader;
-  bool _isDone = false, _isLast = false;
+  bool _isDone = false, _isLast = false, _memberEnded = false;
   _Codes? _lengths, _distances;
   int _rest = 0, _total = 0;
   _Check _check = _Check();
+  _Check? _headerCheck;
+  int _headerText = 0;
 
-  static const _window = 32768, _largestPiece = 65536;
+  static const _largestPiece = 65536;
+  int get _window => 1 << _windowBits;
 
-  /// Whether the input ran out in the middle of something.
-  bool _isStarved = false;
-
-  /// Whether there is input left that can be used.
-  bool get hasInput => !_isDone && !_isStarved && _at < _input.length;
+  /// The window limits history from earlier pieces, not the current output.
+  int get _availableFrom => max(_historyStart, _start - _window);
 
   void add(List<int> data, int start, int end) {
+    if (_isDone || _isWrong) return;
     final left = _input.length - _at;
     final input = Uint8List(left + end - start);
     input.setRange(0, left, _input, _at);
     input.setRange(left, input.length, data, start);
     _input = input;
     _at = 0;
-    _isStarved = false;
   }
 
   /// Decompresses some of the input. Gives null if there is nothing left.
   Uint8List? next() {
     if (_isWrong) _fail();
-    while (!_isDone && _end - _start < _largestPiece) {
+    _memberEnded = false;
+    while (!_isDone && !_memberEnded && _end - _start < _largestPiece) {
       final at = _at, bits = _bits, bitCount = _bitCount;
       if (_step()) continue;
       _at = at;
       _bits = bits;
       _bitCount = bitCount;
-      _isStarved = true;
       break;
     }
     if (_start == _end) return null;
@@ -80,6 +89,8 @@ final class _Inflater {
 
   Never _fail() {
     _isWrong = true;
+    _input = _noInput;
+    _at = 0;
     throw const FormatException('Filter error, bad data');
   }
 
@@ -104,7 +115,10 @@ final class _Inflater {
   bool _readHeader() {
     final first = _read(8), second = _read(8);
     if (second == _needsMore) return false;
-    if (first == 0x1f && second == 0x8b) return _readGzipHeader();
+    if (first == 0x1f && second == 0x8b) {
+      _step = _readGzipHeader;
+      return true;
+    }
     final window = (first >> 4) + 8;
     if ((first << 8 | second) % 31 != 0 || first & 15 != 8) _fail();
     if (window > 15 || window > _windowBits) _fail();
@@ -117,17 +131,18 @@ final class _Inflater {
       final check = _Check()..add(dictionary, 0, dictionary.length);
       if (check.adler != id) _fail();
       _useDictionary(dictionary);
+      _dictionary = null;
     }
     _step = _readBlockHeader;
     return true;
   }
 
   void _useDictionary(List<int> dictionary) {
-    final from = dictionary.length > _window ? dictionary.length - _window : 0;
-    for (var i = from; i < dictionary.length; i++) {
-      _output[_end++] = dictionary[i];
-    }
-    _start = _end;
+    final count = min(dictionary.length, _window);
+    _room(count);
+    _output.setRange(_end, _end + count, dictionary, dictionary.length - count);
+    _end += count;
+    _start = _checked = _end;
   }
 
   int _readBig() {
@@ -141,26 +156,55 @@ final class _Inflater {
   }
 
   bool _readGzipHeader() {
-    final method = _read(8), flags = _read(8);
-    final time = _read(32), others = _read(16);
-    if (others == _needsMore || time == _needsMore) return false;
+    // The magic has been read. The rest of the header is byte-aligned.
+    if (_input.length - _at < 8) return false;
+    final start = _at;
+    final method = _input[_at], flags = _input[_at + 1];
+    _at += 8;
     if (method != 8 || flags & 0xe0 != 0) _fail();
-    if (flags & 4 != 0) {
-      final length = _read(16);
-      for (var i = 0; i < length; i++) {
-        if (_read(8) == _needsMore) return false;
-      }
-      if (length == _needsMore) return false;
+    if (flags & 2 != 0) {
+      _headerCheck = _Check()
+        ..add(const [0x1f, 0x8b], 0, 2, isCrc: true)
+        ..add(_input, start, _at, isCrc: true);
     }
-    for (final flag in const [8, 16]) {
-      if (flags & flag == 0) continue;
-      while (true) {
-        final byte = _read(8);
-        if (byte == _needsMore) return false;
-        if (byte == 0) break;
+    _headerText = flags & 24;
+    _step = flags & 4 != 0 ? _readGzipExtraLength : _readGzipFields;
+    return true;
+  }
+
+  bool _readGzipExtraLength() {
+    final start = _at;
+    final length = _read(16);
+    if (length == _needsMore) return false;
+    _headerCheck?.add(_input, start, _at, isCrc: true);
+    _rest = length;
+    _step = _readGzipFields;
+    return true;
+  }
+
+  bool _readGzipFields() {
+    if (_rest != 0 || _headerText != 0) {
+      final start = _at;
+      if (start == _input.length) return false;
+      if (_rest != 0) {
+        final count = min(_rest, _input.length - start);
+        _at += count;
+        _rest -= count;
+      } else {
+        final terminator = _input.indexOf(0, start);
+        _at = terminator < 0 ? _input.length : terminator + 1;
+        // The name before the comment, in order of their flag bits.
+        if (terminator >= 0) _headerText &= _headerText - 1;
       }
+      _headerCheck?.add(_input, start, _at, isCrc: true);
+      return true;
     }
-    if (flags & 2 != 0 && _read(16) == _needsMore) return false;
+    if (_headerCheck case final check?) {
+      final expected = _read(16);
+      if (expected == _needsMore) return false;
+      if (expected != check.crc & 0xffff) _fail();
+      _headerCheck = null;
+    }
     _wrapping = _Wrapping.gzip;
     _step = _readBlockHeader;
     return true;
@@ -177,6 +221,7 @@ final class _Inflater {
     switch (kind) {
       case 0:
         _toByte();
+        // The two lengths also consume any bytes already in the bit buffer.
         final length = _read(16), inverted = _read(16);
         if (inverted == _needsMore) return false;
         if (length != ~inverted & 0xffff) _fail();
@@ -273,7 +318,7 @@ final class _Inflater {
       return known >> 4;
     }
     var code = 0, first = 0, index = 0;
-    for (var length = 1; length <= 15; length++) {
+    for (var length = 1; length <= codes._longest; length++) {
       final bit = _read(1);
       if (bit == _needsMore) return _needsMore;
       code |= bit;
@@ -306,7 +351,6 @@ final class _Inflater {
     if (symbol < 256) {
       _room(1);
       _output[_end++] = symbol;
-      _took(1);
       return true;
     }
     if (symbol == 256) {
@@ -323,39 +367,37 @@ final class _Inflater {
     if (more == _needsMore) return false;
     final length = _lengthBases[symbol - 257] + extra;
     final distance = _distanceBases[code] + more;
-    if (distance > _end || distance > 1 << _windowBits) _fail();
+    if (distance > _end - _availableFrom) _fail();
     _room(length);
     for (var i = 0; i < length; i++) {
       _output[_end] = _output[_end - distance];
       _end++;
     }
-    _took(length);
     return true;
   }
 
   bool _copyStored() {
-    var isAny = false;
-    while (_rest > 0) {
-      final byte = _read(8);
-      // What was copied stays.
-      if (byte == _needsMore) return isAny;
-      isAny = true;
-      _room(1);
-      _output[_end++] = byte;
-      _took(1);
-      _rest--;
-      if (_end - _start >= _largestPiece) return true;
+    if (_rest == 0) {
+      _step = _readBlockHeader;
+      return true;
     }
-    _step = _readBlockHeader;
+    final available = _input.length - _at;
+    if (available == 0) return false;
+    _room(1);
+    final room = min(_output.length - _end, _largestPiece - (_end - _start));
+    final count = min(min(_rest, available), room);
+    _output.setRange(_end, _end + count, _input, _at);
+    _at += count;
+    _end += count;
+    _rest -= count;
     return true;
   }
 
   /// Makes room for [count] bytes.
   void _room(int count) {
     if (_end + count <= _output.length) return;
-    // What can be referred to stays, and what was not taken.
-    final kept = _end - _window < _start ? _end - _window : _start;
-    final from = kept < 0 ? 0 : kept;
+    _checkOutput();
+    final from = _availableFrom;
     var target = _output;
     if (_end - from + count > target.length) {
       target = Uint8List((_end - from + count) * 2);
@@ -364,16 +406,21 @@ final class _Inflater {
     _output = target;
     _start -= from;
     _end -= from;
+    _historyStart = 0;
+    _checked = _end;
   }
 
-  void _took(int count) {
-    _total += count;
-    if (_wrapping != _Wrapping.raw) {
-      _check.add(_output, _end - count, _end, isCrc: _wrapping == .gzip);
+  /// Checks the span before it can be moved or compared with the trailer.
+  void _checkOutput() {
+    if (_checked < _end && _wrapping != _Wrapping.raw) {
+      _check.add(_output, _checked, _end, isCrc: _wrapping == .gzip);
+      _total += _end - _checked;
     }
+    _checked = _end;
   }
 
   bool _readTrailer() {
+    _checkOutput();
     switch (_wrapping!) {
       case _Wrapping.raw:
         break;
@@ -389,14 +436,20 @@ final class _Inflater {
         final length = _read(32);
         if (length == _needsMore) return false;
         if (length != _total & 0xffffffff) _fail();
-        // Others can follow.
-        _check = _Check();
-        _total = 0;
-        _isLast = false;
-        _step = _readHeader;
-        return true;
     }
-    _isDone = true;
+    if (_concatenates) {
+      _check = _Check();
+      _total = 0;
+      _historyStart = _end;
+      _isLast = false;
+      _step = _wrapping == .raw ? _readBlockHeader : _readHeader;
+      // Give the output of this member before reading the next header.
+      _memberEnded = _start != _end;
+    } else {
+      _isDone = true;
+      _input = _noInput;
+      _at = 0;
+    }
     return true;
   }
 }
@@ -407,6 +460,8 @@ final class _Codes {
   final List<int> counts = List.filled(16, 0);
   final List<int> symbols = [];
   int _left = 1;
+  // Even an invalid entry with no codes takes one bit to read.
+  int _longest = 1;
 
   /// For what the next bits can be, a symbol and the length of its code below
   /// that, or 0 if it is longer.
@@ -416,6 +471,7 @@ final class _Codes {
   _Codes(List<int> lengths) {
     for (final length in lengths) {
       counts[length]++;
+      _longest = max(_longest, length);
     }
     counts[0] = 0;
     for (var length = 1; length < 16; length++) {
@@ -472,11 +528,15 @@ final class _Check {
       return;
     }
     var a = _a, b = _b;
-    for (var i = start; i < end; i++) {
-      a += data[i] & 0xff;
-      if (a >= 65521) a -= 65521;
-      b += a;
-      if (b >= 65521) b -= 65521;
+    // Keep both sums within 64 bits by reducing after each span.
+    while (start < end) {
+      final limit = end - start < 65536 ? end : start + 65536;
+      for (; start < limit; start++) {
+        a += data[start] & 0xff;
+        b += a;
+      }
+      a %= 65521;
+      b %= 65521;
     }
     _a = a;
     _b = b;
