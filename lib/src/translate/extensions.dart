@@ -161,7 +161,7 @@ final class ExtensionTranslator(
           _conversions.coerce(argument, function.parameters[i]),
       ]),
     );
-    if (isNever(element.returnType)) _builder.end(HirUnreachable());
+    if (isNever(element.returnType)) _builder.endNever();
     return result;
   }
 
