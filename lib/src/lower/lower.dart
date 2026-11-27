@@ -6,6 +6,7 @@ import 'callbacks.dart';
 import 'dispatch.dart';
 import 'exports.dart';
 import 'function.dart';
+import 'isolates.dart';
 import 'machine.dart';
 import 'output.dart';
 import 'runtime.dart';
@@ -51,7 +52,6 @@ LirModule lowerProgram(
   final exports = module.exports.isEmpty
       ? null
       : _exports(module, symbols, calls);
-  final needsThread = module.callback != null || exports != null;
   final functions = [
     ...bodies,
     ...layout.functions,
@@ -59,11 +59,28 @@ LirModule lowerProgram(
     if (machine.writesOutput) writeFunction(calls),
     if (module.callback case final callback?)
       ...callbackFunctions(symbols[callback]!, signatureOf(callback), calls),
+    if (module.spawned case final spawned?)
+      isolateEntry(
+        symbols[spawned]!,
+        signatureOf(spawned),
+        checksStack: module.stackOverflow != null,
+        system: calls,
+      ),
     if (exports == null)
       _startFunction(module, symbols, machine, calls)
     else
       ...exports.functions,
   ];
+  final data = _data(module, statics, machine, calls, exports != null);
+  final objects = [
+    ...statics.objects,
+    if (module.stackOverflow != null) stackLimit(),
+  ];
+  if (module.spawned != null) {
+    final (:template, :function) = isolateTemplate(data, objects);
+    functions.add(function);
+    objects.add(template);
+  }
   final called = {
     for (final function in functions)
       for (final block in function.blocks)
@@ -80,49 +97,51 @@ LirModule lowerProgram(
       if (machine.callsNative)
         LirExternal(callNativeSymbol, callNativeSignature),
     ],
-    data: [
-      ...statics.tables,
-      if (machine.usesBuffer)
-        LirData(
-          bufferSymbol,
-          List.filled(bufferBytes, 0),
-          writable: true,
-          isolated: true,
-        ),
-      if (needsThread) mainThread(),
-      if (exports != null) ...exportData(),
-      ...calls.data,
-      if (module.callback != null) ...[...callbackData(calls), callbackMessage],
-      if (machine.keepsNativeFrame)
-        LirData(
-          nativeFrameSymbol,
-          List.filled(8, 0),
-          writable: true,
-          isolated: true,
-        ),
-      if (machine.callsNative)
-        LirData(
-          callBlockSymbol,
-          List.filled(CallBlock.size, 0),
-          writable: true,
-          isolated: true,
-        ),
-      if (machine.usesArguments)
-        LirData(
-          argumentsSymbol,
-          List.filled(argumentsBytes, 0),
-          writable: true,
-        ),
-      if (module.allocate != null) statics.classTable(),
-    ],
+    data: data,
     tables: layout.tables,
-    statics: [
-      ...statics.objects,
-      if (module.stackOverflow != null) stackLimit(),
-    ],
+    statics: objects,
     exports: exports?.names ?? const {},
   );
 }
+
+/// The data that the program needs, once its functions are lowered.
+List<LirData> _data(
+  HirModule module,
+  StaticData statics,
+  MachineLowering machine,
+  SystemCalls calls,
+  bool isLibrary,
+) => [
+  ...statics.tables,
+  if (machine.usesBuffer)
+    LirData(
+      bufferSymbol,
+      List.filled(bufferBytes, 0),
+      writable: true,
+      isolated: true,
+    ),
+  if (module.callback != null || isLibrary) mainThread(),
+  if (isLibrary) ...exportData(),
+  ...calls.data,
+  if (module.callback != null) ...[...callbackData(calls), callbackMessage],
+  if (machine.keepsNativeFrame)
+    LirData(
+      nativeFrameSymbol,
+      List.filled(8, 0),
+      writable: true,
+      isolated: true,
+    ),
+  if (machine.callsNative)
+    LirData(
+      callBlockSymbol,
+      List.filled(CallBlock.size, 0),
+      writable: true,
+      isolated: true,
+    ),
+  if (machine.usesArguments)
+    LirData(argumentsSymbol, List.filled(argumentsBytes, 0), writable: true),
+  if (module.allocate != null) statics.classTable(),
+];
 
 ({List<LirFunction> functions, Map<String, String> names}) _exports(
   HirModule module,

@@ -71,7 +71,9 @@ void main() { exit(1 + 2 * 3); }
 | SIMD 类型（`Float32x4` 等）用普通的 Dart 算，不用机器的向量指令 | 需要时再做 |
 | 函数类型的文字里，命名参数按字母排序；官方按声明的顺序 | 需要时再做 |
 | macOS 上 dartc 做 TLS 服务端时不协商 ALPN（Secure Transport 没有这个功能），也只到 TLS 1.2；带密码的私钥、macOS 上不是 RSA 的私钥、`keyLog` 还不支持 | 需要时再做 |
-| `dart:isolate`：一个 isolate 里的端口和消息已经有了；`Isolate.spawn` 等还没有 | [#13](https://github.com/medz/dartc/issues/13) |
+| `dart:isolate`：端口、消息和 `Isolate.spawn` 已经有了；`spawn` 的 `paused`、`onExit`、`onError`、`errorsAreFatal: false`，`kill`、`pause` 等还没有 | [#13](https://github.com/medz/dartc/issues/13) |
+| isolate 结束后，它的收件箱（一百多字节）不释放，因为别处的 `SendPort` 可能还指着它 | 需要时再做 |
+| 第一个以外的 isolate 不能做给 C 调用的函数（`Pointer.fromFunction`、`NativeCallable`） | 需要时再做 |
 | 不能发送的对象，错误的文字里没有官方的库名、私有名字的后缀和引用的路径；`(object is a …)` 那几种和官方相同 | 不改 |
 | 闭包只捕获用到的变量，所以官方因为闭包带着整个上下文而拒绝发送的，dartc 可能发得出去 | 不改，官方的文档说这是 VM 的实现选择 |
 | `Isolate.packageConfig`、`resolvePackageUri`、`spawnUri` 抛 `UnsupportedError` | 需要时再做 |

@@ -14,7 +14,12 @@ final class HirField(
 
 /// What the collector does with objects that do not keep all that they refer
 /// to. Their weak fields and integers have an order that it knows.
-enum HirWeakness() { references, properties, entries, queues }
+enum HirWeakness() {
+  references,
+  properties,
+  entries,
+  queues,
+}
 
 /// How an array holds one of its elements.
 enum HirElement(

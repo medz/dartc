@@ -2,7 +2,7 @@
 import 'dart:_heap/machine.dart' show load64, store64;
 import 'dart:_heap/objects.dart'
     show callbackInfo, callbacks, registerEvents, takePosted, waitPosted;
-import 'dart:_internal' show EventSource;
+import 'dart:_internal' show EventSource, isFirstIsolate;
 
 /// Does what such a function does, given where the block of the call is, and
 /// what is passed on the stack.
@@ -22,6 +22,12 @@ int _count = 0;
 /// Makes a function that does what [callback] does, for which [stackBytes] are
 /// on the stack, perhaps later. Gives its address.
 int _makeCallback(_Callback callback, int stackBytes, bool isLater) {
+  // Their table is shared, and calls from C reach the first isolate only.
+  if (!isFirstIsolate) {
+    throw UnsupportedError(
+      'Functions of C in isolates other than the first are not supported yet.',
+    );
+  }
   final int slot;
   if (_made.length < _mostCallbacks) {
     slot = _made.length;

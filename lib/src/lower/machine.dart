@@ -3,6 +3,7 @@ import 'package:dartc/lir.dart';
 
 import 'dispatch.dart';
 import 'callbacks.dart';
+import 'isolates.dart';
 import 'output.dart';
 import 'statics.dart';
 import 'system.dart';
@@ -99,6 +100,10 @@ final class MachineLowering(
       return null;
     }
     switch (op) {
+      case .newIsolate:
+        return block.add(Call(newIsolateSymbol, LirSignature([], .i64), []));
+      case .isolateEntry:
+        return symbol(isolateEntrySymbol);
       case .takePosted || .waitPosted || .callBlock || .callNative:
         return _callC(block, op, arguments);
       case .mapMemory:

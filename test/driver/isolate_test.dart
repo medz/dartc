@@ -9,6 +9,7 @@ import 'package:test/test.dart';
 import '../support/compiler.dart';
 import '../support/hosts.dart';
 import 'isolate_ports.dart';
+import 'isolate_spawning.dart';
 
 /// Checks that the program [source] does what it does officially, also where
 /// memory is collected always.
@@ -46,7 +47,7 @@ Future<void> _agrees(String source) async {
 
 void main() {
   group('dart:isolate', () {
-    portPrograms.forEach((name, source) {
+    ({...portPrograms, ...spawningPrograms}).forEach((name, source) {
       test(name, () => _agrees(source));
     });
   }, skip: Host.missing);

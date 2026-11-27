@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:dartc/lir.dart';
 import 'package:dartc/native.dart';
 
@@ -115,27 +113,14 @@ bool _uses(LirModule module, String symbol) => module.functions.any(
 ({Map<String, int> offsets, EmittedObject? object}) _isolateData(
   LirModule module,
 ) {
-  final offsets = <String, int>{}, references = <int, String>{};
-  final bytes = BytesBuilder();
-  void add(String name, Uint8List data, Map<int, String> referring) {
-    while (bytes.length % 16 != 0) {
-      bytes.addByte(0);
-    }
-    offsets[name] = bytes.length;
-    referring.forEach((at, target) => references[bytes.length + at] = target);
-    bytes.add(data);
-  }
-
-  for (final data in module.data) {
-    if (data.isolated) add(data.name, data.bytes, const {});
-  }
-  for (final object in module.statics) {
-    if (object.isolated) add(object.name, object.bytes, object.references);
-  }
+  final (:bytes, :references, :offsets) = isolateData(
+    module.data,
+    module.statics,
+  );
   return (
     offsets: offsets,
     object: offsets.isEmpty
         ? null
-        : EmittedObject(bytes.takeBytes(), references, writable: true),
+        : EmittedObject(bytes, references, writable: true),
   );
 }

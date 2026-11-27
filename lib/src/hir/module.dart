@@ -56,6 +56,8 @@ final class HirFunction(
 /// [uncaught] reports an exception that ends the program. [callback] does what
 /// a function of C that the program made does, given its number, the address
 /// of the block of the call, and that of what is passed on the stack.
+/// [spawned] runs an isolate other than the first on a thread of its own, given
+/// the address of a word that has where the data of the isolate is.
 final class HirModule(
   final HirFunction main,
   Iterable<HirFunction> functions, {
@@ -71,6 +73,7 @@ final class HirModule(
   final HirFunction? outOfMemory,
   final HirFunction? uncaught,
   final HirFunction? callback,
+  final HirFunction? spawned,
   Map<String, HirFunction> exports = const {},
   final HirFunction? eventLoop,
 }) {

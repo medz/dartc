@@ -15,6 +15,10 @@ final class LirFunction(
 
   /// Whether C calls it, so that it finds where the data of the isolate is.
   final bool isEntered = false,
+
+  /// Whether, if it [isEntered], its first argument is the address of a word
+  /// that has where the data of the isolate is, rather than the first one's.
+  final bool takesIsolate = false,
 }) {
   final List<LirBlock> blocks = .unmodifiable(blocks);
   LirBlock get entry => blocks.first;

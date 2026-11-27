@@ -103,6 +103,8 @@ void _checkRuntime(HirModule module, Set<HirFunction> functions) {
   check('outOfMemory', module.outOfMemory, []);
   final callback = module.callback;
   check('callback', callback, [.integer, .integer, .integer], callback?.result);
+  final spawned = module.spawned;
+  check('spawned', spawned, [.integer], spawned?.result);
   module.exports.forEach((name, function) {
     check('export $name', function, [.integer, .integer], function.result);
   });

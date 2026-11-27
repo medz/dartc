@@ -135,6 +135,9 @@ abstract interface class ProgramScope() {
   /// Says that C calls the program.
   void addCallbacks();
 
+  /// Says that the program starts isolates.
+  void addSpawning();
+
   /// Says that collections have C do something.
   void addNativeFinalizers();
 

@@ -88,7 +88,9 @@ final class FunctionEmitter(
       onCheck: () => stackMaps.add(StackMap(_machine.offset, const [])),
     );
     _accessSaved(store: true);
-    if (function.isEntered) _machine.enterIsolate();
+    if (function.isEntered) {
+      _machine.enterIsolate(fromArgument: function.takesIsolate);
+    }
     final incoming = _registers.argumentLocations(
       function.signature,
       .incoming,

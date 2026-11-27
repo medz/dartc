@@ -74,6 +74,17 @@ external int takePosted();
 /// Waits for such a call, for some microseconds at most unless that is negative.
 external void waitPosted(int microseconds);
 
+/// A copy of the data that each isolate has, as it is at the start, in memory
+/// that `malloc` gave, or 0.
+external int newIsolate();
+
+/// The function of C that runs an isolate on a thread, given the address of a
+/// word that has where the data of the isolate is.
+external int isolateEntry();
+
+/// Runs what is left to do of the isolate, until there is nothing to wait for.
+external void runEvents();
+
 /// Has functions of C called after collections.
 external void usesNativeFinalizers();
 

@@ -14,15 +14,19 @@ final class RuntimeNeeds(
   HirFunction? get uncaught => _uncaught;
   HirFunction? get eventLoop => _eventLoop;
   HirFunction? get callback => _callback;
+  HirFunction? get spawned => _spawned;
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
   HirFunction? get exitCode => _exitCode;
-  HirFunction? _eventLoop, _callback, _exitCode;
+  HirFunction? _eventLoop, _callback, _exitCode, _spawned;
 
   /// Says that it creates objects.
   void addAllocation() => _allocate ??= _runtime('allocate');
 
   /// Says that C calls it.
   void addCallbacks() => _callback ??= _runtime('runCallback');
+
+  /// Says that it starts isolates.
+  void addSpawning() => _spawned ??= _runtime('runSpawned');
 
   /// Says that it lets work be done later.
   void addEvents() => _eventLoop ??= _runtime('runEventLoop');
