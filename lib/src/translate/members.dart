@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
@@ -239,4 +240,24 @@ FormalParameterElement? redirectedParameter(FormalParameterElement parameter) {
   return parameter.isNamed
       ? parameters.firstWhere((p) => p.isNamed && p.name == parameter.name)
       : parameters[factory.formalParameters.indexOf(parameter)];
+}
+
+/// Whether [target], or `this` if that is null, is the object of a class or
+/// mixin whose type arguments are those that its body sees. Then what its
+/// members give is of their static type.
+///
+/// In extensions and extension types, `this` may be of a subtype.
+bool isExactThis(AstNode node, Expression? target) {
+  if (target != null && target is! ThisExpression) return false;
+  final body = node.thisOrAncestorMatching(
+    (node) =>
+        node is ClassDeclaration ||
+        node is EnumDeclaration ||
+        node is MixinDeclaration ||
+        node is ExtensionDeclaration ||
+        node is ExtensionTypeDeclaration,
+  );
+  return body is ClassDeclaration ||
+      body is EnumDeclaration ||
+      body is MixinDeclaration;
 }
