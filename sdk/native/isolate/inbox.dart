@@ -148,11 +148,17 @@ final class _Inbox implements EventSource {
   /// How many ports keep the isolate going.
   int keepers = 0;
 
+  /// The number of the control port, and the messages to it that have come,
+  /// which are handled before all others and while the isolate is paused.
+  int control = 0;
+  final List<int> _controls = [];
+
   /// Memory for waiting.
   final int _waiting = _allocate(_pollBytes);
 
   _Inbox(this.address) {
     registerEvents(this);
+    EventOrder.uncaught = _handleUncaught;
     EventOrder.firstMessage = () =>
         _arrived.isEmpty ? 0x7fffffffffffffff : _arrived.first.number;
   }
@@ -166,22 +172,43 @@ final class _Inbox implements EventSource {
   }
 
   /// Gives [data] to the port [port] of this isolate, after what came before.
-  void postHere(int port, int data) =>
+  void postHere(int port, int data) {
+    if (port == control) {
+      _controls.add(data);
+    } else {
       _arrived.add(_Arrived(EventOrder.next++, port, data));
+    }
+  }
+
+  /// What is done before the next message, once the isolate is not paused.
+  final List<void Function()> _beforeNext = [];
+
+  /// Does [action] before the next message.
+  void beforeNext(void Function() action) => _beforeNext.add(action);
 
   bool get keepsAlive => keepers > 0;
 
   int get happened {
     _takeMessages();
+    while (_controls.isNotEmpty) {
+      _handleControl(_decode(_controls.removeAt(0)));
+    }
+    if (EventOrder.isPaused) return 0;
     final limit = EventOrder.firstTimer();
-    var count = 0;
-    while (count < _arrived.length && _arrived[count].number < limit) {
+    var count = _beforeNext.length;
+    while (count - _beforeNext.length < _arrived.length &&
+        _arrived[count - _beforeNext.length].number < limit) {
       count++;
     }
     return count;
   }
 
   bool runOne() {
+    if (EventOrder.isPaused) return false;
+    if (_beforeNext.isNotEmpty) {
+      _beforeNext.removeAt(0)();
+      return true;
+    }
     if (_arrived.isEmpty || _arrived.first.number > EventOrder.firstTimer()) {
       return false;
     }
@@ -211,7 +238,9 @@ final class _Inbox implements EventSource {
     for (final message in _arrived) {
       _freeCopy(message.data);
     }
+    _controls.forEach(_freeCopy);
     _arrived.clear();
+    _controls.clear();
     _closeInbox(address);
     _free(_waiting);
   }
