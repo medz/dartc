@@ -129,6 +129,9 @@ final class Declarations(Iterable<SourceLibrary> libraries) {
             stringValue,
       ];
       if (annotation.name.name == 'pragma' && texts.firstOrNull == name) {
+        if (name == 'dartc:weak' && !element.library!.isInSdk) {
+          throw unsupported(element, 'the dartc:weak pragma outside the SDK');
+        }
         return texts.elementAtOrNull(1) ?? '';
       }
     }

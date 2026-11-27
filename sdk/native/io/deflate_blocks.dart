@@ -1,7 +1,8 @@
 // The blocks of compressed streams.
 
-/// Writes blocks of bytes and matches, each as short as it can be.
+/// Writes stored or Huffman-coded blocks.
 final class _BlockWriter {
+  static const _largestStored = 65535, _largestPiece = 65536;
   final int _size;
 
   /// Whether the codes are always the ones that are known.
@@ -17,16 +18,19 @@ final class _BlockWriter {
   Int32List _lengthUses = Int32List(286), _distanceUses = Int32List(30);
 
   Uint8List _out = Uint8List(1 << 12);
-  int _end = 0, _bits = 0, _bitCount = 0;
+  int _start = 0, _end = 0, _bits = 0, _bitCount = 0;
 
   bool get isUsed => _count > 0;
   bool get isFull => _count >= _size - 1;
+  bool get hasOutput => _start < _end;
 
   /// What was written, but for a part of a byte, or null if there is nothing.
   Uint8List? take() {
-    if (_end == 0) return null;
-    final result = Uint8List.sublistView(_out, 0, _end).sublist(0);
-    _end = 0;
+    if (!hasOutput) return null;
+    final end = min(_start + _largestPiece, _end);
+    final result = _out.sublist(_start, end);
+    _start = end;
+    if (_start == _end) _start = _end = 0;
     return result;
   }
 
@@ -34,13 +38,16 @@ final class _BlockWriter {
     _bits |= value << _bitCount;
     _bitCount += count;
     while (_bitCount >= 8) {
-      if (_end == _out.length) {
-        _out = Uint8List(_end * 2)..setRange(0, _end, _out);
-      }
+      if (_end == _out.length) _grow(_end + 1);
       _out[_end++] = _bits;
       _bits >>= 8;
       _bitCount -= 8;
     }
+  }
+
+  void _grow(int needed) {
+    final twice = _out.length * 2;
+    _out = Uint8List(twice < needed ? needed : twice)..setRange(0, _end, _out);
   }
 
   void writeBig(int value) {
@@ -96,14 +103,14 @@ final class _BlockWriter {
   void store(Uint8List window, int start, int end, {required bool isLast}) {
     var at = start;
     do {
-      final left = end - at, length = left < 65535 ? left : 65535;
+      final left = end - at, length = min(left, _largestStored);
       write(isLast && length == left ? 1 : 0, 3);
       toByte();
       write(length, 16);
       write(~length & 0xffff, 16);
-      for (var i = 0; i < length; i++) {
-        write(window[at + i], 8);
-      }
+      if (_end + length > _out.length) _grow(_end + length);
+      _out.setRange(_end, _end + length, window, at);
+      _end += length;
       at += length;
     } while (at < end);
   }
@@ -269,7 +276,6 @@ void _shorten(List<int> counts, int longest, int over) {
 
 /// How the codes of a block are told.
 final class _Header {
-  final List<int> _all = [];
   late final int _lengthCount, _distanceCount;
 
   /// Symbols for lengths, or for how often one is there, and what tells that.
@@ -280,15 +286,16 @@ final class _Header {
   _Header(List<int> lengths, List<int> distances) {
     _lengthCount = _withoutZeros(lengths, 257);
     _distanceCount = _withoutZeros(distances, 1);
-    _all
-      ..addAll(lengths.take(_lengthCount))
-      ..addAll(distances.take(_distanceCount));
-    for (var i = 0; i < _all.length;) {
+    final all = [
+      ...lengths.take(_lengthCount),
+      ...distances.take(_distanceCount),
+    ];
+    for (var i = 0; i < all.length;) {
       var count = 1;
-      while (i + count < _all.length && _all[i + count] == _all[i]) {
+      while (i + count < all.length && all[i + count] == all[i]) {
         count++;
       }
-      _add(_all[i], count);
+      _add(all[i], count);
       i += count;
     }
     final uses = Int32List(19);

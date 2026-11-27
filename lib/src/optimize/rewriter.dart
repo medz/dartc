@@ -402,6 +402,8 @@ final class _BodyCopy(
         });
       case HirInvoke(:final call, :final onReturn, :final onThrow):
         final caught = _handler(onThrow);
+        // A nonreturning call can keep objects alive in its normal successor.
+        _isCold |= onReturn.target.terminator is HirUnreachable;
         final result = _call(
           copyInstruction(call, _of) as HirCalling,
           handler: caught,
