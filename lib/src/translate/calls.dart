@@ -69,6 +69,7 @@ final class CallTranslator(
     return _checked(
       node,
       element,
+      isExact: isExactThis(node, target),
       method(
         node,
         receiver,
@@ -85,10 +86,12 @@ final class CallTranslator(
   HirValue? _checked(
     AstNode node,
     ExecutableElement element,
-    HirValue? result,
-  ) {
+    HirValue? result, {
+    bool isExact = false,
+  }) {
     final base = element.baseElement;
     if (result == null ||
+        isExact ||
         isExtensionMember(base) ||
         !mentions(base.returnType, base.enclosingElement, isTaken: true)) {
       return result;
@@ -549,7 +552,12 @@ final class CallTranslator(
     } else {
       final receiver = target == null ? _this(node) : object(target, node);
       final read = invoke(node, receiver, receiverType(target, node), element);
-      result = _checked(node, element, read);
+      result = _checked(
+        node,
+        element,
+        read,
+        isExact: isExactThis(node, target),
+      );
     }
     return result ?? _unsupported(node, describe(node));
   }
