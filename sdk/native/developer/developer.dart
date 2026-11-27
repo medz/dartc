@@ -71,7 +71,20 @@ abstract final class NativeRuntime {
 @patch
 abstract final class UserTag {
   @patch
-  factory UserTag(String label) => _UserTag._all[label] ??= _UserTag(label);
+  factory UserTag(String label) {
+    final tags = _UserTag._all;
+    final existing = tags[label];
+    if (existing != null) return existing;
+
+    // The VM allows 256 instances including Default. The public constant is 64.
+    const instanceLimit = 256;
+    if (tags.length == instanceLimit) {
+      throw UnsupportedError(
+        'UserTag instance limit ($instanceLimit) reached.',
+      );
+    }
+    return tags[label] = _UserTag(label);
+  }
 
   @patch
   static UserTag get defaultTag => _UserTag._default;

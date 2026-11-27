@@ -25,13 +25,21 @@ void throwExternal(
   HirValue text(String? text) =>
       builder.add(text == null ? HirNull() : scope.text(text));
   // Members of mixins are those of where they are mixed in.
-  final mixedIn = builder.level;
   final HirValue receiver;
-  if (mixedIn != null && mixedIn.isMixin && class_ == mixedIn.element) {
-    final application = mixedIn.class_;
-    receiver = application is ClassElement && application.isMixinApplication
+  if (builder.level
+      case Level(
+        class_: final application,
+        element: final mixin,
+        mixinIndex: final index?,
+      )
+      when class_ == mixin) {
+    final isNamed =
+        application is ClassElement &&
+        application.isMixinApplication &&
+        index == application.mixins.length - 1;
+    receiver = isNamed
         ? _typeOf(scope, builder, application)
-        : text(_applicationName(mixedIn));
+        : text(_applicationName(application, index));
   } else {
     receiver = class_ is InterfaceElement
         ? _typeOf(scope, builder, class_)
@@ -49,20 +57,12 @@ void throwExternal(
     ..end(HirUnreachable());
 }
 
-/// What the official runtime calls the class that [level] of a mixin makes,
-/// which the program does not name: the class, its superclass and the mixins
-/// up to this one.
-String _applicationName(Level level) {
-  final class_ = level.class_;
-  final mixins = [for (final mixin in class_.mixins) mixin.element.displayName];
-  final count = mixins.indexOf(level.element.displayName) + 1;
-  final superclass = class_.supertype?.element.displayName ?? 'Object';
-  return [
-    '_${class_.displayName}',
-    superclass,
-    ...mixins.take(count),
-  ].join('&');
-}
+/// What the official runtime calls the unnamed application at [index].
+String _applicationName(InterfaceElement class_, int index) => [
+  '_${class_.displayName}',
+  class_.supertype?.element.displayName ?? 'Object',
+  for (final mixin in class_.mixins.take(index + 1)) mixin.element.displayName,
+].join('&');
 
 /// The object that the type [class_] is, with the bounds of its parameters.
 HirValue _typeOf(

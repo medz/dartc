@@ -212,6 +212,12 @@ final class FunctionBuilder(
     return next.parameters.firstOrNull;
   }
 
+  /// Ends a path that cannot return, keeping its variables live across the call.
+  void endNever() {
+    stay();
+    end(HirUnreachable());
+  }
+
   /// Creates an object of [class_].
   HirValue create(HirClass class_) => call(HirNew(class_))!;
 
@@ -296,12 +302,14 @@ final class FunctionBuilder(
       final value = _bound.contains(variable)
           ? _values[_same(variable)]!
           : read(variable);
-      add(HirMachine(.addressOf, [value]));
+      _stayValue(value);
     }
     if (scope == 0 && _keepsReceiver) {
-      add(HirMachine(.addressOf, [receiver!]));
+      _stayValue(receiver!);
     }
   }
+
+  void _stayValue(HirValue value) => add(HirMachine(.addressOf, [value]));
 
   late final bool _keepsReceiver =
       receiver != null && isFinalizable(level?.element.thisType ?? thisType);
@@ -312,9 +320,19 @@ final class FunctionBuilder(
     _kept.length = scope;
   }
 
+  /// Keeps a finalizable variable's value for its scope.
+  void keep(VariableElement variable) {
+    if (isFinalizable(variable.type)) _kept.add(variable);
+  }
+
+  /// Gives a future join parameter its type before the variable is declared.
+  void declareType(VariableElement variable, HirType type) {
+    _types[_same(variable)] = type;
+  }
+
   /// Declares the variable [given], not yet assigned.
   void declare(Object given, HirType type) {
-    if (given is VariableElement && isFinalizable(given.type)) _kept.add(given);
+    if (given is VariableElement) keep(given);
     final variable = _same(given);
     _types[variable] = type;
     _values.remove(variable);
@@ -372,6 +390,11 @@ final class FunctionBuilder(
     if (value.type != _types[variable]) {
       throw StateError('Assigned ${value.type} to $variable.');
     }
+    if (_values[variable] case final previous?
+        when variable is VariableElement && isFinalizable(variable.type)) {
+      // A captured variable's cell still holds the previous value here.
+      _stayValue(previous);
+    }
     if (_isCell(variable)) {
       final field = cells(_types[variable]!).fields.single;
       add(HirStore(field, raw(variable), value));
@@ -411,6 +434,12 @@ final class FunctionBuilder(
       HirEdge(join._block, [...results, ...join._variables.map(raw)]);
 
   void jump(Join join, [HirValue? result]) => jumpWith(join, [?result]);
+
+  /// Keeps the variables in scope alive across a loop's backedge.
+  void repeat(Join head) {
+    stay();
+    jump(head);
+  }
 
   void jumpWith(Join join, List<HirValue> results) =>
       end(HirJump(_edge(join, results)));

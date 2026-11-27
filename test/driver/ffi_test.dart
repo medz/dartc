@@ -81,6 +81,10 @@ void main() {
       await _agrees(finalizersDart, finalizersC, isLong: true);
     });
 
+    test('finalizable locals in loops and across scope exits', () async {
+      await _agrees(finalizableExitsDart, finalizersC);
+    });
+
     test('weak references', () async {
       await _agrees(weakDart, '', isLong: true);
     });
