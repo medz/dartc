@@ -21,6 +21,8 @@ With `DARTC_SELF_HOSTING=1`, `test/driver/build_test.dart` also lets the compile
 
 A change for speed, size or compiling shows what `tool/measure.dart` gives before and after: run time against the official AOT, bytes, and the time and memory of compiling. It then updates the baseline with `--update`, and with `--self` when it changes the compiler's own speed.
 
+A ratio is the median of rounds that run ours and the official program in turn, spread over the whole run; ± is where that median lies with a chance of about 95%. A change in parentheses is noise, as the ranges of now and of the baseline meet. Runs of the same build on an idle machine give ratios within about ±2.5% of each other, so a change outside parentheses but smaller than that needs another run before it counts.
+
 Tests run compiled programs on macOS ARM64. For Linux, give two containers with glibc 2.34 or later and gcc, in which the directory for temporary files has the same path as on the host:
 
 ```sh
