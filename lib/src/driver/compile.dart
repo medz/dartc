@@ -29,7 +29,7 @@ final class const CompileOptions({
 
   /// Whether executables and shared libraries name their functions for tools
   /// like profilers.
-  final bool namesFunctions = true,
+  final bool namesFunctions = false,
 });
 
 /// What this machine runs, if it is supported.

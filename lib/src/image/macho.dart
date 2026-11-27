@@ -138,7 +138,7 @@ Uint8List linkMacho(
   EmittedCode code, {
   required String entry,
   required String identifier,
-  bool namesFunctions = true,
+  bool namesFunctions = false,
 }) => _link(code, MachoExecutable(entry), identifier, namesFunctions);
 
 /// Builds a signed macOS ARM64 library that programs load as [name].
@@ -146,7 +146,7 @@ Uint8List linkMachoLibrary(
   EmittedCode code, {
   required String name,
   required String identifier,
-  bool namesFunctions = true,
+  bool namesFunctions = false,
 }) => _link(code, MachoLibrary(name), identifier, namesFunctions);
 
 Uint8List _link(

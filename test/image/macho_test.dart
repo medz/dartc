@@ -103,9 +103,8 @@ void main() {
       'cmd LC_LOAD_DYLIB\n cmdsize 56\n'
           ' name /usr/lib/libSystem.B.dylib (offset 24)\n time stamp 2',
       'current version 1.0.0\ncompatibility version 1.0.0',
-      // After the symbol of `main` and its name.
-      'cmd LC_CODE_SIGNATURE\n cmdsize 16\n dataoff 16416\n'
-          ' datasize ${size - 16416}',
+      'cmd LC_CODE_SIGNATURE\n cmdsize 16\n dataoff 16384\n'
+          ' datasize ${size - 16384}',
     ]) {
       expect(commands, contains(text));
     }
@@ -146,7 +145,10 @@ void main() {
     expect(named, isNot(contains('.text')));
     // Loaders see only the exported functions.
     expect(symbols(link(namesFunctions: true), ['-g']), endsWith('T _e\n'));
-    final left = symbols(link(namesFunctions: false), ['-n']);
+    final left = symbols(
+      linkMachoLibrary(code, name: 'library', identifier: 'x'),
+      ['-n'],
+    );
     expect(left, isNot(contains(' t ')));
     expect(left, contains('T _e\n'));
   }, skip: skipExecution);
@@ -257,12 +259,7 @@ void main() {
 
   test('the signature marks a main program', () {
     final file = ByteData.sublistView(
-      linkMacho(
-        emitCode(_returning(0)),
-        entry: 'main',
-        identifier: 'x',
-        namesFunctions: false,
-      ),
+      linkMacho(emitCode(_returning(0)), entry: 'main', identifier: 'x'),
     );
     // Offsets come from the system's code directory structure.
     final at = 16384 + 20;

@@ -271,7 +271,7 @@ true
     }
   });
 
-  test('--strip leaves out the names of functions', () async {
+  test('--symbols keeps the names of functions', () async {
     Future<String> symbols(List<String> options) async {
       final result = await run(
         (path) => ['$path/main.dart', '-o', '$path/main', ...options],
@@ -283,8 +283,8 @@ true
       return '${Process.runSync('/usr/bin/nm', [path]).stdout}';
     }
 
-    expect(await symbols(const []), contains(' t .start\n'));
-    expect(await symbols(const ['--strip']), isEmpty);
+    expect(await symbols(const ['--symbols']), contains(' t .start\n'));
+    expect(await symbols(const []), isEmpty);
   }, testOn: 'mac-os');
 
   test('the command works from the package', () {

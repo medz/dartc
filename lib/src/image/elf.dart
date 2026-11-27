@@ -21,21 +21,21 @@ const _libraries = ['libc.so.6', 'libm.so.6'];
 Uint8List linkElf(
   EmittedCode code, {
   required String entry,
-  bool namesFunctions = true,
+  bool namesFunctions = false,
 }) => _ElfImage(code, entry: entry, namesFunctions: namesFunctions).build();
 
 /// Builds a Linux library that programs load as [name].
 Uint8List linkElfLibrary(
   EmittedCode code, {
   required String name,
-  bool namesFunctions = true,
+  bool namesFunctions = false,
 }) => _ElfImage(code, name: name, namesFunctions: namesFunctions).build();
 
 final class _ElfImage(
   final EmittedCode code, {
   final String? entry,
   final String? name,
-  final bool namesFunctions = true,
+  final bool namesFunctions = false,
 }) {
   late final machine = ElfMachine.of(code.architecture);
   final names = ElfNames();

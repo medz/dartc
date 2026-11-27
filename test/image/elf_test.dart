@@ -230,7 +230,9 @@ void main() {
       externals: const ['puts'],
       exports: const {'e': 'g'},
     );
-    final elf = _Elf(linkElfLibrary(code, name: 'libx.so'));
+    final elf = _Elf(
+      linkElfLibrary(code, name: 'libx.so', namesFunctions: true),
+    );
     final start = elf.loaded.firstWhere((s) => s.flags & 1 != 0).address;
     const localFunction = 0x02, global = 0x10, globalFunction = 0x12;
     expect(elf.toolSymbols, [
@@ -245,9 +247,7 @@ void main() {
     // Loaders still find only the exported function.
     expect(elf.symbolValue(elf.find('e')!), start + 8);
     expect(elf.find('f'), isNull);
-    final left = _Elf(
-      linkElfLibrary(code, name: 'libx.so', namesFunctions: false),
-    );
+    final left = _Elf(linkElfLibrary(code, name: 'libx.so'));
     expect(left.toolSymbols, isNull);
     expect(left.symbolValue(left.find('e')!), start + 8);
   });

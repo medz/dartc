@@ -16,7 +16,7 @@ Usage: dartc <source.dart> -o <output> [options]
   --header <file.h>    where to write declarations for C
   -D<name>=<value>     what fromEnvironment knows; also --define <name>=<value>
   --enable-asserts     check assertions
-  --strip              leave out the names of functions, which profilers show
+  --symbols            keep the names of functions for profilers and debuggers
   -h, --help           show this''';
 
 /// A command that cannot be understood.
@@ -58,7 +58,7 @@ final class _Command(
   LibraryKind? _kind;
   Target? _target = hostTarget;
   bool _checksAssertions = false;
-  bool _namesFunctions = true;
+  bool _namesFunctions = false;
   final _environment = <String, String>{};
 
   this {
@@ -91,8 +91,8 @@ final class _Command(
           _define(value('-D'));
         case '--enable-asserts':
           _checksAssertions = true;
-        case '--strip':
-          _namesFunctions = false;
+        case '--symbols':
+          _namesFunctions = true;
         case final name when name.startsWith('-D'):
           _define(argument.substring(2));
         case final name when name.startsWith('-'):
