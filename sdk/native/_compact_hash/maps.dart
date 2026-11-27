@@ -26,18 +26,24 @@ final List<Uint32List?> _indexes = [];
 
 @patch
 abstract class _LinkedHashImmutableBase {
-  /// Where in [_indexes] this has its own.
-  int _place = 0;
+  // The slot for a compiled constant. Maps built at run time keep -1.
+  int _place = -1;
 
   @patch
   List get _data => super._data;
 
   @patch
-  Uint32List? get _indexNullable =>
-      _place < _indexes.length ? _indexes[_place] : null;
+  Uint32List? get _indexNullable {
+    if (_place < 0) return _ownIndex;
+    return _place < _indexes.length ? _indexes[_place] : null;
+  }
 
   @patch
   void set _index(Uint32List value) {
+    if (_place < 0) {
+      super._index = value;
+      return;
+    }
     while (_indexes.length <= _place) {
       _indexes.add(null);
     }
@@ -63,3 +69,27 @@ Uint32List get _uninitializedIndex => _noIndex;
 
 @patch
 List get _uninitializedData => _noData;
+
+@patch
+final class _ConstMap<K, V> {
+  /// Has the keys and values of [map].
+  _ConstMap._of(Map<K, V> map) {
+    final data = List<Object?>.filled(map.length * 2, null);
+    var at = 0;
+    map.forEach((key, value) {
+      data[at++] = key;
+      data[at++] = value;
+    });
+    // As the maps do it when they make their index.
+    final size = at <= 8 ? 8 : 1 << (at - 1).bitLength;
+    _data = data;
+    _usedData = at;
+    _hashMask = (1 << (32 - (size.bitLength - 2))) - 1;
+    // The first lookup builds the index.
+    _ownIndex = null;
+  }
+}
+
+@patch
+_ConstMap<K, V> createConstMapFromMapOfDeeplyImmutables<K, V>(Map<K, V> map) =>
+    _ConstMap._of(map);
