@@ -100,6 +100,75 @@ uint8_t *makeMemory(int32_t n) { return calloc(n, 1); }
 void freeMemory(void *p) { total += 1000; free(p); }
 ''';
 
+const finalizableExitsDart = r'''
+import 'dart:ffi';
+
+final lib = DynamicLibrary.open('LIBRARY');
+final sum = lib.lookupFunction<Int64 Function(), int Function()>('sum');
+final finalizer = NativeFinalizer(lib.lookup('finalize'));
+
+class P implements Finalizable {}
+
+P attach(int token) {
+  final value = P();
+  finalizer.attach(value, Pointer.fromAddress(token));
+  return value;
+}
+
+List<int>? garbage;
+
+void probe(int tokens) {
+  garbage = List.filled(16, tokens);
+  print(sum() & tokens);
+}
+
+int returns() {
+  final outer = attach(2);
+  try {
+    final middle = attach(4);
+    try {
+      final inner = attach(8);
+      probe(14);
+      return 17;
+    } finally {
+      probe(6);
+    }
+  } finally {
+    probe(2);
+  }
+}
+
+void loops() {
+  for (var i = 0; i < 2; i++) {
+    final token = 16 << i;
+    try {
+      final local = attach(token);
+      probe(token);
+      if (i == 0) continue;
+      break;
+    } finally {
+      print(i);
+    }
+  }
+}
+
+Future<int> asyncReturn() async {
+  final outer = attach(64);
+  try {
+    return 23;
+  } finally {
+    await Future<void>.value();
+    probe(64);
+  }
+}
+
+void main() async {
+  print(returns());
+  loops();
+  print(await asyncReturn());
+}
+''';
+
 const finalizersDart = r'''
 import 'dart:ffi';
 import 'dart:typed_data';

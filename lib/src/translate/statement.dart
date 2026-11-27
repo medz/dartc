@@ -38,8 +38,10 @@ final class StatementTranslator(
   /// Ends a function that can be left in the middle.
   void _end() => _leave(_builder.add(HirNull()));
 
-  void _leave(HirValue value) =>
-      _tries.leave(0, (kept) => _coroutine.finish(kept!), value);
+  void _leave(HirValue value) => _tries.leave(0, (kept) {
+    _builder.stay();
+    _coroutine.finish(kept!);
+  }, value);
 
   void _body(FunctionBody body) {
     switch (body) {
@@ -153,7 +155,6 @@ final class StatementTranslator(
       final value = expression == null
           ? _builder.add(HirNull())
           : expressions.valueAsObject(expression, _builder.returnType!);
-      _builder.stay();
       return _leave(value);
     }
     final result = _builder.function.result;
@@ -305,7 +306,7 @@ final class StatementTranslator(
       ..jump(after)
       ..enter(body);
     group.last.statements.forEach(statement);
-    _builder.stay(scope);
+    _builder.leave(scope);
     _builder
       ..jump(exit)
       ..enter(after);
