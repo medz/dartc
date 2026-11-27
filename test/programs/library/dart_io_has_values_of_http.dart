@@ -1,6 +1,8 @@
 import 'dart:io';
 
 void main() {
+  const reasons = {200: 'OK'};
+  final reason = reasons[200];
   print(HttpDate.format(DateTime.utc(2020, 2, 29, 13, 5, 9))); // expect: Sat, 29 Feb 2020 13:05:09 GMT
   print(HttpDate.parse('Sat, 29 Feb 2020 13:05:09 GMT')); // expect: 2020-02-29 13:05:09.000Z
   try {
@@ -30,6 +32,7 @@ void main() {
   // expect: Invalid character in cookie name, code unit: '32'
   print((HttpStatus.notFound, HttpHeaders.contentTypeHeader)); // expect: (404, content-type)
   final value = HeaderValue.parse('text/plain; q=1; a=b');
+  print((reason, reasons[200])); // expect: (OK, OK)
   print((
     value.value,
     value.parameters['a'],
