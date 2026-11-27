@@ -113,7 +113,7 @@ Future<Run> _runWatching(
 void _watchingRegressions() {
   for (final (name, source, output, linux) in const [
     ('watching the filesystem root', rootWatchingProgram, 'true\n', false),
-    ('watching a missing directory', failedWatchingProgram, 'true\n', true),
+    ('watching a missing directory', failedWatchingProgram, 'true\n', null),
     (
       'watching one path with different masks',
       sharedWatchingProgram,
@@ -121,7 +121,9 @@ void _watchingRegressions() {
       true,
     ),
   ]) {
-    final hosts = Host.all.where((host) => host.isLinux == linux);
+    final hosts = Host.all.where(
+      (host) => linux == null || host.isLinux == linux,
+    );
     test(name, () async {
       final directory = writeSources({'main.dart': source});
       for (final host in hosts) {

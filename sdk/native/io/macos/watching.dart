@@ -7,6 +7,7 @@ import 'dart:ffi'
         Int64,
         NativeFunction,
         Pointer,
+        Uint8,
         Uint32,
         Uint64,
         Void,
@@ -41,7 +42,7 @@ final _schedule = _services
       void Function(int, int, int)
     >('FSEventStreamScheduleWithRunLoop');
 final _startStream = _services
-    .lookupFunction<Int32 Function(Int64), int Function(int)>(
+    .lookupFunction<Uint8 Function(Int64), int Function(int)>(
       'FSEventStreamStart',
     );
 final _flushStream = _services
@@ -94,12 +95,7 @@ _FileSystemWatcher _systemWatcher() => _RunLoopFileSystemWatcher();
 int _startWatcher() => 0;
 
 int _watchPathOf(int watcher, String path, int events, bool recursive) {
-  String base;
-  try {
-    base = File(path).resolveSymbolicLinksSync();
-  } on FileSystemException {
-    base = path;
-  }
+  final base = File(path).resolveSymbolicLinksSync();
   final id = ++_lastNode;
   final text = _cString(base);
   final name = _createText(0, text, 0x08000100);
@@ -128,8 +124,15 @@ int _watchPathOf(int watcher, String path, int events, bool recursive) {
   _freeBytes(context);
   _release(array);
   _release(name);
+  if (stream == 0) {
+    throw FileSystemException('Failed to create FSEvents stream', path);
+  }
   _schedule(stream, _mainLoop(), _defaultMode);
-  _startStream(stream);
+  if (_startStream(stream) == 0) {
+    _invalidateStream(stream);
+    _releaseStream(stream);
+    throw FileSystemException('Failed to start FSEvents stream', path);
+  }
   _flushStream(stream);
   _nodes[id] = _Node(stream, utf8.encode(base).length, recursive);
   return id;
