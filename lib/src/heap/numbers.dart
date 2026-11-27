@@ -1,5 +1,6 @@
 // What numbers do where their kind is known only when the program runs.
 import 'machine.dart';
+import 'objects.dart' show floatBits;
 
 /// Whether [self] equals any object.
 bool intEquals(int self, Object other) {
@@ -19,10 +20,7 @@ bool sameObjects(Object? a, Object? b) {
   return isSame(a, b);
 }
 
-bool _sameDoubles(double a, double b) {
-  if (a != b) return a != a && b != b;
-  return a != 0 || 1 / a == 1 / b;
-}
+bool _sameDoubles(double a, double b) => floatBits(a) == floatBits(b);
 
 double numToDouble(num value) {
   if (value is double) return value;

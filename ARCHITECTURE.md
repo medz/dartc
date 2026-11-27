@@ -202,7 +202,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 运行时的库 | `lib/src/heap` 就是 `dart:_heap`。`machine.dart` 和 `objects.dart` 里的函数各是一条操作 |
 | 数组 | 有元素的类：头、一个字段、元素个数、元素。元素是引用或字节。由 `@pragma('dartc:elements')` 标出 |
 | 字符串 | `_OneByteString` `_TwoByteString` 本身就是字节数组，另有一个字段存哈希值 |
-| 数字的类 | `int` 的对象是 `_Mint`，`double` 的是 `_Double`；它们的方法里 `this` 不装箱 |
+| 数字的类 | `int` 的对象是 `_Mint`，`double` 的是 `_Double`；它们的方法里 `this` 不装箱。运行时的 `identical` 按 `double` 的位模式比较。`2^63` 的浮点数和最大的 `int` 取同一个哈希值，沿用 ARM64 官方运行时行为 |
 | `const` 的映射和集合 | 编译时建好，查找用的索引第一次用时才建，放在别处，因为 `const` 对象不能改。运行时创建的不可变映射把索引存于自身，随映射回收 |
 
 ## 6. 测试方法
