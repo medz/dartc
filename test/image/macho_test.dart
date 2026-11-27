@@ -103,8 +103,9 @@ void main() {
       'cmd LC_LOAD_DYLIB\n cmdsize 56\n'
           ' name /usr/lib/libSystem.B.dylib (offset 24)\n time stamp 2',
       'current version 1.0.0\ncompatibility version 1.0.0',
-      'cmd LC_CODE_SIGNATURE\n cmdsize 16\n dataoff 16384\n'
-          ' datasize ${size - 16384}',
+      // After the symbol of `main` and its name.
+      'cmd LC_CODE_SIGNATURE\n cmdsize 16\n dataoff 16416\n'
+          ' datasize ${size - 16416}',
     ]) {
       expect(commands, contains(text));
     }
@@ -112,6 +113,42 @@ void main() {
     expect(signature, contains('Identifier=dartc-test\n'));
     expect(signature, contains('flags=0x20002(adhoc,linker-signed)'));
     expect(signature, contains('CodeDirectory v=20400'));
+  }, skip: skipExecution);
+
+  test('tools find the names of functions unless they are left out', () {
+    final directory = Directory.systemTemp.createTempSync('dartc-image-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final code = EmittedCode(
+      Uint8List(16),
+      const {'.text': 0, 'f': 0, 'g': 8},
+      const [],
+      exports: const {'e': 'g'},
+    );
+    String symbols(Uint8List bytes, List<String> options) {
+      final path = '${directory.path}/library';
+      File(path).writeAsBytesSync(bytes);
+      final verified = Process.runSync('/usr/bin/codesign', ['--verify', path]);
+      expect(verified.exitCode, 0, reason: '${verified.stderr}');
+      final result = Process.runSync('/usr/bin/nm', [...options, path]);
+      return '${result.stdout}${result.stderr}';
+    }
+
+    Uint8List link({required bool namesFunctions}) => linkMachoLibrary(
+      code,
+      name: 'library',
+      identifier: 'x',
+      namesFunctions: namesFunctions,
+    );
+    final named = symbols(link(namesFunctions: true), ['-n']);
+    expect(named, contains('0000000000000210 t f\n'));
+    expect(named, contains('0000000000000218 t g\n'));
+    expect(named, contains('0000000000000218 T _e\n'));
+    expect(named, isNot(contains('.text')));
+    // Loaders see only the exported functions.
+    expect(symbols(link(namesFunctions: true), ['-g']), endsWith('T _e\n'));
+    final left = symbols(link(namesFunctions: false), ['-n']);
+    expect(left, isNot(contains(' t ')));
+    expect(left, contains('T _e\n'));
   }, skip: skipExecution);
 
   test('constant data has its own section', () {
@@ -220,7 +257,12 @@ void main() {
 
   test('the signature marks a main program', () {
     final file = ByteData.sublistView(
-      linkMacho(emitCode(_returning(0)), entry: 'main', identifier: 'x'),
+      linkMacho(
+        emitCode(_returning(0)),
+        entry: 'main',
+        identifier: 'x',
+        namesFunctions: false,
+      ),
     );
     // Offsets come from the system's code directory structure.
     final at = 16384 + 20;

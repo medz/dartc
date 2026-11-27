@@ -16,18 +16,26 @@ const _libraries = ['libc.so.6', 'libm.so.6'];
 /// Builds a Linux executable.
 ///
 /// [entry] is where the system starts it. External functions are bound to the
-/// system libraries then.
-Uint8List linkElf(EmittedCode code, {required String entry}) =>
-    _ElfImage(code, entry: entry).build();
+/// system libraries then. With [namesFunctions], tools like profilers find the
+/// name of every function.
+Uint8List linkElf(
+  EmittedCode code, {
+  required String entry,
+  bool namesFunctions = true,
+}) => _ElfImage(code, entry: entry, namesFunctions: namesFunctions).build();
 
 /// Builds a Linux library that programs load as [name].
-Uint8List linkElfLibrary(EmittedCode code, {required String name}) =>
-    _ElfImage(code, name: name).build();
+Uint8List linkElfLibrary(
+  EmittedCode code, {
+  required String name,
+  bool namesFunctions = true,
+}) => _ElfImage(code, name: name, namesFunctions: namesFunctions).build();
 
 final class _ElfImage(
   final EmittedCode code, {
   final String? entry,
   final String? name,
+  final bool namesFunctions = true,
 }) {
   late final machine = ElfMachine.of(code.architecture);
   final names = ElfNames();
@@ -59,6 +67,7 @@ final class _ElfImage(
     '.got',
     '.data.rel.ro',
     '.data',
+    if (namesFunctions) ...['.symtab', '.strtab'],
     '.shstrtab',
   ];
 
@@ -76,6 +85,23 @@ final class _ElfImage(
         isGlobal: true,
       ),
   ];
+
+  /// The table for tools: every function, then the symbols of the loader.
+  late final _toolSymbols = () {
+    final names = ElfNames();
+    final symbols = encodeElfSymbols([
+      for (final name in code.functionNames)
+        (
+          name: name,
+          type: .function,
+          section: _section('.text'),
+          value: addresses[name]!,
+          isGlobal: false,
+        ),
+      ..._symbols(addresses),
+    ], names);
+    return (symbols: symbols, names: names.finish());
+  }();
 
   late final _nameBytes = () {
     for (final library in _libraries) {
@@ -226,9 +252,21 @@ final class _ElfImage(
     for (final name in _sections) {
       sectionNames[name];
     }
-    final nameBytes = sectionNames.finish();
-    final namesAt = layout['data'].end;
-    final sectionsAt = (namesAt + nameBytes.length + 7) ~/ 8 * 8;
+    final unloaded = {
+      if (namesFunctions) ...{
+        '.symtab': _toolSymbols.symbols,
+        '.strtab': _toolSymbols.names,
+      },
+      '.shstrtab': sectionNames.finish(),
+    };
+    final parts = <String, ElfPart>{};
+    var at = layout['data'].end;
+    unloaded.forEach((name, bytes) {
+      at = (at + 7) ~/ 8 * 8;
+      parts[name] = ElfPart(at, 0, bytes.length);
+      at += bytes.length;
+    });
+    final sectionsAt = (at + 7) ~/ 8 * 8;
     writeElfHeader(
       out,
       type: 3,
@@ -248,10 +286,13 @@ final class _ElfImage(
         ..zeros(layout[name].offset - out.length)
         ..bytes(bytes);
     });
-    out
-      ..bytes(nameBytes)
-      ..align(8);
-    _writeSections(out, sectionNames, namesAt, nameBytes.length);
+    unloaded.forEach((name, bytes) {
+      out
+        ..zeros(parts[name]!.offset - out.length)
+        ..bytes(bytes);
+    });
+    out.align(8);
+    _writeSections(out, sectionNames, parts);
     return out.finish();
   }
 
@@ -295,7 +336,11 @@ final class _ElfImage(
     );
   }
 
-  void _writeSections(ByteWriter out, ElfNames names, int at, int bytes) {
+  void _writeSections(
+    ByteWriter out,
+    ElfNames names,
+    Map<String, ElfPart> unloaded,
+  ) {
     const program = 1, strings = 3, relocations = 4, hash = 5, dynamic = 6;
     const symbols = 11, write = 1, allocate = 2, execute = 4;
     out.zeros(ElfHeaders.sectionBytes);
@@ -359,6 +404,32 @@ final class _ElfImage(
     final objects = layout['constObjects'];
     section('.data.rel.ro', program, allocate | write, objects);
     section('.data', program, allocate | write, layout.data);
-    section('.shstrtab', strings, 0, ElfPart(at, 0, bytes), alignment: 1);
+    _writeUnloadedSections(out, names, unloaded);
+  }
+
+  /// The sections that only tools read: symbols and names.
+  void _writeUnloadedSections(
+    ByteWriter out,
+    ElfNames names,
+    Map<String, ElfPart> unloaded,
+  ) {
+    // Tools read a table of all symbols; 11 would be one for loaders.
+    const strings = 3, symbols = 2;
+    unloaded.forEach((name, part) {
+      final isSymbols = name == '.symtab';
+      writeElfSection(
+        out,
+        name: names[name],
+        type: isSymbols ? symbols : strings,
+        flags: 0,
+        address: 0,
+        offset: part.offset,
+        bytes: part.bytes,
+        link: isSymbols ? _section('.strtab') : 0,
+        info: isSymbols ? code.functionNames.length + 1 : 0,
+        entryBytes: isSymbols ? elfSymbolBytes : 0,
+        alignment: isSymbols ? 8 : 1,
+      );
+    });
   }
 }

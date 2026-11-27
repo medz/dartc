@@ -47,6 +47,40 @@ final class _Elf(Uint8List bytes) {
     return String.fromCharCodes(data.buffer.asUint8List(start, end - start));
   }
 
+  /// Where each section is in the file and what it links to, by its type.
+  List<({int type, int offset, int bytes, int link, int info})> get sections =>
+      [
+        for (var i = 0; i < u16(60); i++)
+          (
+            type: u32(u64(40) + i * 64 + 4),
+            offset: u64(u64(40) + i * 64 + 24),
+            bytes: u64(u64(40) + i * 64 + 32),
+            link: u32(u64(40) + i * 64 + 40),
+            info: u32(u64(40) + i * 64 + 44),
+          ),
+      ];
+
+  /// The names, kinds and values of the table for tools, if there is one.
+  List<(String, int, int)>? get toolSymbols {
+    final table = sections.where((s) => s.type == 2).singleOrNull;
+    if (table == null) return null;
+    final names = sections[table.link].offset;
+    String name(int at) {
+      var end = names + at;
+      while (data.getUint8(end) != 0) {
+        end++;
+      }
+      return String.fromCharCodes(
+        data.buffer.asUint8List(names + at, end - names - at),
+      );
+    }
+
+    return [
+      for (var at = table.offset; at < table.offset + table.bytes; at += 24)
+        (name(u32(at)), data.getUint8(at + 4), u64(at + 8)),
+    ];
+  }
+
   String symbolName(int index) => text(u32(_symbol(index)));
   int symbolValue(int index) => u64(_symbol(index) + 8);
   int _symbol(int index) => at(dynamic[6]!.single) + index * 24;
@@ -186,6 +220,36 @@ void main() {
     final toB = elf.u64(at + 3 * 24 + 16), toA = elf.u64(at + 4 * 24 + 16);
     expect(elf.u64(at + 3 * 24), toA + 8);
     expect(elf.u64(at + 4 * 24), toB + 16);
+  });
+
+  test('tools find the names of functions unless they are left out', () {
+    final code = EmittedCode(
+      Uint8List(64),
+      const {'.text': 0, 'f': 0, 'g': 8},
+      const [],
+      externals: const ['puts'],
+      exports: const {'e': 'g'},
+    );
+    final elf = _Elf(linkElfLibrary(code, name: 'libx.so'));
+    final start = elf.loaded.firstWhere((s) => s.flags & 1 != 0).address;
+    const localFunction = 0x02, global = 0x10, globalFunction = 0x12;
+    expect(elf.toolSymbols, [
+      ('', 0, 0),
+      ('f', localFunction, start),
+      ('g', localFunction, start + 8),
+      ('puts', global, 0),
+      ('e', globalFunction, start + 8),
+    ]);
+    final table = elf.sections.singleWhere((s) => s.type == 2);
+    expect(table.info, 3, reason: 'The first global symbol.');
+    // Loaders still find only the exported function.
+    expect(elf.symbolValue(elf.find('e')!), start + 8);
+    expect(elf.find('f'), isNull);
+    final left = _Elf(
+      linkElfLibrary(code, name: 'libx.so', namesFunctions: false),
+    );
+    expect(left.toolSymbols, isNull);
+    expect(left.symbolValue(left.find('e')!), start + 8);
   });
 
   test('the same code gives the same bytes', () {

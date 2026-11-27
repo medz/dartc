@@ -26,6 +26,10 @@ final class const CompileOptions({
 
   /// Whether programs collect before every allocation.
   final bool collectsAlways = false,
+
+  /// Whether executables and shared libraries name their functions for tools
+  /// like profilers.
+  final bool namesFunctions = true,
 });
 
 /// What this machine runs, if it is supported.
@@ -57,8 +61,13 @@ Future<Uint8List> buildProgram(
       code,
       entry: entrySymbol,
       identifier: Uri.file(path).pathSegments.last,
+      namesFunctions: options.namesFunctions,
     ),
-    .linux => linkElf(code, entry: linuxEntrySymbol),
+    .linux => linkElf(
+      code,
+      entry: linuxEntrySymbol,
+      namesFunctions: options.namesFunctions,
+    ),
   };
 }
 
@@ -90,8 +99,13 @@ Future<({Uint8List bytes, String header})> buildLibrary(
   );
   final code = _emit(module, options);
   final bytes = switch (options.target.system) {
-    .macos => _macosLibrary(code, kind, name),
-    .linux => _linuxLibrary(code, kind, Uri.file(name).pathSegments.last),
+    .macos => _macosLibrary(code, kind, name, options.namesFunctions),
+    .linux => _linuxLibrary(
+      code,
+      kind,
+      Uri.file(name).pathSegments.last,
+      options.namesFunctions,
+    ),
   };
   return (bytes: bytes, header: header);
 }
@@ -107,7 +121,12 @@ EmittedCode _emit(HirModule module, CompileOptions options, {String? entry}) =>
       entry: entry,
     );
 
-Uint8List _macosLibrary(EmittedCode code, LibraryKind kind, String name) {
+Uint8List _macosLibrary(
+  EmittedCode code,
+  LibraryKind kind,
+  String name,
+  bool namesFunctions,
+) {
   final file = Uri.file(name).pathSegments.last;
   return switch (kind) {
     .object => writeMachoObject(code),
@@ -120,17 +139,22 @@ Uint8List _macosLibrary(EmittedCode code, LibraryKind kind, String name) {
       code,
       name: File(name).absolute.path,
       identifier: file,
+      namesFunctions: namesFunctions,
     ),
   };
 }
 
-Uint8List _linuxLibrary(EmittedCode code, LibraryKind kind, String name) =>
-    switch (kind) {
-      .object => writeElfObject(code),
-      .static => writeElfArchive(
-        writeElfObject(code),
-        '$name.o',
-        code.exports.keys,
-      ),
-      .shared => linkElfLibrary(code, name: name),
-    };
+Uint8List _linuxLibrary(
+  EmittedCode code,
+  LibraryKind kind,
+  String name,
+  bool namesFunctions,
+) => switch (kind) {
+  .object => writeElfObject(code),
+  .static => writeElfArchive(
+    writeElfObject(code),
+    '$name.o',
+    code.exports.keys,
+  ),
+  .shared => linkElfLibrary(code, name: name, namesFunctions: namesFunctions),
+};

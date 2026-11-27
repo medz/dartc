@@ -132,21 +132,29 @@ final class _Contents(final EmittedCode code, final MachoKind kind) {
 /// [entry] takes the number of arguments and their address, if anything; the
 /// low 8 bits of its result become the process exit code. [identifier] names
 /// the program in its signature. External functions are bound to the system
-/// library when it starts.
+/// library when it starts. With [namesFunctions], tools like profilers find the
+/// name of every function.
 Uint8List linkMacho(
   EmittedCode code, {
   required String entry,
   required String identifier,
-}) => _link(code, MachoExecutable(entry), identifier);
+  bool namesFunctions = true,
+}) => _link(code, MachoExecutable(entry), identifier, namesFunctions);
 
 /// Builds a signed macOS ARM64 library that programs load as [name].
 Uint8List linkMachoLibrary(
   EmittedCode code, {
   required String name,
   required String identifier,
-}) => _link(code, MachoLibrary(name), identifier);
+  bool namesFunctions = true,
+}) => _link(code, MachoLibrary(name), identifier, namesFunctions);
 
-Uint8List _link(EmittedCode code, MachoKind kind, String identifier) {
+Uint8List _link(
+  EmittedCode code,
+  MachoKind kind,
+  String identifier,
+  bool namesFunctions,
+) {
   final contents = _Contents(code, kind);
   final layout = contents.layout, symbols = contents.symbols;
   final (bytes: constants, offsets: constantOffsets) = contents.constants;
@@ -163,14 +171,26 @@ Uint8List _link(EmittedCode code, MachoKind kind, String identifier) {
     for (final MapEntry(key: name, value: function) in code.exports.entries)
       '_$name': symbols[function]!,
   };
+  final local = [
+    if (namesFunctions)
+      for (final name in code.functionNames)
+        (
+          name: name,
+          section: 1,
+          address: base + symbols[name]!,
+          isExternal: false,
+        ),
+  ];
   final links = LinkTables(
     contents.table,
     exportTable(exported),
     encodeSymbols([
+      ...local,
       for (final MapEntry(key: name, value: address) in exported.entries)
         (name: name, section: 1, address: base + address, isExternal: true),
     ]),
-    exported.length,
+    local.length + exported.length,
+    localCount: local.length,
   );
   final signatureOffset = layout.linkOffset + align16(links.bytes.length);
   final body = ByteWriter(.little)
