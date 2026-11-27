@@ -212,6 +212,12 @@ final class FunctionBuilder(
     return next.parameters.firstOrNull;
   }
 
+  /// Ends a path that cannot return, keeping its variables live across the call.
+  void endNever() {
+    stay();
+    end(HirUnreachable());
+  }
+
   /// Creates an object of [class_].
   HirValue create(HirClass class_) => call(HirNew(class_))!;
 
@@ -312,9 +318,19 @@ final class FunctionBuilder(
     _kept.length = scope;
   }
 
+  /// Keeps a finalizable variable's value for its scope.
+  void keep(VariableElement variable) {
+    if (isFinalizable(variable.type)) _kept.add(variable);
+  }
+
+  /// Gives a future join parameter its type before the variable is declared.
+  void declareType(VariableElement variable, HirType type) {
+    _types[_same(variable)] = type;
+  }
+
   /// Declares the variable [given], not yet assigned.
   void declare(Object given, HirType type) {
-    if (given is VariableElement && isFinalizable(given.type)) _kept.add(given);
+    if (given is VariableElement) keep(given);
     final variable = _same(given);
     _types[variable] = type;
     _values.remove(variable);

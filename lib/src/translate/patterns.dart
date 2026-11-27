@@ -53,26 +53,53 @@ final class PatternTranslator(
   Join join(AstNode node, [Iterable<Element> variables = const []]) => _builder
       .joinAll(node, const [], [..._caches.last.variables, ...variables]);
 
-  /// Declares the variables that [patterns] set.
-  void declareIn(Iterable<DartPattern> patterns) {
-    for (final variable in patterns.expand(declaredIn)) {
-      variable as VariableElement;
-      final type =
-          valueType(variable.type) ??
-          _unsupported(patterns.first, 'a variable of type ${variable.type}');
-      _builder.declare(variable, type);
+  /// Prepares the bindings available in the body shared by these patterns.
+  Set<VariableElement> prepareBody(Iterable<DartPattern> patterns) {
+    final variables = <VariableElement>{};
+    for (final pattern in patterns) {
+      for (final variable in declaredIn(pattern).cast<VariableElement>()) {
+        if (variable is JoinPatternVariableElement && !variable.isConsistent) {
+          continue;
+        }
+        if (variables.add(variable)) {
+          _builder.declareType(variable, _bindingType(pattern, variable));
+        }
+      }
+    }
+    return variables;
+  }
+
+  HirType _bindingType(DartPattern pattern, VariableElement variable) =>
+      valueType(variable.type) ??
+      _unsupported(pattern, 'a variable of type ${variable.type}');
+
+  void _declareIn(DartPattern pattern) {
+    for (final variable in declaredIn(pattern).cast<VariableElement>()) {
+      _builder.declare(variable, _bindingType(pattern, variable));
     }
   }
 
-  /// Goes on if [value], of [type], matches [guarded], and to [fail] if not.
-  void match(GuardedPattern guarded, HirValue value, DartType type, Join fail) {
-    declareIn([guarded.pattern]);
+  /// Does [onMatch] in the scope of the bindings, or goes to [fail].
+  T match<T>(
+    GuardedPattern guarded,
+    HirValue value,
+    DartType type,
+    Join fail,
+    T Function() onMatch,
+  ) {
+    final scope = _builder.scope;
+    _declareIn(guarded.pattern);
     final matched = (value: value, type: type, path: '');
     _match(guarded.pattern, matched, fail);
     if (guarded.whenClause case final clause?) {
       final boolType = _conversions.types.boolType;
-      _unless(_evaluator.valueTo(clause.expression, boolType), fail);
+      final passes = _evaluator.valueTo(clause.expression, boolType);
+      _builder.stay(scope);
+      _unless(passes, fail);
     }
+    final result = onMatch();
+    _builder.leave(scope);
+    return result;
   }
 
   /// Does one of two parts of [node], depending on a [test], which is either a
@@ -101,12 +128,9 @@ final class PatternTranslator(
       final value = _evaluator.value(expression);
       final guarded = clause.guardedPattern;
       matching([guarded.pattern], () {
-        final other = join(node), scope = _builder.scope;
-        match(guarded, value, expression.staticType!, other);
-        part(() {
-          ifTrue();
-          _builder.leave(scope);
-        });
+        final other = join(node);
+        match(guarded, value, expression.staticType!, other, ifTrue);
+        _builder.jump(exit);
         _builder.enter(other);
         part(ifFalse);
       });
@@ -129,7 +153,7 @@ final class PatternTranslator(
   /// [type] and matches.
   void destructure(DartPattern pattern, HirValue value, DartType type) =>
       matching(const [], () {
-        declareIn([pattern]);
+        _declareIn(pattern);
         final fail = join(pattern);
         final pending = _pending = [];
         final wanted = type is DynamicType
@@ -543,9 +567,15 @@ final class PatternTranslator(
     matching(patterns, () {
       for (final member in node.cases) {
         final next = join(node);
-        match(member.guardedPattern, value, node.expression.staticType!, next);
+        final result = match(
+          member.guardedPattern,
+          value,
+          node.expression.staticType!,
+          next,
+          () => _evaluator.valueTo(member.expression, type),
+        );
         _builder
-          ..jump(exit, _evaluator.valueTo(member.expression, type))
+          ..jump(exit, result)
           ..enter(next);
       }
     });

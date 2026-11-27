@@ -135,6 +135,34 @@ void infiniteLoop() {
   }
 }
 
+Never stopAfterProbe(int token) {
+  probe(token);
+  throw 'stop';
+}
+
+class Stopper {
+  Never stop(int token) => stopAfterProbe(token);
+}
+
+void boundedNever<T extends Never>(T Function() stop) {
+  final local = attach(4096);
+  stop().unreachable;
+}
+
+void neverCalls(Stopper stopper) {
+  try {
+    final local = attach(1024);
+    stopAfterProbe(1024);
+  } on String {}
+  try {
+    final local = attach(2048);
+    stopper.stop(2048);
+  } on String {}
+  try {
+    boundedNever(() => stopAfterProbe(4096));
+  } on String {}
+}
+
 int returns() {
   final outer = attach(2);
   try {
@@ -202,6 +230,7 @@ void main() async {
   loops();
   print(await asyncReturn());
   catches();
+  neverCalls(Stopper());
 }
 ''';
 

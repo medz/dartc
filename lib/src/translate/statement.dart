@@ -1,8 +1,8 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 import 'package:dartc/hir.dart';
 
-import 'assigned.dart';
 import 'assertions.dart';
 import 'builder.dart';
 import 'coroutine_body.dart';
@@ -251,38 +251,39 @@ final class StatementTranslator(
     return groups;
   }
 
-  /// Where the statements of [group] start.
-  Join _bodyOf(SwitchStatement node, List<SwitchMember> group) {
-    final patterns = [
-      for (final member in group)
-        if (member is SwitchPatternCase) member.guardedPattern.pattern,
-    ];
-    expressions.patterns.declareIn(patterns);
-    final body = _builder.joinAll(node, const [], [
-      ...patterns.expand(declaredIn),
-    ]);
+  /// Where the statements of [group] start and which bindings they receive.
+  (Join, Set<VariableElement>) _bodyOf(
+    SwitchStatement node,
+    List<SwitchMember> group,
+  ) {
+    final patterns = group.whereType<SwitchPatternCase>().map(
+      (member) => member.guardedPattern.pattern,
+    );
+    final variables = expressions.patterns.prepareBody(patterns);
+    final body = _builder.joinAll(node, const [], [...variables]);
     for (final member in group) {
       _continues[member] = (body, _tries.depth);
     }
-    return body;
+    return (body, variables);
   }
 
-  /// Goes to [body] if one of [group] matches, or goes on. What is declared
-  /// after [scope] ends with the body.
+  /// Enters the shared body if one of [group] matches, or goes on. Bindings
+  /// declared after [scope] end with the body.
   void _group(
     SwitchStatement node,
     List<SwitchMember> group,
     (HirValue, DartType) value,
-    Join body,
+    (Join, Set<VariableElement>) target,
     Join exit,
     int scope,
   ) {
+    final (body, variables) = target;
     final patterns = expressions.patterns;
     for (final member in group) {
       switch (member) {
         case SwitchPatternCase(:final guardedPattern):
           final next = patterns.join(node);
-          patterns.match(guardedPattern, value.$1, value.$2, next);
+          patterns.match(guardedPattern, value.$1, value.$2, next, () {});
           _builder
             ..jump(body)
             ..enter(next);
@@ -301,6 +302,7 @@ final class StatementTranslator(
     _builder
       ..jump(after)
       ..enter(body);
+    variables.forEach(_builder.keep);
     group.last.statements.forEach(statement);
     _builder.leave(scope);
     _builder
