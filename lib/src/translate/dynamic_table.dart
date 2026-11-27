@@ -272,7 +272,12 @@ final class DynamicTable(final ProgramScope _scope, final SourceUnit _unit) {
     }
     if (shape.use == .get) {
       return _make(selector.name, selector, (builder, _) {
-        return _scope.tearOff(builder, method, builder.inputs.first);
+        return _scope.tearOff(
+          builder,
+          method,
+          builder.inputs.first,
+          class_: class_,
+        );
       });
     }
     final (:element, :level) = method;

@@ -103,6 +103,7 @@ abstract interface class ProgramScope() {
     Implementation found,
     HirValue receiver, {
     bool isForwarder = false,
+    InterfaceElement? class_,
   });
 
   /// Gives the method [element] of an extension, used on [receiver], as a
@@ -177,6 +178,7 @@ abstract interface class ProgramScope() {
     ExecutableElement element, {
     FunctionType? asType,
     bool instanceMethod = false,
+    Set<FormalParameterElement> unchecked = const {},
   });
 
   /// The list of [types], or null if one of them is generic.

@@ -28,7 +28,8 @@ final class ChainTranslator(final FunctionBuilder _builder) {
     MethodInvocation(:final target) ||
     PropertyAccess(:final target) ||
     IndexExpression(:final target) => target,
-    FunctionExpressionInvocation(:final function) => function,
+    FunctionExpressionInvocation(:final function) ||
+    FunctionReference(:final function) => function,
     AssignmentExpression(:final leftHandSide) => leftHandSide,
     PostfixExpression(:final operand) => operand,
     PrefixExpression(

@@ -348,6 +348,7 @@ final class ProgramTranslator(
     ExecutableElement element, {
     FunctionType? asType,
     bool instanceMethod = false,
+    Set<FormalParameterElement> unchecked = const {},
   }) {
     _prepareTypes();
     return _types.tearOffType(
@@ -355,6 +356,7 @@ final class ProgramTranslator(
       element,
       asType: asType,
       instanceMethod: instanceMethod,
+      unchecked: unchecked,
     );
   }
 
@@ -393,6 +395,7 @@ final class ProgramTranslator(
     Implementation found,
     HirValue receiver, {
     bool isForwarder = false,
+    InterfaceElement? class_,
   }) {
     _needs.addAllocation();
     return _closures.tearOff(
@@ -400,6 +403,7 @@ final class ProgramTranslator(
       found,
       receiver,
       isForwarder: isForwarder,
+      class_: class_,
     );
   }
 

@@ -199,6 +199,31 @@ bool isUnchecked(FormalParameterElement declared) {
   });
 }
 
+/// The parameters of [method] that [class_] lets get values that are not of
+/// their type, where [method] itself does not. A supertype of [class_] may
+/// declare them covariant.
+Set<FormalParameterElement> uncheckedIn(
+  InterfaceElement class_,
+  ExecutableElement method,
+) {
+  if (method is! MethodElement) return const {};
+  final found = <FormalParameterElement>{};
+  final parameters = method.formalParameters;
+  for (final type in [class_.thisType, ...class_.allSupertypes]) {
+    final other = type.element.getMethod(method.name!);
+    if (other == null || other.isStatic || !_sameName(other, method)) continue;
+    if (other.baseElement == method) continue;
+    for (final (i, parameter) in parameters.indexed) {
+      if (isUnchecked(parameter)) continue;
+      final declared = parameter.isNamed
+          ? other.formalParameters.where((p) => p.name == parameter.name)
+          : other.formalParameters.skip(i).take(1).where((p) => !p.isNamed);
+      if (declared.any(isUnchecked)) found.add(parameter);
+    }
+  }
+  return found;
+}
+
 /// The constructor that [element] redirects to, if it is a factory that does.
 ConstructorElement? redirectionOf(ConstructorElement element) =>
     element.isFactory ? element.redirectedConstructor : null;
