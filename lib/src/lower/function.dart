@@ -153,6 +153,8 @@ final class FunctionLowering(
             return (block, block.add(layout.allocation(block, target)));
           }),
         );
+      case HirRefine(:final value):
+        return _value(value);
       case HirUnbox(:final field, :final object):
         return _continue(_boxes.unbox(block, field, _value(object)));
       case HirVirtualCall() || HirCall():

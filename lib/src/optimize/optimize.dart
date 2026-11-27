@@ -12,6 +12,9 @@ enum Optimization() {
 
   /// Calls of small functions are replaced by their bodies.
   inline,
+
+  /// Tests of types that the classes of objects decide are answered.
+  decideTypes,
 }
 
 /// How often each function is made anew.
@@ -29,6 +32,7 @@ HirModule optimizeProgram(
     module,
     devirtualizes: enabled.contains(Optimization.devirtualize),
     inlinesSmall: enabled.contains(Optimization.inline),
+    decidesTypes: enabled.contains(Optimization.decideTypes),
   );
   for (var round = 0; round < _rounds; round++) {
     for (final function in calleesFirst(module)) {

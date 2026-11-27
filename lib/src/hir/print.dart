@@ -96,6 +96,8 @@ final class _Printer(final HirFunction function) {
     HirBox(:final target, :final value) => '${target.name} ${_name(value)}',
     HirUnbox(:final field, :final object) =>
       'unbox ${_name(object)}.${field.name}',
+    HirRefine(:final value, :final classes) =>
+      '${_name(value)} as ${classes.map((c) => c.name).join(' | ')}',
     HirStatic(:final object) => 'const $object',
     HirLoadGlobal(:final global) => global.name,
     HirStoreGlobal(:final global, :final value) =>

@@ -52,13 +52,79 @@ final class Emitter(final HirModule _module) {
         passing = _module.tests[test]!;
       case HirHasClass(:final target):
         passing = {target};
+      case HirRefine(:final value, :final classes):
+        return _isKnownAs(value, classes) ? value : null;
       default:
         return null;
     }
-    final classes = place!.scope.classesOf(instruction.inputs.single);
+    final classes = classesOf(instruction.inputs.single);
     if (classes == null) return null;
     if (classes.every(passing.contains)) return HirConst(true);
     return classes.any(passing.contains) ? null : HirConst(false);
+  }
+
+  /// Whether how [value] is made tells that it is of [classes], and not null.
+  ///
+  /// What is known here only is not enough: it is forgotten when the function
+  /// is made anew.
+  static bool _isKnownAs(HirValue value, Set<HirClass> classes) =>
+      isObject(value) && classesOfMade(value)!.every(classes.contains);
+
+  /// What [call] of the runtime's test of types gives, if the class of the
+  /// object decides it.
+  ///
+  /// Where the type is a sealed type of the module, no class is of it but
+  /// those that pass its test, so classes that are known tell both ways.
+  HirValue? answerOf(HirCall call) {
+    if (call
+        case HirCall(
+          :final target,
+          arguments: [final object, HirStatic(object: final type)],
+        )
+        when target == _module.isInstance) {
+      final test = _module.sealedTypes[type];
+      if (test == null) return null;
+      final classes = classesOf(object);
+      if (classes == null || !isObject(object) && _unboxedAs(object) == null) {
+        return null;
+      }
+      final passing = _module.tests[test]!;
+      if (classes.every(passing.contains)) return add(HirConst(true));
+      if (!classes.any(passing.contains)) return add(HirConst(false));
+    }
+    return null;
+  }
+
+  /// For each field, the classes of which it is the only one: those whose
+  /// boxes have it.
+  late final _boxes = () {
+    final boxes = <HirField, Set<HirClass>>{};
+    for (final class_ in _module.classes) {
+      if (class_.fields case [final field]) {
+        (boxes[field] ??= {}).add(class_);
+      }
+    }
+    return boxes;
+  }();
+
+  /// The classes of boxes that [object] is one of, if it is unboxed where code
+  /// is: elsewhere code never comes. It is then not null either.
+  Set<HirClass>? _unboxedAs(HirValue object, [Scope? scope]) {
+    if ((scope ?? place!.scope)[unboxingOf(object)] case HirUnbox(
+      :final field,
+    )) {
+      return _boxes[field];
+    }
+    return null;
+  }
+
+  /// The classes that [value] can be of unless it is null, if they are known
+  /// in [scope], or where code is.
+  Set<HirClass>? classesOf(HirValue value, [Scope? scope]) {
+    scope ??= place!.scope;
+    final known = scope.classesOf(value), boxes = _unboxedAs(value, scope);
+    if (boxes == null || known == null) return known ?? boxes;
+    return known.every(boxes.contains) ? known : known.intersection(boxes);
   }
 
   /// Says in [scope] what it means that [condition], on which code depends,
@@ -74,7 +140,7 @@ final class Emitter(final HirModule _module) {
         return;
     }
     final object = (condition as HirInstruction).inputs.single;
-    final classes = scope.classesOf(object);
+    final classes = classesOf(object, scope);
     if (holds) {
       scope.setClasses(object, classes?.intersection(passing) ?? passing);
     } else if (classes != null) {
@@ -104,6 +170,8 @@ final class Emitter(final HirModule _module) {
         memory.clear();
       case HirMachine(:final op) when op != .classNumber:
         memory.clear();
+      case HirUnbox(:final object):
+        scope[unboxingOf(object)] = instruction;
       default:
         break;
     }

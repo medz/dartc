@@ -77,6 +77,18 @@ final class HirUnbox(final HirField field, final HirValue object)
   List<HirValue> get inputs => [object];
 }
 
+/// [value], which is never null and of one of [classes].
+///
+/// It says what is known of a value where it is used, for later rewrites;
+/// it is the same value, with no code.
+final class HirRefine(final HirValue value, final Set<HirClass> classes)
+    extends HirInstruction {
+  @override
+  HirType get type => .reference;
+  @override
+  List<HirValue> get inputs => [value];
+}
+
 /// An array of [target] with [length] elements, which is not negative.
 ///
 /// They are null or 0.
