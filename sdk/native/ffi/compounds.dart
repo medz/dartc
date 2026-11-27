@@ -125,6 +125,12 @@ class _Integers with ListMixin<int>, FixedLengthListMixin<int> {
 Pointer<T> _pointerTo<T extends NativeType>(Object base) =>
     Pointer<Never>._(_startOf(base)).._owner = base;
 
+/// A pointer to [offset] bytes after where [base] starts, which keeps that.
+Pointer<T> _pointerInto<T extends NativeType>(Object base, int offset) =>
+    Pointer<Never>._(_startOf(base) + offset).._owner = base;
+
+int _elementSize(TypedData data) => data.elementSizeInBytes;
+
 /// Where the struct of [size] bytes is in [data], from an element on.
 int _checkData(TypedData data, int element, int size) {
   final start = data.elementSizeInBytes * element;

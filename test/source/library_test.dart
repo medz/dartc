@@ -161,6 +161,27 @@ void main() {
     );
   });
 
+  test('addresses of fields of other classes are errors', () async {
+    final found = load('''
+import 'dart:ffi';
+@Native<Void Function(Pointer<Int8>)>(isLeaf: true)
+external void f(Pointer<Int8> p);
+class C { external int x; void m() => f(x.address); }
+void g(C c) => f((c.x).address);
+void main() {}
+''');
+    await expectLater(
+      found,
+      throwsA(
+        isA<CompileFailure>().having(
+          (failure) => failure.problems,
+          'problems',
+          hasLength(2),
+        ),
+      ),
+    );
+  });
+
   test('libraries importing each other appear once', () async {
     final program = await loadFiles({
       'main.dart': "import 'a.dart';\nvoid main() => a();",

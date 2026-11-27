@@ -365,9 +365,6 @@ final class NativeMembers(
     DartType type,
     String owner,
   ) {
-    if (const ['IntAddress', 'DoubleAddress', 'BoolAddress'].contains(owner)) {
-      _unsupported(node, 'the address of a field');
-    }
     final types = _typeList(node, _argument((node as Expression).staticType!));
     return (result: _call('pointerTo', [value], types: types));
   }

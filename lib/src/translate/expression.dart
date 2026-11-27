@@ -20,6 +20,7 @@ import 'late_locals.dart';
 import 'literals.dart';
 import 'loops.dart';
 import 'members.dart';
+import 'native_addresses.dart';
 import 'operators.dart';
 import 'patterns.dart';
 import 'places.dart';
@@ -101,6 +102,7 @@ final class ExpressionTranslator(
   late final _coroutine = CoroutineBody(_scope, _builder, this);
   late final _references = ReferenceTranslator(_scope, _builder);
   late final _deferred = DeferredTranslator(_scope, _builder);
+  late final _addresses = NativeAddresses(_scope, _builder, this, calls);
   late final _texts = TextTranslator(_scope, _builder, this);
   late final LoopTranslator loops = LoopTranslator(
     _scope,
@@ -210,17 +212,7 @@ final class ExpressionTranslator(
 
   HirValue _value(Expression node, HirType placeholder) {
     final inner = node.unParenthesized, type = inner.staticType;
-    if (_targets[inner] case final value?) return value;
-    if (_chains.isWhole(inner)) {
-      final result = valueType(_resultType(inner))!;
-      return _chains.translate(
-        inner,
-        result,
-        () => _conversions.coerce(_value(inner, result), result),
-      )!;
-    }
-    if (_endsWithin(inner)) return _builder.placeholder(placeholder);
-    if (_deferred.use(inner) case final result?) return result;
+    if (_before(inner, placeholder) case final result?) return result;
     switch (inner) {
       case Literal():
         return _literal(inner);
@@ -286,6 +278,22 @@ final class ExpressionTranslator(
       default:
         _unsupported(inner, describe(inner));
     }
+  }
+
+  /// The value of [inner] if it does not depend on what kind of expression it
+  /// is: one that is known, a chain of `?.`, or one that never ends.
+  HirValue? _before(Expression inner, HirType placeholder) {
+    if (_targets[inner] case final value?) return value;
+    if (_chains.isWhole(inner)) {
+      final result = valueType(_resultType(inner))!;
+      return _chains.translate(
+        inner,
+        result,
+        () => _conversions.coerce(_value(inner, result), result),
+      )!;
+    }
+    if (_endsWithin(inner)) return _builder.placeholder(placeholder);
+    return _deferred.use(inner) ?? _addresses.of(inner);
   }
 
   /// Whether what [node] uses never gives a value, which is evaluated then.
