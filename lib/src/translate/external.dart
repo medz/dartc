@@ -2,6 +2,7 @@ import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 
 import 'builder.dart';
+import 'levels.dart';
 import 'scope.dart';
 import 'types.dart';
 
@@ -23,12 +24,31 @@ void throwExternal(
   final class_ = level == _topLevel ? null : element.enclosingElement;
   HirValue text(String? text) =>
       builder.add(text == null ? HirNull() : scope.text(text));
+  // Members of mixins are those of where they are mixed in.
+  final HirValue receiver;
+  if (builder.level
+      case Level(
+        class_: final application,
+        element: final mixin,
+        mixinIndex: final index?,
+      )
+      when class_ == mixin) {
+    final isNamed =
+        application is ClassElement &&
+        application.isMixinApplication &&
+        index == application.mixins.length - 1;
+    receiver = isNamed
+        ? _typeOf(scope, builder, application)
+        : text(_applicationName(application, index));
+  } else {
+    receiver = class_ is InterfaceElement
+        ? _typeOf(scope, builder, class_)
+        : text(null);
+  }
   builder
     ..call(
       HirCall(scope.runtime('throwExternal'), [
-        class_ is InterfaceElement
-            ? _typeOf(scope, builder, class_)
-            : text(null),
+        receiver,
         text(name),
         builder.add(HirConst(level << 3 | kind)),
         text(found),
@@ -36,6 +56,13 @@ void throwExternal(
     )
     ..end(HirUnreachable());
 }
+
+/// What the official runtime calls the unnamed application at [index].
+String _applicationName(InterfaceElement class_, int index) => [
+  '_${class_.displayName}',
+  class_.supertype?.element.displayName ?? 'Object',
+  for (final mixin in class_.mixins.take(index + 1)) mixin.element.displayName,
+].join('&');
 
 /// The object that the type [class_] is, with the bounds of its parameters.
 HirValue _typeOf(

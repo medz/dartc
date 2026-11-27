@@ -12,10 +12,13 @@ final class Level._(
   /// What its members are declared by, as a type made of the type parameters
   /// of [class_].
   final InterfaceType type,
-  final Level? superLevel,
-) {
+  final Level? superLevel, {
+
+  /// The position in [class_]'s `with` clause for a mixin level.
+  final int? mixinIndex,
+}) {
   InterfaceElement get element => type.element;
-  bool get isMixin => element != class_;
+  bool get isMixin => mixinIndex != null;
 
   /// This level and those after which it comes.
   Iterable<Level> get chain sync* {
@@ -41,8 +44,10 @@ final class LevelTable() {
     Level? found = superclass is ClassElement
         ? of(class_ is EnumElement ? _enum(superclass) : superclass)
         : null;
-    for (final mixin in class_.mixins.expand(_declaring)) {
-      found = Level._(class_, mixin, found);
+    for (final (index, mixin) in class_.mixins.indexed) {
+      for (final type in _declaring(mixin)) {
+        found = Level._(class_, type, found, mixinIndex: index);
+      }
     }
     return Level._(class_, class_.thisType, found);
   }
