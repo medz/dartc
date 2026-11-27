@@ -56,6 +56,16 @@ Future<void> main() async {
   try { stdout.write('lost'); } catch (e) { print(e); }
 }
 ''',
+  'memory of the process': r'''
+import 'dart:io';
+void main() {
+  print(ProcessInfo.currentRss > 0);
+  print(ProcessInfo.maxRss > 0);
+  // Bytes, not pages or kilobytes.
+  print(ProcessInfo.currentRss > 1 << 20 && ProcessInfo.maxRss > 1 << 20);
+  print(ProcessInfo.currentRss < 1 << 40 && ProcessInfo.maxRss < 1 << 40);
+}
+''',
   'exit at once': r'''
 import 'dart:async';
 import 'dart:io';

@@ -171,7 +171,7 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 事件循环 | `main` 返回后，`sdk/native/async/events.dart` 运行微任务和定时器，直到没有要等的 |
 | `void` | 函数仍然返回值，因为调用者可能不知道它是 `void` |
 | `Never` | 和别的类型一样用引用表示。确定表达式的类型或操作数的上限链为不可空的 `Never` 时，求值后结束当前块。上限链可空时仍可得到 `null`。不可达路径需要占位值时，按该位置所需的表示生成 |
-| `external` | 有 `@Native` 的是 C 的函数或变量；`external` 变量只是 getter 和 setter。没有实现的抛 `NoSuchMethodError`。静态分派到这类变量的 setter 时，显式或继承的 `covariant` 仍会检查参数；无需检查的参数也无需拆箱。标准库里没有实现的声明在编译时拒绝 |
+| `external` | 有 `@Native` 的是 C 的函数或变量；标准库的 C 函数在链接时就有，C 变量和程序的一样，第一次用时在进程里找；`external` 变量只是 getter 和 setter。没有实现的抛 `NoSuchMethodError`。静态分派到这类变量的 setter 时，显式或继承的 `covariant` 仍会检查参数；无需检查的参数也无需拆箱。标准库里没有实现的声明在编译时拒绝 |
 | 延迟导入 | 库一开始就在程序里。每个前缀有一个对象，记着是否加载过；每次使用前检查，`loadLibrary` 之后才可用（`translate/deferred.dart`） |
 | 调用 C 函数 | 先把参数写进一个块（`CallBlock`），再由一小段汇编装进寄存器和栈、调用、存回结果。哪个值在哪里由 `native` 按签名算好 |
 | C 调用 Dart | 有 2048 个现成的小函数，各带自己的编号，把寄存器写进块，再调用 `_runCallback`。别的线程来的调用先排队，由事件循环处理 |
