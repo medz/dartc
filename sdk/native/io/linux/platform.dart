@@ -59,6 +59,9 @@ external int _openSignalFile(int file, int set, int flags);
 
 const _spawnSignalDefaults = 0x04, _spawnSignalMask = 0x08;
 const _spawnSession = 0x80;
+const _nonBlocking = 0x800, _eWouldBlock = 11;
+
+int _nativeSignalNumber(ProcessSignal signal) => signal.signalNumber;
 
 /// A file that is ready when the program [pid] ends, or -1 if there is none.
 int _whenEnded(int pid) {
@@ -78,11 +81,11 @@ void _withSignalSet(int signal, void Function(int set) use) {
 
 /// A file that is ready when [signal] comes, which then does nothing else.
 int _signalFile(int signal) {
-  const block = 0, noWait = 0x800, closeOnExec = 0x80000;
+  const block = 0, closeOnExec = 0x80000;
   var file = -1;
   _withSignalSet(signal, (set) {
     _maskSignals(block, set, 0);
-    file = _openSignalFile(-1, set, noWait | closeOnExec);
+    file = _openSignalFile(-1, set, _nonBlocking | closeOnExec);
   });
   return file;
 }

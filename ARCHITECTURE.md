@@ -176,9 +176,9 @@ LIR 解释器会检查这些条件，违反就报内部错误，用来抓 loweri
 | 调用 C 函数 | 先把参数写进一个块（`CallBlock`），再由一小段汇编装进寄存器和栈、调用、存回结果。哪个值在哪里由 `native` 按签名算好 |
 | C 调用 Dart | 有 2048 个现成的小函数，各带自己的编号，把寄存器写进块，再调用 `_runCallback`。别的线程来的调用先排队，由事件循环处理 |
 | 导出函数 | 每个 `@Export` 一个 C 函数，把寄存器写进块再调用 Dart。最外层的调用准备好栈的界限，返回前运行事件循环；没有捕获的异常结束进程 |
-| `dart:io` | 官方源码，`sdk/native/io` 用 C 函数补上系统的部分。异步的文件操作当场做完，结果由事件循环交出；管道和标准输入没准备好时不读写，由事件循环用 `select` 等 |
+| `dart:io` | 官方源码，`sdk/native/io` 用 C 函数补上系统的部分。异步的文件操作当场做完，结果由事件循环交出；管道和标准输入由事件循环用 `poll` 等到就绪后再读写 |
 | 压缩 | `dart:io` 用 Dart 实现 RFC 1950 的 zlib、RFC 1951 的 DEFLATE 和 RFC 1952 的 gzip（`sdk/native/io/inflate.dart`、`deflate.dart`）。`RawZLibFilter` 在接收时复制输入和字典，分段输出，排空后接收下一段。存储块按连续区间复制，解压在搬动缓冲区和读尾部之前累计校验。gzip 的可选头字段分段校验，每个成员有独立的匹配历史。选项和错误行为以官方 Dart 为准 |
-| 子进程和信号 | `posix_spawnp` 启动，管道接到事件循环。进程结束时 macOS 的 kqueue、Linux 的 pidfd 可读，信号用 kqueue 或 signalfd，都由 `select` 等。程序和目录先检查，因为有的系统（模拟的 x64）不告诉 exec 失败 |
+| 子进程和信号 | `posix_spawnp` 启动，标准输入经事件循环分段写入。退出由 macOS 的 kqueue、Linux 的 pidfd 通知，分离的进程也会回收，父进程可自行退出。监听和发送信号时使用系统信号编号。Linux 启动前检查程序和目录，`PATH` 的相对项以子进程工作目录为准 |
 | 退出码 | 程序设过 `exitCode` 时，事件循环结束后用它退出 |
 | 目标平台 | `native` 的 `Target`。传值规则、系统函数、文件格式按它选；`sdk/native/<库>/<系统>/` 里的补丁只给那个系统 |
 | Linux | 只依赖 libc 和 libm，不带符号版本。`.linuxEntry` 调用 `__libc_start_main`。所有导入在启动时绑定，之后只读 |

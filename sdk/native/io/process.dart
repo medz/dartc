@@ -70,7 +70,7 @@ final class _SignalWatch extends _Task {
   int get file => _file;
 
   void _start() {
-    _file = _signalFile(_signal.signalNumber);
+    _file = _signalFile(_nativeSignalNumber(_signal));
     if (_file < 0) {
       _controller.addError(SignalException('Failed to listen for $_signal'));
       return;
@@ -81,7 +81,7 @@ final class _SignalWatch extends _Task {
   void _stop() {
     if (_file < 0) return;
     _Tasks._instance.remove(this);
-    _endSignalFile(_signal.signalNumber, _file);
+    _endSignalFile(_nativeSignalNumber(_signal), _file);
     _file = -1;
   }
 

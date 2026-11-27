@@ -9,6 +9,9 @@ abstract class _Task {
   /// Whether it has to be ready for writing.
   bool get isWriting => false;
 
+  /// Whether the program waits for this task before exiting.
+  bool get keepsAlive => true;
+
   /// Does some of it. Returns whether that was all.
   bool advance();
 }
@@ -68,6 +71,7 @@ class _WriteTask extends _Task {
   bool advance() {
     final count = _target._writeSome(_source, _at, min(_chunk, _end - _at));
     if (count < 0) {
+      if (_errno == _eWouldBlock) return false;
       _completer.complete(_response(_failure()));
       return true;
     }
@@ -88,69 +92,61 @@ class _Tasks implements EventSource {
     return tasks;
   }
 
-  static const _setBytes = 128, _mostFiles = _setBytes * 8;
-
   final List<_Task> _waiting = [];
 
   void add(_Task task) => _waiting.add(task);
 
   void remove(_Task task) => _waiting.remove(task);
 
-  bool get keepsAlive => _waiting.isNotEmpty;
+  bool get keepsAlive => _waiting.any((task) => task.keepsAlive);
 
   int get happened => _waiting.length;
 
   bool runOne() {
     if (_waiting.isEmpty) return false;
-    var first = 0;
-    if (_hasToWait(_waiting[0])) {
-      _lookAt(0);
-      first = _waiting.indexWhere(
-        (task) => !_hasToWait(task) || _isReady(task),
-      );
-      if (first < 0) return false;
-    }
+    final first = _waiting.first.file < 0 ? 0 : _lookAt(0);
+    if (first < 0) return false;
     final task = _waiting.removeAt(first);
-    if (!task.advance()) _waiting.add(task);
-    return true;
+    if (task.advance()) return true;
+    _waiting.add(task);
+    return task.file >= 0;
   }
 
-  void wait(int microseconds) => _lookAt(microseconds);
+  void wait(int microseconds) {
+    // A child without a waitable descriptor is checked with waitpid.
+    const retry = 2000;
+    final canWaitLong = microseconds < 0 || microseconds > retry;
+    _lookAt(
+      canWaitLong && _waiting.any((task) => task.file < 0)
+          ? retry
+          : microseconds,
+    );
+  }
 
   void end() {}
 
-  static bool _hasToWait(_Task task) =>
-      task.file >= 0 && task.file < _mostFiles;
-
-  /// Where the bit for the file of [task] is.
-  static int _placeOf(_Task task) =>
-      _buffer + (task.isWriting ? _setBytes : 0) + (task.file >> 3);
-
-  static bool _isReady(_Task task) =>
-      load8(_placeOf(task)) >> (task.file & 7) & 1 != 0;
-
-  /// Finds out which files are ready, if none is after waiting for
-  /// [microseconds] at most unless that is negative.
-  void _lookAt(int microseconds) {
-    const time = 2 * _setBytes;
-    for (var i = 0; i < time; i += 8) {
-      store64(_buffer + i, 0);
-    }
-    var count = 0;
-    for (final task in _waiting) {
-      if (!_hasToWait(task)) continue;
-      final place = _placeOf(task);
-      store8(place, load8(place) | 1 << (task.file & 7));
-      if (task.file >= count) count = task.file + 1;
-    }
-    store64(_buffer + time, microseconds ~/ 1000000);
-    store64(_buffer + time + 8, microseconds % 1000000);
-    final limit = microseconds < 0 ? 0 : _buffer + time;
-    final result = _select(count, _buffer, _buffer + _setBytes, 0, limit);
-    if (result >= 0) return;
-    // What is wrong with a file is found out when it is used.
-    for (var i = 0; i < time; i += 8) {
-      store64(_buffer + i, -1);
+  /// The first task that can run, or -1 if no descriptor is ready.
+  int _lookAt(int microseconds) {
+    final size = _waiting.length * _pollEntryBytes;
+    final files = size <= _bufferBytes ? _buffer : _allocateBytes(size);
+    try {
+      for (final (index, task) in _waiting.indexed) {
+        _pollFile(
+          files + index * _pollEntryBytes,
+          task.file,
+          isWriting: task.isWriting,
+        );
+      }
+      final ready = _pollFiles(files, _waiting.length, microseconds);
+      for (final (index, task) in _waiting.indexed) {
+        if (task.file < 0 ||
+            ready > 0 && _pollReady(files + index * _pollEntryBytes)) {
+          return index;
+        }
+      }
+      return -1;
+    } finally {
+      if (files != _buffer) _freeBytes(files);
     }
   }
 }

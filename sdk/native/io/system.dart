@@ -7,6 +7,9 @@ import 'dart:ffi' show Int32, Int64, Native, Uint16, Uint32, VarArgs, Void;
 @Native<Int64 Function(Int64)>(symbol: 'malloc')
 external int _allocateBytes(int bytes);
 
+@Native<Void Function(Int64)>(symbol: 'free')
+external void _freeBytes(int address);
+
 @Native<Int32 Function(Int64, Int32, VarArgs<(Int32,)>)>(symbol: 'open')
 external int _openPath(int path, int flags, int mode);
 
@@ -76,8 +79,28 @@ external int _readDirectory(int directory);
 @Native<Int32 Function(Int64)>(symbol: 'closedir')
 external int _closeDirectory(int directory);
 
-@Native<Int32 Function(Int32, Int64, Int64, Int64, Int64)>(symbol: 'select')
-external int _select(int count, int reading, int writing, int failed, int time);
+@Native<Int32 Function(Int64, Int64, Int32)>(symbol: 'poll')
+external int _poll(int files, int count, int milliseconds);
+
+const _pollEntryBytes = 8;
+
+void _pollFile(int entry, int file, {bool isWriting = false}) {
+  const read = 0x01, write = 0x04;
+  store32(entry, file);
+  store16(entry + 4, isWriting ? write : read);
+  store16(entry + 6, 0);
+}
+
+bool _pollReady(int entry) => load16(entry + 6) != 0;
+
+int _pollFiles(int files, int count, int microseconds) {
+  final milliseconds = microseconds < 0
+      ? -1
+      : min(0x7fffffff, (microseconds + 999) ~/ 1000);
+  final result = _poll(files, count, milliseconds);
+  if (result < 0 && _errno != _eInterrupted) throw _failure();
+  return result;
+}
 
 const _eInterrupted = 4, _eNotDirectory = 20, _eIsDirectory = 21;
 const _eInvalid = 22;

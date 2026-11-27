@@ -101,6 +101,22 @@ external int _setSignalAction(int signal, int action);
 
 const _spawnSignalDefaults = 0x04, _spawnSignalMask = 0x08;
 const _spawnSession = 0x0400;
+const _nonBlocking = 0x0004, _eWouldBlock = 35;
+
+/// The numbers used by Darwin for the SDK's signal constants.
+int _nativeSignalNumber(ProcessSignal signal) => switch (signal) {
+  ProcessSignal.sigbus => 10,
+  ProcessSignal.sigusr1 => 30,
+  ProcessSignal.sigusr2 => 31,
+  ProcessSignal.sigchld => 20,
+  ProcessSignal.sigcont => 19,
+  ProcessSignal.sigstop => 17,
+  ProcessSignal.sigtstp => 18,
+  ProcessSignal.sigurg => 16,
+  ProcessSignal.sigpoll => -1,
+  ProcessSignal.sigsys => 12,
+  _ => signal.signalNumber,
+};
 
 /// A queue of the kernel that tells about [ident] of [filter] at [address].
 int _kernelQueueFor(int ident, int filter, int flags, int notes) {

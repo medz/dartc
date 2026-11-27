@@ -1,7 +1,7 @@
 // Other programs that are started, and signals.
 import 'dart:_heap/machine.dart' show load32, load64, store32, store64, store8;
 import 'dart:_heap/objects.dart' show dataAddress;
-import 'dart:ffi' show Int16, Int32, Int64, Native, Void;
+import 'dart:ffi' show Int16, Int32, Int64, Native;
 
 @Native<Int32 Function(Int64, Int64, Int64, Int64, Int64, Int64)>(
   symbol: 'posix_spawnp',
@@ -30,6 +30,11 @@ external int _addDuplicate(int actions, int from, int to);
   symbol: 'posix_spawn_file_actions_addclose',
 )
 external int _addClose(int actions, int file);
+
+@Native<Int32 Function(Int64, Int32, Int64, Int32, Int32)>(
+  symbol: 'posix_spawn_file_actions_addopen',
+)
+external int _addOpen(int actions, int file, int path, int flags, int mode);
 
 @Native<Int32 Function(Int64, Int64)>(
   symbol: 'posix_spawn_file_actions_addchdir_np',
@@ -68,9 +73,6 @@ external int _signal(int pid, int signal);
 
 @Native<Int32 Function(Int64, Int32)>(symbol: 'access')
 external int _access(int path, int mode);
-
-@Native<Void Function(Int64)>(symbol: 'free')
-external void _freeBytes(int address);
 
 const _noHang = 1, _setDescriptorFlags = 2, _closeOnRun = 1;
 
@@ -157,6 +159,7 @@ final class _Start {
 
   /// The error that starting the program would give, if it is known to.
   int? _cannotRun() {
+    if (!Platform.isLinux) return null;
     const executable = 1, noEntry = 2;
     bool runs(String path) {
       final text = _cString(path);
@@ -165,15 +168,21 @@ final class _Start {
       return result == 0;
     }
 
-    if (directory case final place?) {
+    final place = directory;
+    if (place != null) {
       final bytes = FileSystemEntity._toUtf8Array(place);
       if (_anyTypeAt(bytes, true) != _typeDirectory) return noEntry;
     }
     if (path.contains('/')) return null;
     final paths = Platform.environment['PATH'] ?? '/usr/bin:/bin';
-    return paths.split(':').any((at) => runs('${at.isEmpty ? '.' : at}/$path'))
-        ? null
-        : noEntry;
+    final found = paths.split(':').any((at) {
+      final folder = at.isEmpty ? '.' : at;
+      final base = place == null || folder.startsWith('/')
+          ? folder
+          : '$place/$folder';
+      return runs('$base/$path');
+    });
+    return found ? null : noEntry;
   }
 
   /// Starts the program with [files] as its standard ones, unless null, and
@@ -185,111 +194,161 @@ final class _Start {
     bool isDetached = false,
     List<int> others = const [],
   }) {
-    // Not all systems tell when the program cannot be run, so this is found
-    // out first.
-    if (_cannotRun() case final code?) {
-      throw ProcessException(executable, given, _failure(code).message, code);
-    }
-    final actions = _allocateBytes(512), attributes = _allocateBytes(512);
-    final signals = _allocateBytes(256);
-    _initActions(actions);
-    _initAttributes(attributes);
-    if (files != null) {
-      for (final (i, file) in files.indexed) {
-        _addDuplicate(actions, file, i);
+    void check(int code) {
+      if (code != 0) {
+        throw ProcessException(executable, given, _failure(code).message, code);
       }
     }
-    // Ends of pipes that are this program's.
-    for (final file in {...?files, ...others}) {
-      if (file > 2) _addClose(actions, file);
-    }
+
+    // Not all systems tell when the program cannot be run, so this is found
+    // out first.
+    if (_cannotRun() case final code?) check(code);
+    final actions = _allocateBytes(512), attributes = _allocateBytes(512);
+    final signals = _allocateBytes(256);
     final place = directory == null ? 0 : _cString(directory!);
-    if (place != 0) _addDirectory(actions, place);
-    // What is ignored or blocked here is not there.
-    _emptySignals(signals);
-    _setSpawnMask(attributes, signals);
-    _fillSignals(signals);
-    _setSpawnDefaults(attributes, signals);
-    _setSpawnFlags(
-      attributes,
-      _spawnSignalMask |
-          _spawnSignalDefaults |
-          (isDetached ? _spawnSession : 0),
-    );
+    final nullDevice = isDetached && files == null ? _cString('/dev/null') : 0;
     final file = _cString(path);
     final argv = _cStrings([path, ...arguments]);
     final envp = _cStrings(environment);
     final number = _allocateBytes(8);
-    final result = _spawn(number, file, actions, attributes, argv, envp);
-    final pid = load32(number);
-    for (final address in [file, number, actions, attributes, signals]) {
-      _freeBytes(address);
-    }
-    if (place != 0) _freeBytes(place);
-    _freeStrings(argv);
-    _freeStrings(envp);
-    if (result != 0) {
-      throw ProcessException(
-        executable,
-        given,
-        _failure(result).message,
-        result,
+    final actionResult = _initActions(actions);
+    final attributeResult = _initAttributes(attributes);
+    try {
+      check(actionResult);
+      check(attributeResult);
+      if (files != null) {
+        for (final (i, file) in files.indexed) {
+          check(_addDuplicate(actions, file, i));
+        }
+      } else if (nullDevice != 0) {
+        for (var i = 0; i < 3; i++) {
+          check(_addOpen(actions, i, nullDevice, _readWrite, 0));
+        }
+      }
+      for (final file in {...?files, ...others}) {
+        if (file > 2) check(_addClose(actions, file));
+      }
+      if (place != 0) check(_addDirectory(actions, place));
+      // What is ignored or blocked here is not there.
+      _emptySignals(signals);
+      check(_setSpawnMask(attributes, signals));
+      _fillSignals(signals);
+      check(_setSpawnDefaults(attributes, signals));
+      check(
+        _setSpawnFlags(
+          attributes,
+          _spawnSignalMask |
+              _spawnSignalDefaults |
+              (isDetached ? _spawnSession : 0),
+        ),
       );
+      check(_spawn(number, file, actions, attributes, argv, envp));
+      return load32(number);
+    } finally {
+      if (actionResult == 0) _destroyActions(actions);
+      if (attributeResult == 0) _destroyAttributes(attributes);
+      for (final address in [file, number, actions, attributes, signals]) {
+        _freeBytes(address);
+      }
+      if (place != 0) _freeBytes(place);
+      if (nullDevice != 0) _freeBytes(nullDevice);
+      _freeStrings(argv);
+      _freeStrings(envp);
     }
-    return pid;
   }
 }
 
 /// Writes to a file that a program reads, as it is given.
 final class _PipeConsumer implements StreamConsumer<List<int>> {
-  final int _file;
-  _PipeConsumer(this._file);
+  final _SystemFile _target;
+  _PipeConsumer(int file) : _target = _SystemFile(file + 1);
 
-  void _write(List<int> data) {
-    final bytes = data is Uint8List ? data : Uint8List.fromList(data);
-    var at = 0;
-    while (at < bytes.length) {
-      final count = _writeFile(
-        _file,
-        dataAddress(bytes) + at,
-        bytes.length - at,
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final data in stream) {
+      if (data.isEmpty) continue;
+      final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+      final written = Completer<Object?>();
+      _Tasks._instance.add(
+        _WriteTask(written, _target, bytes, 0, bytes.length, null),
       );
-      if (count < 0) {
-        if (_errno == _eInterrupted) continue;
-        throw _failure();
-      }
-      at += count;
+      _checkForErrorResponse(await written.future, 'write failed', '');
     }
   }
 
-  Future addStream(Stream<List<int>> stream) => stream.forEach(_write);
-
-  Future close() {
-    _closeFile(_file);
-    return Future.value();
+  Future<void> close() async {
+    _closeFile(_target.fd);
   }
+}
+
+/// The exit code if the child has ended. With no options, waits for it.
+int? _waitForExit(int pid, int options) {
+  int result;
+  do {
+    result = _waitFor(pid, _buffer, options);
+  } while (result < 0 && _errno == _eInterrupted);
+  if (result < 0) throw _failure();
+  return result == 0 ? null : _codeOf(load32(_buffer));
 }
 
 /// Waits for a program to end.
 final class _EndTask extends _Task {
-  final int _pid;
-  int _ready;
-  final Completer<int> _ended;
+  final _ChildProcess _process;
 
-  _EndTask(this._pid, this._ended) : _ready = _whenEnded(_pid);
+  _EndTask(this._process) : file = _whenEnded(_process.pid);
 
-  int get file => _ready;
+  final int file;
+
+  bool get keepsAlive => _process._ended != null;
 
   bool advance() {
-    final status = _allocateBytes(8);
-    final result = _waitFor(_pid, status, _noHang);
-    final code = _codeOf(load32(status));
-    _freeBytes(status);
-    if (result == 0) return false;
-    if (_ready >= 0) _closeFile(_ready);
-    _ready = -1;
-    _ended.complete(code);
+    final code = _waitForExit(_process.pid, _noHang);
+    if (code == null) return false;
+    if (file >= 0) _closeFile(file);
+    _process._hasEnded = true;
+    _process._ended?.complete(code);
     return true;
+  }
+}
+
+/// Starts a child and transfers the parent's ends of its pipes to the caller.
+({int pid, int stdin, int stdout, int stderr}) _startWithPipes(
+  String executable,
+  List<String> arguments,
+  _Start start, {
+  bool isDetached = false,
+}) {
+  final parent = <int>[], child = <int>[];
+  try {
+    final (input, writer) = _pipe();
+    child.add(input);
+    parent.add(writer);
+    for (var i = 0; i < 2; i++) {
+      final (reader, output) = _pipe();
+      parent.add(reader);
+      child.add(output);
+    }
+    const getFlags = 3, setFlags = 4;
+    final flags = _controlFile(writer, getFlags, 0);
+    if (flags < 0 || _controlFile(writer, setFlags, flags | _nonBlocking) < 0) {
+      throw _failure();
+    }
+    final pid = start.spawn(
+      executable,
+      arguments,
+      child,
+      isDetached: isDetached,
+      others: parent,
+    );
+    return (pid: pid, stdin: writer, stdout: parent[1], stderr: parent[2]);
+  } catch (_) {
+    for (final file in parent) {
+      _closeFile(file);
+    }
+    rethrow;
+  } finally {
+    for (final file in child) {
+      _closeFile(file);
+    }
   }
 }
 
@@ -300,9 +359,7 @@ final class _ChildProcess implements Process {
   final Completer<int>? _ended;
   bool _hasEnded = false;
 
-  _ChildProcess._(this.pid, this._in, this._out, this._error, this._ended) {
-    _ended?.future.then((_) => _hasEnded = true);
-  }
+  _ChildProcess._(this.pid, this._in, this._out, this._error, this._ended);
 
   static Future<Process> start(
     String executable,
@@ -317,32 +374,21 @@ final class _ChildProcess implements Process {
     final isDetached =
         mode == ProcessStartMode.detached ||
         mode == ProcessStartMode.detachedWithStdio;
-    final ends = hasPipes ? [_pipe(), _pipe(), _pipe()] : null;
-    final int pid;
-    try {
-      pid = start.spawn(
-        executable,
-        arguments,
-        ends == null ? null : [ends[0].$1, ends[1].$2, ends[2].$2],
-        isDetached: isDetached,
-        others: ends == null ? const [] : [ends[0].$2, ends[1].$1, ends[2].$1],
-      );
-    } finally {
-      if (ends != null) {
-        _closeFile(ends[0].$1);
-        _closeFile(ends[1].$2);
-        _closeFile(ends[2].$2);
-      }
-    }
-    final ended = isDetached ? null : Completer<int>();
-    if (ended != null) _Tasks._instance.add(_EndTask(pid, ended));
-    return _ChildProcess._(
+    final pipes = hasPipes
+        ? _startWithPipes(executable, arguments, start, isDetached: isDetached)
+        : null;
+    final pid =
+        pipes?.pid ??
+        start.spawn(executable, arguments, null, isDetached: isDetached);
+    final process = _ChildProcess._(
       pid,
-      ends == null ? null : IOSink(_PipeConsumer(ends[0].$2)),
-      ends == null ? null : _InputStream(ends[1].$1),
-      ends == null ? null : _InputStream(ends[2].$1),
-      ended,
+      pipes == null ? null : IOSink(_PipeConsumer(pipes.stdin)),
+      pipes == null ? null : _InputStream(pipes.stdout),
+      pipes == null ? null : _InputStream(pipes.stderr),
+      isDetached ? null : Completer<int>(),
     );
+    _Tasks._instance.add(_EndTask(process));
+    return process;
   }
 
   Never _detached() => throw StateError('Process is detached');
@@ -354,7 +400,7 @@ final class _ChildProcess implements Process {
 
   bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
     if (_hasEnded) return false;
-    return _signal(pid, signal.signalNumber) == 0;
+    return _signal(pid, _nativeSignalNumber(signal)) == 0;
   }
 }
 
@@ -366,34 +412,18 @@ ProcessResult _runToEnd(
   Encoding? stdoutEncoding,
   Encoding? stderrEncoding,
 ) {
-  final ends = [_pipe(), _pipe(), _pipe()];
-  final int pid;
-  try {
-    pid = start.spawn(
-      executable,
-      arguments,
-      [ends[0].$1, ends[1].$2, ends[2].$2],
-      others: [ends[0].$2, ends[1].$1, ends[2].$1],
-    );
-  } finally {
-    _closeFile(ends[0].$1);
-    _closeFile(ends[1].$2);
-    _closeFile(ends[2].$2);
-    _closeFile(ends[0].$2);
-  }
+  final pipes = _startWithPipes(executable, arguments, start);
+  _closeFile(pipes.stdin);
   final out = BytesBuilder(copy: false), error = BytesBuilder(copy: false);
-  _readAll([(ends[1].$1, out), (ends[2].$1, error)]);
-  final status = _allocateBytes(8);
-  while (_waitFor(pid, status, 0) < 0 && _errno == _eInterrupted) {}
-  final code = _codeOf(load32(status));
-  _freeBytes(status);
+  _readAll([(pipes.stdout, out), (pipes.stderr, error)]);
+  final code = _waitForExit(pipes.pid, 0)!;
   Object decoded(BytesBuilder bytes, Encoding? encoding) {
     final all = bytes.takeBytes();
     return encoding == null ? all : encoding.decode(all);
   }
 
   return ProcessResult(
-    pid,
+    pipes.pid,
     code,
     decoded(out, stdoutEncoding),
     decoded(error, stderrEncoding),
@@ -402,33 +432,36 @@ ProcessResult _runToEnd(
 
 /// Reads each file into its builder until all end, then closes them.
 void _readAll(List<(int, BytesBuilder)> files) {
-  const setBytes = 128;
-  final sets = _allocateBytes(setBytes), block = Uint8List(_blockSize);
-  final open = [...files];
-  while (open.isNotEmpty) {
-    for (var i = 0; i < setBytes; i += 8) {
-      store64(sets + i, 0);
-    }
-    var count = 0;
-    for (final (file, _) in open) {
-      store8(sets + (file >> 3), load8(sets + (file >> 3)) | 1 << (file & 7));
-      if (file >= count) count = file + 1;
-    }
-    if (_select(count, sets, 0, 0, 0) < 0) continue;
-    for (final entry in [...open]) {
-      final (file, bytes) = entry;
-      if (load8(sets + (file >> 3)) >> (file & 7) & 1 == 0) continue;
-      final read = _readFile(file, dataAddress(block), block.length);
-      if (read < 0 && _errno == _eInterrupted) continue;
-      if (read <= 0) {
-        _closeFile(file);
-        open.remove(entry);
-      } else {
-        bytes.add(Uint8List.sublistView(block, 0, read).sublist(0));
+  final table = _allocateBytes(files.length * _pollEntryBytes);
+  final block = Uint8List(_blockSize);
+  try {
+    while (files.isNotEmpty) {
+      for (final (index, (file, _)) in files.indexed) {
+        _pollFile(table + index * _pollEntryBytes, file);
+      }
+      if (_pollFiles(table, files.length, -1) < 0) continue;
+      for (var index = files.length - 1; index >= 0; index--) {
+        if (!_pollReady(table + index * _pollEntryBytes)) continue;
+        final (file, bytes) = files[index];
+        final read = _readFile(file, dataAddress(block), block.length);
+        if (read < 0) {
+          if (_errno == _eInterrupted) continue;
+          throw _failure();
+        }
+        if (read == 0) {
+          _closeFile(file);
+          files.removeAt(index);
+        } else {
+          bytes.add(block.sublist(0, read));
+        }
       }
     }
+  } finally {
+    for (final (file, _) in files) {
+      _closeFile(file);
+    }
+    _freeBytes(table);
   }
-  _freeBytes(sets);
 }
 
 @patch
@@ -460,7 +493,7 @@ class Process {
   static bool killPid(
     int pid, [
     ProcessSignal signal = ProcessSignal.sigterm,
-  ]) => _signal(pid, signal.signalNumber) == 0;
+  ]) => _signal(pid, _nativeSignalNumber(signal)) == 0;
 }
 
 @patch
