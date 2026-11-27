@@ -7,8 +7,11 @@ final class LinkTables(
   final Uint8List fixups,
   final Uint8List exports,
   final ({Uint8List symbols, Uint8List names}) symbolTable,
-  final int symbolCount,
-) {
+  final int symbolCount, {
+
+  /// How many symbols at the start are local, which loaders do not look at.
+  final int localCount = 0,
+}) {
   /// Where each is.
   int get exportsOffset => fixups.length;
   int get symbolsOffset => exportsOffset + exports.length;

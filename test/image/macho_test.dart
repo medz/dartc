@@ -114,6 +114,45 @@ void main() {
     expect(signature, contains('CodeDirectory v=20400'));
   }, skip: skipExecution);
 
+  test('tools find the names of functions unless they are left out', () {
+    final directory = Directory.systemTemp.createTempSync('dartc-image-');
+    addTearDown(() => directory.deleteSync(recursive: true));
+    final code = EmittedCode(
+      Uint8List(16),
+      const {'.text': 0, 'f': 0, 'g': 8},
+      const [],
+      exports: const {'e': 'g'},
+    );
+    String symbols(Uint8List bytes, List<String> options) {
+      final path = '${directory.path}/library';
+      File(path).writeAsBytesSync(bytes);
+      final verified = Process.runSync('/usr/bin/codesign', ['--verify', path]);
+      expect(verified.exitCode, 0, reason: '${verified.stderr}');
+      final result = Process.runSync('/usr/bin/nm', [...options, path]);
+      return '${result.stdout}${result.stderr}';
+    }
+
+    Uint8List link({required bool namesFunctions}) => linkMachoLibrary(
+      code,
+      name: 'library',
+      identifier: 'x',
+      namesFunctions: namesFunctions,
+    );
+    final named = symbols(link(namesFunctions: true), ['-n']);
+    expect(named, contains('0000000000000210 t f\n'));
+    expect(named, contains('0000000000000218 t g\n'));
+    expect(named, contains('0000000000000218 T _e\n'));
+    expect(named, isNot(contains('.text')));
+    // Loaders see only the exported functions.
+    expect(symbols(link(namesFunctions: true), ['-g']), endsWith('T _e\n'));
+    final left = symbols(
+      linkMachoLibrary(code, name: 'library', identifier: 'x'),
+      ['-n'],
+    );
+    expect(left, isNot(contains(' t ')));
+    expect(left, contains('T _e\n'));
+  }, skip: skipExecution);
+
   test('constant data has its own section', () {
     final directory = Directory.systemTemp.createTempSync('dartc-image-');
     addTearDown(() => directory.deleteSync(recursive: true));

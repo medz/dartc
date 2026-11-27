@@ -226,6 +226,7 @@ dartc <source.dart> -o <output> [options]
 | `--header <path>` | Write C/C++ declarations for native exports. |
 | `-D<name>=<value>` | Declare a value for `fromEnvironment`. Also `--define`. |
 | `--enable-asserts` | Check assertions. |
+| `--symbols` | Keep the names of functions, which profilers and debuggers show. |
 | `--target <target>` | Select an output platform. Defaults to the host. |
 
 The exit code is 0 if the output was written, 1 if the program cannot be compiled, and 64 if the command is wrong.

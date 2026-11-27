@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:dartc/lir.dart' show textSymbol;
 import 'package:dartc/native.dart';
 
 import 'stack_maps.dart';
@@ -79,4 +80,8 @@ final class EmittedCode(
   final List<String> externals = .unmodifiable(externals);
   final Map<String, int> functions = .unmodifiable(functions);
   final List<Relocation> relocations = .unmodifiable(relocations);
+
+  /// The functions in [functions], without the name of where code starts.
+  Iterable<String> get functionNames =>
+      functions.keys.where((name) => name != textSymbol);
 }

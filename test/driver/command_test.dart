@@ -271,6 +271,22 @@ true
     }
   });
 
+  test('--symbols keeps the names of functions', () async {
+    Future<String> symbols(List<String> options) async {
+      final result = await run(
+        (path) => ['$path/main.dart', '-o', '$path/main', ...options],
+      );
+      expect((result.code, result.errors), (0, ''));
+      final path = '${result.directory.path}/main';
+      final program = Process.runSync(path, const []);
+      expect(program.exitCode, 0);
+      return '${Process.runSync('/usr/bin/nm', [path]).stdout}';
+    }
+
+    expect(await symbols(const ['--symbols']), contains(' t .start\n'));
+    expect(await symbols(const []), isEmpty);
+  }, testOn: 'mac-os');
+
   test('the command works from the package', () {
     final directory = writeSources({
       'main.dart': "void main() => print('hi');",

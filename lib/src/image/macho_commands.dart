@@ -163,11 +163,14 @@ void _writeSymbolTable(ByteWriter out, LinkTables links, int start) {
       ..u32(start + links.namesOffset)
       ..u32(links.symbolTable.names.length);
   }
+  final local = links.localCount;
   out
-    ..u32(0xb) // LC_DYSYMTAB: only external symbols.
+    ..u32(0xb) // LC_DYSYMTAB: local symbols, then defined external ones.
     ..u32(80)
-    ..zeros(12)
-    ..u32(count)
+    ..u32(0)
+    ..u32(local)
+    ..u32(local)
+    ..u32(count - local)
     ..u32(count)
     ..zeros(52);
 }
