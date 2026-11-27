@@ -13,11 +13,13 @@ dart test                                       # everything; about 4 minutes
 dart test test/translate/closures_test.dart     # one file
 dart test test/translate -N 'part of a name'    # by name; -n takes a regular expression
 dart run tool/expect.dart [--update] [files]     # checks or writes what programs of the tests do
-dart run tool/measure.dart [names] [-inline] [-devirtualize]  # time against official AOT
+dart run tool/measure.dart [names] [-inline] [--self] [--update]  # against tool/bench/baseline.json
 dart run tool/size.dart <program> [function]   # what the bytes are; why a function is there
 ```
 
 With `DARTC_SELF_HOSTING=1`, `test/driver/build_test.dart` also lets the compiler compile itself, which takes many minutes and gigabytes of memory.
+
+A change for speed, size or compiling shows what `tool/measure.dart` gives before and after: run time against the official AOT, bytes, and the time and memory of compiling. It then updates the baseline with `--update`, and with `--self` when it changes the compiler's own speed.
 
 Tests run compiled programs on macOS ARM64. For Linux, give two containers with glibc 2.34 or later and gcc, in which the directory for temporary files has the same path as on the host:
 

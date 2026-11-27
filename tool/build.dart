@@ -1,7 +1,6 @@
 import 'dart:io';
 
-import 'package:dartc/driver.dart';
-import 'package:dartc/source.dart';
+import 'src/embedded.dart';
 
 const _usage = 'Usage: dart run tool/build.dart [--with=<dartc>] [output]';
 
@@ -19,27 +18,25 @@ Future<void> main(List<String> arguments) async {
   final own = withOption.firstOrNull?.substring('--with='.length);
   final output = File(rest.firstOrNull ?? 'build/dartc');
   output.parent.createSync(recursive: true);
-  // Generated files are found by the package's own configuration there.
-  final directory = Directory('.dart_tool/dartc')..createSync(recursive: true);
-  final main = File('${directory.path}/main.dart')
-    ..writeAsStringSync('''
+  final main = await writeEmbedded(
+    'main',
+    '''
 import 'dart:io';
 
 // The rest of the driver is for where the libraries are files.
 import 'package:dartc/src/driver/command.dart';
-import 'package:dartc/source.dart';
-
-const _sdk = '${packSdkFiles(await packagedSdkFiles())}';
-
+''',
+    '''
 Future<void> main(List<String> arguments) async {
   exitCode = await runCommand(
     arguments,
     output: stdout,
     errors: stderr,
-    sdk: () async => unpackSdkFiles(_sdk),
+    sdk: () async => sdkFiles,
   );
 }
-''');
+''',
+  );
   final result = own == null
       ? Process.runSync(Platform.resolvedExecutable, [
           'compile',
