@@ -102,11 +102,7 @@ final class ProgramTranslator(
 
   HirModule translate() {
     final entry = program.main.element.entryPoint;
-    if (entry == null) {
-      throw CompileFailure([
-        _unit.problemAt(0, 'The program has no main function.'),
-      ]);
-    }
+    if (entry == null) _fail('The program has no main function.');
     final start = _work.root(
       'the entry of the program',
       () => EntryTranslator(this, _unit, entry, _functions.of(entry))..begin(),
@@ -119,11 +115,7 @@ final class ProgramTranslator(
   /// The program as a library, and a header for it.
   ({HirModule module, String header}) translateLibrary() {
     final exports = exportsOf(program), table = ExportTable(this);
-    if (exports.isEmpty) {
-      throw CompileFailure([
-        _unit.problemAt(0, 'The library exports no functions.'),
-      ]);
-    }
+    if (exports.isEmpty) _fail('The library exports no functions.');
     _work.root('exported', () => exports.forEach(table.add));
     _translateAll();
     final start = HirFunction('start', const [])
@@ -133,6 +125,10 @@ final class ProgramTranslator(
       header: HeaderWriter(natives.types).write(exports),
     );
   }
+
+  /// Stops with [message] about the whole program.
+  Never _fail(String message) =>
+      throw CompileFailure([_unit.problemAt(0, message)]);
 
   /// Translates all that what is translated already can reach.
   void _translateAll() {
@@ -196,6 +192,8 @@ final class ProgramTranslator(
       spawned: _needs.spawned,
       exports: exports,
       eventLoop: _needs.eventLoop,
+      isInstance: _needs.isInstance,
+      sealedTypes: _needs.sealedTypes,
     );
     _work.finish(module, [
       ..._functions.declared,
@@ -228,6 +226,7 @@ final class ProgramTranslator(
   void _addRuntime() {
     if (_closures.closures.isNotEmpty) createdClass(_functionClass);
     if (_links.schedulers.any(_functions.contains)) _needs.addEvents();
+    _needs.addInstanceTests(_functions.contains, _values.sealedTypes);
     if (_links.setExitCode case final setter?
         when _functions.contains(setter)) {
       _needs.addExitCode();

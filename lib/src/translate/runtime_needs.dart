@@ -1,3 +1,4 @@
+import 'package:analyzer/dart/element/element.dart';
 import 'package:dartc/hir.dart';
 
 import 'runtime_links.dart';
@@ -18,6 +19,23 @@ final class RuntimeNeeds(
   HirFunction? _allocate, _raise, _outOfMemory, _stackOverflow, _uncaught;
   HirFunction? get exitCode => _exitCode;
   HirFunction? _eventLoop, _callback, _exitCode, _spawned;
+
+  HirFunction? get isInstance => _isInstance;
+  HirFunction? _isInstance;
+  Map<HirConstObject, HirTypeTest> get sealedTypes => _sealedTypes;
+  var _sealedTypes = const <HirConstObject, HirTypeTest>{};
+
+  /// Says that it tests objects against types that it makes, if [has] the
+  /// runtime function for that, where those of [sealed] are decided by the
+  /// classes of the objects.
+  void addInstanceTests(
+    bool Function(ExecutableElement) has,
+    Map<HirConstObject, HirTypeTest> Function() sealed,
+  ) {
+    if (_isInstance != null || !has(_links.function('isInstance'))) return;
+    _isInstance = _runtime('isInstance');
+    _sealedTypes = sealed();
+  }
 
   /// Says that it creates objects.
   void addAllocation() => _allocate ??= _runtime('allocate');

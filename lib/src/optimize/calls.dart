@@ -70,6 +70,7 @@ final class Calls(
     ?_module.callback,
     ?_module.spawned,
     ?_module.eventLoop,
+    ?_module.isInstance,
     ..._module.exports.values,
   };
 

@@ -58,6 +58,7 @@ HirModule _withoutUnused(HirModule module) {
     module.callback,
     module.spawned,
     module.eventLoop,
+    module.isInstance,
     ...module.exports.values,
   ].forEach(need);
   while (pending.isNotEmpty) {
@@ -93,5 +94,7 @@ HirModule _withoutUnused(HirModule module) {
     spawned: module.spawned,
     exports: module.exports,
     eventLoop: module.eventLoop,
+    isInstance: module.isInstance,
+    sealedTypes: module.sealedTypes,
   );
 }
