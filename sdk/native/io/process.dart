@@ -56,22 +56,41 @@ class _ProcessUtils {
 /// The signals that are listened for, by their numbers.
 final Map<int, _SignalWatch> _watches = {};
 
+/// A signal descriptor and the action that restores the state before watching.
+final class _SignalRegistration {
+  final int file;
+  final void Function()? _restore;
+
+  _SignalRegistration._(this.file, this._restore);
+
+  static _SignalRegistration? opened(int file, void Function()? restore) {
+    if (file >= 0) return _SignalRegistration._(file, restore);
+    restore?.call();
+    return null;
+  }
+
+  void close() {
+    _closeFile(file);
+    _restore?.call();
+  }
+}
+
 /// Tells when a signal comes, while it is listened for.
 final class _SignalWatch extends _Task {
   final ProcessSignal _signal;
   late final StreamController<ProcessSignal> _controller =
       StreamController.broadcast(onListen: _start, onCancel: _stop);
-  int _file = -1;
+  _SignalRegistration? _registration;
 
   _SignalWatch(this._signal);
 
   Stream<ProcessSignal> get stream => _controller.stream;
 
-  int get file => _file;
+  int get file => _registration?.file ?? -1;
 
   void _start() {
-    _file = _signalFile(_nativeSignalNumber(_signal));
-    if (_file < 0) {
+    _registration = _signalFile(_nativeSignalNumber(_signal));
+    if (_registration == null) {
       _controller.addError(SignalException('Failed to listen for $_signal'));
       return;
     }
@@ -79,14 +98,15 @@ final class _SignalWatch extends _Task {
   }
 
   void _stop() {
-    if (_file < 0) return;
+    final registration = _registration;
+    if (registration == null) return;
+    _registration = null;
     _Tasks._instance.remove(this);
-    _endSignalFile(_nativeSignalNumber(_signal), _file);
-    _file = -1;
+    registration.close();
   }
 
   bool advance() {
-    for (var count = _signalsOf(_file); count > 0; count--) {
+    for (var count = _signalsOf(file); count > 0; count--) {
       _controller.add(_signal);
     }
     return false;

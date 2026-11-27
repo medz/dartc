@@ -130,19 +130,18 @@ class _Tasks implements EventSource {
     final size = _waiting.length * _pollEntryBytes;
     final files = size <= _bufferBytes ? _buffer : _allocateBytes(size);
     try {
-      for (final (index, task) in _waiting.indexed) {
-        _pollFile(
-          files + index * _pollEntryBytes,
-          task.file,
-          isWriting: task.isWriting,
-        );
+      var count = 0;
+      for (final task in _waiting) {
+        final file = task.file;
+        if (file < 0) continue;
+        _pollFile(files, count++, file, isWriting: task.isWriting);
       }
-      final ready = _pollFiles(files, _waiting.length, microseconds);
+      final ready = _pollFiles(files, count, microseconds);
+      var entry = 0;
       for (final (index, task) in _waiting.indexed) {
-        if (task.file < 0 ||
-            ready > 0 && _pollReady(files + index * _pollEntryBytes)) {
+        if (task.file < 0 || ready > 0 && _pollReady(files, entry))
           return index;
-        }
+        entry++;
       }
       return -1;
     } finally {

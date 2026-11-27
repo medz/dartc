@@ -96,12 +96,15 @@ external int _kernelEvents(
   int timeout,
 );
 
-@Native<Int64 Function(Int32, Int64)>(symbol: 'signal')
-external int _setSignalAction(int signal, int action);
+@Native<Int32 Function(Int32, Int64, Int64)>(symbol: 'sigaction')
+external int _setSignalAction(int signal, int action, int previous);
 
 const _spawnSignalDefaults = 0x04, _spawnSignalMask = 0x08;
-const _spawnSession = 0x0400;
+const _spawnDetached = 0x0400 | 0x4000;
 const _nonBlocking = 0x0004, _eWouldBlock = 35;
+
+// POSIX_SPAWN_CLOEXEC_DEFAULT closes descriptors not mapped by the actions.
+int _closeDetachedFiles(int _) => 0;
 
 /// The numbers used by Darwin for the SDK's signal constants.
 int _nativeSignalNumber(ProcessSignal signal) => switch (signal) {
@@ -118,11 +121,11 @@ int _nativeSignalNumber(ProcessSignal signal) => switch (signal) {
   _ => signal.signalNumber,
 };
 
-/// A queue of the kernel that tells about [ident] of [filter] at [address].
+/// A queue of the kernel that tells about [ident] of [filter].
 int _kernelQueueFor(int ident, int filter, int flags, int notes) {
   final queue = _kernelQueue();
   if (queue < 0) return -1;
-  final event = _allocateBytes(32);
+  final event = _buffer;
   store64(event, ident);
   store16(event + 8, filter & 0xffff);
   store16(event + 10, flags);
@@ -130,7 +133,6 @@ int _kernelQueueFor(int ident, int filter, int flags, int notes) {
   store64(event + 16, 0);
   store64(event + 24, 0);
   final result = _kernelEvents(queue, event, 1, 0, 0, 0);
-  _freeBytes(event);
   if (result >= 0) return queue;
   _closeFile(queue);
   return -1;
@@ -143,26 +145,26 @@ int _whenEnded(int pid) {
 }
 
 /// A file that is ready when [signal] comes, which then does nothing else.
-int _signalFile(int signal) {
+_SignalRegistration? _signalFile(int signal) {
   const kind = -6, add = 0x1, ignore = 1;
-  _setSignalAction(signal, ignore);
-  return _kernelQueueFor(signal, kind, add, 0);
+  final previous = _buffer + 16;
+  store64(_buffer, ignore);
+  store64(_buffer + 8, 0);
+  if (_setSignalAction(signal, _buffer, previous) < 0) return null;
+  final handler = load64(previous), options = load64(previous + 8);
+  return _SignalRegistration.opened(_kernelQueueFor(signal, kind, add, 0), () {
+    store64(_buffer, handler);
+    store64(_buffer + 8, options);
+    _setSignalAction(signal, _buffer, 0);
+  });
 }
 
 /// How many times the signal of [file] came since this was last asked.
 int _signalsOf(int file) {
-  final event = _allocateBytes(48);
+  final event = _buffer;
   // It does not wait.
   store64(event + 32, 0);
   store64(event + 40, 0);
   final result = _kernelEvents(file, 0, 0, event, 1, event + 32);
-  final count = result > 0 ? load64(event + 16) : 0;
-  _freeBytes(event);
-  return count;
-}
-
-void _endSignalFile(int signal, int file) {
-  const usual = 0;
-  _closeFile(file);
-  _setSignalAction(signal, usual);
+  return result > 0 ? load64(event + 16) : 0;
 }

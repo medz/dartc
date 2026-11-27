@@ -32,7 +32,8 @@ Future<void> main() async {
   await attempt('bytes', () async => (await Process.run('printf', ['\\377'], stdoutEncoding: null)).stdout);
   final p = await Process.start('cat', []);
   final echoed = p.stdout.transform(utf8.decoder).join();
-  final input = 'x' * (256 * 1024);
+  const lots = 262144;
+  final input = 'x' * lots;
   p.stdin.write(input);
   await p.stdin.close();
   print('full duplex: ${await echoed == input}');
@@ -59,6 +60,54 @@ Future<void> main() async {
   await Process.run('/bin/kill', ['-USR1', '$pid']);
   print('got ${await signal}');
   print('end');
+}
+''',
+  'process executables': r'''
+import 'dart:convert';
+import 'dart:io';
+
+void script(String path, String text, {bool executable = true}) {
+  File(path).writeAsStringSync('#!/bin/sh\necho $text\n');
+  final mode = executable ? '755' : '644';
+  if (Process.runSync('/bin/chmod', [mode, path]).exitCode != 0) {
+    throw StateError('chmod failed');
+  }
+}
+
+Future<void> main() async {
+  final arguments = ['first'];
+  final starting = Process.start('/bin/echo', arguments);
+  arguments[0] = 'second';
+  final child = await starting;
+  print((await child.stdout.transform(utf8.decoder).join()).trim());
+  print(await child.exitCode);
+
+  Directory('work/bin').createSync(recursive: true);
+  Directory('work/blocked').createSync();
+  script('helper', 'parent');
+  script('work/helper', 'child');
+  script('work/bin/helper', 'child PATH');
+  script('work/blocked/helper', 'blocked', executable: false);
+
+  final relative = await Process.run('./helper', [], workingDirectory: 'work');
+  print(relative.stdout.trim());
+  final fromPath = Process.runSync(
+    Platform.isLinux ? 'helper' : './bin/helper',
+    [],
+    workingDirectory: 'work',
+    environment: {'PATH': 'blocked:bin'},
+  );
+  print(fromPath.stdout.trim());
+  try {
+    Process.runSync(
+      Platform.isLinux ? 'helper' : './blocked/helper',
+      [],
+      workingDirectory: 'work',
+      environment: {'PATH': 'blocked'},
+    );
+  } on ProcessException catch (error) {
+    print(error.errorCode);
+  }
 }
 ''',
 };

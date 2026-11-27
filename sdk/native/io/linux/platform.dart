@@ -54,12 +54,22 @@ external int _systemCall(int number, int first, int second);
 @Native<Int32 Function(Int32, Int64, Int64)>(symbol: 'sigprocmask')
 external int _maskSignals(int how, int set, int old);
 
+@Native<Int32 Function(Int64, Int32)>(symbol: 'sigismember')
+external int _signalInSet(int set, int signal);
+
 @Native<Int32 Function(Int32, Int64, Int32)>(symbol: 'signalfd')
 external int _openSignalFile(int file, int set, int flags);
 
+@Native<Int32 Function(Int64, Int32)>(
+  symbol: 'posix_spawn_file_actions_addclosefrom_np',
+)
+external int _closeSpawnFilesFrom(int actions, int first);
+
 const _spawnSignalDefaults = 0x04, _spawnSignalMask = 0x08;
-const _spawnSession = 0x80;
+const _spawnDetached = 0x80;
 const _nonBlocking = 0x800, _eWouldBlock = 11;
+
+int _closeDetachedFiles(int actions) => _closeSpawnFilesFrom(actions, 3);
 
 int _nativeSignalNumber(ProcessSignal signal) => signal.signalNumber;
 
@@ -70,40 +80,37 @@ int _whenEnded(int pid) {
   return file < 0 ? -1 : file;
 }
 
-/// Does [how] with the set of [signal] alone.
-void _withSignalSet(int signal, void Function(int set) use) {
-  final set = _allocateBytes(128);
-  _emptySignals(set);
-  _addSignal(set, signal);
-  use(set);
-  _freeBytes(set);
+/// Places a set containing only [signal] in the scratch buffer.
+void _signalSet(int signal) {
+  _emptySignals(_buffer);
+  _addSignal(_buffer, signal);
 }
 
 /// A file that is ready when [signal] comes, which then does nothing else.
-int _signalFile(int signal) {
-  const block = 0, closeOnExec = 0x80000;
-  var file = -1;
-  _withSignalSet(signal, (set) {
-    _maskSignals(block, set, 0);
-    file = _openSignalFile(-1, set, _nonBlocking | closeOnExec);
-  });
-  return file;
+_SignalRegistration? _signalFile(int signal) {
+  const block = 0, unblock = 1, closeOnExec = 0x80000;
+  final previous = _buffer + 128;
+  _signalSet(signal);
+  if (_maskSignals(block, _buffer, previous) < 0) return null;
+  final wasBlocked = _signalInSet(previous, signal) == 1;
+  final file = _openSignalFile(-1, _buffer, _nonBlocking | closeOnExec);
+  return _SignalRegistration.opened(
+    file,
+    wasBlocked
+        ? null
+        : () {
+            _signalSet(signal);
+            _maskSignals(unblock, _buffer, 0);
+          },
+  );
 }
 
 /// How many times the signal of [file] came since this was last asked.
 int _signalsOf(int file) {
   const record = 128;
-  final buffer = _allocateBytes(record);
   var count = 0;
-  while (_readFile(file, buffer, record) == record) {
+  while (_readFile(file, _buffer, record) == record) {
     count++;
   }
-  _freeBytes(buffer);
   return count;
-}
-
-void _endSignalFile(int signal, int file) {
-  const unblock = 1;
-  _closeFile(file);
-  _withSignalSet(signal, (set) => _maskSignals(unblock, set, 0));
 }

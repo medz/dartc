@@ -84,14 +84,16 @@ external int _poll(int files, int count, int milliseconds);
 
 const _pollEntryBytes = 8;
 
-void _pollFile(int entry, int file, {bool isWriting = false}) {
+void _pollFile(int files, int index, int file, {bool isWriting = false}) {
   const read = 0x01, write = 0x04;
+  final entry = files + index * _pollEntryBytes;
   store32(entry, file);
   store16(entry + 4, isWriting ? write : read);
   store16(entry + 6, 0);
 }
 
-bool _pollReady(int entry) => load16(entry + 6) != 0;
+bool _pollReady(int files, int index) =>
+    load16(files + index * _pollEntryBytes + 6) != 0;
 
 int _pollFiles(int files, int count, int microseconds) {
   final milliseconds = microseconds < 0

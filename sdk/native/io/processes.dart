@@ -3,10 +3,27 @@ import 'dart:_heap/machine.dart' show load32, load64, store32, store64, store8;
 import 'dart:_heap/objects.dart' show dataAddress;
 import 'dart:ffi' show Int16, Int32, Int64, Native;
 
-@Native<Int32 Function(Int64, Int64, Int64, Int64, Int64, Int64)>(
-  symbol: 'posix_spawnp',
-)
+typedef _SpawnSignature = Int32 Function(
+  Int64,
+  Int64,
+  Int64,
+  Int64,
+  Int64,
+  Int64,
+);
+
+@Native<_SpawnSignature>(symbol: 'posix_spawn')
 external int _spawn(
+  int pid,
+  int file,
+  int actions,
+  int attributes,
+  int arguments,
+  int environment,
+);
+
+@Native<_SpawnSignature>(symbol: 'posix_spawnp')
+external int _spawnOnPath(
   int pid,
   int file,
   int actions,
@@ -25,11 +42,6 @@ external int _destroyActions(int actions);
   symbol: 'posix_spawn_file_actions_adddup2',
 )
 external int _addDuplicate(int actions, int from, int to);
-
-@Native<Int32 Function(Int64, Int32)>(
-  symbol: 'posix_spawn_file_actions_addclose',
-)
-external int _addClose(int actions, int file);
 
 @Native<Int32 Function(Int64, Int32, Int64, Int32, Int32)>(
   symbol: 'posix_spawn_file_actions_addopen',
@@ -75,6 +87,9 @@ external int _signal(int pid, int signal);
 external int _access(int path, int mode);
 
 const _noHang = 1, _setDescriptorFlags = 2, _closeOnRun = 1;
+const _executePermission = 1, _executeBits = 0x49;
+const _eNoEntry = 2, _eExecFormat = 8;
+const _eAccess = 13;
 
 /// The bytes of [text] that a 0 ends, outside the heap.
 int _cString(String text) {
@@ -112,42 +127,41 @@ int _codeOf(int status) {
 
 /// A pipe, whose ends are not given to programs that are started.
 (int, int) _pipe() {
-  final ends = _allocateBytes(8);
-  if (_makePipe(ends) < 0) {
-    _freeBytes(ends);
-    throw _failure();
+  if (_makePipe(_buffer) < 0) throw _failure();
+  final read = load32(_buffer), write = load32(_buffer + 4);
+  if (_controlFile(read, _setDescriptorFlags, _closeOnRun) < 0 ||
+      _controlFile(write, _setDescriptorFlags, _closeOnRun) < 0) {
+    final error = _failure();
+    _closeFile(read);
+    _closeFile(write);
+    throw error;
   }
-  final read = load32(ends), write = load32(ends + 4);
-  _freeBytes(ends);
-  _controlFile(read, _setDescriptorFlags, _closeOnRun);
-  _controlFile(write, _setDescriptorFlags, _closeOnRun);
   return (read, write);
 }
 
 /// What is needed to start a program.
 final class _Start {
-  final String path;
+  final String executable;
   final List<String> arguments;
   final String? directory;
-  final List<String> environment;
+  final Map<String, String> environment;
+  final bool runInShell;
 
   _Start(
-    String executable,
-    List<String> given,
+    this.executable,
+    List<String> arguments,
     this.directory,
     Map<String, String>? environment,
     bool includeParentEnvironment,
-    bool runInShell,
-  ) : path = runInShell ? '/bin/sh' : executable,
-      arguments = runInShell ? _shellArguments(executable, given) : given,
-      environment = [
-        for (final MapEntry(:key, :value) in (environment ?? const {}).entries)
-          '$key=$value',
+    this.runInShell,
+  ) : arguments = List.of(arguments),
+      environment = {
+        ...?environment,
         if (includeParentEnvironment)
           for (final MapEntry(:key, :value) in Platform.environment.entries)
             if (environment == null || !environment.containsKey(key))
-              '$key=$value',
-      ];
+              key: value,
+      };
 
   static List<String> _shellArguments(String executable, List<String> given) {
     String quoted(String text) => "'${text.replaceAll("'", "'\"'\"'")}'";
@@ -157,59 +171,101 @@ final class _Start {
     ];
   }
 
-  /// The error that starting the program would give, if it is known to.
-  int? _cannotRun() {
-    if (!Platform.isLinux) return null;
-    const executable = 1, noEntry = 2;
-    bool runs(String path) {
-      final text = _cString(path);
-      final result = _access(text, executable);
-      _freeBytes(text);
-      return result == 0;
+  int _launch(int pid, int actions, int attributes, int envp) {
+    const shell = '/bin/sh';
+    final program = runInShell ? shell : executable;
+    if (program.isEmpty) return _eNoEntry;
+    final args = [
+      program,
+      ...(runInShell ? _shellArguments(executable, arguments) : arguments),
+    ];
+    final place = directory;
+    final folder = place != null && !place.startsWith('/')
+        ? '${Directory.current.path}/$place'
+        : place;
+    String inDirectory(String path) =>
+        path.startsWith('/') ? path : '${folder ?? '.'}/$path';
+
+    int launch(
+      String target,
+      List<String> arguments, {
+      bool searchesPath = false,
+    }) {
+      final file = _cString(target);
+      try {
+        // Emulated x64 Linux can report a successful spawn for a failed exec.
+        if (Platform.isLinux) {
+          if (_statPath(file) < 0) return _errno;
+          final mode = _statMode;
+          if (mode & _modeType != _modeFile || mode & _executeBits == 0) {
+            return _eAccess;
+          }
+          if (_access(file, _executePermission) < 0) return _errno;
+        }
+        final argv = _cStrings(arguments);
+        try {
+          return searchesPath
+              ? _spawnOnPath(pid, file, actions, attributes, argv, envp)
+              : _spawn(pid, file, actions, attributes, argv, envp);
+        } finally {
+          _freeStrings(argv);
+        }
+      } finally {
+        _freeBytes(file);
+      }
     }
 
-    final place = directory;
-    if (place != null) {
-      final bytes = FileSystemEntity._toUtf8Array(place);
-      if (_anyTypeAt(bytes, true) != _typeDirectory) return noEntry;
+    final searchesPath = !program.contains('/');
+    if (!Platform.isLinux) {
+      return searchesPath
+          ? launch(program, args, searchesPath: true)
+          : launch(inDirectory(program), args);
     }
-    if (path.contains('/')) return null;
-    final paths = Platform.environment['PATH'] ?? '/usr/bin:/bin';
-    final found = paths.split(':').any((at) {
-      final folder = at.isEmpty ? '.' : at;
-      final base = place == null || folder.startsWith('/')
-          ? folder
-          : '$place/$folder';
-      return runs('$base/$path');
-    });
-    return found ? null : noEntry;
+
+    int launchLinux(String target) {
+      final result = launch(target, args);
+      return result == _eExecFormat
+          ? launch(shell, [shell, target, ...args.skip(1)])
+          : result;
+    }
+
+    if (!searchesPath) return launchLinux(inDirectory(program));
+    var denied = false;
+    for (final entry in (environment['PATH'] ?? '/bin:/usr/bin').split(':')) {
+      final candidate = entry.isEmpty ? program : '$entry/$program';
+      switch (launchLinux(inDirectory(candidate))) {
+        case _eAccess:
+          denied = true;
+        case _eNoEntry || _eNotDirectory:
+          break;
+        case final result:
+          return result;
+      }
+    }
+    return denied ? _eAccess : _eNoEntry;
   }
 
   /// Starts the program with [files] as its standard ones, unless null, and
   /// gives its number. Throws a [ProcessException] if it cannot.
-  int spawn(
-    String executable,
-    List<String> given,
-    List<int>? files, {
-    bool isDetached = false,
-    List<int> others = const [],
-  }) {
+  int spawn(List<int>? files, {bool isDetached = false}) {
     void check(int code) {
       if (code != 0) {
-        throw ProcessException(executable, given, _failure(code).message, code);
+        throw ProcessException(
+          executable,
+          arguments,
+          _failure(code).message,
+          code,
+        );
       }
     }
 
-    // Not all systems tell when the program cannot be run, so this is found
-    // out first.
-    if (_cannotRun() case final code?) check(code);
     final actions = _allocateBytes(512), attributes = _allocateBytes(512);
     final signals = _allocateBytes(256);
     final place = directory == null ? 0 : _cString(directory!);
     final nullDevice = isDetached && files == null ? _cString('/dev/null') : 0;
-    final file = _cString(path);
-    final argv = _cStrings([path, ...arguments]);
-    final envp = _cStrings(environment);
+    final envp = _cStrings([
+      for (final MapEntry(:key, :value) in environment.entries) '$key=$value',
+    ]);
     final number = _allocateBytes(8);
     final actionResult = _initActions(actions);
     final attributeResult = _initAttributes(attributes);
@@ -225,10 +281,15 @@ final class _Start {
           check(_addOpen(actions, i, nullDevice, _readWrite, 0));
         }
       }
-      for (final file in {...?files, ...others}) {
-        if (file > 2) check(_addClose(actions, file));
+      if (isDetached) check(_closeDetachedFiles(actions));
+      if (place != 0) {
+        if (Platform.isLinux) {
+          if (_statPath(place) < 0) check(_errno);
+          if (_statMode & _modeType != _modeDirectory) check(_eNotDirectory);
+          if (_access(place, _executePermission) < 0) check(_errno);
+        }
+        check(_addDirectory(actions, place));
       }
-      if (place != 0) check(_addDirectory(actions, place));
       // What is ignored or blocked here is not there.
       _emptySignals(signals);
       check(_setSpawnMask(attributes, signals));
@@ -239,20 +300,19 @@ final class _Start {
           attributes,
           _spawnSignalMask |
               _spawnSignalDefaults |
-              (isDetached ? _spawnSession : 0),
+              (isDetached ? _spawnDetached : 0),
         ),
       );
-      check(_spawn(number, file, actions, attributes, argv, envp));
+      check(_launch(number, actions, attributes, envp));
       return load32(number);
     } finally {
       if (actionResult == 0) _destroyActions(actions);
       if (attributeResult == 0) _destroyAttributes(attributes);
-      for (final address in [file, number, actions, attributes, signals]) {
+      for (final address in [number, actions, attributes, signals]) {
         _freeBytes(address);
       }
       if (place != 0) _freeBytes(place);
       if (nullDevice != 0) _freeBytes(nullDevice);
-      _freeStrings(argv);
       _freeStrings(envp);
     }
   }
@@ -292,28 +352,29 @@ int? _waitForExit(int pid, int options) {
 
 /// Waits for a program to end.
 final class _EndTask extends _Task {
-  final _ChildProcess _process;
+  final int _pid;
+  final _ChildProcess? _process;
 
-  _EndTask(this._process) : file = _whenEnded(_process.pid);
+  _EndTask(this._pid, [this._process]) : file = _whenEnded(_pid);
 
   final int file;
 
-  bool get keepsAlive => _process._ended != null;
+  bool get keepsAlive => _process?._ended != null;
 
   bool advance() {
-    final code = _waitForExit(_process.pid, _noHang);
+    final code = _waitForExit(_pid, _noHang);
     if (code == null) return false;
     if (file >= 0) _closeFile(file);
-    _process._hasEnded = true;
-    _process._ended?.complete(code);
+    if (_process case final process?) {
+      process._hasEnded = true;
+      process._ended?.complete(code);
+    }
     return true;
   }
 }
 
 /// Starts a child and transfers the parent's ends of its pipes to the caller.
 ({int pid, int stdin, int stdout, int stderr}) _startWithPipes(
-  String executable,
-  List<String> arguments,
   _Start start, {
   bool isDetached = false,
 }) {
@@ -332,13 +393,7 @@ final class _EndTask extends _Task {
     if (flags < 0 || _controlFile(writer, setFlags, flags | _nonBlocking) < 0) {
       throw _failure();
     }
-    final pid = start.spawn(
-      executable,
-      arguments,
-      child,
-      isDetached: isDetached,
-      others: parent,
-    );
+    final pid = start.spawn(child, isDetached: isDetached);
     return (pid: pid, stdin: writer, stdout: parent[1], stderr: parent[2]);
   } catch (_) {
     for (final file in parent) {
@@ -361,12 +416,7 @@ final class _ChildProcess implements Process {
 
   _ChildProcess._(this.pid, this._in, this._out, this._error, this._ended);
 
-  static Future<Process> start(
-    String executable,
-    List<String> arguments,
-    _Start start,
-    ProcessStartMode mode,
-  ) async {
+  static Future<Process> start(_Start start, ProcessStartMode mode) async {
     await null;
     final hasPipes =
         mode == ProcessStartMode.normal ||
@@ -375,11 +425,9 @@ final class _ChildProcess implements Process {
         mode == ProcessStartMode.detached ||
         mode == ProcessStartMode.detachedWithStdio;
     final pipes = hasPipes
-        ? _startWithPipes(executable, arguments, start, isDetached: isDetached)
+        ? _startWithPipes(start, isDetached: isDetached)
         : null;
-    final pid =
-        pipes?.pid ??
-        start.spawn(executable, arguments, null, isDetached: isDetached);
+    final pid = pipes?.pid ?? start.spawn(null, isDetached: isDetached);
     final process = _ChildProcess._(
       pid,
       pipes == null ? null : IOSink(_PipeConsumer(pipes.stdin)),
@@ -387,7 +435,7 @@ final class _ChildProcess implements Process {
       pipes == null ? null : _InputStream(pipes.stderr),
       isDetached ? null : Completer<int>(),
     );
-    _Tasks._instance.add(_EndTask(process));
+    _Tasks._instance.add(_EndTask(pid, process));
     return process;
   }
 
@@ -406,16 +454,19 @@ final class _ChildProcess implements Process {
 
 /// Runs a program to its end, and gives what it wrote.
 ProcessResult _runToEnd(
-  String executable,
-  List<String> arguments,
   _Start start,
   Encoding? stdoutEncoding,
   Encoding? stderrEncoding,
 ) {
-  final pipes = _startWithPipes(executable, arguments, start);
+  final pipes = _startWithPipes(start);
   _closeFile(pipes.stdin);
   final out = BytesBuilder(copy: false), error = BytesBuilder(copy: false);
-  _readAll([(pipes.stdout, out), (pipes.stderr, error)]);
+  try {
+    _readAll([(pipes.stdout, out), (pipes.stderr, error)]);
+  } catch (_) {
+    _Tasks._instance.add(_EndTask(pipes.pid));
+    rethrow;
+  }
   final code = _waitForExit(pipes.pid, 0)!;
   Object decoded(BytesBuilder bytes, Encoding? encoding) {
     final all = bytes.takeBytes();
@@ -437,11 +488,11 @@ void _readAll(List<(int, BytesBuilder)> files) {
   try {
     while (files.isNotEmpty) {
       for (final (index, (file, _)) in files.indexed) {
-        _pollFile(table + index * _pollEntryBytes, file);
+        _pollFile(table, index, file);
       }
       if (_pollFiles(table, files.length, -1) < 0) continue;
       for (var index = files.length - 1; index >= 0; index--) {
-        if (!_pollReady(table + index * _pollEntryBytes)) continue;
+        if (!_pollReady(table, index)) continue;
         final (file, bytes) = files[index];
         final read = _readFile(file, dataAddress(block), block.length);
         if (read < 0) {
@@ -476,8 +527,6 @@ class Process {
     bool runInShell = false,
     ProcessStartMode mode = ProcessStartMode.normal,
   }) => _ChildProcess.start(
-    executable,
-    arguments,
     _Start(
       executable,
       arguments,
@@ -507,8 +556,6 @@ ProcessResult _runNonInteractiveProcessSync(
   Encoding? stdoutEncoding,
   Encoding? stderrEncoding,
 ) => _runToEnd(
-  executable,
-  arguments,
   _Start(
     executable,
     arguments,
