@@ -157,7 +157,9 @@ void main() {
       final directory = writeSources({'main.dart': watchingProgram});
       final path = '${directory.path}/main.dart';
       for (final host in Host.all) {
-        final lines = (await _runWatching(host, directory)).output.split('\n');
+        final run = await _runWatching(host, directory);
+        expect((run.code, run.errors), (0, ''), reason: '${host.target}');
+        final lines = run.output.split('\n');
         if (host.isLinux) {
           // There is no official runtime there to compare with.
           var at = 0;

@@ -128,13 +128,15 @@ int _watchPathOf(int watcher, String path, int events, bool recursive) {
     throw FileSystemException('Failed to create FSEvents stream', path);
   }
   _schedule(stream, _mainLoop(), _defaultMode);
+  // Flushing calls back at once, so the node is there before it.
+  _nodes[id] = _Node(stream, utf8.encode(base).length, recursive);
   if (_startStream(stream) == 0) {
+    _nodes.remove(id);
     _invalidateStream(stream);
     _releaseStream(stream);
     throw FileSystemException('Failed to start FSEvents stream', path);
   }
   _flushStream(stream);
-  _nodes[id] = _Node(stream, utf8.encode(base).length, recursive);
   return id;
 }
 
@@ -168,6 +170,8 @@ void _takeEvents(
   for (var i = 0; i < count; i++) {
     final path = load64(paths + i * 8);
     final full = _bytesAt(path, _lengthAt(path));
+    // When events were dropped, the path may be `/`, above the watched one.
+    if (full.length < node.baseLength) continue;
     var start = node.baseLength;
     if (start < full.length && full[start] == 0x2f) start++;
     final relative = utf8.decode(full.sublist(start), allowMalformed: true);
