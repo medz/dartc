@@ -14,6 +14,7 @@ import '../support/compiler.dart';
 import 'io_compression.dart';
 import 'io_files.dart';
 import 'io_processes.dart';
+import 'io_watching.dart';
 import 'io_system.dart';
 
 const _environment = {'DARTC_TEST': 'é=1'};
@@ -93,6 +94,54 @@ Future<void> _compare(
   }
 }
 
+Future<Run> _runWatching(
+  Host host,
+  Directory directory, {
+  Duration? limit,
+}) async {
+  final program = '${directory.path}/program';
+  writeProgram(
+    await compileProgram(
+      '${directory.path}/main.dart',
+      CompileOptions(target: host.target),
+    ),
+    program,
+  );
+  return host.run(program, place: directory.path, limit: limit);
+}
+
+void _watchingRegressions() {
+  for (final (name, source, output, linux) in const [
+    ('watching the filesystem root', rootWatchingProgram, 'true\n', false),
+    ('watching a missing directory', failedWatchingProgram, 'true\n', null),
+    (
+      'watching one path with different masks',
+      sharedWatchingProgram,
+      'true true\ntrue true\n',
+      true,
+    ),
+  ]) {
+    final hosts = Host.all.where(
+      (host) => linux == null || host.isLinux == linux,
+    );
+    test(name, () async {
+      final directory = writeSources({'main.dart': source});
+      for (final host in hosts) {
+        final run = await _runWatching(
+          host,
+          directory,
+          limit: const Duration(seconds: 8),
+        );
+        expect(run, (
+          code: 0,
+          output: output,
+          errors: '',
+        ), reason: '${host.target}');
+      }
+    }, skip: hosts.isEmpty);
+  }
+}
+
 void main() {
   group('dart:io', () {
     ({...filePrograms, ...systemPrograms, ...processPrograms}).forEach((
@@ -103,6 +152,32 @@ void main() {
     });
 
     test('the environment', () => _agrees(environmentProgram));
+
+    test('watching files', () async {
+      final directory = writeSources({'main.dart': watchingProgram});
+      final path = '${directory.path}/main.dart';
+      for (final host in Host.all) {
+        final run = await _runWatching(host, directory);
+        expect((run.code, run.errors), (0, ''), reason: '${host.target}');
+        final lines = run.output.split('\n');
+        if (host.isLinux) {
+          // There is no official runtime there to compare with.
+          var at = 0;
+          for (final line in lines) {
+            if (at < linuxEvents.length && line == linuxEvents[at]) at++;
+          }
+          expect(
+            linuxEvents.skip(at),
+            isEmpty,
+            reason: '${host.target}\n$lines',
+          );
+          continue;
+        }
+        final official = await _official(path, directory.path, '');
+        expect(lines.join('\n'), official.output, reason: '${host.target}');
+      }
+    });
+    _watchingRegressions();
 
     test('what only the system knows', () async {
       final directory = writeSources({'main.dart': platformProgram});
